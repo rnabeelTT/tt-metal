@@ -24,6 +24,9 @@ Env (read at install):
   HYB_HOSTK        1 (default): one layer's missed experts in one call of the fused C kernel (hybrid/hostk; build it
                    on the host with `python -m hybrid.hostk`); 0: per-expert torch int4 matmuls
   HYB_HOSTK_THREADS threads of that kernel's pool (default 4: 2-4 saturate DRAM)
+  HYB_LOWBIT       missed experts whose largest routing weight in the step is below this (and not skipped) read only
+                   the top 2 bits of their int4 weights (hostk bit-plane layout: half the weight bytes, ~0.5 relative
+                   output error instead of the 1.0 of skipping); 0 (default): every computed miss is full int4
 """
 
 from __future__ import annotations
@@ -58,6 +61,7 @@ class HybridState:
         self.rows_max = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "1") or 1)  # fused multi-row decode width
         self.fused = os.environ.get("HYB_FUSED", "1") == "1"
         self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed
+        self.lowbit = float(os.environ.get("HYB_LOWBIT", "0"))  # computed misses below this weight: hi 2 bits only
         # static plan counts only picks with at least this routing weight (default HYB_SKIP: skipped misses are free)
         self.plan_min_score = float(
             os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip))
@@ -79,6 +83,8 @@ class HybridState:
         self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
         if self.hostk:
             hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "4")))
+        if self.lowbit > 0 and not self.hostk:
+            raise ValueError(f"HYB_LOWBIT={self.lowbit} needs the fused host kernel (HYB_HOSTK=1)")
         # with an MTP head, the RAM copies of the library start only once the head is built (_install_mtp_head): the
         # head's 512 full-precision experts take ~44 GB of host RAM while they are repacked, on top of ~136 GB of copies
         self.defer_lib = self.lib_resident and int(os.environ.get("QWEN35_MTP", "0") or 0) > 0
@@ -109,6 +115,8 @@ class HybridState:
             "dec_hits": 0,
             "skipped": 0,
             "skipped_mass": 0.0,
+            "lowbit": 0,
+            "host_experts": 0,
             "t_route": 0.0,
             "t_craft": 0.0,
         }
@@ -169,12 +177,18 @@ class HybridState:
         t0 = time.perf_counter()
         d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
         if not self.lib_resident:
+            if self.lowbit > 0:
+                raise ValueError(f"HYB_LOWBIT={self.lowbit} needs the RAM-resident library (HYB_LIB_RESIDENT=1)")
             d["row"] = np.arange(self.E, dtype=np.int64)
             return d
         cold = np.flatnonzero(self.slot_of[layer] < 0) if layer in self.slot_of else np.arange(self.E)
         idx = torch.from_numpy(cold)
         out = {k: d[k].index_select(0, idx).contiguous() for k in ("gu_p", "gu_sz", "dn_p", "dn_sz")}
         out["gs"] = d["gs"]
+        if self.lowbit > 0:  # bit-plane layout, in place on the RAM copies (same bytes, read by hostk)
+            hostk.planarize(out["gu_p"])
+            hostk.planarize(out["dn_p"])
+            out["planar"] = True
         row = np.full(self.E, -1, dtype=np.int64)
         row[cold] = np.arange(len(cold))
         out["row"] = row
@@ -197,7 +211,10 @@ class HybridState:
                     f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static"
                 )
             W = ((ids[None] == ex[:, None, None]) & miss_mask[None]).float().mul_(sc.float()[None]).sum(-1)  # [E, R]
-            hostk.moe(lib, X.float().contiguous(), rows.contiguous(), W.contiguous(), out)
+            lo = (W.amax(1) < self.lowbit).to(torch.int8) if lib.get("planar") else None
+            hostk.moe(lib, X.float().contiguous(), rows.contiguous(), W.contiguous(), out, lo=lo)
+            self.st["host_experts"] += len(ex)
+            self.st["lowbit"] += int(lo.sum()) if lo is not None else 0
             self.st["t_host"] += time.perf_counter() - t0
             return out
         for e in torch.unique(ids[miss_mask]).tolist():
@@ -211,10 +228,15 @@ class HybridState:
                 r = int(lib["row"][e])
                 if r < 0:
                     raise RuntimeError(f"layer {layer}: expert {e} missed on the device but is in the static set")
-                h = torch._weight_int4pack_mm_for_cpu(xr, lib["gu_p"][r], gs, lib["gu_sz"][r])
-                n = h.shape[1] // 2
-                a = (torch.nn.functional.silu(h[:, :n].float()) * h[:, n:].float()).to(torch.bfloat16)
-                y = torch._weight_int4pack_mm_for_cpu(a, lib["dn_p"][r], gs, lib["dn_sz"][r])
+                if lib.get("planar"):  # prefill rows: back in torch's pack for its GEMMs (low-weight rows: hi bits)
+                    y = torch.empty(len(rows), X.shape[1], dtype=torch.float32)
+                    lo_r = w_r < self.lowbit
+                    self.st["lowbit"] += int(lo_r.sum())
+                    for m in (~lo_r, lo_r):
+                        if m.any():
+                            y[m] = _int4_expert(xr[m], *_torch_pack(lib, r, hi_only=bool(m is lo_r)), gs).float()
+                else:
+                    y = _int4_expert(xr, lib["gu_p"][r], lib["gu_sz"][r], lib["dn_p"][r], lib["dn_sz"][r], gs)
             else:
                 with self.lock:
                     gu, dn = self.sd.expert(layer, e)
@@ -256,6 +278,29 @@ HYB = HybridState()
 _orig_forward = None  # Qwen35MoE.forward before install() (the MTP head's MoE keeps it)
 
 
+def _int4_expert(x, gu_p, gu_sz, dn_p, dn_sz, gs):
+    h = torch._weight_int4pack_mm_for_cpu(x, gu_p, gs, gu_sz)
+    n = h.shape[1] // 2
+    a = (torch.nn.functional.silu(h[:, :n].float()) * h[:, n:].float()).to(torch.bfloat16)
+    return torch._weight_int4pack_mm_for_cpu(a, dn_p, gs, dn_sz)
+
+
+def _torch_pack(lib, r, hi_only):
+    """Library row r of a bit-plane library, in torch's int4 pack: (gu_p, gu_sz, dn_p, dn_sz). hi_only: the lo planes
+    zeroed (q = 4h) and every zero point raised by 1.5 scales, i.e. hostk's hi-only q ~ 4h + 1.5."""
+    out = []
+    for p, sz in ((lib["gu_p"][r], lib["gu_sz"][r]), (lib["dn_p"][r], lib["dn_sz"][r])):
+        p = p.clone()
+        if hi_only:
+            K = p.shape[-1] * 2
+            p.view(-1, 2, K * 16)[:, 1] = 0
+            s = sz.float()
+            sz = torch.stack([s[..., 0], s[..., 1] + 1.5 * s[..., 0]], -1).to(sz.dtype)
+        hostk.planarize(p, inverse=True)
+        out += [p, sz]
+    return out
+
+
 def _die0(t):
     return ttnn.get_device_tensors(t)[0]
 
@@ -270,7 +315,8 @@ def _log_stats(replays):
     ms = {k[2:]: round(1e3 * v / n, 2) for k, v in d.items() if k.startswith("t_") and v}
     print(
         f"HYB_STATS replays={replays} per replay ms={ms} steps/replay={d.get('steps', 0) / n:.1f} "
-        f"hit={d.get('dec_hits', 0) / max(1, d.get('dec_picks', 0)):.3f} skipped/replay={d.get('skipped', 0) / n:.1f}",
+        f"hit={d.get('dec_hits', 0) / max(1, d.get('dec_picks', 0)):.3f} skipped/replay={d.get('skipped', 0) / n:.1f} "
+        f"host experts/replay={d.get('host_experts', 0) / n:.1f} lowbit/replay={d.get('lowbit', 0) / n:.1f}",
         flush=True,
     )
     HYB._log_prev = dict(st)

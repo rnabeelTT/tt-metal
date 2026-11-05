@@ -27,8 +27,9 @@ from capture_routing import PROMPTS  # noqa: E402
 if os.environ.get("POC_PROMPT_SET"):  # prompts_v2: "train", "heldout" or "all" (= train then heldout)
     import prompts_v2  # noqa: E402
 
-    PROMPTS = {"train": prompts_v2.TRAIN, "heldout": prompts_v2.HELDOUT,
-               "all": prompts_v2.TRAIN + prompts_v2.HELDOUT}[os.environ["POC_PROMPT_SET"]]
+    PROMPTS = {"train": prompts_v2.TRAIN, "heldout": prompts_v2.HELDOUT, "all": prompts_v2.TRAIN + prompts_v2.HELDOUT}[
+        os.environ["POC_PROMPT_SET"]
+    ]
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import build_generator  # noqa: E402
 
 N_PROMPTS = int(os.environ.get("POC_PROMPTS", "2"))
@@ -61,6 +62,8 @@ def main():
         res["memory"] = gen._memory_report()
         print("MEMORY " + json.dumps(res["memory"]), flush=True)
         tok = gen.tokenizer
+        if os.environ.get("POC_TF_TEXTS"):
+            return tf_texts(gen, res, out_dir)
         if os.environ.get("POC_SKIP_SWEEP"):
             return skip_sweep(gen, tok, res, out_dir)
         runs = []
@@ -91,7 +94,8 @@ def main():
                 # traced decode only: prefill (TTFT) ends at the first trace replay
                 "ttft_s": round(st["seg"]["t_first"] - t1, 2) if st["seg"].get("t_first") else None,
                 "decode_ms_per_token": round(1e3 * (t1 + dt - st["seg"]["t_first"]) / max(1, st["seg"]["replays"]), 1)
-                if st["seg"].get("t_first") else None,
+                if st["seg"].get("t_first")
+                else None,
                 "hit_rate": round(st["hits"] / max(1, st["picks"]), 4),  # incl. prefill (padded bucket rows)
                 "decode_hit_rate": round(st.get("dec_hits", 0) / max(1, st.get("dec_picks", 0)), 4),
                 "decode_steps": st["steps"],
@@ -122,13 +126,55 @@ def main():
                 steps = len(HYB.record) // nl
                 recs = HYB.record[: steps * nl]
                 rec_arrays[f"p{i}"] = np.stack([rec[1].numpy() for rec in recs]).reshape(steps, nl, -1)
-                rec_arrays[f"s{i}"] = np.stack([rec[2].numpy() for rec in recs]).reshape(steps, nl, -1).astype(np.float16)
+                rec_arrays[f"s{i}"] = (
+                    np.stack([rec[2].numpy() for rec in recs]).reshape(steps, nl, -1).astype(np.float16)
+                )
                 np.savez_compressed(os.path.join(out_dir, "routing.npz"), layers=np.array(layers), **rec_arrays)
             res["runs"] = runs
             json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
     finally:
         ttnn.close_mesh_device(mesh)
         ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+
+
+def tf_texts(gen, res, out_dir):
+    """POC_TF_TEXTS=<json {name: token ids}>: per threshold in POC_SKIP_SWEEP (default 0,0.15) and sequence, one
+    teacher-forced prefill; saves the next-token log-probs as fp16 <out_dir>/lp_<tau>_<name>.npy [T, vocab] for the
+    comparison against the CPU reference (quality_compare.py)."""
+    import torch
+
+    seqs = json.load(open(os.environ["POC_TF_TEXTS"]))
+    taus = [float(t) for t in os.environ.get("POC_SKIP_SWEEP", "0,0.15").split(",")]
+    rows = []
+    for tau in taus:
+        HYB.skip = tau
+        for name, seq in seqs.items():
+            HYB.reset_stats()
+            gen.reset()
+            t1 = time.time()
+            logits = gen.prefill_forward(
+                torch.tensor(seq).reshape(1, -1),
+                page_table=gen.page_table[:1],
+                prompt_lens=[len(seq)],
+                return_all_logits=True,
+            )
+            lp = torch.log_softmax(torch.as_tensor(logits).float()[0, : len(seq)], dim=-1)
+            np.save(os.path.join(out_dir, f"lp_{tau}_{name}.npy"), lp.numpy().astype(np.float16))
+            nll = float(-lp[:-1].gather(1, torch.tensor(seq[1:]).reshape(-1, 1)).mean())
+            st = dict(HYB.st)
+            r = {
+                "tau": tau,
+                "name": name,
+                "tokens": len(seq),
+                "nll": round(nll, 4),
+                "s": round(time.time() - t1, 1),
+                "skipped_mass_per_pick": round(st["skipped_mass"] / max(1, st["picks"]), 4),
+                "hit_rate": round(st["hits"] / max(1, st["picks"]), 4),
+            }
+            rows.append(r)
+            print(f"TF {json.dumps(r)}", flush=True)
+            res["tf"] = rows
+            json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
 
 
 def skip_sweep(gen, tok, res, out_dir):
@@ -153,8 +199,12 @@ def skip_sweep(gen, tok, res, out_dir):
             HYB.reset_stats()
             gen.reset()
             t1 = time.time()
-            logits = gen.prefill_forward(torch.tensor(seq).reshape(1, -1), page_table=gen.page_table[:1],
-                                         prompt_lens=[len(seq)], return_all_logits=True)
+            logits = gen.prefill_forward(
+                torch.tensor(seq).reshape(1, -1),
+                page_table=gen.page_table[:1],
+                prompt_lens=[len(seq)],
+                return_all_logits=True,
+            )
             tf_s = time.time() - t1
             pred = torch.as_tensor(logits).float()[0, len(ids) - 1 : len(seq) - 1].argmax(-1)
             st_tf = dict(HYB.st)

@@ -10,6 +10,11 @@
 // unit has its gate and up rows together and writes the activation directly; phase 2 splits 64-wide blocks of the H
 // outputs, so every unit owns its output columns across all experts. A persistent pthread pool (spin, then futex)
 // runs the units; the calling thread takes part. Built by hostk.py (gcc -O3 -mavx512f -mavx512bw).
+//
+// Bit-plane layout (hostk_planarize, HYB_LOWBIT): each 64-row block's K*32 bytes become a hi plane (K*16 bytes: the
+// top 2 bits of q) followed by a lo plane (K*16: the bottom 2 bits). Byte j of a plane's 16 bytes at column k holds
+// rows j, 16+j, 32+j, 48+j at bits 0-1, 2-3, 4-5, 6-7. A full read reproduces q = 4h + l exactly; a hi-only read
+// (low-weight misses) streams half the weight bytes and uses q ~ 4h + 1.5, the middle of the dropped bits' range.
 #define _GNU_SOURCE
 #include <immintrin.h>
 #include <linux/futex.h>
@@ -32,6 +37,8 @@ typedef struct {
     const float* X;              // [R, H]
     const int64_t* rows;         // [E] row of each expert in the library tensors
     const float* W;              // [E, R]
+    const int8_t* lo;            // [E] 1: hi plane only (NULL: all full)
+    int planar;                  // library in the bit-plane layout
     const uint8_t *gu_p, *dn_p;  // library bases
     const uint16_t *gu_sz, *dn_sz;
     float* out;  // [R, H]
@@ -71,6 +78,7 @@ static void gemv_block(
     const float* const* x,
     const float* const* xs,
     int nr,
+    int layout,  // 0: torch pack, 1: bit planes (full), 2: hi plane only
     float out[][64]) {
     const int G = K / gs;
     for (int r0 = 0; r0 < nr; r0 += 4) {
@@ -88,16 +96,32 @@ static void gemv_block(
                     acc[r][i] = _mm512_setzero_ps();
                 }
             }
-            const uint8_t* p = w + (size_t)g * gs * 32;
-            const __m512i m15 = _mm512_set1_epi32(15);
-            for (int k = 0; k < gs; k++, p += 32) {
-                __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
-                __m512i v1 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(p + 16)));
+            const uint8_t* p = w + (size_t)g * gs * (layout ? 16 : 32);
+            const uint8_t* pl = w + (size_t)K * 16 + (size_t)g * gs * 16;
+            const __m512i m15 = _mm512_set1_epi32(15), m3 = _mm512_set1_epi32(3);
+            for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
                 __m512 f[4];
-                f[0] = _mm512_cvtepi32_ps(_mm512_and_si512(v0, m15));
-                f[1] = _mm512_cvtepi32_ps(_mm512_and_si512(v1, m15));
-                f[2] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v0, 4));
-                f[3] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v1, 4));
+                if (layout == 0) {
+                    __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                    __m512i v1 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(p + 16)));
+                    f[0] = _mm512_cvtepi32_ps(_mm512_and_si512(v0, m15));
+                    f[1] = _mm512_cvtepi32_ps(_mm512_and_si512(v1, m15));
+                    f[2] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v0, 4));
+                    f[3] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v1, 4));
+                } else if (layout == 1) {
+                    __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                    __m512i vl = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)pl));
+                    for (int i = 0; i < 4; i++) {
+                        __m512i h = _mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3);
+                        __m512i l = _mm512_and_si512(_mm512_srli_epi32(vl, 2 * i), m3);
+                        f[i] = _mm512_cvtepi32_ps(_mm512_or_si512(_mm512_slli_epi32(h, 2), l));
+                    }
+                } else {
+                    __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                    for (int i = 0; i < 4; i++) {
+                        f[i] = _mm512_cvtepi32_ps(_mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3));
+                    }
+                }
                 const int kk = g * gs + k;
 #define ROW(r)                                                                        \
     if (rc > r) {                                                                     \
@@ -112,7 +136,11 @@ static void gemv_block(
                 __m512i u = _mm512_loadu_si512((const void*)(s32 + i * 16));
                 __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
                 __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
-                __m512 zz = _mm512_fnmadd_ps(_mm512_set1_ps(8.0f), s, z);  // z - 8 s
+                // w = (q - 8) s + z; hi only: q ~ 4h + 1.5 -> w = h (4 s) + z - 6.5 s
+                __m512 zz = _mm512_fnmadd_ps(_mm512_set1_ps(layout == 2 ? 6.5f : 8.0f), s, z);
+                if (layout == 2) {
+                    s = _mm512_mul_ps(s, _mm512_set1_ps(4.0f));
+                }
                 for (int r = 0; r < rc; r++) {
                     tot[r][i] = _mm512_fmadd_ps(s, acc[r][i], tot[r][i]);
                     tot[r][i] = _mm512_fmadd_ps(zz, _mm512_set1_ps(xs[r0 + r][g]), tot[r][i]);
@@ -141,9 +169,10 @@ static void unit(int u) {
             x[r] = J.X + (size_t)J.er[e][r] * H;
             xs[r] = J.xs_gu + ((size_t)e * MAXR + r) * (H / gs);
         }
+        const int lay = J.planar ? (J.lo && J.lo[e] ? 2 : 1) : 0;
         float g[MAXR][64], up[MAXR][64];
-        gemv_block(wb + (size_t)j * H * 32, sb + (size_t)j * 64 * 2, 2 * I, H, gs, x, xs, nr, g);
-        gemv_block(wb + (size_t)(nb + j) * H * 32, sb + (size_t)(I + j * 64) * 2, 2 * I, H, gs, x, xs, nr, up);
+        gemv_block(wb + (size_t)j * H * 32, sb + (size_t)j * 64 * 2, 2 * I, H, gs, x, xs, nr, lay, g);
+        gemv_block(wb + (size_t)(nb + j) * H * 32, sb + (size_t)(I + j * 64) * 2, 2 * I, H, gs, x, xs, nr, lay, up);
         for (int r = 0; r < nr; r++) {
             float* a = J.A + ((size_t)e * MAXR + r) * I + j * 64;
             for (int t = 0; t < 64; t++) {
@@ -178,6 +207,7 @@ static void unit(int u) {
                 x,
                 xs,
                 nr,
+                J.planar ? (J.lo && J.lo[e] ? 2 : 1) : 0,
                 y);
             for (int r = 0; r < nr; r++) {
                 const int rr = J.er[e][r];
@@ -260,6 +290,8 @@ int hostk_moe(
     int E,
     const int64_t* rows,
     const float* W,
+    const int8_t* lo,
+    int planar,
     const uint8_t* gu_p,
     const uint16_t* gu_sz,
     const uint8_t* dn_p,
@@ -288,7 +320,7 @@ int hostk_moe(
             return -3;
         }
     }
-    J.R = R, J.H = H, J.I = I, J.gs = gs, J.E = E, J.X = X, J.rows = rows, J.W = W;
+    J.R = R, J.H = H, J.I = I, J.gs = gs, J.E = E, J.X = X, J.rows = rows, J.W = W, J.lo = lo, J.planar = planar;
     J.gu_p = gu_p, J.gu_sz = gu_sz, J.dn_p = dn_p, J.dn_sz = dn_sz, J.out = out;
     J.xs_gu = g_scratch;
     J.A = J.xs_gu + (size_t)E * MAXR * (H / gs);
@@ -316,5 +348,48 @@ int hostk_moe(
     run_phase(1, E * (I / 64));
     run_phase(2, H / 64);
     pthread_mutex_unlock(&g_mu);
+    return 0;
+}
+
+// In place, between torch's int4 pack and the bit-plane layout (inverse = 1: back to torch's): nblocks 64-row blocks
+// of K*32 bytes each. Returns 0, or -3 out of memory.
+int hostk_planarize(uint8_t* p, int64_t nblocks, int K, int inverse) {
+    uint8_t* tmp = malloc((size_t)K * 32);
+    if (!tmp) {
+        return -3;
+    }
+    for (int64_t b = 0; b < nblocks; b++) {
+        uint8_t* w = p + (size_t)b * K * 32;
+        for (int k = 0; k < K; k++) {
+            uint8_t q[64];
+            if (!inverse) {
+                for (int j = 0; j < 32; j++) {
+                    q[j] = w[(size_t)k * 32 + j] & 15;
+                    q[32 + j] = w[(size_t)k * 32 + j] >> 4;
+                }
+                for (int j = 0; j < 16; j++) {
+                    uint8_t h = 0, l = 0;
+                    for (int i = 0; i < 4; i++) {
+                        h |= (q[16 * i + j] >> 2) << (2 * i);
+                        l |= (q[16 * i + j] & 3) << (2 * i);
+                    }
+                    tmp[(size_t)k * 16 + j] = h;
+                    tmp[(size_t)K * 16 + (size_t)k * 16 + j] = l;
+                }
+            } else {
+                for (int j = 0; j < 16; j++) {
+                    const uint8_t h = w[(size_t)k * 16 + j], l = w[(size_t)K * 16 + (size_t)k * 16 + j];
+                    for (int i = 0; i < 4; i++) {
+                        q[16 * i + j] = (((h >> (2 * i)) & 3) << 2) | ((l >> (2 * i)) & 3);
+                    }
+                }
+                for (int j = 0; j < 32; j++) {
+                    tmp[(size_t)k * 32 + j] = q[j] | (q[32 + j] << 4);
+                }
+            }
+        }
+        memcpy(w, tmp, (size_t)K * 32);
+    }
+    free(tmp);
     return 0;
 }

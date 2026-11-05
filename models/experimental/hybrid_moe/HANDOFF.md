@@ -43,6 +43,22 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
   (readback 0.56-0.6 s: the non-blocking read waits longer than the host craft). C=512 takes the unfused stock path
   (3.9 incl. prefill), so it is no longer a like-for-like reference. Takeaway: the remaining time is device layer
   time, not host work; further gains need fewer device ops per layer or more accepted MTP tokens per pass.
+- Quality vs the real model (2026-11-05, `ref397_tf.py`, `runs/quality/ref2/compare.json`): CPU reference = HF
+  transformers Qwen3_5MoeDecoderLayer in bf16 streamed from the FP8 checkpoint (A_log / GDN norm kept fp32), teacher
+  forced over 8 x 1000-token texts (`quality_texts.py`: GSM8K, MBPP, EN/ZH/FR chat, a Python file, a markdown doc,
+  LiveCodeBench). Ours: device prefill with all logits (`run_generate.py` POC_TF_TEXTS). Mean top-1 agreement /
+  on reference-confident positions / KL: skip 0: 0.900 / 0.945 / 0.102; 0.05: 0.890 / 0.937 / 0.117; 0.1: 0.874 /
+  0.920 / 0.160; 0.15 (serving default): 0.838 / 0.889 / 0.266. Math is the worst text (KL 0.27 at skip 0, 0.59 at
+  0.15). The skip-0 gap is the 4-bit weights / bfp4 mixer policy, not the hybrid. The multi-turn chat texts are OOD
+  for both (the reference itself predicts <|im_end|> mid-turn); agreement there is still valid.
+- Served speed at skip 0.05 (MTP k=3, hostk): 17.5 tok/s (vs 34.6 at 0.15); IFEval (non-thinking, greedy, 541):
+  see runs/eval/. Host DRAM measured 36-40 GB/s (4 DIMMs at 3600 MT/s), so the host kernel is near the ceiling
+  and PCIe shares the same DRAM: zero-skip speed needs fewer bytes per miss or fewer misses.
+- HYB_LOWBIT (2026-11-05, default 0): bit-plane library layout (hostk_planarize, in place at load: same bytes) so a
+  computed miss whose largest routing weight is below the threshold reads only the top 2 bits of its int4 weights.
+  CPU checks (layer 30, 12 experts): bit-plane full read == torch-pack read exactly; hi-only 1.9x faster per
+  expert, 0.49 relative output error (skipping = 1.0); prefill's torch path reproduces it (zero lo plane, zero
+  point + 1.5 scales) within bf16 (0.4%). Not yet measured on the device (TF fidelity + speed).
 - Serving defaults (2026-11-05): HYB_MTP=3 + HYB_SKIP=0.15 + hostk: **34.4-34.9 tok/s** (4 runs, serve/bench.py,
   8 held-out prompts x 128 tokens, TTFT 0.65 s). Same sweep: MTP=3 skip 0.2 35.7 / 36.2 (TF top-1 0.951 vs 0.959
   at 0.15, kept as opt-in); MTP=0 skip 0.15 30.7 / 32.4; MTP=3 skip 0.1 (old default) 27.5 / 28.4. MTP=0 serving
@@ -159,6 +175,7 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
 
 ## Log
+- 2026-11-05: quality vs real 397B measured (skip 0.15 costs ~6 pts top-1); HYB_LOWBIT 2-bit misses added.
 - 2026-11-05: served 34.4-34.9 tok/s (MTP k=3, skip 0.15, hostk); MTP=0 serving fixed.
 - 2026-11-04: MTP k=3 served: 17-26 tok/s; one-row decode via 2-row kernels (PCC 0.95 -> 0.998).
 - 2026-11-04: held-out decode 21.5 tok/s mean (plan v4 + lean host step).
