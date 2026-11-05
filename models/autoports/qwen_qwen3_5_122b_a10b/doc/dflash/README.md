@@ -126,3 +126,20 @@ GDN 242 / 355 / 487 us at 1 / 8 / 16 rows (~16 us per extra row: the head's rows
 attention 226 / 407 / 515 us (~26 us per extra row: one paged K/V update per row - `paged_update_cache(share_cache=)`
 would write them in one call but is rejected for paged caches by its C++ validation). With real drafts the 8 rows route
 to a union of experts that adds ~7.5 ms per pass (the 256-expert MoE's DRAM reads: an inherent per-row cost here).
+
+### Served A/B 1 (`runs/dfl_ab1_{on,off}`, p300x2, shipped env + this branch, same session; DFlash = block 8, guard 6)
+
+| row | plain | DFlash |
+|---|---|---|
+| real text greedy (12 x 384, thinking off) | 131.7 tok/s (130.8..132.1) | 131.4 tok/s (124.5..159.6) |
+| real text t 0.6 / top-k 20 / top-p 0.95 | 131.7 | 129.0 (124.8..132.2) |
+| 1 user 128/128 random tokens, TPOT | 7.54 ms | 8.97 ms |
+| 1 user 2048/256, TPOT | 7.72 ms | 8.44 ms |
+| 8 users / 32 users 128/128, TPOT | 25.80 / 48.00 ms | 24.57 / 47.15 ms (plain path: same) |
+| TTFT 1 user 128 / 2048 | 195 / 594 ms | 231 / 636 ms |
+| garble gate (t 0.6, per 1k words) | 12.05 | 8.46 |
+
+Served round ~38-44 ms (the tool's ~37 + vLLM's per-step time, not overlapped as the plain decode's async steps are):
+break-even at ~5.3 tokens per round. Of 54 phases, 10 ran past the probe (128-165 tok/s), the others went plain;
+random-token requests pay the probe (6 rounds). Multi-user rows are the plain path (unchanged). TTFT +36-42 ms: the
+drafter's context program in every prefill segment.
