@@ -34,6 +34,11 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- 4-layer breakdown (2026-11-05, layers 0-3, heldout x2, 256 tokens, traced, hostk, `runs/l4b_*`): decode ms/token
+  skip-all-misses 3.1 (hybrid machinery + device only), skip 0.15 3.5 (host experts ~0.1 ms/layer), devcraft 4.2-4.3
+  (readback 0.56-0.6 s: the non-blocking read waits longer than the host craft). C=512 takes the unfused stock path
+  (3.9 incl. prefill), so it is no longer a like-for-like reference. Takeaway: the remaining time is device layer
+  time, not host work; further gains need fewer device ops per layer or more accepted MTP tokens per pass.
 - Serving defaults (2026-11-05): HYB_MTP=3 + HYB_SKIP=0.15 + hostk: **34.4-34.9 tok/s** (4 runs, serve/bench.py,
   8 held-out prompts x 128 tokens, TTFT 0.65 s). Same sweep: MTP=3 skip 0.2 35.7 / 36.2 (TF top-1 0.951 vs 0.959
   at 0.15, kept as opt-in); MTP=0 skip 0.15 30.7 / 32.4; MTP=3 skip 0.1 (old default) 27.5 / 28.4. MTP=0 serving
