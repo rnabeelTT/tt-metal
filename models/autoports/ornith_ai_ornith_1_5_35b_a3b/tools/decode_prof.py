@@ -24,6 +24,9 @@ import sys
 
 os.environ.setdefault("TT_METAL_DEVICE_PROFILER", "1")
 os.environ.setdefault("TT_METAL_PROFILER_MID_RUN_DUMP", "1")
+os.environ.setdefault("TT_METAL_PROFILER_CPP_POST_PROCESS", "1")
+# fast runtime mode binds every op without the pre/post-operation hooks: off, before ttnn registers its operations
+os.environ.setdefault("TTNN_CONFIG_OVERRIDES", '{"enable_fast_runtime_mode": false}')
 
 import torch  # noqa: E402
 
@@ -78,7 +81,7 @@ def read_csv():
         zone = r[ix["zone name"]].strip()
         if not zone.endswith("-KERNEL"):
             continue
-        run = int(r[ix["run host ID"]].strip() or 0)
+        run = int(r[ix["run host ID"]].strip() or 0) >> 10  # device op id << 10 | chip
         chip = r[ix["PCIe slot"]].strip()
         t = int(r[ix["time[cycles since reset]"]])
         s = span.setdefault((chip, run), [t, t])
@@ -87,6 +90,24 @@ def read_csv():
     dur = collections.defaultdict(float)
     for (chip, run), (a, b) in span.items():
         dur[run] = max(dur[run], (b - a) / freq / 1e3)  # us, max over chips
+    return dur
+
+
+def read_api():
+    """{runtime_id: device kernel us (max over chips)} from the in-process analysis of the last ReadDeviceProfiler."""
+    dur = collections.defaultdict(float)
+    try:
+        data = ttnn.get_latest_programs_perf_data()
+    except Exception as e:  # noqa: BLE001
+        print(f"DECODE_PROF perf-data API unavailable: {e}", flush=True)
+        return dur
+    for chip, progs in (data or {}).items():
+        for p in progs:
+            res = p.program_analyses_results
+            r = res.get("DEVICE KERNEL DURATION [ns]") or res.get("DEVICE FW DURATION [ns]")
+            if r is not None:
+                rid = p.program_execution_uid.runtime_id >> 10  # runtime id = device op id << 10 | chip
+                dur[rid] = max(dur[rid], r.duration / 1e3)
     return dur
 
 
@@ -154,7 +175,12 @@ def main():
     ttnn.synchronize_device(mesh)
     last_id = ttnn._ttnn.get_device_operation_id()
     ttnn.ReadDeviceProfiler(mesh)
-    dur = read_csv()
+    dur = read_api()
+    if not dur:
+        getattr(gen, "teardown", lambda: None)()
+        ttnn.close_mesh_device(mesh)  # the device CSV is written on close
+        mesh = None
+        dur = read_csv()
     print(f"DECODE_PROF port {args.port} {'prefill ' + str(args.prefill) if args.prefill else 'decode'} batch {B} layers {layers} ({kinds}), "
           f"device ops {first_id}..{last_id}", flush=True)
     by = collections.defaultdict(lambda: [0.0, 0])
@@ -173,8 +199,9 @@ def main():
           f"profile data)", flush=True)
     for lab, (d, n) in sorted(by.items(), key=lambda kv: -kv[1][0])[: args.top]:
         print(f"  {d:8.1f} us {100 * d / max(tot, 1e-9):5.1f}%  x{n:<3d} {lab}", flush=True)
-    getattr(gen, "teardown", lambda: None)()
-    ttnn.close_mesh_device(mesh)
+    if mesh is not None:
+        getattr(gen, "teardown", lambda: None)()
+        ttnn.close_mesh_device(mesh)
 
 
 if __name__ == "__main__":

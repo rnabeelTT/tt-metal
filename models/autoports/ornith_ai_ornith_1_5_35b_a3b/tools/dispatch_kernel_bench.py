@@ -37,16 +37,17 @@ def main():
                 logits[:, :4] += 4.0
             sc, ids = torch.topk(torch.softmax(logits, -1), K, dim=-1)
             sc = sc / sc.sum(-1, keepdim=True)
-            ids_tt = ttnn.from_torch(ids.to(torch.int32).reshape(1, 1, T, K), dtype=ttnn.uint16,
-                                     layout=ttnn.TILE_LAYOUT, device=dev)
-            sc_tt = ttnn.from_torch(sc.to(torch.bfloat16).reshape(1, 1, T, K), dtype=ttnn.bfloat16,
-                                    layout=ttnn.TILE_LAYOUT, device=dev)
+            def inputs():
+                return (ttnn.from_torch(ids.to(torch.int32).reshape(1, 1, T, K), dtype=ttnn.uint16,
+                                        layout=ttnn.TILE_LAYOUT, device=dev),
+                        ttnn.from_torch(sc.to(torch.bfloat16).reshape(1, 1, T, K), dtype=ttnn.bfloat16,
+                                        layout=ttnn.TILE_LAYOUT, device=dev))
             outs = {}
             for mode in ("counting_mm", "kernel"):
                 md.DISPATCH_MODE = mode
                 md.UNDISPATCH_KERNEL = False
                 disp = md.SortedDispatch(dev, E, K)
-                m = disp.build(ids_tt, sc_tt, T)
+                m = disp.build(*inputs(), T)
                 outs[mode] = {kk: to_torch(m[kk]).float() for kk in ("src_tok", "weights", "group_ids", "undispatch")}
             ok = True
             for kk in outs["kernel"]:
@@ -63,6 +64,7 @@ def main():
             Rd = md.dispatch_rows(T, K, E, 32)
             op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
             ts = []
+            ids_tt, sc_tt = inputs()
             for r in range(a.reps + 2):
                 ttnn.synchronize_device(dev)
                 t0 = time.perf_counter()

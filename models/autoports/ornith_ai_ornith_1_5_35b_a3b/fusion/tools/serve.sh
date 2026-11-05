@@ -29,6 +29,13 @@ case $MODEL_ID in  # each bundle's serving recipe (its tt-model.yaml)
   zai-org/GLM-4.5-Air) MENV="--env QWEN35_BATCHED_PREFILL=0"; MAXLEN=131072
     MARGS=(--enable-auto-tool-choice --tool-call-parser glm45 --reasoning-parser glm45
            --default-chat-template-kwargs '{"enable_thinking": false}');;
+  Qwen/Qwen3-Coder-30B-A3B-Instruct)  # the qwen3-coder-30b-a3b fast bundle (tt-model-fast.yaml): ring fabric, 48 MB trace
+    MENV="--env QWEN3_DECODE_WIDTHS=1,2,4,8,16,32 --env QWEN3_MOE_FUSED_DECODE=1 --env QWEN3_PREFILL_BUCKETS=proportional"
+    MENV+=" --env QWEN3_PREFILL_WARMUP=auto --env QWEN3_PREFILL_WARMUP_MAX=8192 --env QWEN3_PREFILL_WARMUP_SUFFIX_MAX=1024"
+    MENV+=" --env QWEN3_WARMUP_SAMPLING=both --env TORCHDYNAMO_DISABLE=1 --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"
+    MAXLEN=256000; [ "$PROFILE" = p300x2 ] && FAB=FABRIC_1D_RING; TT_CFG='"trace_region_size": 50331648'
+    MARGS=(--revision b2cff646eb4bb1d68355c01b18ae02e7cf42d120 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+           --max-num-batched-tokens 256000 --generation-config vllm --override-generation-config '{"temperature": 0}');;
   *) echo "serve.sh: no recipe for $MODEL_ID"; exit 1;;
 esac
 KCACHE=${KCACHE:-$CACHE/cache}
@@ -45,5 +52,5 @@ docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --
   $MNT --publish ${PORT:-20000}:20000 --env ARCH_NAME=blackhole --env HF_MODEL=$MODEL_ID --env MESH_DEVICE=$MESH \
   --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_TRACE_REGION_MIB=768 $VIS --env VLLM_ENGINE_READY_TIMEOUT_S=3600 $MENV \
   "$@" $IMAGE vllm serve $MODEL_ID --max-model-len ${MAXLEN:-262144} --max-num-seqs ${MAXSEQS:-32} --block-size 64 \
-  --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", \"trace_region_size\": 805306368, \"l1_small_size\": 24576, \"fabric_config\": \"$FAB\"}}" \
+  --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", ${TT_CFG:-\"trace_region_size\": 805306368, \"l1_small_size\": 24576}, \"fabric_config\": \"$FAB\"}}" \
   "${MARGS[@]}" --port 20000
