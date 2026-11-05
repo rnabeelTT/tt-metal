@@ -15,13 +15,13 @@ P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); cd "$P" && python3 -m hybr
   --user "$(id -u):$(id -g)" -p ${PORT}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=Qwen/Qwen3.5-397B-A17B-FP8 -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e TT_METAL_LOGGER_LEVEL=Error -e TT_METAL_CACHE=/cache -e TT_METAL_LOGS_PATH=/poc/logs \
-  -e QWEN35_TRACE_REGION_MIB=$TR_MIB -e QWEN35_PREFIX_STATE_SLOTS=0 -e QWEN35_MAX_TOKENS_ALL_USERS=${MAX_TOKENS:-${MAX_LEN:-8192}} \
+  -e QWEN35_TRACE_REGION_MIB=$TR_MIB -e QWEN35_PREFIX_STATE_SLOTS=0 -e QWEN35_MAX_TOKENS_ALL_USERS=${MAX_TOKENS:-${MAX_LEN:-131072}} \
   -e HYB_ENABLE=1 -e HYB_SLOTS=${HYB_SLOTS:-256} -e HYB_DYN_SLOTS=${HYB_DYN_SLOTS:-0} -e HYB_SKIP=${HYB_SKIP:-0.15} -e HYB_MTP=${HYB_MTP:-3} -e HYB_LOG_EVERY=${HYB_LOG_EVERY:-0} -e HYB_THREADS=${HYB_THREADS:-12} \
   -e HYB_HOSTK=${HYB_HOSTK:-1} -e HYB_DEVCRAFT=${HYB_DEVCRAFT:-0} -e HYB_HOSTK_THREADS=${HYB_HOSTK_THREADS:-4} \
   -e HYB_LIB=/hyblib/qwen35_397b_int4 ${PLAN:+-e HYB_PLAN=/poc/$PLAN} \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
-  --entrypoint bash $IMG -c "cd /tmp && exec vllm serve Qwen/Qwen3.5-397B-A17B-FP8 --max-model-len ${MAX_LEN:-8192} \
-    --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --reasoning_parser qwen3 \
+  --entrypoint bash $IMG -c "cd /tmp && exec vllm serve Qwen/Qwen3.5-397B-A17B-FP8 --max-model-len ${MAX_LEN:-131072} \
+    --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser ${TOOL_PARSER:-qwen3_coder} \
     --default-chat-template-kwargs '{\"enable_thinking\": false}' --served-model-name qwen3.5-397b-hybrid --port 8000" \
   && docker logs -f hybrid-moe-serve > serve/server.log 2>&1 &
 echo "started; tail -f $P/serve/server.log"

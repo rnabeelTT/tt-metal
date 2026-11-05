@@ -34,6 +34,10 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Serving (2026-11-05): default context 131072 (MAX_LEN; KV 2049 blocks x 64, fits next to C=256 + MTP head). Tool
+  calling on (`--enable-auto-tool-choice --tool-call-parser qwen3_coder`, matches the template's XML tool calls) plus
+  `--reasoning-parser qwen3`. Checked: tool call, streamed tool call, tool-result round trip, thinking on/off; needle
+  in 21K / 98K / 129K-token prompts found (prefill 31 s / 144 s / 190 s); decode after 34.0 tok/s.
 - 4-layer breakdown (2026-11-05, layers 0-3, heldout x2, 256 tokens, traced, hostk, `runs/l4b_*`): decode ms/token
   skip-all-misses 3.1 (hybrid machinery + device only), skip 0.15 3.5 (host experts ~0.1 ms/layer), devcraft 4.2-4.3
   (readback 0.56-0.6 s: the non-blocking read waits longer than the host craft). C=512 takes the unfused stock path
