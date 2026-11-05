@@ -163,11 +163,11 @@ if _MTP_K > 0:
 
 def _dflash_bs_env() -> int:
     """QWEN35_DFLASH=1: single-user speculative decoding with the DFlash 2 drafter (tt/dflash_serving.py), block
-    QWEN35_DFLASH_BLOCK (default 16 = the drafter's). Off with chunked prefill (not wired together, as MTP) and with MTP."""
+    QWEN35_DFLASH_BLOCK (default 8: measured better than the drafter's 16, doc/dflash). Off with chunked prefill (not wired together, as MTP) and with MTP."""
     if os.environ.get("QWEN35_DFLASH", "0") != "1" or os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
         return 0
     assert _MTP_K == 0, "QWEN35_DFLASH and QWEN35_MTP are exclusive"
-    return int(os.environ.get("QWEN35_DFLASH_BLOCK", "16"))
+    return int(os.environ.get("QWEN35_DFLASH_BLOCK", "8"))
 
 
 _DFLASH_BS = _dflash_bs_env()
