@@ -203,6 +203,15 @@ def noc_coords(mesh_device):
     return table
 
 
+def offrow_candidates(mesh_device, w):
+    """(x, y) candidates for a bank whose reader row is shared with another bank's: the next row inward first, then the
+    rows beyond it (the robust placement leaves fewer columns per row: east banks grow east only)."""
+    grid = mesh_device.compute_with_storage_grid_size()
+    d = -1 if w.y > 0 else 1
+    rows = [w.y + d * i for i in (1, 2, 3) if 0 <= w.y + d * i < grid.y]
+    return [(x, y) for y in rows for x in bank_columns(mesh_device, w.x)]
+
+
 def place_along_rows(mesh_device, per_bank, used=None):
     """{bank: count} -> {bank: [CoreCoord]}: each bank's cores on its optimal reader's row, nearest first (+dx before
     -dx), then the rows above / below (off-row placement measured slower). `used`: (x, y) cores already taken
@@ -242,9 +251,8 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
     placed = {}
     for b in sorted(noc1):
         w = workers[b]
-        y = w.y - 1 if w.y > 0 else w.y + 1
         cores = []
-        for x in bank_columns(mesh_device, w.x):
+        for x, y in offrow_candidates(mesh_device, w):
             if len(cores) < per_bank[b] and (x, y) not in used:
                 used.add((x, y))
                 cores.append(ttnn.CoreCoord(x, y))
