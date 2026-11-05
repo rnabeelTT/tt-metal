@@ -67,8 +67,11 @@ def test_rows_match_sequential(mesh, R):
     st2 = [dev(c) for c in carry_h]
     state2 = dev(state_h)
     snap = dev(torch.zeros(max(R, 1), Nv, D, D))
+    hist = dev(torch.zeros(1, 32, qkv))
+    none = ttnn.from_torch(torch.full((1, 32), -1, dtype=torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                           device=mesh, memory_config=DR, **rep)
     proj = dev(proj_h, mc=L1)
-    y = ops(proj, st2, taps_t, params_t, state2, R, snap=snap)
+    y = ops(proj, st2, taps_t, params_t, state2, R, snap=snap, base=none, hist=hist)
     y_rows = ttnn.to_torch(ttnn.get_device_tensors(y)[0]).float().reshape(-1, Nv * D)[:R]
     snaps = ttnn.to_torch(ttnn.get_device_tensors(snap)[0]).float().reshape(-1, Nv, D, D)
     state_after = ttnn.to_torch(ttnn.get_device_tensors(state2)[0]).float().reshape(Nv, D, D)
@@ -79,6 +82,33 @@ def test_rows_match_sequential(mesh, R):
         ps = _pcc(snaps[r], s_ref[r])
         print(f"R {R} row {r}: y pcc {py:.6f} max err {(y_rows[r] - y_ref[r]).abs().max():.3e} | state pcc {ps:.6f}")
         assert py > 0.9999 and ps > 0.9999, (r, py, ps)
+    # second pass starting from accepted row a of the first (base / history): vs the sequential reference continued
+    # from row a (a fresh sequential run over rows 0..a, then the new rows)
+    if R >= 2:
+        a = R // 2 - 1
+        R2 = 4
+        proj2_h = torch.randn(1, R2, P) * 0.5
+        st_r = [dev(c) for c in carry_h]
+        state_r = dev(state_h)
+        for r in range(a + 1):
+            p_ = dev(proj_h[:, r : r + 1], mc=L1)
+            ttnn.deallocate(ops(p_, st_r, taps_t, params_t, state_r, 1))
+        y2_ref, s2_ref = [], []
+        for r in range(R2):
+            p_ = dev(proj2_h[:, r : r + 1], mc=L1)
+            yy = ops(p_, st_r, taps_t, params_t, state_r, 1)
+            y2_ref.append(ttnn.to_torch(ttnn.get_device_tensors(yy)[0]).float().reshape(-1, Nv * D)[0])
+            s2_ref.append(ttnn.to_torch(ttnn.get_device_tensors(state_r)[0]).float().reshape(Nv, D, D))
+        base = ttnn.from_torch(torch.full((1, 32), a, dtype=torch.int32), dtype=ttnn.uint32,
+                               layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DR, **rep)
+        y2 = ops(dev(proj2_h, mc=L1), st2, taps_t, params_t, state2, R2, snap=snap, base=base, hist=hist)
+        y2r = ttnn.to_torch(ttnn.get_device_tensors(y2)[0]).float().reshape(-1, Nv * D)[:R2]
+        sn2 = ttnn.to_torch(ttnn.get_device_tensors(snap)[0]).float().reshape(-1, Nv, D, D)
+        for r in range(R2):
+            py, ps = _pcc(y2r[r], y2_ref[r]), _pcc(sn2[r], s2_ref[r])
+            print(f"R {R} base {a} pass-2 row {r}: y pcc {py:.6f} max err {(y2r[r] - y2_ref[r]).abs().max():.3e} | "
+                  f"state pcc {ps:.6f}")
+            assert py > 0.9999 and ps > 0.9999, (r, py, ps)
     # rows mode leaves the bound state and the conv register untouched (the commit sets them)
     assert torch.equal(state_after, ttnn.to_torch(ttnn.get_device_tensors(dev(state_h))[0]).float().reshape(Nv, D, D))
     for j in range(1, 4):

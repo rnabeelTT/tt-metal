@@ -431,7 +431,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     _PREFIX_SLOT_GIB = 48.0 / 1024 * 4 / _PREFIX_DEVICES
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
-    _DFLASH_GIB = 1.5  # QWEN35_DFLASH: the drafter (bfp8 weights, replicated: ~0.9 GiB per die), its K/V rings and step buffers
+    # QWEN35_DFLASH: per die the drafter (TP bfp8 matmul weights ~0.2 GiB, replicated conv projections ~0.07), the verify
+    # pass's GDN state snapshots (36 layers x block x 0.5 MiB = 0.14 GiB at block 8), the context-row staging (~0.04)
+    _DFLASH_GIB = 0.75
     _KV_LAYERS = 12  # attention layers holding paged K/V
     # The context contract's DRAM total (31.331 GiB) was measured with a 512 MiB trace region; a larger region (stage 10:
     # 768 MiB for the per-width decode traces) shrinks the allocator's DRAM by the difference.

@@ -94,6 +94,12 @@ void kernel_main() {
     constexpr auto snap_args = TensorAccessorArgs<state_args.next_compile_time_args_offset()>();
     const uint32_t snap_addr = get_arg_val<uint32_t>(7);
     const uint32_t rows_sem = get_semaphore(2);
+    // base (runtime arg 8, uint32 word 0): row 0 starts from snapshot slot `base` (the previous pass's accepted row) instead
+    // of the bound state; 0xFFFFFFFF = the bound state. Slot `base` of this lane's head is read before this lane writes
+    // any slot (row 0's state is read before its compute), and no other lane writes it.
+    constexpr auto base_args = TensorAccessorArgs<snap_args.next_compile_time_args_offset()>();
+    const auto s_base = TensorAccessor(base_args, get_arg_val<uint32_t>(8), 128);
+    uint32_t base = 0xFFFFFFFFu;
 #endif
     constexpr uint32_t kv = Kt * Vt;
     constexpr uint32_t GQA = Nv / Nk;
@@ -130,6 +136,12 @@ void kernel_main() {
 
     static_assert(Nv <= 32, "the per-head params sit in params tile 0");
     const uint32_t scr = get_write_ptr(cb_scr);
+#ifdef ROWS
+    noc_async_read(s_base.get_noc_addr(0), scr, 64);
+    noc_async_read_barrier();
+    invalidate_l1_cache();
+    base = *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr);
+#endif
     volatile tt_l1_ptr uint32_t* par = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr);
     // the gate inputs of a unit as column 0 of four FP32 tiles (a / b: the bf16 face rows holding column h of the a / b
     // tiles, row b, read to scr + 4 tiles; dt_bias / -exp(A_log) from params tile 0 at scr)
@@ -210,8 +222,9 @@ void kernel_main() {
         for (uint32_t ki = 0; ki < Kt; ++ki) {
             for (uint32_t j = 0; j < Vt; ++j) {
                 const uint32_t off = ki * VTF + p * Vt + j;
-                const uint64_t a = (w == 0) ? s_state.get_noc_addr(h * (Kt * VTF) + off)
-                                            : s_snap.get_noc_addr((n - Nv) * (Kt * VTF) + off);
+                const uint64_t a = (w > 0) ? s_snap.get_noc_addr((n - Nv) * (Kt * VTF) + off)
+                                   : (base != 0xFFFFFFFFu) ? s_snap.get_noc_addr((base * Nv + h) * (Kt * VTF) + off)
+                                                           : s_state.get_noc_addr(h * (Kt * VTF) + off);
                 noc_async_read(a, s + (ki * Vt + j) * BF_TILE, BF_TILE);
             }
         }

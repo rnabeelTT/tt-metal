@@ -82,7 +82,7 @@ class DFlashServing(MtpServing):
         self.min_tau = float(os.environ.get("QWEN35_DFLASH_MIN_TAU", "1.5"))
         self.plain_ms = float(os.environ.get("QWEN35_DFLASH_PLAIN_MS", "7.6"))
         self.margin = float(os.environ.get("QWEN35_DFLASH_MARGIN", "1.0"))
-        self.guard_rounds = int(os.environ.get("QWEN35_DFLASH_GUARD_ROUNDS", "8"))
+        self.guard_rounds = int(os.environ.get("QWEN35_DFLASH_GUARD_ROUNDS", "6"))
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_device import DFlashDevice
 
         self.drafter = DFlashDevice(self.model, drafter_dir())
@@ -205,6 +205,7 @@ class DFlashServing(MtpServing):
                 ttnn.deallocate(src)
             rebuild_conv_carry(dn)
         self._phase_slot = int(slot)
+        self.runner.set_base(None)  # the slot's state was just copied into the bound scratch
         self.runner.rope_delta = self.model.slot_rope_delta(slot)
         self.set_page_table(page_table_row)
         self._tok, self._pos = int(tok), int(pos)
@@ -212,6 +213,25 @@ class DFlashServing(MtpServing):
         self._log_stats("previous phase")
         self._stats = {"passes": 0, "tokens": 0, "hist": [0] * (self.bs + 1), "wall": 0.0}
         logger.info(f"DFlash phase enter slot {slot} at pos {pos}: {(time.perf_counter() - t0) * 1e3:.1f} ms")
+
+    def leave(self):
+        """Phase end with the state written back: first the verify passes' state (snapshot / history of the last accepted
+        row) into the MTP scratch the write-back reads."""
+        if self._phase_slot is not None:
+            if self._suspended:
+                prev = self.model._bind_gdn_mtp_scratch()
+                try:
+                    self.runner.materialize()
+                finally:
+                    self.model._unbind_gdn_mtp_scratch(prev)
+            else:
+                self.runner.materialize()
+        return super().leave()
+
+    def drop(self):
+        if self.runner is not None:
+            self.runner.set_base(None)
+        return super().drop()
 
     def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None) -> list[int]:
         t0 = time.perf_counter()

@@ -152,9 +152,10 @@ class GdnDecode:
         return self._l1([1, B, self.vdim], ttnn.bfloat16)
 
     # ---- programs -------------------------------------------------------------------------------------------------
-    def conv(self, proj, st1, st2, st3, taps, rows=False):
-        """rows=True: the proj rows are consecutive positions of ONE user (the carried rows are row 0 of st1..st3) and
-        the register is not shifted (DFlash verify; the commit sets it)."""
+    def conv(self, proj, st1, st2, st3, taps, rows=False, base=None, hist=None):
+        """rows=True: the proj rows are consecutive positions of ONE user and the register is not shifted (DFlash verify).
+        The carried rows are row 0 of st1..st3, or (base[0] = a != 0xFFFFFFFF) rows a + 1 .. a + 3 of `hist` ([1, 32, qkv]
+        bf16, per column one tile: row i = u[i - 3] of the previous pass); this pass's history is written to `hist`."""
         conv_out = self._l1([1, 1, TILE, self.qkv], ttnn.float32)
         cols = self.qkv // TILE
         ncores = min(cols, self.mesh.compute_with_storage_grid_size().x * self.mesh.compute_with_storage_grid_size().y)
@@ -165,11 +166,12 @@ class GdnDecode:
         cbs = [_cb(cr, cb_x, ttnn.bfloat16, 2048, 2), _cb(cr, cb_h, ttnn.bfloat16, 2048, 6),
                _cb(cr, cb_t, ttnn.bfloat16, 2048, 8), _cb(cr, cb_o, ttnn.float32, 4096, 2)]
         rd_ct = [cb_x, cb_h, cb_t, cols]
-        for t in (proj, st1, taps):
+        for t in (proj, st1, taps) + ((base, hist) if rows else ()):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [cb_o] + ttnn.TensorAccessorArgs(conv_out).get_compile_time_args()
         rd_rt = [[proj.buffer_address(), st1.buffer_address(), st2.buffer_address(), st3.buffer_address(),
-                  taps.buffer_address(), s, c] for s, c in work]
+                  taps.buffer_address(), s, c] + ([base.buffer_address(), hist.buffer_address()] if rows else [])
+                 for s, c in work]
         wr_rt = [[conv_out.buffer_address(), s, c] for s, c in work]
         kernels = [
             _dm("conv_reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0,
@@ -183,7 +185,7 @@ class GdnDecode:
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([proj, st1, st2, st3, taps, conv_out], program)
+        return ttnn.generic_op([proj, st1, st2, st3, taps] + ([base, hist] if rows else []) + [conv_out], program)
 
     def _vsplit(self, units):
         """Value-column parts per head (QWEN35_GDN_VSPLIT, default up to 4): one work item per core when the units x
@@ -194,10 +196,11 @@ class GdnDecode:
                 return p
         return 1
 
-    def head(self, conv_out, proj, params, state, B, snap=None):
+    def head(self, conv_out, proj, params, state, B, snap=None, base=None):
         """snap ([R >= B, Nv, Dk, Dv] bf16): ROWS mode - the B rows are consecutive positions of ONE user whose state is
-        `state` slot 0; row r's state lands in snapshot slot r (`state` itself is not written). One core per lane
-        (value head x part) runs the lane's rows in order."""
+        `state` slot 0, or snapshot slot base[0] (uint32 [1, 32] row-major; 0xFFFFFFFF = `state`); row r's state lands in
+        snapshot slot r (`state` itself is not written). One core per lane (value head x part) runs the lane's rows in
+        order."""
         assert state.dtype == ttnn.bfloat16, "bf16 recurrent state"
         rows = snap is not None
         y = self.output(B)
@@ -231,7 +234,7 @@ class GdnDecode:
             cbs.append(_cb(cr, CB["xs"], ttnn.float32, 16 * (P + 1), 1))
         rd_ct = [Kt, Vt, self.Nv, self.Nk, self.qkv // TILE, self.proj_dim // TILE, self.z_tile, self.a_tile,
                  self.b_tile, CB["q"], CB["k"], CB["v"], CB["gin"], CB["S"], CB["z"], CB["w"], CB["scr"]]
-        for t in (conv_out, proj, params, state) + ((snap,) if rows else ()):
+        for t in (conv_out, proj, params, state) + ((snap, base) if rows else ()):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [Kt, Vt, self.Nv, CB["state"], CB["y"]]
         for t in (state, y) + ((snap,) if rows else ()):
@@ -239,7 +242,7 @@ class GdnDecode:
         rd_rt = [[conv_out.buffer_address(), proj.buffer_address(), params.buffer_address(),
                   state.buffer_address(), s, c] + ([units] if P > 1 or rows else []) for s, c in work]
         if rows:
-            rd_rt = [a + [snap.buffer_address()] for a in rd_rt]
+            rd_rt = [a + [snap.buffer_address(), base.buffer_address()] for a in rd_rt]
         wr_rt = [[state.buffer_address(), y.buffer_address(), s, c] for s, c in work]
         if P > 1:
             noc = [self.mesh.worker_core_from_logical_core(c) for c in cores]
@@ -280,15 +283,17 @@ class GdnDecode:
         semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, cr, 0) for i in sem_ids]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         # generic_op returns its LAST io tensor: y stays last
-        return ttnn.generic_op([conv_out, proj, params, state] + ([snap] if rows else []) + [y], program)
+        return ttnn.generic_op([conv_out, proj, params, state] + ([snap, base] if rows else []) + [y], program)
 
-    def __call__(self, proj, conv_states, taps, params, state, B, snap=None):
+    def __call__(self, proj, conv_states, taps, params, state, B, snap=None, base=None, hist=None):
         """proj: the [1, B, P] in-proj output (L1); conv_states: the layer's 4 carried-row tensors; -> the [1, B, Nv *
         Dv] gated output (the out-proj input; a fresh L1 tensor the caller frees). snap: ROWS mode (see head())."""
         dbg = os.environ.get("GDN_ROWS_DEBUG", "")  # op-test bisection: "conv" = rows conv only, "head" = rows head only
+        rows = snap is not None
+        assert not rows or (base is not None and hist is not None), "rows mode takes the base index and history tensors"
         conv_out = self.conv(proj, conv_states[1], conv_states[2], conv_states[3], taps,
-                             rows=snap is not None and dbg != "head")
-        y = self.head(conv_out, proj, params, state, B, snap=None if dbg == "conv" else snap)
+                             rows=rows and dbg != "head", base=base, hist=hist)
+        y = self.head(conv_out, proj, params, state, B, snap=None if dbg == "conv" else snap, base=base)
         if self.keep_conv:
             self.conv_out = conv_out
         else:

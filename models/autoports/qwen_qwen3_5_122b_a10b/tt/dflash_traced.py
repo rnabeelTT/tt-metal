@@ -54,7 +54,10 @@ class DFlashTraced(MtpTraced):
         self.fused = os.environ.get("QWEN35_DFLASH_FUSED", "1") == "1"
         if self.fused:
             rep = ttnn.ReplicateTensorToMesh(self.mesh)
-            self.snaps, self.projs = [], []
+            # per GDN layer: the pass's per-row state snapshots and its conv history (row i = input i - 3); the next pass
+            # starts from snapshot a / history rows a + 1 .. a + 3 (a = the accepted row, `base`): no commit program.
+            # The state reaches the bound buffers only at materialize() (phase end).
+            self.snaps, self.hists = [], []
             for dn in self.dn_layers:
                 if dn.conv_states is None:
                     dn.reset_state()
@@ -62,10 +65,13 @@ class DFlashTraced(MtpTraced):
                 assert st[0] == 1, f"the verify runs on a B = 1 GDN state (bound scratch), got {st}"
                 self.snaps.append(ttnn.allocate_tensor_on_device(
                     ttnn.Shape([self.BW] + st[1:]), dn.rec_state.dtype, ttnn.TILE_LAYOUT, self.mesh, _DRAM))
-                P = int(dn.tw["qkvz"].shape[-1])
-                self.projs.append(ttnn.allocate_tensor_on_device(
-                    ttnn.Shape([1, self.BW, P]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, _DRAM))
+                self.hists.append(ttnn.allocate_tensor_on_device(
+                    ttnn.Shape([1, 32, int(dn.qkv_dim_tp)]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, _DRAM))
             self.qkv_dim = int(self.dn_layers[0].qkv_dim_tp)
+            self.base = ttnn.from_torch(torch.full((1, 32), -1, dtype=torch.int32), dtype=ttnn.uint32,
+                                        layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, memory_config=_DRAM,
+                                        mesh_mapper=rep)
+            self.base_val = None  # None = the bound state is current
 
     # ------------------------------------------------------------------------------------------------ programs
     def _pass_body(self):
@@ -138,11 +144,11 @@ class DFlashTraced(MtpTraced):
                     att.rows_pos_masks = None
             else:
                 dn = layer.attention
-                dn.rows_snap, dn.rows_proj = self.snaps[gi], self.projs[gi]
+                dn.rows_snap, dn.rows_base, dn.rows_hist = self.snaps[gi], self.base, self.hists[gi]
                 try:
                     x = layer.forward(x, mode="decode")
                 finally:
-                    dn.rows_snap = dn.rows_proj = None
+                    dn.rows_snap = dn.rows_base = dn.rows_hist = None
                 gi += 1
             if li in self.lids:
                 # a DRAM copy of the (width-sharded L1) replicated residual
@@ -162,20 +168,32 @@ class DFlashTraced(MtpTraced):
         return am, mx, lg_rm, logits
 
     def _commit_body_fused(self, a):
-        """Accepted rows 0..a: every GDN layer's state <- snapshot a, conv register <- inputs a - 2 .. a."""
-        for dn, snap, proj in zip(self.dn_layers, self.snaps, self.projs):
+        """Materialize: every GDN layer's bound state <- snapshot a, conv register rows 1..3 <- history rows a+1..a+3
+        (the inputs a - 2 .. a)."""
+        for dn, snap, hist in zip(self.dn_layers, self.snaps, self.hists):
             src = ttnn.slice(snap, (a, 0, 0, 0), tuple([a + 1] + list(snap.shape)[1:]))
             ttnn.copy(src, dn.rec_state)
             ttnn.deallocate(src)
-            for j in range(1, 4):  # register row j <- u[a - 3 + j]; u[-1..-3] = the old rows 3..1 (read before written)
-                k = a - 3 + j
-                if k >= 0:
-                    row = ttnn.slice(proj, (0, k, 0), (1, k + 1, self.qkv_dim))
-                    ttnn.copy(ttnn.reshape(row, list(dn.conv_states[j].shape)), dn.conv_states[j])
-                    ttnn.deallocate(row)
-                else:
-                    ttnn.copy(dn.conv_states[4 + k], dn.conv_states[j])
+            for j in range(1, 4):
+                row = ttnn.slice(hist, (0, a + j, 0), (1, a + j + 1, self.qkv_dim))
+                ttnn.copy(ttnn.reshape(row, list(dn.conv_states[j].shape)), dn.conv_states[j])
+                ttnn.deallocate(row)
         return ()
+
+    def set_base(self, a):
+        """The next pass starts from accepted row a of the last pass (None: from the bound state)."""
+        if a == self.base_val:
+            return
+        v = torch.full((1, 32), -1 if a is None else int(a), dtype=torch.int32)
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(v, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT), self.base)
+        self.base_val = a
+
+    def materialize(self):
+        """The current state into the bound buffers (phase end / before a plain step); the next pass reads them."""
+        if self.base_val is None:
+            return
+        self.commit(self.base_val + 1)
+        self.set_base(None)
 
     def _ctx_body(self):
         return self.dr.ctx_body(self.feats)
@@ -319,7 +337,9 @@ class DFlashTraced(MtpTraced):
                     break
                 a += 1
             nxt = preds[a]
-        if a < len(drafts) or self.fused:  # the fused pass never writes the state in place: always commit
+        if self.fused:
+            self.set_base(a)  # the next pass starts from this pass's row a (no commit program)
+        elif a < len(drafts):
             self.commit(a + 1)
         self.ctx([pos + i for i in range(a + 1)])
         return rows[1 : a + 1] + [nxt]

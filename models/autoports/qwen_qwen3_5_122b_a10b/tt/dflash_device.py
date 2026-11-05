@@ -157,6 +157,8 @@ class DFlashDevice:
                 base = w[f"{p}.{conv}.base_kernel"]  # [2, K, H]
                 lw[f"{conv}.proj_all"] = put(f"{p}.{conv}.proj_all", proj.T, dtype=ttnn.bfloat16)
                 lw[f"{conv}.base_all"] = vec(f"{p}.{conv}.base_all", base.reshape(-1))
+                if os.environ.get("DFLASH_CONV_EXPAND", "all") == "all":
+                    continue  # the per-part kernels are only read by the older expansion paths
                 for half in range(2):
                     for tap in range(self.K):
                         r0 = (half * self.K + tap) * G
@@ -414,10 +416,8 @@ class DFlashDevice:
             if xs is not x:
                 ttnn.deallocate(xs)
             xs = xs2
-            t = ttnn.multiply(kern[(half, tap)], xs, memory_config=_DRAM)
-            out2 = ttnn.add(out, t, memory_config=_DRAM)
+            out2 = ttnn.addcmul(out, kern[(half, tap)], xs, value=1.0, memory_config=_DRAM)  # out + k * shift(x)
             ttnn.deallocate(out)
-            ttnn.deallocate(t)
             out = out2
         if xs is not x:
             ttnn.deallocate(xs)

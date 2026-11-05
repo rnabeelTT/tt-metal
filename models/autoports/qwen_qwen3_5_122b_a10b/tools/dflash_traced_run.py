@@ -31,6 +31,8 @@ def load_prompt_ctx(gen, runner, ids):
     tok0, feats = prefill_features(gen, ids, dr.layer_ids, gen.args.dim)
     P = len(ids)
     dr.reset()
+    if getattr(runner, "fused", False):
+        runner.set_base(None)  # the prefill wrote the bound state
     BW = runner.BW
     first = max(0, P - dr.window)
     for s in range(first, P, BW):
@@ -48,7 +50,7 @@ def load_prompt_ctx(gen, runner, ids):
 def prof_pieces(mesh, runner):
     """Each trace replayed alone (device time + one dispatch), and the drafter's pieces traced on their own."""
     reps = {}
-    commit = f"commit{runner.BW - 1}" if runner.fused else "commit"
+    commit = f"commit{runner.BW - 1}" if runner.fused else "commit"  # fused: the phase-end materialize
     for nm in ("pass", "cands_pass", commit, "ctx", "draft", "cands_draft"):
         ttnn.synchronize_device(mesh)
         t1 = time.perf_counter()
