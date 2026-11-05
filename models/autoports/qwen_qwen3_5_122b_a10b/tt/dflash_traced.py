@@ -75,6 +75,10 @@ class DFlashTraced(MtpTraced):
                                         layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, memory_config=_DRAM,
                                         mesh_mapper=rep)
             self.base_val = None  # None = the bound state is current
+            # per-row K/V write index tensors (row b: -1 except [b] = its position), written by verify()
+            self.rowpos = [ttnn.from_torch(torch.full((self.BW,), -1, dtype=torch.int32), dtype=ttnn.int32,
+                                           layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, memory_config=_DRAM,
+                                           mesh_mapper=rep) for _ in range(self.BW)]
 
     # ------------------------------------------------------------------------------------------------ programs
     def _pass_body(self):
@@ -140,11 +144,13 @@ class DFlashTraced(MtpTraced):
                 att = layer.attention
                 att.rows_kv_write = True
                 att.rows_pos_masks = self.p_masks
+                att.rows_pos_list = self.rowpos
                 try:
                     x = layer.forward(x, cos, sin, position_tensor=self.p_pos, page_table=self.p_pt, mode="decode")
                 finally:
                     att.rows_kv_write = False
                     att.rows_pos_masks = None
+                    att.rows_pos_list = None
             else:
                 dn = layer.attention
                 dn.rows_snap, dn.rows_base, dn.rows_hist = self.snaps[gi], self.base, self.hists[gi]
@@ -337,6 +343,12 @@ class DFlashTraced(MtpTraced):
 
     def verify(self, rows, pos: int, want_logits=False, sampler=None):
         assert len(rows) == self.BW
+        if self.fused:
+            for b in range(self.BW):
+                v = torch.full((self.BW,), -1, dtype=torch.int32)
+                v[b] = pos + b
+                ttnn.copy_host_to_device_tensor(ttnn.from_torch(v, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT),
+                                                self.rowpos[b])
         return super().verify(rows, pos, want_logits=want_logits, sampler=sampler)
 
     def round(self, tok: int, pos: int, sampler=None):

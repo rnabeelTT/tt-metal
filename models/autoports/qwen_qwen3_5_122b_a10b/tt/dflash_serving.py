@@ -88,6 +88,7 @@ class DFlashServing(MtpServing):
         self._cur = None  # (slot, prompt) of the request whose bucket segments are running
         self._owner = None  # slot whose context the drafter rings hold
         self._off = set()  # slots the acceptance guard handed to the plain decode (until a new request takes the slot)
+        self._fresh = set()  # slots whose request has not had its first (plain) decode step yet
         self.in_trace = True
         # acceptance guard: after QWEN35_DFLASH_GUARD_ROUNDS rounds, a request whose rounds produced fewer tokens than
         # the plain decode would have in the same wall time (QWEN35_DFLASH_PLAIN_MS per token, x QWEN35_DFLASH_MARGIN)
@@ -107,8 +108,14 @@ class DFlashServing(MtpServing):
     # ------------------------------------------------------------------ MtpServing surface
     @property
     def no_head_slots(self):
-        """Slots that must take the plain decode when alone: every slot but the rings' owner, and guarded ones."""
-        return {s for s in range(self.B) if s != self._owner} | self._off
+        """Slots that must take the plain decode when alone: every slot but the rings' owner, guarded ones, and a
+        request's first decode step after its prefill (read once per step by the adaptive decode: the first step stays
+        a plain one, so the first token streams at the plain step's latency, not a DFlash round's)."""
+        out = {s for s in range(self.B) if s != self._owner} | self._off
+        if self._fresh:
+            out |= self._fresh
+            self._fresh = set()
+        return out
 
     @no_head_slots.setter
     def no_head_slots(self, v):  # MtpServing.remap assigns it; ownership is remapped in remap() below
@@ -350,5 +357,6 @@ class DFlashServing(MtpServing):
     def end_prefill(self, tok0, P, slots=None):
         self._prefill_queue = []
         self._cur = None
+        self._fresh |= {int(x) for x in (slots or [])}
         if self._phase_slot is not None and self._phase_slot in [int(x) for x in (slots or [])]:
             self.drop()
