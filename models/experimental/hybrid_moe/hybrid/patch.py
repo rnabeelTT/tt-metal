@@ -18,6 +18,9 @@ Env (read at install):
   HYB_LIB_RESIDENT 1 (default): copy each layer's non-static int4 experts into RAM (during the build; with MTP, after the head)
   HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user)
   HYB_THREADS      host torch threads (default 8)
+  HYB_HOSTK        1 (default): one layer's missed experts in one call of the fused C kernel (hybrid/hostk; build it
+                   on the host with `python -m hybrid.hostk`); 0: per-expert torch int4 matmuls
+  HYB_HOSTK_THREADS threads of that kernel's pool (default 4: 2-4 saturate DRAM)
 """
 
 from __future__ import annotations
@@ -34,6 +37,8 @@ import numpy as np
 import torch
 
 import ttnn
+
+from . import hostk
 
 
 class HybridState:
@@ -67,6 +72,9 @@ class HybridState:
         self.crafted_rm = {}  # fused hybrid: rows -> the model-wide crafted logits rows (row-major DRAM), _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
+        self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
+        if self.hostk:
+            hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "4")))
         # with an MTP head, the RAM copies of the library start only once the head is built (_install_mtp_head): the
         # head's 512 full-precision experts take ~44 GB of host RAM while they are repacked, on top of ~136 GB of copies
         self.defer_lib = self.lib_resident and int(os.environ.get("QWEN35_MTP", "0") or 0) > 0
@@ -176,6 +184,18 @@ class HybridState:
         if not miss_mask.any():
             return out
         t0 = time.perf_counter()
+        if self.hostk and self.lib_dir and R <= hostk.MAXR:  # decode / MTP verify rows (prefill: torch GEMMs)
+            lib = self.lib_layer(layer)
+            ex = torch.unique(ids[miss_mask])
+            rows = torch.from_numpy(lib["row"][ex.numpy()])
+            if (rows < 0).any():
+                raise RuntimeError(
+                    f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static"
+                )
+            W = ((ids[None] == ex[:, None, None]) & miss_mask[None]).float().mul_(sc.float()[None]).sum(-1)  # [E, R]
+            hostk.moe(lib, X.float().contiguous(), rows.contiguous(), W.contiguous(), out)
+            self.st["t_host"] += time.perf_counter() - t0
+            return out
         for e in torch.unique(ids[miss_mask]).tolist():
             sel = (ids == e) & miss_mask
             rows = sel.any(dim=1).nonzero().flatten()

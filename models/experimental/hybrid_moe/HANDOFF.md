@@ -34,6 +34,13 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Fused host-expert kernel (2026-11-05, HYB_HOSTK=1 default, `hybrid/hostk/`): one C call per layer (AVX-512, its
+  own 4-thread pool, short spin then futex) runs every missed expert on the library's torch CPU int4 pack (decode /
+  MTP verify rows <= 16; prefill keeps torch GEMMs). PCC 0.999996 vs the torch path. Host experts per MTP pass
+  61 ms -> 17-28 ms; pass 112-156 ms -> 93-96 ms; bench 27.5 / 28.4 tok/s (vs 27.2-27.7): the critical path is now
+  the device + per-layer sync ('read' ~44 ms/pass). An 8-thread pool spinning 200k pauses starved the host step
+  (23.8-25.0 tok/s). Built on the host by serve_397b.sh (`python -m hybrid.hostk`; the image has no gcc).
+- MTP k=5/k=7 (2026-11-05, with the lean head load both now load: peak ~181-182 GB): 20.1 / 23.3 tok/s, below k=3.
 - Lean MTP head load (2026-11-05): with MTP on, the resident int4 library copies start only after the MTP head is
   built (patch._install_mtp_head), and state.mtp_state fills the 512-expert stacks in place. Host RAM peak during
   startup 226.6 GB -> 179.7 GB (= steady state; was 28 GB available at the head build, now ~75 GB), same ~25 min
