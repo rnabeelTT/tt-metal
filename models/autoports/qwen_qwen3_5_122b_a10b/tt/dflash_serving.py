@@ -76,7 +76,12 @@ class DFlashServing(MtpServing):
         self._owner = None  # slot whose context the drafter rings hold
         self._off = set()  # slots the acceptance guard handed to the plain decode (until a new request takes the slot)
         self.in_trace = True
-        self.min_tau = float(os.environ.get("QWEN35_DFLASH_MIN_TAU", "2.5"))
+        # acceptance guard: after QWEN35_DFLASH_GUARD_ROUNDS rounds, a request whose rounds produced fewer tokens than
+        # the plain decode would have in the same wall time (QWEN35_DFLASH_PLAIN_MS per token, x QWEN35_DFLASH_MARGIN)
+        # goes to the plain decode for the rest of the request; QWEN35_DFLASH_MIN_TAU (tokens / round) is a floor
+        self.min_tau = float(os.environ.get("QWEN35_DFLASH_MIN_TAU", "1.5"))
+        self.plain_ms = float(os.environ.get("QWEN35_DFLASH_PLAIN_MS", "7.6"))
+        self.margin = float(os.environ.get("QWEN35_DFLASH_MARGIN", "1.0"))
         self.guard_rounds = int(os.environ.get("QWEN35_DFLASH_GUARD_ROUNDS", "8"))
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_device import DFlashDevice
 
@@ -228,7 +233,10 @@ class DFlashServing(MtpServing):
         st["wall"] += time.perf_counter() - t0
         if st["passes"] % 64 == 0:
             self._log_stats("running")
-        if st["passes"] >= self.guard_rounds and st["tokens"] < self.min_tau * st["passes"]:
+        plain_equiv = st["wall"] * 1e3 / self.plain_ms * self.margin  # tokens the plain decode makes in that time
+        if st["passes"] >= self.guard_rounds and (
+            st["tokens"] < self.min_tau * st["passes"] or st["tokens"] < plain_equiv
+        ):
             # not paying: the rest of this request runs the plain decode (the next decode step leaves the phase)
             self._off.add(self._phase_slot)
             self._log_stats("guard: plain decode for the rest of the request")

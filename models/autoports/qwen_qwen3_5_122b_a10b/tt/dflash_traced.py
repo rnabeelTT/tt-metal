@@ -145,7 +145,9 @@ class DFlashTraced(MtpTraced):
                     dn.rows_snap = dn.rows_proj = None
                 gi += 1
             if li in self.lids:
-                caps.append(self.dr._full(ttnn.clone(x, memory_config=_DRAM)))
+                # a DRAM copy of the (width-sharded L1) replicated residual
+                c = ttnn.sharded_to_interleaved(x, _DRAM) if x.is_sharded() else ttnn.clone(x, memory_config=_DRAM)
+                caps.append(self.dr._full(c))
         feats = ttnn.concat(caps, dim=3, memory_config=_DRAM)  # [1,1,BW,8H]
         for c in caps:
             ttnn.deallocate(c)

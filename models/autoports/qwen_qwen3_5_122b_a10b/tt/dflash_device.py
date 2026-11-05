@@ -79,6 +79,34 @@ class DFlashDevice:
                 cache_file_name=os.path.join(cache_dir, f"{name}_{str(dtype).split('.')[-1]}"),
             )
 
+        # tensor parallel over the mesh (DFLASH_TP=1, default on several dies): q / kv heads and the MLP's intermediate
+        # columns split per die, o-proj / down-proj partial sums all-reduced, fc column-split + all-gathered; the
+        # dynamic convs, norms and the selector projection stay replicated (they act on the full hidden)
+        D = getattr(self.mesh, "get_num_devices", lambda: 1)()
+        self.tp = D > 1 and os.environ.get("DFLASH_TP", "1") == "1"
+        self.D = D if self.tp else 1
+        assert nh % self.D == 0 and nkv % self.D == 0 and self.I % self.D == 0 and H % self.D == 0
+        self.nh_l, self.nkv_l, self.I_l = nh // self.D, nkv // self.D, self.I // self.D
+        shard = ttnn.ShardTensorToMesh(self.mesh, dim=0) if self.tp else rep
+
+        def put_tp(name, per_die, dtype=wdtype):
+            """per_die: list of D [K, N] weights -> each die its own (replicated as one when not TP)."""
+            if not self.tp:
+                return put(name, per_die[0])
+            t = torch.stack([x.contiguous() for x in per_die]).unsqueeze(1)  # [D, 1, K, N]
+            return ttnn.as_tensor(
+                t, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=_DRAM, mesh_mapper=shard,
+                cache_file_name=os.path.join(cache_dir, f"{name}_tp{self.D}_{str(dtype).split('.')[-1]}"),
+            )
+
+        def cols(t, d, n):  # [K, N] column block d of n
+            c = t.shape[1] // n
+            return t[:, d * c : (d + 1) * c]
+
+        def rows(t, d, n):
+            r = t.shape[0] // n
+            return t[d * r : (d + 1) * r]
+
         def vec(name, t):
             return put(name, t.float().reshape(1, 1, 1, -1), dtype=ttnn.bfloat16)
 
@@ -86,7 +114,8 @@ class DFlashDevice:
             # ttnn.rms_norm takes the weight as a ROW_MAJOR [hd / 32, 32] stick view
             return put(name, t.float().reshape(1, 1, -1, TILE), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT)
 
-        self.fc = put("fc", w["fc.weight"].T)  # [8H, H]
+        fcT = w["fc.weight"].T  # [8H, H]
+        self.fc = put_tp("fc", [cols(fcT, d, self.D) for d in range(self.D)])  # column split + all-gather
         self.hidden_norm = norm_w("hidden_norm", w["hidden_norm.weight"])
         self.final_norm = norm_w("norm", w["norm.weight"])
         self.sel_proj = put("sel_proj", w["candidate_selector.hidden_projection.weight"].T, dtype=ttnn.bfloat16)
@@ -95,6 +124,9 @@ class DFlashDevice:
         for j in range(G):
             E[j, j * self.gs : (j + 1) * self.gs] = 1.0
         self.expand = put("expand", E, dtype=ttnn.bfloat16)
+        # block-diagonal expansion of the 2 x K dynamic kernels at once ([2K G, 2K H]; 0 / 1 entries, exact in bfp8)
+        E4 = torch.block_diag(*([E] * (2 * self.K)))
+        self.expand_all = put("expand_all", E4, dtype=ttnn.bfloat8_b)
         sh = torch.zeros(ROWS, ROWS)
         for i in range(1, ROWS):
             sh[i, i - 1] = 1.0  # row i <- row i - 1 (row 0 <- 0)
@@ -104,21 +136,27 @@ class DFlashDevice:
         for i in range(self.L):
             p = f"layers.{i}"
             a = f"{p}.self_attn"
+            Dn = self.D
+            wq, wk, wv = w[f"{a}.q_proj.weight"], w[f"{a}.k_proj.weight"], w[f"{a}.v_proj.weight"]  # [heads*hd, H]
+            wgate, wup = w[f"{p}.mlp.gate_proj.weight"], w[f"{p}.mlp.up_proj.weight"]  # [I, H]
             lw = {
                 "in_ln": norm_w(f"{p}.in_ln", w[f"{p}.input_layernorm.weight"]),
                 "post_ln": norm_w(f"{p}.post_ln", w[f"{p}.post_attention_layernorm.weight"]),
-                "wqkv": put(f"{p}.wqkv", torch.cat([w[f"{a}.q_proj.weight"], w[f"{a}.k_proj.weight"],
-                                                    w[f"{a}.v_proj.weight"]], 0).T),
-                "wkv": put(f"{p}.wkv", torch.cat([w[f"{a}.k_proj.weight"], w[f"{a}.v_proj.weight"]], 0).T),
+                # die d: q heads [d nh_l, (d+1) nh_l), kv heads [d nkv_l, (d+1) nkv_l) (GQA groups stay on one die)
+                "wqkv": put_tp(f"{p}.wqkv", [torch.cat([rows(wq, d, Dn), rows(wk, d, Dn), rows(wv, d, Dn)], 0).T
+                                             for d in range(Dn)]),
+                "wkv": put_tp(f"{p}.wkv", [torch.cat([rows(wk, d, Dn), rows(wv, d, Dn)], 0).T for d in range(Dn)]),
                 "q_norm": norm_w(f"{p}.q_norm", w[f"{a}.q_norm.weight"]),
                 "k_norm": norm_w(f"{p}.k_norm", w[f"{a}.k_norm.weight"]),
-                "wo": put(f"{p}.wo", w[f"{a}.o_proj.weight"].T),
-                "wgu": put(f"{p}.wgu", torch.cat([w[f"{p}.mlp.gate_proj.weight"], w[f"{p}.mlp.up_proj.weight"]], 0).T),
-                "wdown": put(f"{p}.wdown", w[f"{p}.mlp.down_proj.weight"].T),
+                "wo": put_tp(f"{p}.wo", [rows(w[f"{a}.o_proj.weight"].T, d, Dn) for d in range(Dn)]),
+                "wgu": put_tp(f"{p}.wgu", [torch.cat([rows(wgate, d, Dn), rows(wup, d, Dn)], 0).T for d in range(Dn)]),
+                "wdown": put_tp(f"{p}.wdown", [rows(w[f"{p}.mlp.down_proj.weight"].T, d, Dn) for d in range(Dn)]),
             }
             for conv in ("attention_conv", "mlp_conv"):
                 proj = w[f"{p}.{conv}.kernel_projection.weight"]  # [2*K*G, H], rows (half, tap, group)
                 base = w[f"{p}.{conv}.base_kernel"]  # [2, K, H]
+                lw[f"{conv}.proj_all"] = put(f"{p}.{conv}.proj_all", proj.T, dtype=ttnn.bfloat16)
+                lw[f"{conv}.base_all"] = vec(f"{p}.{conv}.base_all", base.reshape(-1))
                 for half in range(2):
                     for tap in range(self.K):
                         r0 = (half * self.K + tap) * G
@@ -127,7 +165,7 @@ class DFlashDevice:
                         lw[f"{conv}.base{half}{tap}"] = vec(f"{p}.{conv}.base{half}{tap}", base[half, tap])
             # K / V ring of this layer (replicated), zero-initialised; visibility comes from the host row
             # slots [0, R): context positions (slot = position mod R); [R, R + ROWS): the current block's own rows
-            lw["ring_k"] = ttnn.from_torch(torch.zeros(1, nkv, self.R + ROWS, hd), dtype=ttnn.bfloat16,
+            lw["ring_k"] = ttnn.from_torch(torch.zeros(1, self.nkv_l, self.R + ROWS, hd), dtype=ttnn.bfloat16,
                                            layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=_DRAM,
                                            mesh_mapper=rep)
             lw["ring_v"] = ttnn.clone(lw["ring_k"])
@@ -139,6 +177,7 @@ class DFlashDevice:
                                    memory_config=_DRAM, mesh_mapper=rep)
 
         self._zeros = zeros
+        self._ones = {}
         self._cstage = {}  # ctx rows CR -> (slot [1,1,1,CR] fp32: target slot per row, -1 = skip; cos; sin)
         self.d_cos = zeros((1, 1, ROWS, hd))
         self.d_sin = zeros((1, 1, ROWS, hd))
@@ -149,7 +188,7 @@ class DFlashDevice:
             compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(), q_chunk_size=ROWS,
             k_chunk_size=kc, exp_approx_mode=False,
         )
-        self.conv_expand = os.environ.get("DFLASH_CONV_EXPAND", "mm")
+        self.conv_expand = os.environ.get("DFLASH_CONV_EXPAND", "all")
         self.d_tok = None  # built lazily from the model's decode-token layout (first draft_inputs call)
         self.feats = None  # [1,1,ROWS,8H] persistent ctx input (the verify pass copies its captures in)
         self.scale = hd ** -0.5
@@ -193,7 +232,15 @@ class DFlashDevice:
             )  # [1,1,R+ROWS,CR]: slot index down the rows (compared with the per-row target slot, broadcast over rows)
             self._cstage[CR] = (z((1, 1, 1, CR), dtype=ttnn.float32), z((1, 1, CR, self.hd)), z((1, 1, CR, self.hd)),
                                 iota)
+            self._ones_hd(CR)  # persistent before any capture
         return self._cstage[CR]
+
+    def _ones_hd(self, CR):
+        if CR not in self._ones:
+            self._ones[CR] = ttnn.from_torch(
+                torch.ones(1, 1, CR, self.hd), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                memory_config=_DRAM, mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        return self._ones[CR]
 
     def stage_ctx(self, positions, CR):
         """Rows 0..n-1 of the next CR-row ctx run land at `positions` (rows past n are skipped). Only the last
@@ -281,33 +328,32 @@ class DFlashDevice:
         """feats [1,1,CR,8H] -> the K / V rows of every layer written into the rings at the staged slots."""
         CR = int(feats.shape[-2])
         slot_t, cos_t, sin_t, iota = self.ctx_stage(CR)
-        x = self._mm(feats, self.fc)  # [1,1,CR,H]
+        x = self._mm(feats, self.fc)  # [1,1,CR,H / D]
+        if self.tp:
+            x = self._gather(x)
         x = self._rms(x, self.hidden_norm)
         # one-hot [1,1,R,CR]: slot j <- row i
         sel = ttnn.eq(iota, slot_t, memory_config=_DRAM)  # [1,1,R,CR] fp32
         sel = ttnn.typecast(sel, ttnn.bfloat16)
-        keep = ttnn.sum(sel, dim=-1, keepdim=True)  # [1,1,R,1]
-        keep = ttnn.rsub(keep, 1.0)
-        sel_h = ttnn.repeat(sel, (1, self.nkv, 1, 1))
+        sel_h = ttnn.repeat(sel, (1, self.nkv_l, 1, 1))
+        # written slots as a full [1, nkv, R+ROWS, hd] predicate (one-hot rows x ones): the ring update is then one
+        # in-place select per tensor
+        written = ttnn.matmul(sel_h, self._ones_hd(CR), memory_config=_DRAM, compute_kernel_config=self.ckc_hi)
         for lw in self.layers:
             kv = self._mm(x, lw["wkv"])  # [1,1,ROWS,2*nkv*hd]
-            k = ttnn.slice(kv, (0, 0, 0, 0), (1, 1, CR, self.nkv * self.hd))
-            v = ttnn.slice(kv, (0, 0, 0, self.nkv * self.hd), (1, 1, CR, 2 * self.nkv * self.hd))
+            k = ttnn.slice(kv, (0, 0, 0, 0), (1, 1, CR, self.nkv_l * self.hd))
+            v = ttnn.slice(kv, (0, 0, 0, self.nkv_l * self.hd), (1, 1, CR, 2 * self.nkv_l * self.hd))
             ttnn.deallocate(kv)
-            k = self._heads(k, self.nkv, CR)
+            k = self._heads(k, self.nkv_l, CR)
             k = self._rms(k, lw["k_norm"])
             k = self._rope(k, cos_t, sin_t)
-            v = self._heads(v, self.nkv, CR)
+            v = self._heads(v, self.nkv_l, CR)
             for ring, rows in ((lw["ring_k"], k), (lw["ring_v"], v)):
                 new = ttnn.matmul(sel_h, rows, memory_config=_DRAM, compute_kernel_config=self.ckc_hi)  # [1,nkv,R,hd]
-                kept = ttnn.multiply(ring, keep, memory_config=_DRAM)
-                upd = ttnn.add(kept, new, memory_config=_DRAM)
-                ttnn.deallocate(kept)
+                ttnn.where(written, new, ring, output_tensor=ring)
                 ttnn.deallocate(new)
-                ttnn.copy(upd, ring)
-                ttnn.deallocate(upd)
                 ttnn.deallocate(rows)
-        for t in (x, sel, keep, sel_h):
+        for t in (x, sel, sel_h, written):
             ttnn.deallocate(t)
         return ()
 
@@ -335,6 +381,18 @@ class DFlashDevice:
         """The conv's 4 dynamic kernels from its input h, expanded to the channels with the base kernel added:
         {(half, tap): [1,1,ROWS,H]} (one matmul per part + a column repeat; DFLASH_CONV_EXPAND=mm: expansion matmul)."""
         out = {}
+        if self.conv_expand == "all":
+            d = self._mm(h, lw[f"{conv}.proj_all"], hi=True)  # [1,1,ROWS,2K G]
+            de = self._mm(d, self.expand_all, hi=True)  # [1,1,ROWS,2K H]
+            ttnn.deallocate(d)
+            k = ttnn.add(de, lw[f"{conv}.base_all"], memory_config=_DRAM)
+            ttnn.deallocate(de)
+            for half in range(2):
+                for tap in range(self.K):
+                    c0 = (half * self.K + tap) * self.H
+                    out[(half, tap)] = ttnn.slice(k, (0, 0, 0, c0), (1, 1, ROWS, c0 + self.H))
+            ttnn.deallocate(k)
+            return out
         for half in range(2):
             for tap in range(self.K):
                 d = self._mm(h, lw[f"{conv}.proj{half}{tap}"], hi=True)  # [1,1,ROWS,G]
@@ -366,7 +424,7 @@ class DFlashDevice:
         return out
 
     def layer_body(self, lw, x):
-        nh, nkv = self.nh, self.nkv
+        nh, nkv = self.nh_l, self.nkv_l
         res = x
         h = self._rms(x, lw["in_ln"])
         kern = self._dyn(lw, "attention_conv", h)
@@ -394,7 +452,7 @@ class DFlashDevice:
         )  # [1,nh,ROWS,hd]
         ttnn.deallocate(q2)
         o = ttnn.experimental.nlp_concat_heads(o, memory_config=_DRAM)  # [1,1,ROWS,nh*hd]
-        o2 = self._mm(o, lw["wo"])
+        o2 = self._reduce(self._mm(o, lw["wo"]))
         ttnn.deallocate(o)
         o3 = self._conv_apply(kern, 1, o2)
         ttnn.deallocate(o2)
@@ -410,13 +468,13 @@ class DFlashDevice:
         ttnn.deallocate(h)
         gu = self._mm(hc, lw["wgu"])
         ttnn.deallocate(hc)
-        gate = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, ROWS, self.I))
-        up = ttnn.slice(gu, (0, 0, 0, self.I), (1, 1, ROWS, 2 * self.I))
+        gate = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, ROWS, self.I_l))
+        up = ttnn.slice(gu, (0, 0, 0, self.I_l), (1, 1, ROWS, 2 * self.I_l))
         ttnn.deallocate(gu)
         a = ttnn.multiply(gate, up, input_tensor_a_activations=[ttnn.UnaryOpType.SILU], memory_config=_DRAM)
         ttnn.deallocate(gate)
         ttnn.deallocate(up)
-        mo = self._mm(a, lw["wdown"])
+        mo = self._reduce(self._mm(a, lw["wdown"]))
         ttnn.deallocate(a)
         mo2 = self._conv_apply(kern, 1, mo)
         ttnn.deallocate(mo)
@@ -435,6 +493,29 @@ class DFlashDevice:
         hp = self._mm(h, self.sel_proj, hi=True)  # [1,1,ROWS,256]
         ttnn.deallocate(h)
         return logits, hp
+
+    def _reduce(self, part):
+        """Sum of the dies' [1,1,ROWS,H] partials (TP), replicated; identity when not TP."""
+        if not self.tp:
+            return part
+        from models.tt_transformers.tt.ccl import tt_all_reduce
+
+        # on a (1, N) mesh tt_all_reduce is a reduce-scatter (each die gets H / N columns of the sum): gather after it
+        out = tt_all_reduce(part, self.mesh, self.model.tt_ccl, cluster_axis=0, dim=3,
+                            topology=self.model.args.ccl_topology(), memory_config=_DRAM)
+        if out.shape[-1] != self.H:
+            out = self._gather(out)
+        if out.is_sharded():
+            out = ttnn.sharded_to_interleaved(out, _DRAM)
+        if tuple(out.shape) != (1, 1, ROWS, self.H):
+            out = ttnn.reshape(out, (1, 1, ROWS, self.H))
+        return out
+
+    def _gather(self, x):
+        from models.tt_transformers.tt.ccl import tt_all_gather
+
+        return tt_all_gather(x, self.mesh, self.model.tt_ccl, cluster_axis=None, dim=3,
+                             topology=self.model.args.ccl_topology())
 
     def _full(self, x):
         """A [1,1,ROWS,H/TP] fractured row block -> replicated [1,1,ROWS,H] (no-op when already full)."""

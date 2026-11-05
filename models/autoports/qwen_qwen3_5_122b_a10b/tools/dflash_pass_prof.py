@@ -140,7 +140,40 @@ def main():
                     gl.feed_forward.mtp_rows_mode = False
                 ttnn.deallocate(y)
 
-            for name, fn in (("gdn_layer", gdn_layer), ("attn_layer", attn_layer), ("moe", moe_only)):
+            # fused verify (the decode layers over the rows; GDN rows mode with snapshots)
+            dn = gl.attention
+            snap = ttnn.allocate_tensor_on_device(ttnn.Shape([BW] + list(dn.rec_state.shape)[1:]), dn.rec_state.dtype,
+                                                  ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG)
+            projsink = ttnn.allocate_tensor_on_device(ttnn.Shape([1, BW, int(dn.tw["qkvz"].shape[-1])]),
+                                                      ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG)
+            replicated = bool(getattr(m.args, "decode_replicated", False))
+
+            def rep_x():
+                xx = ttnn.clone(x0)
+                if replicated and xx.shape[-1] != m.args.dim:
+                    from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+                    xx = decode_boundary(m.args, m.mesh_device).gather(xx, m.tt_ccl)
+                return xx
+
+            def gdn_fused():
+                dn.rows_snap, dn.rows_proj = snap, projsink
+                try:
+                    ttnn.deallocate(gl.forward(rep_x(), mode="decode"))
+                finally:
+                    dn.rows_snap = dn.rows_proj = None
+
+            def attn_fused():
+                att = al.attention
+                att.rows_kv_write, att.rows_pos_masks = True, masks
+                try:
+                    ttnn.deallocate(al.forward(rep_x(), cos, sin, position_tensor=cur_pos_tt, page_table=pt_tt,
+                                               mode="decode"))
+                finally:
+                    att.rows_kv_write, att.rows_pos_masks = False, None
+
+            for name, fn in (("gdn_layer", gdn_layer), ("attn_layer", attn_layer), ("moe", moe_only),
+                             ("gdn_layer_fused", gdn_fused), ("attn_layer_fused", attn_fused)):
                 fn()
                 fn()
                 sync()
