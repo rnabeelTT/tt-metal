@@ -88,13 +88,20 @@ class HybridStateDict(StreamingStateDict):
         if fuse_experts and per_expert:
             for li in sorted({li for li, _, _ in per_expert}):
                 experts = sorted({e for l2, e, _ in per_expert if l2 == li})
-                gu, dn = [], []
+                if experts != list(range(len(experts))):
+                    raise KeyError(f"mtp layer {li}: expert ids not contiguous from 0 ({experts[:4]}..{experts[-4:]})")
+                # filled in place: a per-expert list then torch.stack peaked at twice the fused stack (~26 GB for 512)
+                gu = dn = None
                 for e in experts:
                     g, u, d = (self._read(*per_expert[(li, e, q)]) for q in ("gate_proj", "up_proj", "down_proj"))
-                    gu.append(torch.cat([g, u], 0))
-                    dn.append(d)
-                out[f"mtp.layers.{li}.mlp.experts.gate_up_proj"] = torch.stack(gu, 0)
-                out[f"mtp.layers.{li}.mlp.experts.down_proj"] = torch.stack(dn, 0)
+                    if gu is None:
+                        gu = torch.empty((len(experts), 2 * g.shape[0], g.shape[1]), dtype=g.dtype)
+                        dn = torch.empty((len(experts), *d.shape), dtype=d.dtype)
+                    gu[e, : g.shape[0]] = g
+                    gu[e, g.shape[0] :] = u
+                    dn[e] = d
+                out[f"mtp.layers.{li}.mlp.experts.gate_up_proj"] = gu
+                out[f"mtp.layers.{li}.mlp.experts.down_proj"] = dn
         return out
 
     def _drop_layer_key(self, key):
@@ -123,6 +130,7 @@ class HybridStateDict(StreamingStateDict):
     def expert(self, li: int, e: int):
         """(gate_up [2N, H] = [gate; up], down [H, N]) bf16 for one expert."""
         if self.per_expert:
+
             def get(p):
                 key = self._experts[(li, e, p)]
                 ent = self._expert_entry[key]

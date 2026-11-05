@@ -15,13 +15,14 @@ Env (read at install):
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
-  HYB_LIB_RESIDENT 1 (default): copy each layer's non-static int4 experts into RAM during the build (0: mmap only)
+  HYB_LIB_RESIDENT 1 (default): copy each layer's non-static int4 experts into RAM (during the build; with MTP, after the head)
   HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user)
   HYB_THREADS      host torch threads (default 8)
 """
 
 from __future__ import annotations
 
+import gc
 import math
 import os
 import threading
@@ -49,7 +50,9 @@ class HybridState:
         self.fused = os.environ.get("HYB_FUSED", "1") == "1"
         self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed
         # static plan counts only picks with at least this routing weight (default HYB_SKIP: skipped misses are free)
-        self.plan_min_score = float(os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip)))  # fused MoE decode kernels (moe_decode/fused.py)
+        self.plan_min_score = float(
+            os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip))
+        )  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
@@ -64,6 +67,9 @@ class HybridState:
         self.crafted_rm = {}  # fused hybrid: rows -> the model-wide crafted logits rows (row-major DRAM), _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
+        # with an MTP head, the RAM copies of the library start only once the head is built (_install_mtp_head): the
+        # head's 512 full-precision experts take ~44 GB of host RAM while they are repacked, on top of ~136 GB of copies
+        self.defer_lib = self.lib_resident and int(os.environ.get("QWEN35_MTP", "0") or 0) > 0
         self.loader = ThreadPoolExecutor(max_workers=1)
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=int(os.environ.get("HYB_PREP_WORKERS", "2")))
@@ -72,9 +78,28 @@ class HybridState:
         self.reset_stats()
 
     def reset_stats(self):
-        self.st = {"picks": 0, "hits": 0, "dyn_hits": 0, "steps": 0, "promoted": 0, "t_read": 0.0, "t_host": 0.0,
-                   "t_up": 0.0, "t_promote": 0.0, "prefill_rows": 0, "prefill_miss_pairs": 0, "t_sync": 0.0, "t_up_conv": 0.0, "t_lib_load": 0.0, "dec_picks": 0, "dec_hits": 0, "skipped": 0,
-                   "skipped_mass": 0.0, "t_route": 0.0, "t_craft": 0.0}
+        self.st = {
+            "picks": 0,
+            "hits": 0,
+            "dyn_hits": 0,
+            "steps": 0,
+            "promoted": 0,
+            "t_read": 0.0,
+            "t_host": 0.0,
+            "t_up": 0.0,
+            "t_promote": 0.0,
+            "prefill_rows": 0,
+            "prefill_miss_pairs": 0,
+            "t_sync": 0.0,
+            "t_up_conv": 0.0,
+            "t_lib_load": 0.0,
+            "dec_picks": 0,
+            "dec_hits": 0,
+            "skipped": 0,
+            "skipped_mass": 0.0,
+            "t_route": 0.0,
+            "t_craft": 0.0,
+        }
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -90,8 +115,11 @@ class HybridState:
                     a = z[k]
                     # with scores (s<k>) and a threshold, count only the picks the host would compute on a miss
                     sk = "s" + k[1:]
-                    w = (z[sk] >= self.plan_min_score).astype(np.float64) if (self.plan_min_score > 0 and sk in z.files) \
+                    w = (
+                        (z[sk] >= self.plan_min_score).astype(np.float64)
+                        if (self.plan_min_score > 0 and sk in z.files)
                         else np.ones(a.shape)
+                    )
                     for li, L in enumerate(layers):
                         np.add.at(f[L], a[:, li, :].ravel(), w[:, li, :].ravel())
             self._freq = f
@@ -124,7 +152,8 @@ class HybridState:
     def _load_lib(self, layer):
         """The int4 experts of one layer that can miss (every expert not in the static set), copied out of the mmap
         into process RAM: through the page cache the 225 GiB library is mostly evicted by the checkpoint load, and a
-        miss then reads its expert from NVMe. row[e] = the expert's row in the copies (-1: static, never on the host)."""
+        miss then reads its expert from NVMe. row[e] = the expert's row in the copies (-1: static, never on the host).
+        """
         t0 = time.perf_counter()
         d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
         if not self.lib_resident:
@@ -186,10 +215,15 @@ class HybridState:
             dim=-1,
         ).reshape(1, 1, gu.shape[1], 2 * N)
         down_t = dn.T.contiguous().reshape(1, 1, N, dn.shape[0])
-        h_gu = ttnn.from_torch(packed.contiguous(), dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT,
-                               mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1))
-        h_dn = ttnn.from_torch(down_t, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT,
-                               mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2))
+        h_gu = ttnn.from_torch(
+            packed.contiguous(),
+            dtype=ttnn.bfloat8_b,
+            layout=ttnn.TILE_LAYOUT,
+            mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+        )
+        h_dn = ttnn.from_torch(
+            down_t, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2)
+        )
         return h_gu, h_dn
 
 
@@ -210,9 +244,11 @@ def _log_stats(replays):
     n = SEG.log_every
     d = {k: st[k] - prev.get(k, 0) for k in st if isinstance(st[k], (int, float))}
     ms = {k[2:]: round(1e3 * v / n, 2) for k, v in d.items() if k.startswith("t_") and v}
-    print(f"HYB_STATS replays={replays} per replay ms={ms} steps/replay={d.get('steps', 0) / n:.1f} "
-          f"hit={d.get('dec_hits', 0) / max(1, d.get('dec_picks', 0)):.3f} skipped/replay={d.get('skipped', 0) / n:.1f}",
-          flush=True)
+    print(
+        f"HYB_STATS replays={replays} per replay ms={ms} steps/replay={d.get('steps', 0) / n:.1f} "
+        f"hit={d.get('dec_hits', 0) / max(1, d.get('dec_picks', 0)):.3f} skipped/replay={d.get('skipped', 0) / n:.1f}",
+        flush=True,
+    )
     HYB._log_prev = dict(st)
 
 
@@ -249,7 +285,7 @@ def install():
             self._hyb_on = False
             return
         HYB.plan(layer_num)
-        if HYB.lib_dir:
+        if HYB.lib_dir and not HYB.defer_lib:
             HYB.lib_layer_async(layer_num)  # load this layer's host library while the rest of the model builds
         args.num_experts = HYB.C
         try:
@@ -263,8 +299,10 @@ def install():
         self._hyb_fused = False
         if HYB.fused and HYB.C < E:
             if getattr(self, "_fused", None) is None:
-                raise RuntimeError(f"layer {layer_num}: HYB_FUSED=1 but the fused MoE decode was not built "
-                                   f"(QWEN35_MOE_FUSED_DECODE={os.environ.get('QWEN35_MOE_FUSED_DECODE')}, C={HYB.C})")
+                raise RuntimeError(
+                    f"layer {layer_num}: HYB_FUSED=1 but the fused MoE decode was not built "
+                    f"(QWEN35_MOE_FUSED_DECODE={os.environ.get('QWEN35_MOE_FUSED_DECODE')}, C={HYB.C})"
+                )
             if HYB.D:
                 raise RuntimeError("HYB_FUSED=1 does not support dynamic slots (HYB_DYN_SLOTS)")
             self._hyb_fused = True
@@ -279,8 +317,13 @@ def install():
             kw = {"layout": ttnn.TILE_LAYOUT, "device": mesh_device, "memory_config": ttnn.DRAM_MEMORY_CONFIG}
             gu = ttnn.from_torch(torch.zeros(1, D, H, tp * 2 * Nl), dtype=ttnn.bfloat8_b, mesh_mapper=sh_last, **kw)
             dn = ttnn.from_torch(torch.zeros(1, D, N, H), dtype=ttnn.bfloat8_b, mesh_mapper=sh_m2, **kw)
-            ones = ttnn.from_torch(torch.ones(1, 1, 1, D, dtype=torch.bfloat16), dtype=ttnn.bfloat16,
-                                   layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh_device, mesh_mapper=rep)
+            ones = ttnn.from_torch(
+                torch.ones(1, 1, 1, D, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=mesh_device,
+                mesh_mapper=rep,
+            )
             gs, ds = [int(v) for v in gu.shape], [int(v) for v in dn.shape]
             self._dyn_views = (ttnn.reshape(gu, [gs[1], 1, gs[2], gs[3]]), ttnn.reshape(dn, [ds[1], 1, ds[2], ds[3]]))
             # promotion staging: allocated once, written with copy_host_to_device_tensor (no device allocation later)
@@ -288,8 +331,14 @@ def install():
                 ttnn.from_torch(torch.zeros(1, 1, H, tp * 2 * Nl), dtype=ttnn.bfloat8_b, mesh_mapper=sh_last, **kw),
                 ttnn.from_torch(torch.zeros(1, 1, N, H), dtype=ttnn.bfloat8_b, mesh_mapper=sh_m2, **kw),
             )
-            self._dyn_attrs = {"up_gate": gu, "down": dn, "ones_mask": ones, "num_experts": D, "_pairs_masks": {},
-                               "_dispatch": None}
+            self._dyn_attrs = {
+                "up_gate": gu,
+                "down": dn,
+                "ones_mask": ones,
+                "num_experts": D,
+                "_pairs_masks": {},
+                "_dispatch": None,
+            }
             self._static_attrs = {k: getattr(self, k, None) for k in self._dyn_attrs}
             if self._static_attrs["_pairs_masks"] is None:
                 self._static_attrs["_pairs_masks"] = {}
@@ -303,8 +352,16 @@ def install():
 
     def f_init(fself, mesh_device, args, *, num_experts, router_weight, shared_gate_weight, hidden, **kw):
         E_true = int(router_weight.shape[0])
-        f_orig(fself, mesh_device, args, num_experts=num_experts, router_weight=router_weight[:num_experts],
-               shared_gate_weight=shared_gate_weight, hidden=hidden, **kw)
+        f_orig(
+            fself,
+            mesh_device,
+            args,
+            num_experts=num_experts,
+            router_weight=router_weight[:num_experts],
+            shared_gate_weight=shared_gate_weight,
+            hidden=hidden,
+            **kw,
+        )
         if E_true == num_experts:
             return
         # the kernels rank the C slots; the router (run by _forward_fused, its logits read on the host) stays E-wide
@@ -314,11 +371,20 @@ def install():
         rw = torch.zeros(hidden, E_true + TILE_W)
         rw[:, :E_true] = router_weight.T.float()
         rw[:, E_true] = shared_gate_weight.reshape(-1).float()
-        fself.router_w = ttnn.from_torch(rw, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device,
-                                         mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
-                                         memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        fself.router_w = ttnn.from_torch(
+            rw,
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
         fself.router_pc = tpc.create_matmul_1d_decode_progcfg(
-            TILE_W, hidden, E_true + TILE_W, (E_true + TILE_W) // TILE_W, fp32_acc=True,
+            TILE_W,
+            hidden,
+            E_true + TILE_W,
+            (E_true + TILE_W) // TILE_W,
+            fp32_acc=True,
             grid_w=mesh_device.compute_with_storage_grid_size().x,
             in0_block_w=16 if (hidden // TILE_W) % 16 == 0 else None,
         )
@@ -327,6 +393,24 @@ def install():
     global _orig_forward
     _orig_forward = moe_mod.Qwen35MoE.forward
     moe_mod.Qwen35MoE.forward = _forward
+    if HYB.defer_lib:
+        _install_mtp_head()
+
+
+def _install_mtp_head():
+    """Start the deferred host-library loads (HybridState.defer_lib) once the MTP head is built and its state freed."""
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp as mtp_mod
+
+    h_orig = mtp_mod.Qwen35MtpHead.__init__
+
+    def h_init(self, *a, **kw):
+        h_orig(self, *a, **kw)
+        gc.collect()
+        if HYB.lib_dir:
+            for layer in sorted(HYB.slot_of):
+                HYB.lib_layer_async(layer)
+
+    mtp_mod.Qwen35MtpHead.__init__ = h_init
 
     # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
     # without a bucket trace the model's prefill falls back to its stock (eager) path
@@ -363,8 +447,16 @@ def _finish(self, out, orig, partial):
     if self.num_devices > 1:
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
-        out = tt_all_reduce(out, self.device, self.tt_ccl, cluster_axis=0, dim=3, topology=self.args.ccl_topology(),
-                            memory_config=ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.bfloat16)
+        out = tt_all_reduce(
+            out,
+            self.device,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            dtype=ttnn.bfloat16,
+        )
         orig = orig[:-1] + [out.shape[-1]]
     if list(out.shape) != orig:
         out = ttnn.reshape(out, orig)
@@ -405,9 +497,14 @@ def _kernel_rows(m):
 
 
 def _rm_buffer(mesh_device, rows, width):
-    return ttnn.from_torch(torch.zeros(1, 1, rows, width), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
-                           device=mesh_device, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
-                           memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    return ttnn.from_torch(
+        torch.zeros(1, 1, rows, width),
+        dtype=ttnn.bfloat16,
+        layout=ttnn.ROW_MAJOR_LAYOUT,
+        device=mesh_device,
+        mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
 
 
 def _fused_step1(self, x, logits, B):
@@ -469,8 +566,13 @@ def _fused_step1(self, x, logits, B):
         t0 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
-        B["job"] = (L, xh, torch.from_numpy(ids.astype(np.int64)), torch.from_numpy(sc.astype(np.float32)),
-                    torch.from_numpy(miss))
+        B["job"] = (
+            L,
+            xh,
+            torch.from_numpy(ids.astype(np.int64)),
+            torch.from_numpy(sc.astype(np.float32)),
+            torch.from_numpy(miss),
+        )
     else:
         B["job"] = None
 
@@ -486,8 +588,9 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     f = self._fused
     dram = ttnn.DRAM_MEMORY_CONFIG
     if logits is None:
-        logits = ttnn.linear(x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc,
-                             memory_config=dram)
+        logits = ttnn.linear(
+            x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc, memory_config=dram
+        )
     # the host step reads one row of each (row-major, DRAM: they stay allocated for the trace's life, no live L1)
     lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     ttnn.deallocate(logits)
@@ -531,7 +634,9 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     host = ttnn.to_layout(B["host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
         if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
-            raise NotImplementedError("fused hybrid on the fabric boundary needs the one-row kernels: HYB_SINGLE_ROWS=0")
+            raise NotImplementedError(
+                "fused hybrid on the fabric boundary needs the one-row kernels: HYB_SINGLE_ROWS=0"
+            )
         out = ttnn.add(part, host, output_tensor=part)
         ttnn.deallocate(host)
         return out
@@ -620,8 +725,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         SEG.split(lambda: _host_step(self, h_x, h_sc, h_ids, T, "decode", B))
         routed = _routed(self, x4, B["sc"], B["ids"], T, mode)
         if self._dyn_attrs is not None:
-            routed = ttnn.add(routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode),
-                              memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            routed = ttnn.add(
+                routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode), memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
         out = ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
         if HYB.overlap:
             SEG.split(lambda: _host_step2(self, B))  # host experts run while the segment above executes
@@ -640,8 +746,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         _write_bufs(self, B, dec)
         routed = _routed(self, x4, B["sc"], B["ids"], T, mode)
         if self._dyn_attrs is not None:
-            routed = ttnn.add(routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode),
-                              memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            routed = ttnn.add(
+                routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode), memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
         out = ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
         out = ttnn.add(out, B["host"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(scores)
@@ -663,18 +770,28 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         shp = [int(s) for s in out.shape]
         full = torch.zeros(shp, dtype=torch.float32)
         full.view(-1, shp[-1])[: dec["host"].shape[0]] = dec["host"] / self.num_devices
-        hdev = ttnn.from_torch(full, dtype=out.dtype, layout=out.layout, device=self.device,
-                               mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-                               memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        hdev = ttnn.from_torch(
+            full,
+            dtype=out.dtype,
+            layout=out.layout,
+            device=self.device,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
         out = _add(out, hdev)
         HYB.st["t_up"] += time.perf_counter() - t0
     return _finish(self, out, orig, partial)
 
 
 def _upload_like(self, t_host, ref, dtype_torch):
-    return ttnn.from_torch(t_host.to(dtype_torch).reshape([int(s) for s in ref.shape]), dtype=ref.dtype,
-                           layout=ref.layout, device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-                           memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    return ttnn.from_torch(
+        t_host.to(dtype_torch).reshape([int(s) for s in ref.shape]),
+        dtype=ref.dtype,
+        layout=ref.layout,
+        device=self.device,
+        mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
 
 
 def _bufs(self, T, scores, ids, x4):
@@ -685,17 +802,28 @@ def _bufs(self, T, scores, ids, x4):
     rep = ttnn.ReplicateTensorToMesh(self.device)
 
     def like(ref, dtype_torch):
-        return ttnn.from_torch(torch.zeros([int(s) for s in ref.shape], dtype=dtype_torch), dtype=ref.dtype,
-                               layout=ref.layout, device=self.device, mesh_mapper=rep,
-                               memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        return ttnn.from_torch(
+            torch.zeros([int(s) for s in ref.shape], dtype=dtype_torch),
+            dtype=ref.dtype,
+            layout=ref.layout,
+            device=self.device,
+            mesh_mapper=rep,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
 
     B = {"ids": like(ids, torch.int32), "sc": like(scores, torch.bfloat16), "meta": (ids, scores)}
     if self._dyn_attrs is not None:
         B["dids"] = like(ids, torch.int32)
         B["dsc"] = like(scores, torch.bfloat16)
     H = int(x4.shape[-1])
-    B["host"] = ttnn.from_torch(torch.zeros(1, 1, T, H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-                                device=self.device, mesh_mapper=rep, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    B["host"] = ttnn.from_torch(
+        torch.zeros(1, 1, T, H),
+        dtype=ttnn.bfloat16,
+        layout=ttnn.TILE_LAYOUT,
+        device=self.device,
+        mesh_mapper=rep,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
     B["shapes"] = {"ids": [int(s) for s in ids.shape], "sc": [int(s) for s in scores.shape], "T": T, "H": H}
     B["dtypes"] = {"ids": (ids.dtype, ids.layout), "sc": (scores.dtype, scores.layout)}
     self._hyb_bufs[T] = B
@@ -832,9 +960,7 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     s_slot = torch.from_numpy(HYB.slot_of[L]).long()[ic]
     # prefill: the grouped (sorted-dispatch) sparse matmul cannot hold a bfp8 expert block in L1, so the bfp8 dynamic
     # slots serve decode only; in prefill a dynamic-resident expert counts as a miss (host)
-    d_slot = (
-        torch.from_numpy(HYB.dyn_of[L]).long()[ic] if (use_dyn and mode != "prefill") else torch.full_like(ic, -1)
-    )
+    d_slot = torch.from_numpy(HYB.dyn_of[L]).long()[ic] if (use_dyn and mode != "prefill") else torch.full_like(ic, -1)
     in_s, in_d = s_slot >= 0, (s_slot < 0) & (d_slot >= 0)
     miss = ~(in_s | in_d)
     v_miss = miss[:valid]
@@ -874,5 +1000,11 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         host = torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
     z = torch.zeros_like(s_slot)
     zf = torch.zeros_like(sch)
-    return {"ids": torch.where(in_s, s_slot, z), "sc": torch.where(in_s, sch, zf),
-            "dids": torch.where(in_d, d_slot, z), "dsc": torch.where(in_d, sch, zf), "host": host, "job": job}
+    return {
+        "ids": torch.where(in_s, s_slot, z),
+        "sc": torch.where(in_s, sch, zf),
+        "dids": torch.where(in_d, d_slot, z),
+        "dsc": torch.where(in_d, sch, zf),
+        "host": host,
+        "job": job,
+    }

@@ -34,6 +34,10 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- Lean MTP head load (2026-11-05): with MTP on, the resident int4 library copies start only after the MTP head is
+  built (patch._install_mtp_head), and state.mtp_state fills the 512-expert stacks in place. Host RAM peak during
+  startup 226.6 GB -> 179.7 GB (= steady state; was 28 GB available at the head build, now ~75 GB), same ~25 min
+  startup, bench 27.7 tok/s (k=3, 12 threads). This is the headroom k=7 was missing; k=7 not yet retried.
 - MTP sweep (2026-11-05, serve/bench.py, 8 held-out prompts x 128 tokens): k=3/8 threads 25.4 tok/s; k=1 21.1;
   k=3/12 threads 27.2 (serving default now); k=3/16 threads 26.2. k=7 (8-row verify): the engine process died
   silently right after the layers loaded (no TT error in the log; host RAM pressure at the same time: Claude Code
