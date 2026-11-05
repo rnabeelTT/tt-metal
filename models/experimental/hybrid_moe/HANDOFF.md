@@ -34,6 +34,11 @@ from host RAM and added to the device MoE output. Validate on Qwen3.5-122B first
 - M5 vLLM serving at batch 1 (demo).
 
 ## Status
+- MTP sweep (2026-11-05, serve/bench.py, 8 held-out prompts x 128 tokens): k=3/8 threads 25.4 tok/s; k=1 21.1;
+  k=3/12 threads 27.2 (serving default now); k=3/16 threads 26.2. k=7 (8-row verify): the engine process died
+  silently right after the layers loaded (no TT error in the log; host RAM pressure at the same time: Claude Code
+  reaped the sweep for low memory) - not retried. Host RAM budget: ~127 GiB resident int4 library + the MTP head's
+  bf16 expert stack during its build + checkpoint page cache.
 - MTP (2026-11-04): `serve/serve_397b.sh runs/plan397_v4.npz` now defaults to HYB_MTP=3 (k=3 drafts, 4-row verify
   through the fused rows kernels on crafted rows; the MTP head's MoE keeps all 512 experts on device, stock forward).
   2.5-3.4 tokens/pass, 112-156 ms/pass -> 17-26 tok/s (vs 13-20 without MTP). Per pass (HYB_LOG_EVERY=50):
