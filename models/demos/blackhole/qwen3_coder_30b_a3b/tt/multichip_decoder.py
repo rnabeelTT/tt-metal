@@ -154,6 +154,7 @@ _FUSED_ARGS: dict = {}  # per mesh: the namespace the fused ops / buffers are sh
 # QWEN3_FABRIC_BOUNDARY=1: one-row decode runs each layer boundary as one fabric all-reduce + add + RMSNorm program
 # (decoder_layer_decode_fabric; needs the fused MoE). Wider decode steps keep the RS + AG path.
 FABRIC_BOUNDARY = os.environ.get("QWEN3_FABRIC_BOUNDARY", "1") == "1"
+FABRIC_MAX_ROWS = int(os.environ.get("QWEN3_FB_MAX_ROWS", "4"))  # decode widths up to this run on the boundary (<= 8)
 _FABRIC: dict = {}  # per mesh: the FabricBoundary
 from .weight_mapping import hf_to_meta_channels, permute_head_vector_to_meta, permute_wqkv_to_meta
 
@@ -1959,7 +1960,8 @@ def fabric_decode_usable(weights: MultichipWeights, ctx: MeshContext, rows: int)
     """Whether a decode step may run its layer boundaries on the fabric boundary (QWEN3_FABRIC_BOUNDARY=1): one row,
     a multi-die mesh and the fused expert-parallel MoE (its L1 BF16 partial is the boundary's input)."""
     # the (1, 4) mesh only: validated there (2 dies: untested, as the Ornith bundles keep it off on p300)
-    return FABRIC_BOUNDARY and rows == 1 and ctx.num_devices == 4 and weights.fused_moe is not None
+    return (FABRIC_BOUNDARY and 1 <= rows <= FABRIC_MAX_ROWS and ctx.num_devices == 4 and weights.fused_moe is not None
+            and rows <= MOE_FUSED_ROWS_MAX)
 
 
 def fabric_boundary_for(mesh_device, hidden: int, eps: float):
@@ -1969,7 +1971,7 @@ def fabric_boundary_for(mesh_device, hidden: int, eps: float):
     if fb is None:
         from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import FabricBoundary
 
-        fb = FabricBoundary(mesh_device, hidden, eps, max_rows=1)
+        fb = FabricBoundary(mesh_device, hidden, eps, max_rows=max(1, min(8, FABRIC_MAX_ROWS)))
         _FABRIC[id(mesh_device)] = fb
     return fb
 
@@ -2015,7 +2017,10 @@ def decoder_layer_decode_fabric(
     ttnn.deallocate(res)
     ttnn.deallocate(attn_partial)
     ex = weights.experts
-    moe_partial = weights.fused_moe(ff_in, ex.gate_up_proj, ex.down_proj)  # the model-wide L1 buffer: not freed
+    fm = weights.fused_moe
+    # the model-wide partial buffer (1 row: L1; M rows: DRAM, copied to L1 by the boundary): not freed
+    moe_partial = fm(ff_in, ex.gate_up_proj, ex.down_proj) if int(ff_in.shape[-2]) == 1 else fm.rows(
+        ff_in, ex.gate_up_proj, ex.down_proj)
     ttnn.deallocate(ff_in)
     res2, x2 = fb(h, moe_partial, g_next, "mlp",
                   out_memory_config=ttnn.DRAM_MEMORY_CONFIG if last else ttnn.L1_MEMORY_CONFIG)
