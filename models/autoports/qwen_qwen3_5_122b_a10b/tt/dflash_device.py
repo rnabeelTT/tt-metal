@@ -42,7 +42,7 @@ def _rot_matrix(hd):
 
 
 class DFlashDevice:
-    def __init__(self, model, ckpt_dir, *, ring=2112, wdtype=ttnn.bfloat8_b, cache_dir=None):
+    def __init__(self, model, ckpt_dir, *, ring=2272, wdtype=ttnn.bfloat8_b, cache_dir=None):
         from safetensors.torch import load_file
 
         self.model = model
@@ -126,7 +126,8 @@ class DFlashDevice:
                                                             dtype=ttnn.bfloat16)
                         lw[f"{conv}.base{half}{tap}"] = vec(f"{p}.{conv}.base{half}{tap}", base[half, tap])
             # K / V ring of this layer (replicated), zero-initialised; visibility comes from the host row
-            lw["ring_k"] = ttnn.from_torch(torch.zeros(1, nkv, self.R, hd), dtype=ttnn.bfloat16,
+            # slots [0, R): context positions (slot = position mod R); [R, R + ROWS): the current block's own rows
+            lw["ring_k"] = ttnn.from_torch(torch.zeros(1, nkv, self.R + ROWS, hd), dtype=ttnn.bfloat16,
                                            layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=_DRAM,
                                            mesh_mapper=rep)
             lw["ring_v"] = ttnn.clone(lw["ring_k"])
@@ -142,6 +143,13 @@ class DFlashDevice:
         self.d_cos = zeros((1, 1, ROWS, hd))
         self.d_sin = zeros((1, 1, ROWS, hd))
         self.d_vis = zeros((1, 1, 1, self.R + ROWS))  # 0 visible / -inf hidden, ring slots then block rows
+        self.d_mask = zeros((1, 1, ROWS, self.R + ROWS))
+        kc = 256 if (self.R + ROWS) % 256 == 0 else 128 if (self.R + ROWS) % 128 == 0 else 32
+        self.sdpa_cfg = ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(), q_chunk_size=ROWS,
+            k_chunk_size=kc, exp_approx_mode=False,
+        )
+        self.conv_expand = os.environ.get("DFLASH_CONV_EXPAND", "mm")
         self.d_tok = None  # built lazily from the model's decode-token layout (first draft_inputs call)
         self.feats = None  # [1,1,ROWS,8H] persistent ctx input (the verify pass copies its captures in)
         self.scale = hd ** -0.5
@@ -178,10 +186,11 @@ class DFlashDevice:
         if CR not in self._cstage:
             z = self._zeros
             iota = ttnn.from_torch(
-                torch.arange(self.R, dtype=torch.float32).reshape(1, 1, self.R, 1).expand(1, 1, self.R, CR).contiguous(),
+                torch.arange(self.R + ROWS, dtype=torch.float32).reshape(1, 1, -1, 1).expand(1, 1, self.R + ROWS, CR)
+                .contiguous(),
                 dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=_DRAM,
                 mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
-            )  # [1,1,R,CR]: slot index down the rows (compared with the per-row target slot, broadcast over rows)
+            )  # [1,1,R+ROWS,CR]: slot index down the rows (compared with the per-row target slot, broadcast over rows)
             self._cstage[CR] = (z((1, 1, 1, CR), dtype=ttnn.float32), z((1, 1, CR, self.hd)), z((1, 1, CR, self.hd)),
                                 iota)
         return self._cstage[CR]
@@ -206,7 +215,7 @@ class DFlashDevice:
         c, s = self._rope_rows(list(range(start, start + ROWS)))
         self._write(self.d_cos, self._host(c))
         self._write(self.d_sin, self._host(s))
-        vis = torch.full((1, 1, 1, self.R + ROWS), float("-inf"))
+        vis = torch.full((1, 1, 1, self.R + ROWS), -1e30)  # finite: a key chunk may be fully hidden for a row
         ok = (self.slot_pos < start) & (self.slot_pos > start - self.window)
         vis[0, 0, 0, : self.R][ok] = 0.0
         vis[0, 0, 0, self.R : self.R + bs] = 0.0
@@ -304,81 +313,122 @@ class DFlashDevice:
 
     def draft_body(self):
         """The block through the drafter -> (logits [1,1,ROWS,V/TP] vocab-sharded TILE, hp [1,1,ROWS,256])."""
+        self._make_mask()
+        x = self.embed_body()
+        for lw in self.layers:
+            x = self.layer_body(lw, x)
+        return self.head_body(x)
+
+    def _make_mask(self):
+        """The [1,1,ROWS,R+ROWS] attention mask (every block row gets the host's visibility row)."""
+        m = ttnn.repeat(self.d_vis, (1, 1, ROWS, 1))
+        ttnn.copy(m, self.d_mask)
+        ttnn.deallocate(m)
+
+    def embed_body(self):
         m = self.model
         x = m.embd(m._decode_tokens_view(self.d_tok, ROWS))
         x = ttnn.to_memory_config(ttnn.reshape(x, (1, 1, ROWS, x.shape[-1])), _DRAM)
-        x = self._full(x)
-        nh, nkv, hd, g = self.nh, self.nkv, self.hd, self.g
-        for lw in self.layers:
-            res = x
-            h = self._rms(x, lw["in_ln"])
-            dyn0 = [self._mm(h, lw[f"attention_conv.proj0{t}"], hi=True) for t in range(self.K)]
-            dyn1 = [self._mm(h, lw[f"attention_conv.proj1{t}"], hi=True) for t in range(self.K)]
-            hc = self._conv(lw, "attention_conv", 0, h, dyn0)
-            ttnn.deallocate(h)
-            qkv = self._mm(hc, lw["wqkv"])
-            ttnn.deallocate(hc)
-            q = ttnn.slice(qkv, (0, 0, 0, 0), (1, 1, ROWS, nh * hd))
-            k = ttnn.slice(qkv, (0, 0, 0, nh * hd), (1, 1, ROWS, (nh + nkv) * hd))
-            v = ttnn.slice(qkv, (0, 0, 0, (nh + nkv) * hd), (1, 1, ROWS, (nh + 2 * nkv) * hd))
-            ttnn.deallocate(qkv)
-            q = self._rope(self._rms(self._heads(q, nh), lw["q_norm"]), self.d_cos, self.d_sin)  # [1,nh,ROWS,hd]
-            k = self._rope(self._rms(self._heads(k, nkv), lw["k_norm"]), self.d_cos, self.d_sin)  # [1,nkv,ROWS,hd]
-            v = self._heads(v, nkv)
-            # GQA: query heads of kv head j are j*g .. j*g+g-1 -> [1, nkv, g*ROWS, hd]
-            q = ttnn.reshape(q, (1, nkv, g * ROWS, hd))
-            ka = ttnn.concat([lw["ring_k"], k], dim=2, memory_config=_DRAM)  # [1,nkv,R+ROWS,hd]
-            va = ttnn.concat([lw["ring_v"], v], dim=2, memory_config=_DRAM)
-            ttnn.deallocate(k)
-            ttnn.deallocate(v)
-            kt = ttnn.transpose(ka, -2, -1)
-            ttnn.deallocate(ka)
-            s = ttnn.matmul(q, kt, memory_config=_DRAM, compute_kernel_config=self.ckc_hi)  # [1,nkv,g*ROWS,R+ROWS]
-            ttnn.deallocate(kt)
-            ttnn.deallocate(q)
-            s = ttnn.multiply(s, self.scale, memory_config=_DRAM)
-            s2 = ttnn.add(s, self.d_vis, memory_config=_DRAM)
-            ttnn.deallocate(s)
-            p = ttnn.softmax(s2, dim=-1, memory_config=_DRAM, compute_kernel_config=self.ckc_hi)
-            ttnn.deallocate(s2)
-            o = ttnn.matmul(p, va, memory_config=_DRAM, compute_kernel_config=self.ckc_hi)  # [1,nkv,g*ROWS,hd]
-            ttnn.deallocate(p)
-            ttnn.deallocate(va)
-            o = ttnn.reshape(o, (1, nh, ROWS, hd))
-            o = ttnn.permute(o, (0, 2, 1, 3))
-            o = ttnn.reshape(o, (1, 1, ROWS, nh * hd))
-            o2 = self._mm(o, lw["wo"])
-            ttnn.deallocate(o)
-            o3 = self._conv(lw, "attention_conv", 1, o2, dyn1)
-            ttnn.deallocate(o2)
-            for d in dyn0 + dyn1:
+        return self._full(x)
+
+    def _dyn(self, lw, conv, h):
+        """The conv's 4 dynamic kernels from its input h, expanded to the channels with the base kernel added:
+        {(half, tap): [1,1,ROWS,H]} (one matmul per part + a column repeat; DFLASH_CONV_EXPAND=mm: expansion matmul)."""
+        out = {}
+        for half in range(2):
+            for tap in range(self.K):
+                d = self._mm(h, lw[f"{conv}.proj{half}{tap}"], hi=True)  # [1,1,ROWS,G]
+                if self.conv_expand == "mm":
+                    de = self._mm(d, self.expand, hi=True)
+                else:
+                    de = ttnn.repeat_interleave(d, self.gs, dim=3)
                 ttnn.deallocate(d)
-            x = ttnn.add(res, o3, memory_config=_DRAM)
-            ttnn.deallocate(o3)
-            ttnn.deallocate(res)
-            res = x
-            h = self._rms(x, lw["post_ln"])
-            dyn0 = [self._mm(h, lw[f"mlp_conv.proj0{t}"], hi=True) for t in range(self.K)]
-            dyn1 = [self._mm(h, lw[f"mlp_conv.proj1{t}"], hi=True) for t in range(self.K)]
-            hc = self._conv(lw, "mlp_conv", 0, h, dyn0)
-            ttnn.deallocate(h)
-            gu = self._mm(hc, lw["wgu"])
-            ttnn.deallocate(hc)
-            gate = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, ROWS, self.I))
-            up = ttnn.slice(gu, (0, 0, 0, self.I), (1, 1, ROWS, 2 * self.I))
-            ttnn.deallocate(gu)
-            a = ttnn.multiply(ttnn.silu(gate), up, memory_config=_DRAM)
-            ttnn.deallocate(gate)
-            ttnn.deallocate(up)
-            mo = self._mm(a, lw["wdown"])
-            ttnn.deallocate(a)
-            mo2 = self._conv(lw, "mlp_conv", 1, mo, dyn1)
-            ttnn.deallocate(mo)
-            for d in dyn0 + dyn1:
-                ttnn.deallocate(d)
-            x = ttnn.add(res, mo2, memory_config=_DRAM)
-            ttnn.deallocate(mo2)
-            ttnn.deallocate(res)
+                out[(half, tap)] = ttnn.add(de, lw[f"{conv}.base{half}{tap}"], memory_config=_DRAM)
+                ttnn.deallocate(de)
+        return out
+
+    def _conv_apply(self, kern, half, x):
+        """sum over taps of kern[(half, tap)] * shift^tap(x) (causal along the block rows)."""
+        out = ttnn.multiply(kern[(half, 0)], x, memory_config=_DRAM)
+        xs = x
+        for tap in range(1, self.K):
+            xs2 = ttnn.matmul(self.shift, xs, memory_config=_DRAM, compute_kernel_config=self.ckc_hi)
+            if xs is not x:
+                ttnn.deallocate(xs)
+            xs = xs2
+            t = ttnn.multiply(kern[(half, tap)], xs, memory_config=_DRAM)
+            out2 = ttnn.add(out, t, memory_config=_DRAM)
+            ttnn.deallocate(out)
+            ttnn.deallocate(t)
+            out = out2
+        if xs is not x:
+            ttnn.deallocate(xs)
+        return out
+
+    def layer_body(self, lw, x):
+        nh, nkv = self.nh, self.nkv
+        res = x
+        h = self._rms(x, lw["in_ln"])
+        kern = self._dyn(lw, "attention_conv", h)
+        hc = self._conv_apply(kern, 0, h)
+        ttnn.deallocate(h)
+        qkv = self._mm(hc, lw["wqkv"])  # [1,1,ROWS,(nh+2nkv)*hd]
+        ttnn.deallocate(hc)
+        q, k, v = ttnn.experimental.nlp_create_qkv_heads(
+            qkv, num_heads=nh, num_kv_heads=nkv, transpose_k_heads=False, memory_config=_DRAM
+        )  # [1,nh,ROWS,hd], [1,nkv,ROWS,hd] x 2
+        ttnn.deallocate(qkv)
+        q2 = ttnn.experimental.rotary_embedding(self._rms(q, lw["q_norm"]), self.d_cos, self.d_sin, memory_config=_DRAM)
+        k2 = ttnn.experimental.rotary_embedding(self._rms(k, lw["k_norm"]), self.d_cos, self.d_sin, memory_config=_DRAM)
+        ttnn.deallocate(q)
+        ttnn.deallocate(k)
+        # the block's own K / V into the ring's last ROWS slots (in place, tile aligned), then flash attention over the
+        # ring with the visibility mask (non-causal)
+        ttnn.fill_cache(lw["ring_k"], k2, 0, update_idx=self.R)
+        ttnn.fill_cache(lw["ring_v"], v, 0, update_idx=self.R)
+        ttnn.deallocate(k2)
+        ttnn.deallocate(v)
+        o = ttnn.transformer.scaled_dot_product_attention(
+            q2, lw["ring_k"], lw["ring_v"], attn_mask=self.d_mask, is_causal=False, scale=self.scale,
+            program_config=self.sdpa_cfg, compute_kernel_config=self.ckc_hi, memory_config=_DRAM,
+        )  # [1,nh,ROWS,hd]
+        ttnn.deallocate(q2)
+        o = ttnn.experimental.nlp_concat_heads(o, memory_config=_DRAM)  # [1,1,ROWS,nh*hd]
+        o2 = self._mm(o, lw["wo"])
+        ttnn.deallocate(o)
+        o3 = self._conv_apply(kern, 1, o2)
+        ttnn.deallocate(o2)
+        for t in kern.values():
+            ttnn.deallocate(t)
+        x = ttnn.add(res, o3, memory_config=_DRAM)
+        ttnn.deallocate(o3)
+        ttnn.deallocate(res)
+        res = x
+        h = self._rms(x, lw["post_ln"])
+        kern = self._dyn(lw, "mlp_conv", h)
+        hc = self._conv_apply(kern, 0, h)
+        ttnn.deallocate(h)
+        gu = self._mm(hc, lw["wgu"])
+        ttnn.deallocate(hc)
+        gate = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, ROWS, self.I))
+        up = ttnn.slice(gu, (0, 0, 0, self.I), (1, 1, ROWS, 2 * self.I))
+        ttnn.deallocate(gu)
+        a = ttnn.multiply(gate, up, input_tensor_a_activations=[ttnn.UnaryOpType.SILU], memory_config=_DRAM)
+        ttnn.deallocate(gate)
+        ttnn.deallocate(up)
+        mo = self._mm(a, lw["wdown"])
+        ttnn.deallocate(a)
+        mo2 = self._conv_apply(kern, 1, mo)
+        ttnn.deallocate(mo)
+        for t in kern.values():
+            ttnn.deallocate(t)
+        x = ttnn.add(res, mo2, memory_config=_DRAM)
+        ttnn.deallocate(mo2)
+        ttnn.deallocate(res)
+        return x
+
+    def head_body(self, x):
+        m = self.model
         h = self._rms(x, self.final_norm)
         ttnn.deallocate(x)
         logits = ttnn.linear(h, m.lm_head_weight, compute_kernel_config=m._lm_head_ckc())  # [1,1,ROWS,V/TP]

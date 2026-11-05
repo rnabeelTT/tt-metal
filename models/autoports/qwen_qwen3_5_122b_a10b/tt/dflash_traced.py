@@ -48,9 +48,30 @@ class DFlashTraced(MtpTraced):
             self.suc_cb = f.get_tensor("candidate_selector.successor_codebook").float()
         self.top_k = 16
         self.timing.update({"ctx": [], "draft_dev": [], "select": []})
+        # QWEN35_DFLASH_FUSED=1 (default): the verify pass runs the model's DECODE layers over the BW rows (the fused
+        # decode ops; GDN layers in rows mode: per-row state snapshots, so the commit is a copy of the accepted row's
+        # snapshot). 0: the MTP rows pass (GDN prefill form) and its scan-replay commit.
+        self.fused = os.environ.get("QWEN35_DFLASH_FUSED", "1") == "1"
+        if self.fused:
+            rep = ttnn.ReplicateTensorToMesh(self.mesh)
+            self.snaps, self.projs = [], []
+            for dn in self.dn_layers:
+                if dn.conv_states is None:
+                    dn.reset_state()
+                st = list(dn.rec_state.shape)
+                assert st[0] == 1, f"the verify runs on a B = 1 GDN state (bound scratch), got {st}"
+                self.snaps.append(ttnn.allocate_tensor_on_device(
+                    ttnn.Shape([self.BW] + st[1:]), dn.rec_state.dtype, ttnn.TILE_LAYOUT, self.mesh, _DRAM))
+                P = int(dn.tw["qkvz"].shape[-1])
+                self.projs.append(ttnn.allocate_tensor_on_device(
+                    ttnn.Shape([1, self.BW, P]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, _DRAM))
+            self.qkv_dim = int(self.dn_layers[0].qkv_dim_tp)
 
     # ------------------------------------------------------------------------------------------------ programs
     def _pass_body(self):
+        return self._pass_body_fused() if self.fused else self._pass_body_rows()
+
+    def _pass_body_rows(self):
         m = self.model
         BW = self.BW
         for dn, rec, taps in zip(self.dn_layers, self.snap_rec, self.snap_conv):
@@ -90,6 +111,70 @@ class DFlashTraced(MtpTraced):
             ttnn.deallocate(t)
         return am, mx, lg_rm, logits
 
+    def _pass_body_fused(self):
+        """The model's decode layers over the BW rows (one user, positions pos .. pos + BW - 1)."""
+        m = self.model
+        BW = self.BW
+        cos, sin = m._rope_from_idxs(self.p_rot)
+        x = m.embd(m._decode_tokens_view(self.p_tok, BW))
+        if m.num_devices > 1:
+            x = ttnn.reshape(x, (1, 1, x.shape[0] * x.shape[1], x.shape[-1]))
+        replicated = bool(getattr(m.args, "decode_replicated", False))
+        if replicated:
+            from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
+
+            x = decode_boundary(m.args, m.mesh_device).gather(x, m.tt_ccl)
+        caps = []
+        gi = 0
+        for li, layer in enumerate(m.layers):
+            if layer.is_full_attention:
+                att = layer.attention
+                att.rows_kv_write = True
+                att.rows_pos_masks = self.p_masks
+                try:
+                    x = layer.forward(x, cos, sin, position_tensor=self.p_pos, page_table=self.p_pt, mode="decode")
+                finally:
+                    att.rows_kv_write = False
+                    att.rows_pos_masks = None
+            else:
+                dn = layer.attention
+                dn.rows_snap, dn.rows_proj = self.snaps[gi], self.projs[gi]
+                try:
+                    x = layer.forward(x, mode="decode")
+                finally:
+                    dn.rows_snap = dn.rows_proj = None
+                gi += 1
+            if li in self.lids:
+                caps.append(self.dr._full(ttnn.clone(x, memory_config=_DRAM)))
+        feats = ttnn.concat(caps, dim=3, memory_config=_DRAM)  # [1,1,BW,8H]
+        for c in caps:
+            ttnn.deallocate(c)
+        ttnn.copy(feats, self.feats)
+        ttnn.deallocate(feats)
+        h = m._final_norm_decode_replicated(x) if replicated else m._final_norm_decode(x)
+        logits = ttnn.linear(h, m.lm_head_weight, compute_kernel_config=m._lm_head_ckc())
+        ttnn.deallocate(h)
+        am, mx, lg_rm = self._argmax_max(logits)
+        for t in (cos, sin):
+            ttnn.deallocate(t)
+        return am, mx, lg_rm, logits
+
+    def _commit_body_fused(self, a):
+        """Accepted rows 0..a: every GDN layer's state <- snapshot a, conv register <- inputs a - 2 .. a."""
+        for dn, snap, proj in zip(self.dn_layers, self.snaps, self.projs):
+            src = ttnn.slice(snap, (a, 0, 0, 0), tuple([a + 1] + list(snap.shape)[1:]))
+            ttnn.copy(src, dn.rec_state)
+            ttnn.deallocate(src)
+            for j in range(1, 4):  # register row j <- u[a - 3 + j]; u[-1..-3] = the old rows 3..1 (read before written)
+                k = a - 3 + j
+                if k >= 0:
+                    row = ttnn.slice(proj, (0, k, 0), (1, k + 1, self.qkv_dim))
+                    ttnn.copy(ttnn.reshape(row, list(dn.conv_states[j].shape)), dn.conv_states[j])
+                    ttnn.deallocate(row)
+                else:
+                    ttnn.copy(dn.conv_states[4 + k], dn.conv_states[j])
+        return ()
+
     def _ctx_body(self):
         return self.dr.ctx_body(self.feats)
 
@@ -105,8 +190,14 @@ class DFlashTraced(MtpTraced):
         self.plen_commit.stage(1)
         self.dr.stage_ctx([0], self.BW)
         self.dr.stage_draft(0, 1, self.bs)
-        bodies = (("pass", self._pass_body), ("pass", self._pass_body), ("commit", self._commit_body),
-                  ("ctx", self._ctx_body), ("draft", self._draft_body), ("draft", self._draft_body))
+        if self.fused:
+            bodies = (("pass", self._pass_body), ("pass", self._pass_body),
+                      ("ctx", self._ctx_body), ("draft", self._draft_body), ("draft", self._draft_body))
+            for a in range(self.BW):
+                bodies = bodies + ((f"commit{a}", lambda a=a: self._commit_body_fused(a)),)
+        else:
+            bodies = (("pass", self._pass_body), ("pass", self._pass_body), ("commit", self._commit_body),
+                      ("ctx", self._ctx_body), ("draft", self._draft_body), ("draft", self._draft_body))
         for name, body in bodies:
             outs = body()
             if name in ("pass", "draft"):
@@ -119,10 +210,17 @@ class DFlashTraced(MtpTraced):
         self.dr.reset()
         ttnn.synchronize_device(self.mesh)
 
+    def _body(self, name):
+        if self.fused and name.startswith("commit"):
+            a = int(name[len("commit"):])
+            return lambda: self._commit_body_fused(a)
+        return getattr(self, self._BODIES[name])
+
     def capture(self, flush=None):
-        for name in ("pass", "commit", "ctx", "draft"):
+        names = ["pass", "ctx", "draft"] + ([f"commit{a}" for a in range(self.BW)] if self.fused else ["commit"])
+        for name in names:
             tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-            outs = getattr(self, self._BODIES[name])()
+            outs = self._body(name)()
             ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
             self.traces[name] = tid
             self.outs[name] = outs
@@ -139,7 +237,14 @@ class DFlashTraced(MtpTraced):
         if name in self.traces:
             ttnn.execute_trace(self.mesh, self.traces[name], cq_id=0, blocking=False)
             return self.outs[name], False
-        return getattr(self, self._BODIES[name])(), True
+        return self._body(name)(), True
+
+    def commit(self, accepted_rows: int):
+        if not self.fused:
+            return super().commit(accepted_rows)
+        t0 = time.perf_counter()
+        outs, eager = self._exec(f"commit{accepted_rows - 1}")
+        self.timing["commit"].append(time.perf_counter() - t0)
 
     # ------------------------------------------------------------------------------------------------ host side
     def ctx(self, positions):
@@ -212,7 +317,7 @@ class DFlashTraced(MtpTraced):
                     break
                 a += 1
             nxt = preds[a]
-        if a < len(drafts):
+        if a < len(drafts) or self.fused:  # the fused pass never writes the state in place: always commit
             self.commit(a + 1)
         self.ctx([pos + i for i in range(a + 1)])
         return rows[1 : a + 1] + [nxt]

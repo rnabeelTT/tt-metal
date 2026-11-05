@@ -87,12 +87,29 @@ void kernel_main() {
     constexpr auto proj_args = TensorAccessorArgs<conv_args.next_compile_time_args_offset()>();
     constexpr auto params_args = TensorAccessorArgs<proj_args.next_compile_time_args_offset()>();
     constexpr auto state_args = TensorAccessorArgs<params_args.next_compile_time_args_offset()>();
+#ifdef ROWS
+    // ROWS (one user's consecutive rows r = 0..count-1, this core = one lane (value head h, part p)): row r's state is
+    // read from the bound state (r = 0) or from snapshot slot r - 1, which this core's writer wrote for row r - 1 (it
+    // raises the local semaphore 2 once that write landed)
+    constexpr auto snap_args = TensorAccessorArgs<state_args.next_compile_time_args_offset()>();
+    const uint32_t snap_addr = get_arg_val<uint32_t>(7);
+    const uint32_t rows_sem = get_semaphore(2);
+#endif
     constexpr uint32_t kv = Kt * Vt;
     constexpr uint32_t GQA = Nv / Nk;
     if (count == 0) {
         return;
     }
+#if defined(ROWS)
 #ifdef VSPLIT
+    constexpr uint32_t VTF = VT_FULL;
+#else
+    constexpr uint32_t VTF = Vt;
+#endif
+    // item start + w = row w of lane `start` (lane = p * Nv + h)
+    auto unit_of = [&](uint32_t n) { return (n - start) * Nv + start % Nv; };
+    auto part_of = [&](uint32_t n) { return 0 * n + start / Nv; };
+#elif defined(VSPLIT)
     constexpr uint32_t VTF = VT_FULL;  // the head's value tiles; this core holds Vt of them
     const uint32_t U = get_arg_val<uint32_t>(6);
     auto unit_of = [&](uint32_t n) { return n % U; };
@@ -107,6 +124,9 @@ void kernel_main() {
     const auto s_proj = TensorAccessor(proj_args, proj_addr, BF_TILE);
     const auto s_par = TensorAccessor(params_args, params_addr, F32_TILE);
     const auto s_state = TensorAccessor(state_args, state_addr, BF_TILE);
+#ifdef ROWS
+    const auto s_snap = TensorAccessor(snap_args, snap_addr, BF_TILE);
+#endif
 
     static_assert(Nv <= 32, "the per-head params sit in params tile 0");
     const uint32_t scr = get_write_ptr(cb_scr);
@@ -183,12 +203,26 @@ void kernel_main() {
 
         cb_reserve_back(cb_S, kv);
         const uint32_t s = get_write_ptr(cb_S);
+#ifdef ROWS
+        if (w > 0) {
+            noc_semaphore_wait_min(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(rows_sem), w);
+        }
+        for (uint32_t ki = 0; ki < Kt; ++ki) {
+            for (uint32_t j = 0; j < Vt; ++j) {
+                const uint32_t off = ki * VTF + p * Vt + j;
+                const uint64_t a = (w == 0) ? s_state.get_noc_addr(h * (Kt * VTF) + off)
+                                            : s_snap.get_noc_addr((n - Nv) * (Kt * VTF) + off);
+                noc_async_read(a, s + (ki * Vt + j) * BF_TILE, BF_TILE);
+            }
+        }
+#else
         for (uint32_t ki = 0; ki < Kt; ++ki) {
             for (uint32_t j = 0; j < Vt; ++j) {
                 const uint32_t src = n * (Kt * VTF) + ki * VTF + p * Vt + j;
                 noc_async_read(s_state.get_noc_addr(src), s + (ki * Vt + j) * BF_TILE, BF_TILE);
             }
         }
+#endif
         if (w == 0) {
             // the gated-norm weight (params row 2), read once: the compute needs it last
             for (uint32_t t = 1; t < 4; ++t) {

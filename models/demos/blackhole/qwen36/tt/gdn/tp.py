@@ -1550,7 +1550,12 @@ class TPGatedDeltaNet:
 
     def _forward_decode_ops_from(self, proj, partial):
         B = proj.shape[-2]
-        y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B)
+        # DFlash verify (rows mode): the B rows are consecutive positions of ONE user; each row's state lands in
+        # rows_snap[r] (rec_state / conv register untouched) and the in-proj rows are kept for the commit's conv carry
+        snap = self.__dict__.get("rows_snap")
+        if snap is not None and self.__dict__.get("rows_proj") is not None:
+            ttnn.copy(ttnn.reshape(proj, self.rows_proj.shape), self.rows_proj)
+        y = self._gdn_ops(proj, self.conv_states, self._gdn_taps, self._gdn_params, self.rec_state, B, snap=snap)
         ttnn.deallocate(proj)
         # call the out-proj directly (matmul_1d_decode frees its input's L1 "copy", which for an L1-interleaved input is
         # the input itself); y is freed after it

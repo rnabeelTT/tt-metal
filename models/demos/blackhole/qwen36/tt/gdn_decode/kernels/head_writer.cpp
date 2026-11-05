@@ -34,6 +34,19 @@ void kernel_main() {
 
     const auto s_state = TensorAccessor(state_args, state_addr, BF_TILE);
     const auto s_y = TensorAccessor(y_args, y_addr, BF_TILE);
+#ifdef ROWS
+    // ROWS: row w's state goes to snapshot slot w ([R, Nv, Dk, Dv]), then the local semaphore 2 tells this core's
+    // reader that row w + 1 may read it
+    constexpr auto snap_args = TensorAccessorArgs<y_args.next_compile_time_args_offset()>();
+#ifdef VSPLIT
+    constexpr uint32_t snap_arg = 5 + 2 * VSPLIT;
+#else
+    constexpr uint32_t snap_arg = 4;
+#endif
+    const auto s_snap = TensorAccessor(snap_args, get_arg_val<uint32_t>(snap_arg), BF_TILE);
+    const uint32_t rows_sem = get_semaphore(2);
+    const uint64_t rows_sem_noc = get_noc_addr(my_x[noc_index], my_y[noc_index], rows_sem);
+#endif
 
 #ifdef VSPLIT
     constexpr uint32_t P = VSPLIT;
@@ -54,7 +67,10 @@ void kernel_main() {
 #endif
 
     for (uint32_t w = 0; w < count; ++w) {
-#ifdef VSPLIT
+#if defined(ROWS)
+        const uint32_t n = w * Nv + start % Nv;  // lane start = p * Nv + h
+        const uint32_t p = start / Nv;
+#elif defined(VSPLIT)
         const uint32_t n = (start + w) % U;
         const uint32_t p = (start + w) / U;
 #else
@@ -95,7 +111,11 @@ void kernel_main() {
         for (uint32_t ki = 0; ki < Kt; ++ki) {
             for (uint32_t j = 0; j < Vt; ++j) {
                 const uint32_t dst = n * (Kt * VTF) + ki * VTF + p * Vt + j;
+#ifdef ROWS
+                noc_async_write(s + (ki * Vt + j) * BF_TILE, s_snap.get_noc_addr(dst), BF_TILE);
+#else
                 noc_async_write(s + (ki * Vt + j) * BF_TILE, s_state.get_noc_addr(dst), BF_TILE);
+#endif
             }
         }
         cb_wait_front(cb_y, Vt);
@@ -109,6 +129,10 @@ void kernel_main() {
             }
         }
         noc_async_write_barrier();
+#ifdef ROWS
+        noc_semaphore_inc(rows_sem_noc, 1);
+        noc_async_atomic_barrier();
+#endif
         cb_pop_front(cb_state, kv);
         cb_pop_front(cb_y, Vt);
     }

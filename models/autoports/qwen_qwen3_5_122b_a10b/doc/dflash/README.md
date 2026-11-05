@@ -36,3 +36,40 @@ The divergences are bf16 near-ties between the 16-row verify pass and the one-ro
 form, multi-row MoE); both continuations read correctly (e.g. "To achieve O(1) for both..." vs "The standard approach is...").
 The drafter is therefore correct (a broken drafter accepts ~0 drafts) and its published acceptance (MT-Bench 5.4, code
 6.4-8.6 on SGLang) holds on this target.
+
+### First traced device loop (MTP rows verify pass, replicated drafter; `runs/dflash/tr1..tr3`)
+
+Greedy, thinking on, 128 new tokens, p300x2. Plain decode (served card) is 7.55 ms / token.
+
+| block | mean tokens / round | round | ms / token |
+|---|---|---|---|
+| 16 | 4.53 | ~80 ms | 18.0 |
+| 12 | 4.02 | ~75 ms | 20.6 |
+| 8 | 4.26 | ~68 ms | 17.7 |
+
+Round at block 16 (each trace replayed alone): verify pass 34.8 ms (47 ms in the loop: the 16 different drafts route to
+a union of ~60-70 experts per layer, the warm-up rows to 8), GDN commit 14.1, drafter 12.0, drafter context 2.8,
+candidate top-k 0.9. Per layer (traced, rows mode): GDN layer 640-650 us at 1 or 16 rows (the prefill-form chunk scan
+is row independent), attention layer 239 us (1 row) / 526 us (16 rows: per-row K/V writes), MoE 115-130 us (identical
+rows). A fused decode GDN layer is ~211 us. Conclusions: the verify must run on the fused decode ops; the commit's scan
+replay must go; the drafter is op-overhead bound (1.9 ms per layer for ~0.35 ms of weight traffic); block 8 keeps most
+of block 16's acceptance at a lower verify cost.
+
+### GDN decode ops, rows mode (`gdn_decode/ops.py` + kernels, `tests/test_gdn_rows_ops.py`)
+
+`GdnDecode(..., snap=)`: the B rows are consecutive positions of ONE user. Conv: each row's three previous inputs come
+from the carried rows / earlier rows of the tile (`ROWS` conv reader), register untouched. Head: one core per lane
+(value head x part) runs the lane's rows in order; row r reads the state the previous row wrote (snapshot r - 1, local
+semaphore from the writer) and writes its own state to snapshot r; the bound state is untouched. Op test vs the same ops
+run row by row (state / register in place): **bit-exact** (max error 0) for R = 1 / 4 / 16, every output row and every
+snapshot. The verify pass therefore reproduces the plain decode's GDN numerics exactly, and the commit is a copy of the
+accepted row's snapshot (+ the conv register from the pass's in-proj rows).
+Lesson: `ttnn.generic_op` returns its LAST io tensor - the output must stay last (a snapshot appended after it came back
+as "the output").
+
+### Drafter layer (`tools/dflash_drafter_prof.py`, no target model)
+
+1.92 -> 1.43 ms per layer: `nlp_create_qkv_heads` + `rotary_embedding` (heads / RoPE 209 us -> ~60), flash SDPA with a
+mask over the ring (ring 2272 slots so ring + block = 2304 = 9 x 256; attention core 579 us -> ~150), dynamic-conv
+expansion by matmul (191 us per conv; `repeat_interleave` measured slower, 278 us). Remaining: ~50 small replicated ops
+per layer at ~10-15 us each.

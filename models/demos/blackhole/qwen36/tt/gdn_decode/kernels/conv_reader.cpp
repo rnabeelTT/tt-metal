@@ -51,11 +51,52 @@ void kernel_main() {
             noc_async_read(s_taps.get_noc_addr(j * cols + c), t + j * TB, TB);
         }
         noc_async_read_barrier();
+#ifdef ROWS
+        // ROWS: the tile rows are consecutive positions of ONE user (row r = position p + r), its carried inputs in row 0
+        // of st1..st3 (oldest first). The compute's h_j tile (tap j, j = 0..2) must hold u[r - 3 + j] in row r, where
+        // u[-3..-1] = the carried rows and u[0..] = this step's x rows: built here by 32-byte face-row copies (no
+        // register shift: the commit sets the carry from the accepted rows).
+        invalidate_l1_cache();
+        auto row_ptr = [](uint32_t base, uint32_t r, uint32_t half) {
+            return reinterpret_cast<volatile tt_l1_ptr uint32_t*>(base + ((r >> 4) * 2 + half) * 512 + (r & 15) * 32);
+        };
+        // carried rows (row 0 of each st tile) to a scratch copy first: the h tiles are rewritten in place
+        uint32_t carry[3][16];
+        for (uint32_t j = 0; j < 3; ++j) {
+            for (uint32_t half = 0; half < 2; ++half) {
+                volatile tt_l1_ptr uint32_t* src = row_ptr(h + j * TB, 0, half);
+                for (uint32_t w = 0; w < 8; ++w) {
+                    carry[j][half * 8 + w] = src[w];
+                }
+            }
+        }
+        for (uint32_t j = 0; j < 3; ++j) {      // h_j: shift s = 3 - j
+            const uint32_t s = 3 - j;
+            for (uint32_t r = 0; r < 32; ++r) {
+                for (uint32_t half = 0; half < 2; ++half) {
+                    volatile tt_l1_ptr uint32_t* dst = row_ptr(h + j * TB, r, half);
+                    if (r >= s) {
+                        volatile tt_l1_ptr uint32_t* src = row_ptr(x, r - s, half);
+                        for (uint32_t w = 0; w < 8; ++w) {
+                            dst[w] = src[w];
+                        }
+                    } else {
+                        // u[r - s] with r - s in [-3, -1] -> carried row 3 + (r - s)
+                        const uint32_t k = 3 + r - s;
+                        for (uint32_t w = 0; w < 8; ++w) {
+                            dst[w] = carry[k][half * 8 + w];
+                        }
+                    }
+                }
+            }
+        }
+#else
         // shift: the register's new rows 1..3 are the old rows 2, 3 and this step's input
         noc_async_write(h + TB, s_st1.get_noc_addr(c), TB);
         noc_async_write(h + 2 * TB, s_st2.get_noc_addr(c), TB);
         noc_async_write(x, s_st3.get_noc_addr(c), TB);
         noc_async_write_barrier();  // the slots are recycled once the compute pops them
+#endif
         cb_push_back(cb_h, 3);
         cb_push_back(cb_x, 1);
         cb_push_back(cb_t, 4);
