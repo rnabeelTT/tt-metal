@@ -417,6 +417,11 @@ def install():
     global _orig_forward
     _orig_forward = moe_mod.Qwen35MoE.forward
     moe_mod.Qwen35MoE.forward = _forward
+    # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
+    # without a bucket trace the model's prefill falls back to its stock (eager) path
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import generator as gen_mod
+
+    gen_mod.Qwen35MoeGenerator._warm_prefill_traces = lambda self: None
     if HYB.defer_lib:
         _install_mtp_head()
 
@@ -435,12 +440,6 @@ def _install_mtp_head():
                 HYB.lib_layer_async(layer)
 
     mtp_mod.Qwen35MtpHead.__init__ = h_init
-
-    # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
-    # without a bucket trace the model's prefill falls back to its stock (eager) path
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import generator as gen_mod
-
-    gen_mod.Qwen35MoeGenerator._warm_prefill_traces = lambda self: None
 
 
 def _routed(self, x4, scores, ids, T, mode):
