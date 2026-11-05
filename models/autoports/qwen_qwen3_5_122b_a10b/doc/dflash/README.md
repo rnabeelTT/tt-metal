@@ -73,3 +73,25 @@ as "the output").
 mask over the ring (ring 2272 slots so ring + block = 2304 = 9 x 256; attention core 579 us -> ~150), dynamic-conv
 expansion by matmul (191 us per conv; `repeat_interleave` measured slower, 278 us). Remaining: ~50 small replicated ops
 per layer at ~10-15 us each.
+
+### Fused verify + tensor-parallel drafter (`runs/dflash/tr5..tr7`)
+
+Verify on the decode layers (GDN rows mode, snapshot commit), traced, greedy, 128 new tokens, shipped decode flags.
+Each trace replayed alone (block 16 / 8): pass 29.5 / 19.0 ms, commit 2.4, drafter ctx 1.2, draft 5.4 (TP over the 4
+dies; was 12.0 replicated), candidate top-k 0.9. The fused verify also raised acceptance (code 5.6 -> 7.3 tokens per
+round at block 16): its GDN numerics equal the plain decode's, which is what the drafter was trained against.
+
+ms per emitted token (plain decode 7.55):
+
+| prompt | block 16 | block 8 |
+|---|---|---|
+| code | 7.10 (tau 7.26) | **6.80** (5.38) |
+| math | **6.96** (7.78) | 7.02 (5.86) |
+| prose | 11.63 (4.57) | 9.38 (4.10) |
+| chat | 16.42 (3.17) | 12.70 (3.02) |
+
+Block 8 is the default (`QWEN35_DFLASH_BLOCK`). Per layer, fused rows path, traced (identical rows, so no MoE union):
+GDN 242 / 355 / 487 us at 1 / 8 / 16 rows (~16 us per extra row: the head's rows run in order on each lane's core),
+attention 226 / 407 / 515 us (~26 us per extra row: one paged K/V update per row - `paged_update_cache(share_cache=)`
+would write them in one call but is rejected for paged caches by its C++ validation). With real drafts the 8 rows route
+to a union of experts that adds ~7.5 ms per pass (the 256-expert MoE's DRAM reads: an inherent per-row cost here).
