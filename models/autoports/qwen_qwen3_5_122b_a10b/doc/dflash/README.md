@@ -5,6 +5,29 @@ Goal: higher single-user decode throughput on p300x2 with unchanged output quali
 non-causal sliding-window attention 2048, two-tap dynamic grouped convs, top-16 candidate selector; reference math:
 github.com/z-lab/dflash `dflash/model.py` `DFlash2DraftModel`).
 
+## Design (as built)
+
+One round, one user (`tt/dflash_traced.py`, block B = 8 by default):
+
+1. **Draft** (device, ~5.4 ms): the drafter over [last token, mask x 15] (32 tile rows, positions start..), tensor
+   parallel over the 4 dies (q / kv heads and MLP columns split, o / down projections reduce-scattered + gathered), its
+   context K / V in per-layer rings of 2272 slots (sliding window 2048), flash SDPA with a host-written visibility row,
+   the target's LM head; per-shard top-32 candidates + the selector projection read back; the selector path (7
+   sequential first-order choices over top-16 candidates, codebooks on the host) gives the B - 1 drafts.
+2. **Verify** (device, ~21-27 ms at B = 8): the model's own decode layers over the B rows of the one user (GDN layers in
+   the decode ops' rows mode, attention with per-row paged K/V writes, the fused multi-row MoE), the 8 context layers'
+   rows captured for the drafter, argmax (greedy) or per-shard top-k candidates (sampled) read back.
+3. **Accept** (host): greedy = longest prefix of drafts equal to the argmax; sampled = exact speculative sampling
+   (`SpecSampler.accept`, the selector's distribution as q): the emitted stream has the target's distribution.
+4. **Commit**: none - the next verify starts from the accepted row's GDN snapshot / conv history (a 4-byte host write);
+   the bound state is materialized only when the request leaves the DFlash phase.
+5. **Drafter context** (~1.2 ms): the accepted rows' context features -> the drafter's K / V rings.
+
+Serving (`tt/dflash_serving.py`, `QWEN35_DFLASH=1`): the adaptive MTP plumbing - a lone request decodes in DFlash
+rounds, any multi-user step runs the plain batched decode (the rings are not advanced there). Prefill builds the
+drafter's context inside the traced bucket programs (layer hook + ctx program). The guard: after 6 rounds a request that
+produced fewer tokens than the plain decode would have in the same time goes to the plain decode for good.
+
 ## Pieces
 
 | file | what |
@@ -16,8 +39,16 @@ github.com/z-lab/dflash `dflash/model.py` `DFlash2DraftModel`).
 | `tools/dflash_acceptance.py` | eager acceptance on the device target with the host drafter (+ greedy agreement) |
 | `tools/dflash_traced_run.py` | the traced device loop: tokens per round, ms per token, per-program walls |
 
-Env: `QWEN35_DFLASH=1` (needs `QWEN35_MTP=0`, off with chunked prefill), `QWEN35_DFLASH_BLOCK` (16),
-`QWEN35_DFLASH_MIN_TAU` (2.5 tokens / round) and `QWEN35_DFLASH_GUARD_ROUNDS` (8): the acceptance guard.
+Env: `QWEN35_DFLASH=1` (needs `QWEN35_MTP=0`; off with chunked prefill), `QWEN35_DFLASH_BLOCK` (8),
+`QWEN35_DFLASH_GUARD_ROUNDS` (6), `QWEN35_DFLASH_PLAIN_MS` (7.6: the plain decode's ms / token the guard compares
+with), `QWEN35_DFLASH_MARGIN` (1.0), `QWEN35_DFLASH_MIN_TAU` (1.5), `QWEN35_DFLASH_FUSED` (1: the fused verify),
+`QWEN35_DFLASH_DRAFTER` (a directory or repo id; default: the bundle's auxiliary weights entry).
+Bundle: `tt-model-ornith122.yaml` profile `p300x2-dflash` (opt-in), drafter as `auxiliary_weights` (pinned).
+
+How to run: `tools/dflash_traced_run.py --bs 8` (device loop vs plain greedy, per-trace timings),
+`tools/dflash_acceptance.py` (host drafter, eager target), `tests/test_gdn_rows_ops.py` (rows mode + base / history,
+bit-exact vs row-by-row), `tools/dflash_drafter_prof.py` / `tools/dflash_pass_prof.py` (profiles); served A/B:
+`~/ornith-fusion/runs/dfl_ab.sh` (TAG=..., ARMS="on off"), evals `~/ornith-fusion/runs/dfl_evals.sh`.
 
 ## Measurements
 
