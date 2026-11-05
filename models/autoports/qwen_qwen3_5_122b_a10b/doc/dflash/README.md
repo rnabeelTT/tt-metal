@@ -143,3 +143,46 @@ Served round ~38-44 ms (the tool's ~37 + vLLM's per-step time, not overlapped as
 break-even at ~5.3 tokens per round. Of 54 phases, 10 ran past the probe (128-165 tok/s), the others went plain;
 random-token requests pay the probe (6 rounds). Multi-user rows are the plain path (unchanged). TTFT +36-42 ms: the
 drafter's context program in every prefill segment.
+
+### Served A/B 2 and 3: final (`runs/dfl_ab2_{on,off}`, `runs/dfl_ab3_on`)
+
+ab3 = the final code (fused commit-less verify, TP drafter, next draft queued before the step returns, first decode step
+after a prefill plain, host-staged K/V write indices, guard on the served step-to-step span with an early exit).
+Plain = ab2_off (ab1_off within 0.3 %).
+
+| row | plain | DFlash (ab3) |
+|---|---|---|
+| real text greedy, thinking off (12 x 384) | 131.6 tok/s | 128.0 tok/s (125.0..130.6) |
+| real text t 0.6, thinking off | 131.9 | 127.8 (125.8..129.8) |
+| real text t 0.6, thinking ON (12 x 512, the shipped default) | 131.6 | 132.4 (128.0..156.6) |
+| 1 user 128/128 random tokens, TPOT | 7.55 ms | 8.65 ms |
+| 1 user 2048/256, TPOT | 7.73 ms | 8.29 ms |
+| 8 / 32 users 128/128, TPOT | 24.32 / 46.80 ms | 25.22 / 48.59 ms (the plain path; run-to-run noise) |
+| TTFT 1 user 128 / 2048 | 202 / 591 ms | 198 / 614 ms |
+| garble gate (t 0.6, per 1k words) | 12.05 (ab1_off) | 13.17 |
+
+A served round is 38-45 ms inside the step (vLLM adds ~1 ms between steps): verify pass ~26 ms (block 8: the decode
+layers over 8 rows - the 256-expert MoE's union of ~40 experts adds ~7.5 ms, the per-row GDN / attention work ~6 ms,
+the multi-row path lacks the 1-row fabric-boundary path's ~4 ms of savings), drafter 5.4 ms, drafter context 1.2 ms,
+host ~3 ms. Break-even is ~5.2 accepted tokens per round; this target accepts 4-6 on real text at block 8 (the
+drafter's 16-token block accepts more but costs a longer verify). Requests with very predictable text gain
+(a 512-token thinking answer at 160 tok/s, +22 %), the rest are probed and handed back to the plain decode.
+
+## Verdict (2026-11-05)
+
+**Leave DFlash off** (the shipped manifest is unchanged: no profile, no drafter download). Quality is preserved by
+construction and measured (exact speculative sampling; the GDN rows-mode verify is bit-exact with the plain decode;
+garble gate within noise), multi-user decode and TTFT are unaffected, but single-user decode throughput does not go up:
+-3 % on real text without thinking, +0.6 % with thinking, -7..-13 % on short random-token requests (the probe). The
+gpt-oss PR's 1.7-2.1x relies on a verify that costs ~1.6 plain steps; here an 8-row verify costs ~3.5 plain steps.
+
+What would make it pay (measured costs above), in order of size:
+1. a cheaper multi-row MoE for one user's rows (the union reads ~40 experts per layer for 8 rows: a grouped
+   (row, expert) kernel or expert prefetch as in the PR's verify MoE),
+2. a one-program verify layer (gpt-oss "row attention inside the QKV program", boundary inside the next matmul) -
+   the 8-row path runs ~4 ms behind the 1-row fabric path,
+3. block attention (one K/V read for all rows; today each row's SDPA reads the whole cache: grows with context) and a
+   one-call row K/V write (`paged_update_cache(share_cache=)` is rejected for paged caches in its C++ validation),
+4. the GDN head's rows keeping the state on-core between rows (~1 ms), a fused drafter conv kernel (~1.5 ms), drafts +
+   accept on the device in one trace per round (~3 ms of host per round).
+With 1-3 the verify would approach ~12-14 ms and the round ~22 ms: ~+40 % at 5 accepted tokens per round.

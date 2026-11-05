@@ -9,9 +9,9 @@ repo: raahemnabeel/ornith-1.5-122b
 name: ornith-1.5-122b
 # weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
 weights: {repo: ornith-ai/Ornith-1.5-122B, revision: 7681ef608624e7532d8164128bcffdbdbaf1b1af}
-# the DFlash 2 speculative-decoding drafter (Apache-2.0), read only by the -dflash profiles (QWEN35_DFLASH=1)
-auxiliary_weights:
-  - {repo: incoai/Ornith-1.5-122B-DFlash2, revision: 9baefc1bec85c08193ab442e0ca5f7057669b61d}
+# DFlash 2 speculative decoding (QWEN35_DFLASH=1, doc/dflash) is not shipped: measured break-even or slower on this
+# box. To try it: add `auxiliary_weights: [{repo: incoai/Ornith-1.5-122B-DFlash2, revision: 9baefc1bec85c08193ab442e0ca5f7057669b61d}]`
+# and a profile with env {QWEN35_DFLASH: "1"}.
 kind: vllm-plugin
 arch: blackhole
 
@@ -118,11 +118,6 @@ serve_profiles:
     description: 'Default. Interactive assistants and agents: text and images, thinking on.'
     hardware: p300x2
     mesh_device: P300x2
-  - name: p300x2-dflash
-    description: 'One user at a time (an assistant, an agent, a coding tool): speculative decoding with the DFlash 2 drafter while exactly one request is running; a request whose text the drafter does not predict well, and every multi-user step, runs the plain decode. Same outputs (exact speculative sampling).'
-    hardware: p300x2
-    mesh_device: P300x2
-    env: {QWEN35_DFLASH: "1"}
   - name: p300x2-burst
     description: 'Many short prompts arriving together (chat front-ends, batch jobs): prompts of up to 512 tokens are prefilled up to four at a time, so a 32-request burst gets its first token in about 3.8 s instead of 6.3 s; decode speed unchanged. A request''s first token can depend on which requests arrived with it.'
     hardware: p300x2
