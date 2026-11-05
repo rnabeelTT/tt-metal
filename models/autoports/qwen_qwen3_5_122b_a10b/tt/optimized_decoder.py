@@ -552,9 +552,9 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             self._cfg_sorted_dn = sparse_matmul_program_config(
                 gs, H, Nl, target_cores=opt.sorted_down_cores, in0_block_w_cap=opt.sorted_down_in0
             )
-        m = self._dispatch.build(ids, scores, T)
-        Rd, G = m["Rd"], m["G"]
         grouped = bool(getattr(opt, "sorted_grouped", False))
+        m = self._dispatch.build(ids, scores, T, mask=not grouped)  # grouped: the sparsity operand is never read
+        Rd, G = m["Rd"], m["G"]
         # the kernel gather needs the skip-aware grouped matmul (padding groups' tiles are not written)
         x_disp = gather_rows(
             x4,
@@ -615,7 +615,8 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             dtype=act,
         )  # compact [1,G,32,H]
         ttnn.deallocate(din)
-        ttnn.deallocate(m["group_mask"])
+        if not m.get("group_mask_const"):
+            ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
         y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
         ttnn.deallocate(down)

@@ -62,6 +62,9 @@ SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
 # Un-dispatch through the multi-core gather-add kernel (ttnn.experimental.moe_gather_add_rows) instead of k x
 # (slice + embedding gather + add); only available with the kernel dispatch (it consumes the raw undispatch stick).
 UNDISPATCH_KERNEL = DISPATCH_MODE == "kernel" and os.environ.get("QWEN35_UNDISPATCH_KERNEL", "1") == "1"
+# Grouped (indices=) sparse matmuls never read the [1, G, 1, E] one-hot sparsity operand: build(mask=False) hands them a
+# cached placeholder instead of the per-call eq / typecast / to_layout chain (~0.3 ms per 2048-token MoE layer)
+CONST_GROUP_MASK = os.environ.get("QWEN35_CONST_GROUP_MASK", "1") == "1"
 
 
 class SortedDispatch:
@@ -176,7 +179,7 @@ class SortedDispatch:
     def _tiled(t):
         return t if t.layout == ttnn.TILE_LAYOUT else ttnn.to_layout(t, ttnn.TILE_LAYOUT)
 
-    def build(self, ids, scores, T: int):
+    def build(self, ids, scores, T: int, mask: bool = True):
         """ids [1,1,T,k] (uint16/uint32/int32, any layout), scores [1,1,T,k] bf16 tiled.
 
         Returns dict: src_tok (uint32 ROW_MAJOR [1, Rd]), weights (bf16 tiled [1,1,Rd,1]), group_mask (bf16 ROW_MAJOR
@@ -193,7 +196,7 @@ class SortedDispatch:
         ), f"sorted dispatch admits at most {MAX_DISPATCH_ROWS} dispatched rows (T={T}: {Rd})"
         f32, u32 = ttnn.float32, ttnn.uint32
         if DISPATCH_MODE == "kernel":
-            return self._build_kernel(ids, scores, T, R, Rd, G)
+            return self._build_kernel(ids, scores, T, R, Rd, G, mask=mask)
 
         # ---- flat, token-major (token t, slot j) -> position t*k + j
         # reshape/pad run on the fp32 copy (reshape_view accepts bf16/fp32/int32/uint32 only)
@@ -449,7 +452,20 @@ class SortedDispatch:
         }
 
 
-def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
+def _const_group_mask(self, G):
+    """A [1, G, 1, E] bf16 ROW_MAJOR placeholder for the grouped (indices=) sparse matmul, which validates the sparsity
+    operand's shape but never reads it (sparse_matmul_multicore_reuse_grouped: the kernels walk the id list). Created
+    once per G on the first (eager) call, kept for the model's lifetime."""
+    cache = self.__dict__.setdefault("_mask_const", {})
+    t = cache.get(G)
+    if t is None:
+        t = ttnn.zeros((1, G, 1, self.E), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device,
+                       memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        cache[G] = t
+    return t
+
+
+def _kernel_dispatch(self, ids, scores, T, R, Rd, G, mask=True):
     """One single-core program (ttnn.experimental.moe_sorted_dispatch) computes every dispatch map: the same row
     layout as the counting sort (experts ascending, each padded to whole `group` blocks, one trailing padding group),
     so the outputs are bit-identical to the counting_* modes (test_dispatch_modes_equivalent)."""
@@ -466,17 +482,23 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
             ttnn.deallocate(t)
     weights = ttnn.reshape(ttnn.to_layout(ttnn.reshape(w_disp, (1, 1, 1, Rd)), ttnn.TILE_LAYOUT), (1, 1, Rd, 1))
     ttnn.deallocate(w_disp)
-    # one-hot of the group experts (the sparse op still validates a [1,G,1,E] sparsity operand)
-    grp_f = self._f32(
-        ttnn.to_layout(ttnn.typecast(ttnn.reshape(group_ids, (1, 1, 1, G)), ttnn.uint32), ttnn.TILE_LAYOUT)
-    )
-    group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)
-    ttnn.deallocate(grp_f)
-    group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
+    if mask or not CONST_GROUP_MASK:
+        # one-hot of the group experts (the sparse op still validates a [1,G,1,E] sparsity operand)
+        grp_f = self._f32(
+            ttnn.to_layout(ttnn.typecast(ttnn.reshape(group_ids, (1, 1, 1, G)), ttnn.uint32), ttnn.TILE_LAYOUT)
+        )
+        group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)
+        ttnn.deallocate(grp_f)
+        group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
+        mask_const = False
+    else:  # grouped (indices=) consumer: the mask is never read
+        group_mask = _const_group_mask(self, G)
+        mask_const = True
     out = {
         "src_tok": ttnn.reshape(src_tok, (1, Rd)),
         "weights": weights,
         "group_mask": group_mask,
+        "group_mask_const": mask_const,
         "group_ids": ttnn.reshape(group_ids, (1, G)),
         "Rd": Rd,
         "G": G,
