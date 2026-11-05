@@ -35,6 +35,7 @@ Weights therefore keep their checkpoint channel order.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import torch
@@ -96,7 +97,10 @@ def build_rope_cache(hf_config, max_seq_len: int, device) -> tuple[ttnn.Tensor, 
     return out[0], out[1]
 
 
-def _per_head_rms_norm(tensor: ttnn.Tensor, weight: ttnn.Tensor, eps: float) -> ttnn.Tensor:
+HEADNORM_4D = os.environ.get("QWEN3_DECODE_HEADNORM_4D", "1") == "1"
+
+
+def _per_head_rms_norm(tensor: ttnn.Tensor, weight: ttnn.Tensor, eps: float, decode: bool = False) -> ttnn.Tensor:
     """RMSNorm over the last dim, applied independently per head.
 
     ``ttnn.rms_norm`` normalises the last dimension of a 2D-ish tile grid, so
@@ -104,6 +108,11 @@ def _per_head_rms_norm(tensor: ttnn.Tensor, weight: ttnn.Tensor, eps: float) -> 
     Input/output ``[1, n_heads, seq, head_dim]``.
     """
     shape = tensor.shape
+    if decode and HEADNORM_4D:
+        # decode [1, B, heads, head_dim]: the heads (8 Q / 1 KV per die) are padded to a 32-row tile, so the fold is a
+        # real copy each way (~9 us per reshape at B = 32); rms_norm already normalizes every row of the 4-D tile grid
+        # (padding rows included, discarded), so run it in place (QWEN3_DECODE_HEADNORM_4D=1)
+        return ttnn.rms_norm(tensor, weight=weight, epsilon=eps)
     flat = ttnn.reshape(tensor, (1, 1, shape[1] * shape[2], shape[3]))
     normed = ttnn.rms_norm(flat, weight=weight, epsilon=eps)
     return ttnn.reshape(normed, shape)
