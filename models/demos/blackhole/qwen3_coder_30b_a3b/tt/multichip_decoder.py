@@ -151,6 +151,10 @@ from .precision import DEFAULT_PRECISION, PrecisionConfig  # noqa: F401  (re-exp
 MOE_FUSED_DECODE = os.environ.get("QWEN3_MOE_FUSED_DECODE", "0") == "1"
 MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN3_MOE_FUSED_ROWS_MAX", "32") or 0)
 _FUSED_ARGS: dict = {}  # per mesh: the namespace the fused ops / buffers are shared through (one set per model)
+# QWEN3_FABRIC_BOUNDARY=1: one-row decode runs each layer boundary as one fabric all-reduce + add + RMSNorm program
+# (decoder_layer_decode_fabric; needs the fused MoE). Wider decode steps keep the RS + AG path.
+FABRIC_BOUNDARY = os.environ.get("QWEN3_FABRIC_BOUNDARY", "0") == "1"
+_FABRIC: dict = {}  # per mesh: the FabricBoundary
 from .weight_mapping import hf_to_meta_channels, permute_head_vector_to_meta, permute_wqkv_to_meta
 
 # The target mesh. This module deliberately supports exactly one shape: the
@@ -1949,6 +1953,73 @@ def decoder_layer_decode_multichip(
     ttnn.deallocate(hidden)
     ttnn.deallocate(moe_out)
     return out
+
+
+def fabric_decode_usable(weights: MultichipWeights, ctx: MeshContext, rows: int) -> bool:
+    """Whether a decode step may run its layer boundaries on the fabric boundary (QWEN3_FABRIC_BOUNDARY=1): one row,
+    a multi-die mesh and the fused expert-parallel MoE (its L1 BF16 partial is the boundary's input)."""
+    return FABRIC_BOUNDARY and rows == 1 and ctx.num_devices > 1 and weights.fused_moe is not None
+
+
+def fabric_boundary_for(mesh_device, hidden: int, eps: float):
+    """The model-wide one-row FabricBoundary (models/demos/blackhole/qwen36/tt/fabric_boundary/ops.py), built once per
+    mesh before any trace capture."""
+    fb = _FABRIC.get(id(mesh_device))
+    if fb is None:
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import FabricBoundary
+
+        fb = FabricBoundary(mesh_device, hidden, eps, max_rows=1)
+        _FABRIC[id(mesh_device)] = fb
+    return fb
+
+
+def decoder_layer_decode_fabric(
+    fb,
+    res: ttnn.Tensor,
+    x: ttnn.Tensor,
+    weights: MultichipWeights,
+    config: MeshDecoderConfig,
+    cos_cache: ttnn.Tensor,
+    sin_cache: ttnn.Tensor,
+    kv_cache: KVCache,
+    current_pos: ttnn.Tensor,
+    g_ffn: ttnn.Tensor,
+    g_next: ttnn.Tensor,
+    rope=None,
+    precision: PrecisionConfig = DEFAULT_PRECISION,
+    last: bool = False,
+):
+    """One decode row through the fabric boundaries (after the Ornith / gpt-oss fused decode boundary): ``res`` is the
+    flat replicated residual, ``x`` this layer's normed input row ([1, 1, 1, H] BF16 L1). Attention and the fused MoE
+    return their per-die partial sums in L1, and each boundary is one program: the fabric all-reduce of the partial +
+    the residual add + the next RMSNorm (``g_ffn``: this layer's post-attention norm, ``g_next``: the next layer's input
+    norm or, ``last``, the final norm with x landing in DRAM for the LM head). Replaces per layer the two RS + AG
+    all-reduces, their clones, the two adds and the two sharded norms. Returns (res', x')."""
+    attn_partial = attention_decode_optimized(
+        x,
+        weights.experts,
+        config.local_attention,
+        cos_cache,
+        sin_cache,
+        kv_cache,
+        current_pos,
+        0,
+        sdpa_program_config=_sdpa_program_config(x.device(), kv_cache),
+        rope=rope,
+        precision=precision,
+        out_memory_config=ttnn.L1_MEMORY_CONFIG,
+    )
+    ttnn.deallocate(x)
+    h, ff_in = fb(res, attn_partial, g_ffn, "mixer")
+    ttnn.deallocate(res)
+    ttnn.deallocate(attn_partial)
+    ex = weights.experts
+    moe_partial = weights.fused_moe(ff_in, ex.gate_up_proj, ex.down_proj)  # the model-wide L1 buffer: not freed
+    ttnn.deallocate(ff_in)
+    res2, x2 = fb(h, moe_partial, g_next, "mlp",
+                  out_memory_config=ttnn.DRAM_MEMORY_CONFIG if last else ttnn.L1_MEMORY_CONFIG)
+    ttnn.deallocate(h)
+    return res2, x2
 
 
 # Bytes one 32x32 tile occupies, per dtype. Spelled out because
