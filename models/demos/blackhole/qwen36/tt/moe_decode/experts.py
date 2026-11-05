@@ -97,9 +97,13 @@ def logits_row_bytes(num_experts, router):
 _BANK_WORKERS = {}
 
 
-def _robust_readers():
-    """QWEN35_ROBUST_READERS (default 1): reader placement right for every die of the mesh (see bank_workers)."""
-    return os.environ.get("QWEN35_ROBUST_READERS", "1") == "1"
+def _robust_readers(rows=False):
+    """QWEN35_ROBUST_READERS: reader placement right for every die of the mesh (see bank_workers). "rows" (default): only
+    for the multi-row ops (decode widths 2..32, bandwidth bound: 32 users 24.7 -> 19.2 ms per step on Ornith-35B), the
+    one-row ops keep die 0's placement (latency bound: 4.57 vs 4.85 ms per token with the robust one); "1": every op;
+    "0": none."""
+    v = os.environ.get("QWEN35_ROBUST_READERS", "rows")
+    return v == "1" or (v == "rows" and rows)
 
 
 def _device_bank_workers(mesh_device):
@@ -125,7 +129,7 @@ def _dies_agree(per):
     return all([(c.x, c.y) for c in w] == [(c.x, c.y) for c in per[0]] for w in per)
 
 
-def bank_workers(mesh_device):
+def bank_workers(mesh_device, rows=False):
     """The reader core per DRAM bank used on every die (one program serves the whole mesh). A die's optimal reader for a
     bank is the first unharvested worker column east of the bank's DRAM column; logical columns skip harvested ones, so
     one logical column is a different physical column per die, and a reader physically WEST of a die's east DRAM column
@@ -133,7 +137,7 @@ def bank_workers(mesh_device):
     (after tt-metal #61548): per bank the largest logical column any die wants, which is at or east of the bank on every
     die. Dies that agree (and QWEN35_ROBUST_READERS=0) keep die 0's placement exactly."""
     per = _device_bank_workers(mesh_device)
-    if not _robust_readers() or _dies_agree(per):
+    if not _robust_readers(rows) or _dies_agree(per):
         return list(per[0])
     out = []
     for b in range(len(per[0])):
@@ -143,14 +147,14 @@ def bank_workers(mesh_device):
     return out
 
 
-def bank_columns(mesh_device, wx):
+def bank_columns(mesh_device, wx, rows=False):
     """Candidate reader columns for a bank whose (bank_workers) reader sits at column wx, nearest first. Dies that agree:
     +dx before -dx around wx (the original placement). Otherwise readers stay on their bank's side of the DRAM columns on
     every die: east banks grow east only (x >= wx); west banks stay below the smallest column any die gives an east bank
     (a west-bank reader at or past it would sit east of the east DRAM column on that die)."""
     grid_x = mesh_device.compute_with_storage_grid_size().x
     per = _device_bank_workers(mesh_device)
-    if not _robust_readers() or _dies_agree(per):
+    if not _robust_readers(rows) or _dies_agree(per):
         return [wx + dx for d in range(grid_x) for dx in ((d, -d) if d else (0,)) if 0 <= wx + dx < grid_x]
     west = min(c.x for w in per for c in w)
     east = min(c.x for w in per for c in w if c.x > west)
@@ -203,17 +207,26 @@ def noc_coords(mesh_device):
     return table
 
 
-def place_along_rows(mesh_device, per_bank, used=None):
+def offrow_candidates(mesh_device, w, rows=False):
+    """(x, y) candidates for a bank whose reader row is shared with another bank's: the next row inward first, then the
+    rows beyond it (the robust placement leaves fewer columns per row: east banks grow east only)."""
+    grid = mesh_device.compute_with_storage_grid_size()
+    d = -1 if w.y > 0 else 1
+    ys = [w.y + d * i for i in (1, 2, 3) if 0 <= w.y + d * i < grid.y]
+    return [(x, y) for y in ys for x in bank_columns(mesh_device, w.x, rows)]
+
+
+def place_along_rows(mesh_device, per_bank, used=None, rows=False):
     """{bank: count} -> {bank: [CoreCoord]}: each bank's cores on its optimal reader's row, nearest first (+dx before
     -dx), then the rows above / below (off-row placement measured slower). `used`: (x, y) cores already taken
     (updated)."""
-    workers = bank_workers(mesh_device)
+    workers = bank_workers(mesh_device, rows)
     grid = mesh_device.compute_with_storage_grid_size()
     used = set() if used is None else used
     out = {}
     for b, n in per_bank.items():
         w = workers[b]
-        xs = bank_columns(mesh_device, w.x)
+        xs = bank_columns(mesh_device, w.x, rows)
         cand = [(x, w.y + dy) for dy in (0, -1, 1, -2, 2) for x in xs]
         cores = []
         for x, y in cand:
@@ -242,9 +255,8 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
     placed = {}
     for b in sorted(noc1):
         w = workers[b]
-        y = w.y - 1 if w.y > 0 else w.y + 1
         cores = []
-        for x in bank_columns(mesh_device, w.x):
+        for x, y in offrow_candidates(mesh_device, w):
             if len(cores) < per_bank[b] and (x, y) not in used:
                 used.add((x, y))
                 cores.append(ttnn.CoreCoord(x, y))
