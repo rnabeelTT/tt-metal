@@ -1,6 +1,48 @@
 --- a/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 20:52:38.576299043 +0000
-+++ b/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 20:52:38.588392639 +0000
-@@ -148,15 +148,23 @@
++++ b/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 22:42:04.041016601 +0000
+@@ -64,6 +64,41 @@
+             os.environ["HF_MODEL"] = prev
+ 
+ 
++def pos_embed_interpolate(visual, grid_thw: torch.Tensor) -> torch.Tensor:
++    """Qwen3-VL's bilinearly interpolated position embedding in merge-window order, as transformers 5.12's
++    ``fast_pos_embed_interpolate`` computes it (later releases dropped the method)."""
++    side, merge = int(visual.config.num_position_embeddings**0.5), visual.config.spatial_merge_size
++    idx_parts, weight_parts = [[] for _ in range(4)], [[] for _ in range(4)]
++    for t, h, w in grid_thw.tolist():
++        t, h, w = int(t), int(h), int(w)
++        h_grid, w_grid = torch.linspace(0, side - 1, h), torch.linspace(0, side - 1, w)
++        h_floor, w_floor = h_grid.int(), w_grid.int()
++        h_ceil, w_ceil = (h_floor + 1).clamp(max=side - 1), (w_floor + 1).clamp(max=side - 1)
++        h_frac, w_frac = h_grid - h_floor, w_grid - w_floor
++        hf, hc = h_floor * side, h_ceil * side
++        corners = [
++            (hf[:, None] + w_floor[None, :]).flatten(),
++            (hf[:, None] + w_ceil[None, :]).flatten(),
++            (hc[:, None] + w_floor[None, :]).flatten(),
++            (hc[:, None] + w_ceil[None, :]).flatten(),
++        ]
++        weights = [
++            ((1 - h_frac)[:, None] * (1 - w_frac)[None, :]).flatten(),
++            ((1 - h_frac)[:, None] * w_frac[None, :]).flatten(),
++            (h_frac[:, None] * (1 - w_frac)[None, :]).flatten(),
++            (h_frac[:, None] * w_frac[None, :]).flatten(),
++        ]
++        h_idx = torch.arange(h).view(h // merge, merge)
++        w_idx = torch.arange(w).view(w // merge, merge)
++        reorder = (h_idx[:, :, None, None] * w + w_idx[None, None, :, :]).transpose(1, 2).flatten().repeat(t)
++        for i in range(4):
++            idx_parts[i].append(corners[i][reorder])
++            weight_parts[i].append(weights[i][reorder])
++    idx = torch.stack([torch.cat(p) for p in idx_parts])
++    wts = torch.stack([torch.cat(p) for p in weight_parts])
++    return (visual.pos_embed(idx) * wts[:, :, None]).sum(0)
++
++
+ class DeepstackMerger:
+     """Qwen3VLVisionPatchMerger with ``use_postshuffle_norm=True``: merge 2x2 patches, LayerNorm(4608), fc1+GELU, fc2."""
+ 
+@@ -148,15 +183,23 @@
          self.deepstack = [
              DeepstackMerger(mesh, sd, f"deepstack_merger_list.{i}", dtype, name=f"ds{i}") for i in range(len(self.taps))
          ]
@@ -30,7 +72,16 @@
          self.ckc_patch = ttnn.init_device_compute_kernel_config(
              mesh.arch(),
              math_fidelity=ttnn.MathFidelity.HiFi4,
-@@ -205,7 +213,7 @@
+@@ -192,7 +235,7 @@
+             seq_len=n, grid_thw=g, head_dim=self.args.head_dim, spatial_merge_size=self.cfg.spatial_merge_size
+         )
+         with torch.no_grad():
+-            pos = self.hf_visual.fast_pos_embed_interpolate(g).float()
++            pos = pos_embed_interpolate(self.hf_visual, g).float()
+         pos = torch.nn.functional.pad(pos, (0, 0, 0, seq - n))[None, None]
+         cos, sin = convert_rope_style_hf_to_meta(cos, sin)
+         cos = torch.nn.functional.pad(cos, (0, 0, 0, seq - n), value=1)[None, None]
+@@ -205,7 +248,7 @@
          )
          t, h, w = key
          hit = {
@@ -39,7 +90,7 @@
              "cos": host(cos),
              "sin": host(sin),
              "n": n,
-@@ -217,6 +225,32 @@
+@@ -217,6 +260,32 @@
          self._grid_cache[key] = hit
          return hit
  
@@ -72,7 +123,7 @@
      def encode_one(self, pixel_values, grid_thw):
          """-> (main, [deepstack...]) device tensors [1, 1, seq/4, hidden] TILE (rows past n/4 are padding)."""
          gi = self.grid_inputs(grid_thw)
-@@ -238,7 +272,10 @@
+@@ -238,7 +307,10 @@
          taps = {}
  
          def tap(i, h):
@@ -84,7 +135,7 @@
  
          main = self.tt(
              x_t,
-@@ -250,7 +287,7 @@
+@@ -250,7 +322,7 @@
          )
          ttnn.deallocate(cos)
          ttnn.deallocate(sin)
