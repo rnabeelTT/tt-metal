@@ -1,0 +1,13 @@
+--- a/models/autoports/qwen_qwen3_vl_reranker_8b/server/service.py	2026-11-06 21:10:20.668256653 +0000
++++ b/models/autoports/qwen_qwen3_vl_reranker_8b/server/service.py	2026-11-06 21:10:20.680310633 +0000
+@@ -305,6 +305,10 @@
+                         param=labels[i].split("[")[0],
+                         code="context_length_exceeded",
+                     )
++            check = getattr(self.engines[0], "check", None) if self.engines else None
++            for i, p in enumerate(prepared):
++                if check and (why := check(p)):  # an input this engine refuses (e.g. the co-host's one image)
++                    raise RequestError(f"{labels[i]}: {why}", param=labels[i].split("[")[0], code="unsupported_input")
+         except RequestError:
+             self.stats["rejected_requests"] += 1
+             raise

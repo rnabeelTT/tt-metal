@@ -394,6 +394,13 @@ class Lane:
     def warm(self) -> dict:  # the device boot ran in the co-host phases already
         return {"die": self.die, "task": self.task, "buckets": list(TEXT_BUCKETS), "traced_max_T": TRACE_MAX_T}
 
+    def check(self, pair) -> Optional[str]:
+        """Why this server refuses a prepared pair (the service answers HTTP 400), or None."""
+        if image_pieces(pair) > 1:
+            return ("the co-host server takes one image per input (no videos or image sets): their vision tables "
+                    "would compile programs after the shared chips' traces")
+        return None
+
     def score(self, pairs):
         if self.combiner.engine.towers.get(self.task) is None and any(p.has_vision for p in pairs):
             from models.autoports.qwen_qwen3_vl_reranker_8b.server.media import RequestError
