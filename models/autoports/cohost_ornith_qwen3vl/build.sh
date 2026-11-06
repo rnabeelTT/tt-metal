@@ -38,6 +38,7 @@ for p in models/autoports/qwen_qwen3_vl_reranker_8b models/autoports/qwen_qwen3_
   docker cp -q "$c:/opt/tt-metal/$p" "$CTX/context/$(dirname $p)/"
 done
 docker cp -q "$c:/opt/tt-metal/models/common/tt_ccl.py" "$CTX/context/models/common/"   # vision towers only
+cp "$HERE/compat/tensor_utils_v082.py" "$CTX/context/"   # appended to the base's tensor_utils (Dockerfile)
 docker rm "$c" >/dev/null
 find "$CTX/context" -name __pycache__ -prune -exec rm -rf {} +
 rm -rf "$CTX/context/models/autoports/qwen_qwen3_vl_reranker_8b/demo"   # gradio demo: not served here

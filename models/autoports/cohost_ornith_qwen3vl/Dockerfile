@@ -14,6 +14,9 @@ COPY context/uv /tmp/uv
 RUN /tmp/uv pip install --python /opt/tt-venv/bin/python --no-cache --no-deps qwen-vl-utils==0.0.14 av==18.1.0 \
  && rm /tmp/uv
 COPY context/models/ /opt/tt-metal/models/
+# v0.82 helpers the vision code imports from models/common/tensor_utils, added without changing what is there
+COPY context/tensor_utils_v082.py /tmp/
+RUN cat /tmp/tensor_utils_v082.py >> /opt/tt-metal/models/common/tensor_utils.py && rm /tmp/tensor_utils_v082.py
 COPY context/tt-cohost/ /opt/tt-cohost/
 RUN chmod -R a+rX /opt/tt-cohost /opt/tt-metal/models
 ENV PYTHONPATH=/opt/tt-cohost:/opt/tt-metal \
@@ -22,9 +25,12 @@ ENV PYTHONPATH=/opt/tt-cohost:/opt/tt-metal \
     TT_MODEL_KIND=cohost
 USER 1000:1000
 WORKDIR /home/tt/work
-# imports as the server's uid: the runtime, the adapter, both input pipelines (ttnn imports without a device)
+# imports as the server's uid: the runtime, the adapter, both input pipelines and the vision towers (ttnn imports
+# without a device)
 RUN cd /opt/tt-metal && python -c "import tt_kernel.cohost.launch, cohost_qwen3vl.member, qwen_vl_utils, av; \
 from models.autoports.qwen_qwen3_vl_embedding_8b.inputs import EmbedFormatter; \
 from models.autoports.qwen_qwen3_vl_reranker_8b.tt.inputs import PairFormatter; \
+from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision_tower import VisionTower; \
+from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision.model import DropInVisionTransformer; \
 from cohost_qwen3vl import split, engine; print('cohost image imports ok')"
 CMD ["python", "-m", "tt_kernel.cohost.launch"]
