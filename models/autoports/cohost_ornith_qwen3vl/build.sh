@@ -88,6 +88,7 @@ if [ "$SIZE" = qwen38 ]; then
   M="$CTX/context/cohost-models/models"; mkdir -p "$M/autoports"
   c=$(docker create "$BASE"); docker cp -q "$c:/opt/tt-metal/models/common" "$M/"; docker cp -q "$c:/opt/tt-metal/models/__init__.py" "$M/" 2>/dev/null || touch "$M/__init__.py"; docker rm "$c" >/dev/null
   cp "$CTX/context/models/common/tt_ccl.py" "$M/common/"
+  cat "$CTX/context/tensor_utils_v082.py" >> "$M/common/tensor_utils.py"   # as the Dockerfile does for 122b / 35b
   cp -r "$CTX/context/models/ttt_compat" "$CTX/context/models/tt_dit" "$M/"
   cp -r "$CTX/context/models/autoports/qwen_qwen3_vl_reranker_8b" "$CTX/context/models/autoports/qwen_qwen3_vl_embedding_8b" "$M/autoports/"
   touch "$M/autoports/__init__.py"

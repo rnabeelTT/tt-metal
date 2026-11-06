@@ -52,5 +52,7 @@ USER 1000:1000
 WORKDIR /home/tt/work
 RUN python -c "import tt_kernel.cohost.launch, cohost_qwen3vl.member, qwen_vl_utils, av, vllm, vllm_tt_plugin, qwen38; \
 from models.autoports.qwen_qwen3_vl_embedding_8b.inputs import EmbedFormatter; \
+from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision_tower import VisionTower; \
+from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision.model import DropInVisionTransformer; \
 from cohost_qwen3vl import split, engine; import vllm; print('cohost qwen38 image imports ok, vllm', vllm.__version__)"
 CMD ["python", "-m", "tt_kernel.cohost.launch"]

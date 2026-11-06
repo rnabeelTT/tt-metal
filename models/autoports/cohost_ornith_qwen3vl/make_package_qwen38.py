@@ -83,12 +83,16 @@ def profiles() -> tuple:
          "env": {**common, "QWEN3VL_COHOST_PRECISION": "p3_mlp_bfp4_lofi"},
          "description": "The default with the 8B models' MLP weights in bfp4 (about 2.6 GiB per chip less). Use if the "
                         "default runs out of DRAM; embeddings and rerank scores change slightly."},
+        {"name": "qwen38-vision", "hardware": "p300x2", "mesh_device": "P150x4",
+         "env": {**common, "QWEN3VL_COHOST_VISION": "1"},
+         "description": "EXPERIMENTAL: the default plus both 8B vision towers (image inputs to the embedder and "
+                        "reranker, one image per input), tensor-parallel over the four chips."},
         {"name": "qwen38-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Validation baseline: Qwen3.8 alone in the co-host runtime, with the group's settings."},
         {"name": "qwen3vl-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Validation baseline: the embedder and reranker alone in the co-host runtime."},
     ]
-    groups = {"qwen38": ["llm", "embed", "rerank"],
+    groups = {"qwen38": ["llm", "embed", "rerank"], "qwen38-vision": ["llm", "embed", "rerank"],
               "qwen38-lean": ["llm", "embed", "rerank"], "qwen38-solo": ["llm"], "qwen3vl-solo": ["embed", "rerank"]}
     return sp, groups
 
