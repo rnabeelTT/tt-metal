@@ -139,6 +139,12 @@ def main():
                                page_table=pt, kv_cache=kv, sampling_mode="host", enable_trace=False, active_batch=B)
 
         kinds = f"{len(layers)} attn+moe"
+        if args.prefill:
+            pids = torch.tensor([[1000 + (i * 7) % 9973 for i in range(args.prefill)]])
+            ppt = gen.make_page_table([args.prefill + 64])
+
+            def step():  # noqa: F811
+                gen.prefill_forward(pids, page_table=ppt, kv_cache=kv, prompt_lens=[args.prefill], sampling_mode="host")
     else:
         base = f"models.autoports.{args.port}"
         gen_mod = importlib.import_module(f"{base}.tt.generator")
