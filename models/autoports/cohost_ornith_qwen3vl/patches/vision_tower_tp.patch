@@ -1,9 +1,30 @@
 --- a/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 20:52:38.576299043 +0000
-+++ b/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 22:42:04.041016601 +0000
-@@ -64,6 +64,41 @@
-             os.environ["HF_MODEL"] = prev
++++ b/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 22:54:33.136476712 +0000
+@@ -55,13 +55,56 @@
+     """qwen36 ``VisionModelArgs`` over this checkpoint (tt_transformers ``ModelArgs`` reads ``HF_MODEL``)."""
+     from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision.vision_model_config import VisionModelArgs
  
- 
+-    prev = os.environ.get("HF_MODEL")
+-    os.environ["HF_MODEL"] = hf_model_path
++    from models.autoports.qwen_qwen3_vl_reranker_8b.tt.weights import cache_dir
++
++    # ModelArgs caches weights under TT_CACHE_PATH/<device> with no model in the path, where another model's vision
++    # tower (a co-hosted LLM's) can have left same-named tensors: point it at this checkpoint's own cache dir.
++    keys = {"HF_MODEL": hf_model_path, "TT_CACHE_PATH": str(cache_dir() / "vision")}
++    prev = {k: os.environ.get(k) for k in keys}
++    os.environ.update(keys)
+     try:
+         return VisionModelArgs(mesh, max_batch_size=1, max_seq_len=max_seq_len, cache_hf=False)
+     finally:
+-        if prev is not None:
+-            os.environ["HF_MODEL"] = prev
++        for k, v in prev.items():
++            if v is None:
++                os.environ.pop(k, None)
++            else:
++                os.environ[k] = v
++
++
 +def pos_embed_interpolate(visual, grid_thw: torch.Tensor) -> torch.Tensor:
 +    """Qwen3-VL's bilinearly interpolated position embedding in merge-window order, as transformers 5.12's
 +    ``fast_pos_embed_interpolate`` computes it (later releases dropped the method)."""
@@ -37,12 +58,10 @@
 +    idx = torch.stack([torch.cat(p) for p in idx_parts])
 +    wts = torch.stack([torch.cat(p) for p in weight_parts])
 +    return (visual.pos_embed(idx) * wts[:, :, None]).sum(0)
-+
-+
- class DeepstackMerger:
-     """Qwen3VLVisionPatchMerger with ``use_postshuffle_norm=True``: merge 2x2 patches, LayerNorm(4608), fc1+GELU, fc2."""
  
-@@ -148,15 +183,23 @@
+ 
+ class DeepstackMerger:
+@@ -148,15 +191,23 @@
          self.deepstack = [
              DeepstackMerger(mesh, sd, f"deepstack_merger_list.{i}", dtype, name=f"ds{i}") for i in range(len(self.taps))
          ]
@@ -72,7 +91,7 @@
          self.ckc_patch = ttnn.init_device_compute_kernel_config(
              mesh.arch(),
              math_fidelity=ttnn.MathFidelity.HiFi4,
-@@ -192,7 +235,7 @@
+@@ -192,7 +243,7 @@
              seq_len=n, grid_thw=g, head_dim=self.args.head_dim, spatial_merge_size=self.cfg.spatial_merge_size
          )
          with torch.no_grad():
@@ -81,7 +100,7 @@
          pos = torch.nn.functional.pad(pos, (0, 0, 0, seq - n))[None, None]
          cos, sin = convert_rope_style_hf_to_meta(cos, sin)
          cos = torch.nn.functional.pad(cos, (0, 0, 0, seq - n), value=1)[None, None]
-@@ -205,7 +248,7 @@
+@@ -205,7 +256,7 @@
          )
          t, h, w = key
          hit = {
@@ -90,7 +109,7 @@
              "cos": host(cos),
              "sin": host(sin),
              "n": n,
-@@ -217,6 +260,32 @@
+@@ -217,6 +268,32 @@
          self._grid_cache[key] = hit
          return hit
  
@@ -123,7 +142,7 @@
      def encode_one(self, pixel_values, grid_thw):
          """-> (main, [deepstack...]) device tensors [1, 1, seq/4, hidden] TILE (rows past n/4 are padding)."""
          gi = self.grid_inputs(grid_thw)
-@@ -238,7 +307,10 @@
+@@ -238,7 +315,10 @@
          taps = {}
  
          def tap(i, h):
@@ -135,7 +154,7 @@
  
          main = self.tt(
              x_t,
-@@ -250,7 +322,7 @@
+@@ -250,7 +330,7 @@
          )
          ttnn.deallocate(cos)
          ttnn.deallocate(sin)

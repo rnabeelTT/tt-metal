@@ -27,6 +27,7 @@ DRAFTER = "incoai/Qwen3.8-27B-DFlash2@dedf8df68adfb1afeaf7b7480c0a0243108177b4"
 SNAP = f"{mp.HF}/models--Qwen--Qwen3.8-27B/snapshots/{HF_REV}"
 TRACE_REGION = 2 * 2**30   # the bundle's 1 GiB + 1 GiB for the Qwen3-VL text traces
 KV_DEFAULT, KV_FULL = 262144, 524288   # QWEN36_MAX_TOKENS_ALL_USERS: co-host default / the bundle's own
+KV_VISION = 131072   # the vision towers and their warm-up need about 1 GiB per chip more than the default leaves
 PORTS = {"llm": 0, "rerank": 4, "embed": 5}
 
 # run.sh's exports (the bundle manifest's env plus the lines run.sh adds), unchanged
@@ -84,9 +85,10 @@ def profiles() -> tuple:
          "description": "The default with the 8B models' MLP weights in bfp4 (about 2.6 GiB per chip less). Use if the "
                         "default runs out of DRAM; embeddings and rerank scores change slightly."},
         {"name": "qwen38-vision", "hardware": "p300x2", "mesh_device": "P150x4",
-         "env": {**common, "QWEN3VL_COHOST_VISION": "1"},
+         "env": {**common, "QWEN3VL_COHOST_VISION": "1", "QWEN36_MAX_TOKENS_ALL_USERS": str(KV_VISION)},
          "description": "EXPERIMENTAL: the default plus both 8B vision towers (image inputs to the embedder and "
-                        "reranker, one image per input), tensor-parallel over the four chips."},
+                        f"reranker, one image per input), tensor-parallel over the four chips; a {KV_VISION:,}-token "
+                        "shared KV pool to make room for them."},
         {"name": "qwen38-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Validation baseline: Qwen3.8 alone in the co-host runtime, with the group's settings."},
         {"name": "qwen3vl-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
