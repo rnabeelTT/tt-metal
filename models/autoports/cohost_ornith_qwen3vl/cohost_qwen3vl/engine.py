@@ -96,6 +96,13 @@ def covering_slot(B: int, T: int) -> Optional[tuple]:
     return (min(Bs), T) if Bs else None
 
 
+def image_pieces(p: PairInputs) -> int:
+    """Vision tower passes a pair needs: one per image, one per temporal group of a video."""
+    images = 0 if p.image_grid_thw is None else len(p.image_grid_thw)
+    frames = 0 if p.video_grid_thw is None else int(p.video_grid_thw[:, 0].sum())
+    return images + frames
+
+
 def _dummy(n: int) -> PairInputs:
     ids = torch.full((n,), 11, dtype=torch.long)
     return PairInputs(input_ids=ids, position_ids=torch.arange(n)[None].expand(3, n).clone())
@@ -186,12 +193,22 @@ class SplitEngine:
                  time.time() - t0)
 
     def _warm_vision(self, tower):
+        """Every program an image pair runs, before any trace is captured: the tower at each patch bucket, then the
+        text tower with that bucket's tables at every text bucket (the visual gathers are keyed on the table's rows).
+        A program compiled after the captures would trip Ornith's program guard, so pairs are one image each
+        (``image_pieces``): any other table size would compile late."""
         from models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision_tower import padded_buckets
 
+        n = len(self.lanes)
         for padded in padded_buckets(7200):
             npatch = padded - 32 * 8
             g = torch.tensor([[1, 32, npatch // 32]])
             tabs = tower.tables(torch.randn(npatch, 1536), g)
+            for T in TEXT_BUCKETS:
+                d = build_inputs(self.scorer, [[_dummy(T - 1)]] * n, T, 1, device=self.device,
+                                 vis_index=torch.zeros(T, dtype=torch.int32))
+                out = self._forward(d, 1, T, tables=tabs)
+                self._free(out, *d.values())
             tabs.deallocate()
 
     def capture_all(self):
@@ -383,6 +400,11 @@ class Lane:
 
             raise RequestError("this server is text-only: image and video inputs are not served "
                                "(the co-host profile runs without the vision towers)", code="unsupported_input")
+        if any(image_pieces(p) > 1 for p in pairs):
+            from models.autoports.qwen_qwen3_vl_reranker_8b.server.media import RequestError
+
+            raise RequestError("the co-host server takes one image per input (no videos or image sets): their vision "
+                               "tables would compile programs after the shared chips' traces", code="unsupported_input")
         out = self.combiner.submit(self.die, pairs).result()
         self.counters["pairs"] += len(pairs)
         self.counters["calls"] += 1
