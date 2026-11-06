@@ -37,7 +37,10 @@ Three models from one process on all four Blackhole chips, each on its own OpenA
   stops the engine otherwise): the warm-up runs every patch bucket's tables through the text tower at every text bucket.
   Inputs are one image each; image sets and videos get HTTP 400 (`engine.check`, via `patches/service_check.patch`).
 - Validated on the 35B (2026-11-06): page-image embeddings vs the single-model embedder, cosine 0.995; reranker picks the
-  source page 8/8; Ornith's greedy output unchanged with images flowing. Same on the 122B (vision is its default too).
+  source page 8/8; Ornith's greedy output unchanged with images flowing. Same on the 122B (vision is its default too). Qwen3.8-27B: same checks pass with
+  `qwen38-vision`, which halves its KV pool to fit the towers (not its default); the tower computes its own position
+  embedding (transformers 5.17 dropped `fast_pos_embed_interpolate`) and caches its weights under its checkpoint's
+  namespace (the shared `TT_CACHE_PATH/<device>` path held Qwen3.8's own vision merger).
 
 ## Files
 

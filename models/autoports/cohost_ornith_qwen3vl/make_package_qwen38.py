@@ -86,9 +86,9 @@ def profiles() -> tuple:
                         "default runs out of DRAM; embeddings and rerank scores change slightly."},
         {"name": "qwen38-vision", "hardware": "p300x2", "mesh_device": "P150x4",
          "env": {**common, "QWEN3VL_COHOST_VISION": "1", "QWEN36_MAX_TOKENS_ALL_USERS": str(KV_VISION)},
-         "description": "EXPERIMENTAL: the default plus both 8B vision towers (image inputs to the embedder and "
-                        f"reranker, one image per input), tensor-parallel over the four chips; a {KV_VISION:,}-token "
-                        "shared KV pool to make room for them."},
+         "description": "The default plus both 8B vision towers (image inputs to the embedder and reranker, one "
+                        f"image per input), tensor-parallel over the four chips; a {KV_VISION:,}-token shared KV pool "
+                        "to make room for them."},
         {"name": "qwen38-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
          "description": "Validation baseline: Qwen3.8 alone in the co-host runtime, with the group's settings."},
         {"name": "qwen3vl-solo", "hardware": "p300x2", "mesh_device": "P150x4", "env": dict(common),
@@ -132,35 +132,47 @@ def card() -> dict:
         "capabilities": "Ports are the serve port plus an offset: the LLM on +0 (OpenAI chat / completions, tool calls "
                         "(`qwen3_coder`), reasoning, up to 4 images per request, the bundle's opt-in "
                         "`TT_THINK_BUDGET`), the reranker on +4, the embedder on +5, the co-host status on +6.",
-        "performance": ("Not yet measured on hardware. Device-free boot (mock 4-chip mesh, untraced, 2026-11-04), DRAM "
-                        "per chip as the mock allocator counts it:\n\n"
-                        "| | GiB per chip |\n| --- | ---: |\n"
-                        "| Qwen3.8-27B weights + DFlash2 drafter + vision | 10.91 |\n"
-                        f"| KV pool ({KV_DEFAULT:,} tokens, 8 slots) incl. 5.10 recurrent-state store (120 x 43.5 MiB) | 7.95 |\n"
-                        "| DFlash serving buffers (warmup) | 2.23 |\n"
-                        "| Qwen3-VL embedder + reranker (one 8B copy per chip) | 8.03 |\n"
-                        "| **total, before request transients** | **29.13** (of about 29.8 allocatable next to a 2 GiB trace region) |\n\n"
-                        "L1 held per core by Qwen3.8: 89.6 KiB (every Qwen3-VL program compiles next to it). Expected speed: "
-                        "the LLM at its single-model speed while the 8B models are idle, as measured for the "
-                        "Ornith-1.5-122B co-host package (147 tok/s alone and in the group)."),
-        "limitations": "- **Not yet validated on hardware.** Checked device-free: the full group boots on a mock "
-                       "4-chip mesh (all members ready; embedder and reranker answer), the 8B engine passes its mock "
-                       "suite on this image's ttnn. Not checked: traced boot, DFlash serving, speed, numerics. The "
-                       "runtime and 8B adapter are the ones validated in raahemnabeel/cohost-ornith-122b-qwen3vl, plus "
-                       "two changes this model needs (the LLM worker opens the mesh with its model's fabric config; the "
-                       "phased warmup passes the plugin's device-grammar flag).\n"
-                       "- **DRAM is tight** (29.13 of about 29.8 GiB per chip before request transients): if the boot "
-                       "or a long prefill runs out of DRAM, use `qwen38-lean`.\n"
-                       f"- Shared KV pool {KV_DEFAULT:,} tokens (the bundle: {KV_FULL:,}, which does not fit next to "
-                       "the 8B models).\n"
+        "performance": ("Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-06, all three members loaded, warm. "
+                        "Qwen3.8: up to 128 output tokens per request, streamed, greedy (DFlash2 speculative decoding, "
+                        "so speed varies with the text).\n\n"
+                        "| | other members idle | while 8 Qwen3.8 streams decode |\n| --- | ---: | ---: |\n"
+                        "| Qwen3.8-27B, 1 user | 72.6 tok/s (`qwen38`), 76.4 tok/s (`qwen38-vision`), TTFT 0.16 s | |\n"
+                        "| Qwen3.8-27B, 8 users | 340 tok/s total (`qwen38`), 354 (`qwen38-vision`), TTFT 1.2-1.4 s | |\n"
+                        "| Embedder, 1 query | 0.067 s | 0.131 s |\n"
+                        "| Embedder, 64 documents | 0.59 s | 0.64 s |\n"
+                        "| Embedder, 1 page image (612x792), `qwen38-vision` | 0.15 s | 0.19 s |\n"
+                        "| Reranker, 30 documents | 0.44 s | 0.51 s |\n"
+                        "| Reranker, 8 page images, `qwen38-vision` | 1.56 s | 2.08 s |\n\n"
+                        "| | value |\n| --- | ---: |\n"
+                        f"| DRAM per chip after boot, `qwen38-vision` | 27.91 GiB (Qwen3-VL pair with both vision towers "
+                        f"8.55, Qwen3.8 weights + drafter + vision 10.91, KV pool of {KV_VISION:,} tokens incl. the "
+                        "recurrent-state store 5.99, warm-up and traces 2.43) |\n"
+                        "| L1 held per core | 94.1 KiB |\n"
+                        "| Ready time, warm caches | about 4.5 min |"),
+        "limitations": "- **Validated on hardware (2026-11-06).** `qwen38-vision`: page-image embeddings vs the "
+                       "single-model embedder, cosine mean 0.9948 (min 0.9883) on 12 pages, each nearest its own "
+                       "reference; text embeddings cosine 0.9995; reranker on page images, the source page first 8/8; "
+                       "Qwen3.8's greedy output identical 8/8 with the 8B models idle and with images flowing; "
+                       "images from 40x40 to 4000x5000 px served, image sets and videos refused (HTTP 400). Both "
+                       "profiles: correct, repeatable greedy answers. Not run: evals, the soak, `qwen38-lean`.\n"
+                       "- **Qwen3.8 compiles programs after its trace captures** (4 after a dozen requests, 54 after a "
+                       "longer mixed run; both profiles, so not the vision towers): its warm-up in the co-host runtime "
+                       "misses some of its own serving shapes. Outputs stayed correct and repeatable, but a program "
+                       "compiled after a capture can disturb a parked trace; watch `compiles_after_capture` on the "
+                       "status port. The 8B members compile nothing late.\n"
+                       f"- **DRAM is tight:** `qwen38` uses a {KV_DEFAULT:,}-token shared KV pool (the bundle: "
+                       f"{KV_FULL:,}, which does not fit next to the 8B models); `qwen38-vision` halves it to "
+                       f"{KV_VISION:,} to make room for the vision towers. If a boot or a long prefill runs out of "
+                       "DRAM, use `qwen38-lean`.\n"
                        "- The image patches the plugin's executor allow-list for block-output (DFlash) models to admit "
                        "the co-host RemoteExecutor (a UniProcExecutor whose worker runs in the device host).\n"
                        "- Trace region 2 GiB (the bundle: 1 GiB): the 8B text traces share it.\n"
                        "- The chat template is the checkpoint's own with one change: a conversation whose last "
                        "message is not a user turn (agent loops ending on a tool result) no longer raises \"No user "
                        "query found in messages\".\n"
-                       "- The models take turns on the chips. The embedder and reranker are text only (image inputs: "
-                       "HTTP 400) and use the embedder's precision policy; pairs up to 8,192 tokens.\n"
+                       "- The models take turns on the chips. The embedder and reranker use the embedder's precision "
+                       "policy; pairs up to 8,192 tokens. Images (`qwen38-vision` only): one image per input, up to "
+                       "1,800 visual tokens; `qwen38` is text-only (image inputs: HTTP 400).\n"
                        "- Licenses: Qwen3.8-27B and the Qwen3-VL models Apache-2.0; see the drafter's card.",
         "license": {"id": "apache-2.0", "name": "Apache-2.0 (Qwen3.8-27B, Qwen3-VL-Embedding-8B, Qwen3-VL-Reranker-8B)"},
     }
