@@ -43,6 +43,8 @@ sed -i 's/^    return ttnn.get_num_links(mesh_device, cluster_axis)$/    from mo
   "$CTX/context/models/common/tt_ccl.py"
 grep -q "ttnn.get_num_links" "$CTX/context/models/common/tt_ccl.py" && { echo "tt_ccl patch failed" >&2; exit 1; }
 cp "$HERE/compat/tensor_utils_v082.py" "$CTX/context/"   # appended to the base's tensor_utils (Dockerfile)
+# the vision tower wrapper was written for one chip; here its blocks are tensor-parallel over the mesh
+for p in "$HERE"/patches/*.patch; do patch -p1 --forward --silent -d "$CTX/context" < "$p"; done
 docker rm "$c" >/dev/null
 find "$CTX/context" -name __pycache__ -prune -exec rm -rf {} +
 rm -rf "$CTX/context/models/autoports/qwen_qwen3_vl_reranker_8b/demo"   # gradio demo: not served here

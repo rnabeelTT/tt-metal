@@ -1,0 +1,95 @@
+--- a/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 20:52:38.576299043 +0000
++++ b/models/autoports/qwen_qwen3_vl_reranker_8b/tt/vision_tower.py	2026-11-06 20:52:38.588392639 +0000
+@@ -148,15 +148,23 @@
+         self.deepstack = [
+             DeepstackMerger(mesh, sd, f"deepstack_merger_list.{i}", dtype, name=f"ds{i}") for i in range(len(self.taps))
+         ]
++        # The blocks are tensor-parallel over a multi-chip mesh: their input and output are fractured along the
++        # hidden dim (VisionModelArgs.prepare_residual_tensor_prefill), so the patch embedding's columns and the
++        # position embedding are sharded the same way. On one chip the shard is the whole tensor.
++        self.multichip = mesh.get_num_devices() > 1
++        self.shard = ttnn.ShardTensor2dMesh(mesh, dims=(None, -1), mesh_shape=self.args.cluster_shape)
+         # Conv3d patch embedding with stride == kernel is a [1536 -> 1152] linear: run it on device
+         pe = self.hf_visual.patch_embed.proj
+-        self.patch_w = as_device(
+-            pe.weight.detach().reshape(pe.weight.shape[0], -1).T.contiguous().float(),
+-            mesh,
+-            ttnn.bfloat16,
+-            "vision.patch_w",
++        sharded = lambda t: ttnn.from_torch(
++            t.to(torch.bfloat16),
++            dtype=ttnn.bfloat16,
++            layout=ttnn.TILE_LAYOUT,
++            device=mesh,
++            memory_config=ttnn.DRAM_MEMORY_CONFIG,
++            mesh_mapper=self.shard,
+         )
+-        self.patch_b = as_device(pe.bias.detach().reshape(1, -1).float(), mesh, ttnn.bfloat16, "vision.patch_b")
++        self.patch_w = sharded(pe.weight.detach().reshape(pe.weight.shape[0], -1).T.contiguous().float())
++        self.patch_b = sharded(pe.bias.detach().reshape(1, -1).float())
+         self.ckc_patch = ttnn.init_device_compute_kernel_config(
+             mesh.arch(),
+             math_fidelity=ttnn.MathFidelity.HiFi4,
+@@ -205,7 +213,7 @@
+         )
+         t, h, w = key
+         hit = {
+-            "pos": host(pos),
++            "pos": ttnn.from_torch(pos.to(torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, mesh_mapper=self.shard),
+             "cos": host(cos),
+             "sin": host(sin),
+             "n": n,
+@@ -217,6 +225,32 @@
+         self._grid_cache[key] = hit
+         return hit
+ 
++    def gather(self, x):
++        """A tensor fractured along the hidden dim across the mesh, whole on every chip (the all-gather the blocks'
++        norms use)."""
++        if not self.multichip:
++            return x
++        ccl = self.tt.tt_ccl
++        return ttnn.experimental.all_gather_async(
++            x,
++            persistent_output_buffer=None,
++            dim=3,
++            multi_device_global_semaphore=ccl.get_and_cycle_ag_semaphore_handles(),
++            num_links=ccl.get_num_links(1),
++            topology=self.args.ccl_topology(),
++            memory_config=ttnn.DRAM_MEMORY_CONFIG,
++            barrier_semaphore=ccl.get_and_cycle_barrier_semaphore_handle(),
++            chunks_per_sync=10,
++            num_workers_per_link=2,
++            num_buffers_per_channel=2,
++        )
++
++    def whole(self, x):
++        out = self.gather(x)
++        if out is not x:
++            ttnn.deallocate(x)
++        return out
++
+     def encode_one(self, pixel_values, grid_thw):
+         """-> (main, [deepstack...]) device tensors [1, 1, seq/4, hidden] TILE (rows past n/4 are padding)."""
+         gi = self.grid_inputs(grid_thw)
+@@ -238,7 +272,10 @@
+         taps = {}
+ 
+         def tap(i, h):
+-            taps[i] = self.deepstack[self.taps.index(i)](h)
++            full = self.gather(h)  # the block output stays alive for the next block
++            taps[i] = self.deepstack[self.taps.index(i)](full)
++            if full is not h:
++                ttnn.deallocate(full)
+ 
+         main = self.tt(
+             x_t,
+@@ -250,7 +287,7 @@
+         )
+         ttnn.deallocate(cos)
+         ttnn.deallocate(sin)
+-        return main, [taps[i] for i in self.taps], n // self.merge2
++        return self.whole(main), [taps[i] for i in self.taps], n // self.merge2
+ 
+     def tables(self, pixel_values=None, image_grid_thw=None, pixel_values_videos=None, video_grid_thw=None, cache=None):
+         """Encode every image, then every video, of one pair and build the gather tables. ``image_rows`` /
