@@ -38,6 +38,10 @@ for p in models/autoports/qwen_qwen3_vl_reranker_8b models/autoports/qwen_qwen3_
   docker cp -q "$c:/opt/tt-metal/$p" "$CTX/context/$(dirname $p)/"
 done
 docker cp -q "$c:/opt/tt-metal/models/common/tt_ccl.py" "$CTX/context/models/common/"   # vision towers only
+# v0.82's link count is a ttnn call this v0.79 build lacks; the base's own helper answers it from its device table
+sed -i 's/^    return ttnn.get_num_links(mesh_device, cluster_axis)$/    from models.common.modules.tt_ccl import get_num_links as v079_num_links\n\n    return v079_num_links(mesh_device, cluster_axis)/' \
+  "$CTX/context/models/common/tt_ccl.py"
+grep -q "ttnn.get_num_links" "$CTX/context/models/common/tt_ccl.py" && { echo "tt_ccl patch failed" >&2; exit 1; }
 cp "$HERE/compat/tensor_utils_v082.py" "$CTX/context/"   # appended to the base's tensor_utils (Dockerfile)
 docker rm "$c" >/dev/null
 find "$CTX/context" -name __pycache__ -prune -exec rm -rf {} +
