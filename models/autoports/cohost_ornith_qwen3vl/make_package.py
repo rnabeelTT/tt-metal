@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 GiB = 2**30
-VISION_VALIDATED = {"35b"}  # sizes whose -vision profile was validated on hardware (and is their default)
+VISION_VALIDATED = {"35b", "122b"}  # sizes whose -vision profile was validated on hardware (and is their default)
 HF = "/hf/hub"
 
 QWEN3VL = {
@@ -58,29 +58,34 @@ ORNITH = {
 MEASURED = {
     "122b": {
         "performance": (
-            "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-04, profile `ornith122b`, all three members "
-            "loaded, warm. Ornith: 128 output tokens per request, streamed, greedy.\n\n"
+            "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-06, profile `ornith122b-vision`, all three "
+            "members loaded, warm. Ornith: up to 128 output tokens per request, streamed, greedy.\n\n"
             "| | other members idle | while 8 Ornith streams decode |\n| --- | ---: | ---: |\n"
             "| Ornith-1.5-122B, 1 user | 147.6 tok/s, TTFT 0.18 s | |\n"
-            "| Ornith-1.5-122B, 8 users | 345 tok/s total (87 tok/s per user), TTFT 1.49 s | |\n"
-            "| Embedder, 1 query | 0.067 s | 0.072 s |\n"
-            "| Embedder, 64 documents | 1.46 s | 1.64 s |\n"
-            "| Reranker, 30 documents | 0.49 s | 0.62 s |\n\n"
-            "Ornith alone in the same runtime (profile `ornith122b-solo`): 147.4 tok/s for 1 user, 347 tok/s for 8, so "
-            "co-hosting costs Ornith nothing while the 8B models are idle (its single-model package card: 133 tok/s "
-            "for 1 user). When the embedder or reranker runs, the models take turns: Ornith's decode pauses for each "
-            "8B pass.\n\n"
+            "| Ornith-1.5-122B, 8 users | 364 tok/s total (46 tok/s per user), TTFT 1.43 s | |\n"
+            "| Embedder, 1 query | 0.064 s | 0.127 s |\n"
+            "| Embedder, 64 documents | 0.64 s | 0.70 s |\n"
+            "| Embedder, 1 page image (612x792) | 0.15 s | 0.20 s |\n"
+            "| Reranker, 30 documents | 0.47 s | 0.56 s |\n"
+            "| Reranker, 8 page images | 1.61 s | 1.88 s |\n\n"
+            "Ornith alone in the same runtime (profile `ornith122b-solo`, 2026-11-04): 147.4 tok/s for 1 user, 347 "
+            "tok/s for 8, so co-hosting costs Ornith nothing while the 8B models are idle (its single-model package "
+            "card: 133 tok/s for 1 user). When the embedder or reranker runs, the models take turns: Ornith's decode "
+            "pauses for each 8B pass.\n\n"
             "| | value |\n| --- | ---: |\n"
-            "| DRAM per chip after boot | 28.21 GiB (Qwen3-VL pair 8.03, Ornith weights 17.01, Ornith KV 2.22, traces 0.14) |\n"
-            "| L1 held per core | 254.3 KiB (Ornith's resident buffers) |\n"
-            "| Ready time, warm caches | about 14 min (Ornith's weight load: about 11 min) |"),
+            "| DRAM per chip after boot | 28.73 GiB (Qwen3-VL pair with both vision towers 8.55, Ornith weights "
+            "17.01, Ornith KV 2.22, warm-up and traces 0.95) |\n"
+            "| L1 held per core | 258.8 KiB |\n"
+            "| Ready time, warm caches | about 15 min (Ornith's weight load: about 11 min) |"),
         "status": (
-            "- **Validated on hardware (2026-11-04).** Embedder vs the single-model package: cosine mean 0.9993 "
-            "(min 0.9984) on 16 texts; reranker: top-1 8/8 and full order 7/8 of 8 queries (its single-model package "
-            "runs LoFi MLPs, this one HiFi2). Ornith: greedy batch-1 output identical 16/16 with the embedder and "
-            "reranker idle and with both busy without pause (no interference); the 8B outputs identical before and "
-            "after that load; 0 programs compiled after trace capture. Not run: evals, the soak, the -lean / -vision "
-            "profiles.\n"
+            "- **Validated on hardware (2026-11-04 text, 2026-11-06 vision).** Text: embedder vs the single-model "
+            "package, cosine mean 0.9993 (min 0.9984) on 16 texts; reranker top-1 8/8 and full order 7/8 of 8 queries "
+            "(its single-model package runs LoFi MLPs, this one HiFi2); Ornith's greedy batch-1 output identical 16/16 "
+            "with the 8B models idle and busy. Vision (profile `ornith122b-vision`): page-image embeddings vs the "
+            "single-model embedder, cosine mean 0.9948 (min 0.9883) on 12 pages, each nearest its own reference; "
+            "reranker on page images, the source page first 8/8; Ornith's greedy output identical 8/8 with images "
+            "flowing through both; images from 40x40 to 4000x5000 px served; 0 programs compiled after trace capture. "
+            "Not run: evals, the soak, the -lean profile.\n"
             "- Ornith's concurrent (batched) greedy output varies run to run by itself (13/16 identical between two "
             "identical 16-request bursts), with or without the 8B models.\n"),
     },

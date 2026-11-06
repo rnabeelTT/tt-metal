@@ -37,7 +37,7 @@ Three models from one process on all four Blackhole chips, each on its own OpenA
   stops the engine otherwise): the warm-up runs every patch bucket's tables through the text tower at every text bucket.
   Inputs are one image each; image sets and videos get HTTP 400 (`engine.check`, via `patches/service_check.patch`).
 - Validated on the 35B (2026-11-06): page-image embeddings vs the single-model embedder, cosine 0.995; reranker picks the
-  source page 8/8; Ornith's greedy output unchanged with images flowing. Not yet run on the 122B.
+  source page 8/8; Ornith's greedy output unchanged with images flowing. Same on the 122B (vision is its default too).
 
 ## Files
 
