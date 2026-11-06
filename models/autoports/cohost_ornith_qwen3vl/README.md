@@ -27,6 +27,18 @@ Three models from one process on all four Blackhole chips, each on its own OpenA
   qwen36 decode kernels, so each size gets its own image. The Qwen3-VL code (written on tt-metal v0.82) is added as new
   packages and runs on the Ornith images' v0.79 tree (checked on a mock mesh: every program shape builds).
 
+## Vision (profile `ornith<size>-vision`, the 35B default)
+
+- Both 8B models get their Qwen3-VL vision tower, tensor-parallel over the four chips. The tower code (`vision_tower.py`
+  from the single-model packages) was written for one chip, so `patches/vision_tower_tp.patch` shards its input along
+  the hidden dim and gathers the merger and DeepStack outputs back to whole tables on every chip;
+  `compat/tensor_utils_v082.py` and the `tt_ccl.py` edit in `build.sh` cover the v0.82 helpers the tower imports.
+- An image pair runs untraced, so its programs must all exist before the traces are captured (Ornith's program guard
+  stops the engine otherwise): the warm-up runs every patch bucket's tables through the text tower at every text bucket.
+  Inputs are one image each; image sets and videos get HTTP 400 (`engine.check`, via `patches/service_check.patch`).
+- Validated on the 35B (2026-11-06): page-image embeddings vs the single-model embedder, cosine 0.995; reranker picks the
+  source page 8/8; Ornith's greedy output unchanged with images flowing. Not yet run on the 122B.
+
 ## Files
 
 | file | what |

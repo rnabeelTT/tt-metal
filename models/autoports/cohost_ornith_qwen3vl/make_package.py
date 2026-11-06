@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 GiB = 2**30
+VISION_VALIDATED = {"35b"}  # sizes whose -vision profile was validated on hardware (and is their default)
 HF = "/hf/hub"
 
 QWEN3VL = {
@@ -87,20 +88,30 @@ MEASURED = {
 
 MEASURED["35b"] = {
     "performance": (
-        "Not yet measured on hardware. Device-free boot (mock 4-chip mesh, untraced, 2026-11-04), DRAM per chip as the "
-        "mock allocator counts it:\n\n| | GiB per chip |\n| --- | ---: |\n"
-        "| Qwen3-VL embedder + reranker (one 8B copy per chip) | 8.03 |\n"
-        "| Ornith-1.5-35B-A3B weights, four dies | 9.18 |\n"
-        "| Ornith KV pool (1,048,576 tokens) | 6.32 |\n"
-        "| **total after load** | **23.54** (warmup adds about 1 more on the 122B; about 5 GiB of margin) |\n\n"
-        "L1 held per core by Ornith-35B: 173.1 KiB (the 8B programs fit next to the 122B's 254.3 KiB on hardware). "
-        "Expected speed: Ornith at its single-model p300x2 speed while the 8B models are idle, as measured for the "
-        "122B co-host package (no co-host cost while the others are idle)."),
+        "Measured on one QuietBox 2 (4x Blackhole p300c), 2026-11-06, profile `ornith35b-vision`, all three members "
+        "loaded, warm. Ornith: up to 128 output tokens per request, streamed, greedy.\n\n"
+        "| | other members idle | while 8 Ornith streams decode |\n| --- | ---: | ---: |\n"
+        "| Ornith-1.5-35B-A3B, 1 user | 212.5 tok/s, TTFT 0.12 s | |\n"
+        "| Ornith-1.5-35B-A3B, 8 users | 839 tok/s total (107 tok/s per user), TTFT 1.13 s | |\n"
+        "| Embedder, 1 query | 0.066 s | 0.137 s |\n"
+        "| Embedder, 64 documents | 0.64 s | 0.70 s |\n"
+        "| Embedder, 1 page image (612x792) | 0.15 s | 0.21 s |\n"
+        "| Reranker, 30 documents | 0.47 s | 0.50 s |\n"
+        "| Reranker, 8 page images | 1.60 s | 1.93 s |\n\n"
+        "When the embedder or reranker runs, the models take turns: Ornith's decode pauses for each 8B pass.\n\n"
+        "| | value |\n| --- | ---: |\n"
+        "| DRAM per chip after boot | 24.87 GiB (Qwen3-VL pair with both vision towers 8.55, Ornith weights 9.18, "
+        "Ornith KV 6.32, warm-up and traces 0.82) |\n"
+        "| L1 held per core | 177.6 KiB |\n"
+        "| Ready time, warm caches | about 6 min |"),
     "status": (
-        "- **Not yet validated on hardware.** Checked device-free: the group loads on a mock 4-chip mesh (the 8B pair "
-        "first, then Ornith's weights and KV pool); the mock stops at Ornith's warmup, whose ring all-reduce needs the "
-        "QuietBox 2's board-to-board wraparound link the mock topology lacks. The runtime, the 8B adapter and the "
-        "Ornith serve settings are the ones validated on hardware in raahemnabeel/cohost-ornith-122b-qwen3vl.\n"),
+        "- **Validated on hardware (2026-11-06), profile `ornith35b-vision`.** Page-image embeddings vs the "
+        "single-model embedder package: cosine mean 0.9948 (min 0.9879) on 12 FinanceBench and UniDoc pages, each "
+        "page nearest its own reference vector (next best 0.28). Text embeddings: cosine mean 0.9995 on 12 chunks. "
+        "Reranker on page images: a passage from one page as the query against 8 page images, its page first 8/8. "
+        "Ornith: greedy outputs identical 8/8 with the 8B models idle and with images flowing through both the whole "
+        "time; images from 40x40 to 4000x5000 px served; 0 programs compiled after trace capture. Not run: evals, "
+        "the soak, the -lean profile.\n"),
 }
 
 TRACE_REGION = 1792 * 2**20          # Ornith's 768 MiB + 1 GiB for the Qwen3-VL text traces (T <= 4096)
@@ -157,13 +168,15 @@ def profiles(size: str) -> tuple:
                         "(text-only embedder and reranker)."},
         {"name": f"ornith{size}-lean", "hardware": "p300x2", "mesh_device": "P300x2",
          "env": {**common, "QWEN35_MAX_TOKENS_ALL_USERS": str(lean_kv), "QWEN3VL_COHOST_PRECISION": "p3_mlp_bfp4_lofi"},
-         "description": "The default with the 8B models' MLP weights in bfp4 (about 2.6 GiB per chip less), and that "
+         "description": "The text profile with the 8B models' MLP weights in bfp4 (about 2.6 GiB per chip less), and that "
                         "DRAM given to Ornith's KV pool. Use if the default runs out of DRAM; embeddings and rerank "
                         "scores change slightly."},
         {"name": f"ornith{size}-vision", "hardware": "p300x2", "mesh_device": "P300x2",
          "env": {**common, "QWEN3VL_COHOST_VISION": "1"},
-         "description": "EXPERIMENTAL: the default plus both 8B vision towers (image inputs to the embedder and "
-                        "reranker), tensor-parallel over the four chips."},
+         "description": ("The text profile plus both 8B vision towers (image inputs to the embedder and reranker, one "
+                         "image per input), tensor-parallel over the four chips." if size in VISION_VALIDATED else
+                         "EXPERIMENTAL: the default plus both 8B vision towers (image inputs to the embedder and "
+                         "reranker, one image per input), tensor-parallel over the four chips.")},
         {"name": f"ornith{size}-solo", "hardware": "p300x2", "mesh_device": "P300x2", "env": dict(common),
          "description": "Validation baseline: Ornith alone in the co-host runtime, with the group's settings."},
         {"name": "qwen3vl-solo", "hardware": "p300x2", "mesh_device": "P300x2", "env": dict(common),
@@ -240,8 +253,14 @@ def card(size: str, repo: str, image_tag: str) -> dict:
                        "precision policy (`p0_bfp8_hifi2`); the single-model reranker package defaults to LoFi MLPs "
                        "(`p1_mlp_lofi`), so its scores can differ slightly. Pairs are capped at 8,192 tokens (the "
                        "single-model reranker serves 32,768).\n"
-                       "- Text only for the embedder and reranker by default (an image input gets HTTP 400); the "
-                       f"`ornith{size}-vision` profile is experimental. Ornith itself accepts images.\n"
+                       + (f"- Images: the embedder and reranker take one image per input (page images, photos up to "
+                          "1,800 visual tokens); image sets and videos get HTTP 400, since their vision tables would "
+                          "compile programs after the shared chips' traces. Image inputs run one pair per pass, "
+                          f"untraced. The `ornith{size}` profile is text-only (an image gets HTTP 400). Ornith itself "
+                          "accepts images.\n" if size in VISION_VALIDATED else
+                          "- Text only for the embedder and reranker by default (an image input gets HTTP 400); the "
+                          f"`ornith{size}-vision` profile is experimental (validated on the 35B package). Ornith "
+                          "itself accepts images.\n") +
                        "- Each model keeps its own license: Ornith-1.5 MIT, Qwen3-VL-Embedding/Reranker Apache-2.0."),
         "license": {"id": "other", "name": "MIT (Ornith-1.5) and Apache-2.0 (Qwen3-VL-Embedding-8B, Qwen3-VL-Reranker-8B)"},
     }
@@ -271,7 +290,7 @@ def manifest(size: str, repo: str, image_tag: str, digest: str) -> dict:
             },
             "serve": {"port": BASE_PORT},
             "serve_profiles": sp,
-            "default_profile": f"ornith{size}",
+            "default_profile": f"ornith{size}-vision" if size in VISION_VALIDATED else f"ornith{size}",
             "verify": ["import tt_kernel.cohost.launch, cohost_qwen3vl.member, qwen_vl_utils"],
             "built": {"image": image_tag, "repo": repo,
                       "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
