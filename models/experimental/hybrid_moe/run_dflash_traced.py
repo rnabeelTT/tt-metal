@@ -145,7 +145,7 @@ def main():
             embed,
             None,
             None,
-            cmax=int(os.environ.get("DFLASH_CMAX", "4096")),
+            cmax=int(os.environ.get("DFLASH_CMAX", "2048")),
             rows=R,
             tp=os.environ.get("DFLASH_TP", "1") == "1",
         )
@@ -180,11 +180,11 @@ def main():
         prompts = prompts_v2.HELDOUT[start : start + int(os.environ.get("POC_PROMPTS", "2"))]
         long_n = int(os.environ.get("POC_LONG", "0") or 0)
         if long_n:  # a long prompt (TTFT / prefill at length): held-out texts repeated to ~long_n tokens
-            texts = json.load(open("/poc/runs/m27/texts_held.json"))  # name -> token ids (chat-formatted)
-            body = "\n\n".join(tok.decode(t, skip_special_tokens=True) for t in texts.values())
-            reps = max(1, long_n // max(1, len(tok.encode(body))) + 1)
-            text = tok.decode(tok.encode((body + "\n\n") * reps)[:long_n])
-            prompts.append(text + "\n\nSummarize the text above in three sentences.")
+            # a realistic long input: source files of this repo (POC_LONG_FILES), cut to ~long_n tokens
+            files = os.environ.get("POC_LONG_FILES", "/poc/hybrid/patch.py,/poc/run_dflash_traced.py,/poc/dflash_tt.py")
+            body = "\n\n".join(f"# file: {os.path.basename(f)}\n" + open(f).read() for f in files.split(","))
+            text = tok.decode(tok.encode(body)[:long_n])
+            prompts.append("Here is some Python code:\n\n" + text + "\n\nExplain what this code does, file by file.")
         for p_text in prompts:
             chat = tok.apply_chat_template(
                 [{"role": "user", "content": p_text}], add_generation_prompt=True, enable_thinking=False, tokenize=False
@@ -212,14 +212,69 @@ def main():
                 for li in dr.taps:
                     model.layers[li].forward = orig[li]
             print(f"TAPCHUNKS P={P} " + str([tuple(c.shape) for c in captured[dr.taps[0]]]), flush=True)
-            feats = torch.cat([torch.cat([c.reshape(-1, H) for c in captured[li]])[:P] for li in dr.taps], dim=-1)
-            W = int(os.environ.get("DFLASH_WINDOW", str(dr.cmax // 2)))  # drafter context window (sliding)
-            hist = feats[-W:].clone()  # host copy of the last W context features (refills)
-            if P + dr.rows + dr.bs + 8 > dr.cmax:
+            # the prefill layer outputs are REPLICATED ([.., H] per die): the mesh concat holds tp copies side by side
+            feats = torch.cat(
+                [torch.cat([c.reshape(-1, c.shape[-1])[:, :H] for c in captured[li]])[:P] for li in dr.taps], dim=-1
+            )
+            # drafter context window (sliding): the drafter's acceptance falls with its context (window_oracle.py on an 8K
+            # prompt: 2.03 tokens/pass at 1024, 1.47 at 4096, 1.10 with the whole context), so it sees the last W only
+            W = int(os.environ.get("DFLASH_WINDOW", "1024"))
+            hist = [feats[-W:].clone()]  # host copies of the context features (refills), concatenated only then
+            n_hist = hist[0].shape[0]
+            if P > W:
                 dr.fill_prompt(feats[-W:], start=P - W)
             else:
                 dr.fill_prompt(feats)
             n_refill = 0
+            save_all = [feats.to(torch.float16)] if os.environ.get("DFLASH_SAVE_CTX") == "1" else None
+            t_first = int(torch.as_tensor(logits0).reshape(-1, logits0.shape[-1])[-1, :V].argmax())
+            if os.environ.get("DFLASH_LONGCHECK") == "1" and P > 1000:  # captured prefill rows vs a verify pass
+                for k, c in enumerate(captured[dr.taps[2]]):
+                    w = c.reshape(-1, c.shape[-1])
+                    parts = [w[:, d * H : (d + 1) * H] for d in range(w.shape[-1] // H)]
+                    print(
+                        f"LONGCHECK chunk {k}: die copies max diff "
+                        f"{max(float((parts[0] - q).abs().max()) for q in parts[1:]) if len(parts) > 1 else 0:.4f} "
+                        f"row norm mean {float(parts[0].norm(dim=-1).mean()):.2f}",
+                        flush=True,
+                    )
+                ver.stage(ids[P - R : P], list(range(P - R, P)), page_table)
+                ver.run()  # eager (no trace yet): rewrites the same K / V of the last R prompt positions
+                vt = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)
+                for j in range(len(dr.taps)):
+                    a_, b_ = vt[:, j * H : (j + 1) * H], feats[P - R :, j * H : (j + 1) * H]
+                    pc = float(torch.corrcoef(torch.stack([a_.flatten(), b_.flatten()]))[0, 1])
+                    print(
+                        f"LONGCHECK tap {dr.taps[j]}: verify vs captured prefill rows pcc {pc:.4f} "
+                        f"norms {float(a_.norm(dim=-1).mean()):.1f} / {float(b_.norm(dim=-1).mean()):.1f}",
+                        flush=True,
+                    )
+            if os.environ.get("DFLASH_LONGCHECK") == "1" and P > 1000:  # eager drafter vs the CPU reference here
+                dr.stage_pass([], t_first)
+                d_eager = dr.pass_body()
+                d_eager = read_argmax(mesh, d_eager, int(ttnn.get_device_tensors(dr.lm_head)[0].shape[-1]))[1:4]
+                from safetensors.torch import load_file
+                from transformers import Qwen3Config
+
+                from dflash_ref import DFlashDraftModel
+
+                cfg = Qwen3Config.from_pretrained(snap)
+                cfg._attn_implementation = "eager"
+                cpu = DFlashDraftModel(cfg).to(torch.bfloat16).eval()
+                cpu.load_state_dict(load_file(f"{snap}/model.safetensors"), strict=False)
+                head = ref_m27.get("lm_head.weight")
+                with torch.no_grad():
+                    blk = torch.tensor([t_first] + [cpu.mask_token_id] * (cpu.block_size - 1))
+                    hh = cpu(
+                        position_ids=torch.arange(P + cpu.block_size)[None],
+                        noise_embedding=torch.nn.functional.embedding(blk, embed)[None],
+                        target_hidden=feats.to(torch.bfloat16)[None],
+                    )
+                d_cpu = (hh[0, 1:].float() @ head.float().T).argmax(-1).tolist()[:3]
+                print(f"LONGCHECK P={P} eager {d_eager} cpu {d_cpu}", flush=True)
+                del cpu, head
+                dr.reset()
+                dr.fill_prompt(feats)
             # the traces are captured per prompt, after its eager prefill: eager device work after trace replays hung
             # the next replay (the second prompt's first drafter pass, 2026-11-06)
             ttnn.synchronize_device(mesh)
@@ -246,7 +301,9 @@ def main():
                     ver.release()
                     for name in list(dr.traces):
                         ttnn.release_trace(mesh, dr.traces.pop(name))
-                    dr.fill_prompt(hist[-W:], start=pos - min(W, hist.shape[0]))
+                    hist = [torch.cat(hist)[-W:]]
+                    n_hist = hist[0].shape[0]
+                    dr.fill_prompt(hist[0], start=pos - n_hist)
                     prev_acc = []
                     ttnn.synchronize_device(mesh)
                     dr.capture("pass", dr.pass_body)
@@ -263,8 +320,16 @@ def main():
                 while a < K and drafts[a] == top[a]:
                     a += 1
                 acc_hist[a] += 1
+                if os.environ.get("DFLASH_LONGCHECK") == "1" and passes < 6:
+                    print(f"PASS {passes} pos {pos} t {t} drafts {drafts} top {top} accept {a}", flush=True)
                 rows_h = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)[: a + 1]
-                hist = torch.cat([hist, rows_h])[-W:]
+                hist.append(rows_h)
+                n_hist += rows_h.shape[0]
+                if save_all is not None:
+                    save_all.append(rows_h.to(torch.float16))
+                if n_hist > 2 * W:  # bound the host copy
+                    hist = [torch.cat(hist)[-W:]]
+                    n_hist = W
                 out += [t] + drafts[:a]
                 prev_acc = list(range(pos, pos + a + 1))
                 t = top[a]
@@ -278,6 +343,11 @@ def main():
             for name in list(dr.traces):
                 ttnn.release_trace(mesh, dr.traces.pop(name))
             dr.outs = {}
+            if save_all is not None:  # the whole context's features and tokens, for offline drafter studies
+                torch.save(
+                    {"feats": torch.cat(save_all), "tokens": list(ids) + out, "P": P},
+                    os.path.join(out_dir, f"ctx_{len(res['runs'])}.pt"),
+                )
             out = out[:NEW]
             r = {
                 "prompt": p_text[:80],
