@@ -64,6 +64,16 @@ def install():
             os.environ.setdefault("QWEN35_FB_CONSUMER", "0")
     for k, v in _ENV_ON.items():
         os.environ.setdefault(k, v)
+    if os.environ.get("HYB_FETCH_ASYNC") == "1":  # the async fetch writes on CQ1: every mesh opens with two queues
+        import ttnn
+
+        _open = ttnn.open_mesh_device
+
+        def open_mesh_device(*a, **kw):
+            kw.setdefault("num_command_queues", 2)
+            return _open(*a, **kw)
+
+        ttnn.open_mesh_device = open_mesh_device
     from . import patch, seg
 
     seg.install()  # segmented decode traces (host step between per-layer segments)

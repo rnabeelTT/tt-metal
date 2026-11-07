@@ -137,6 +137,7 @@ class Verify:
         return out
 
     def run(self):
+        HYB.fetch.commit(HYB.slot_of)  # async fetch: last pass's CQ1 writes land before this pass reads the slots
         if self.trace is not None:
             ttnn.execute_trace(self.mesh, self.trace, cq_id=0, blocking=False)
             outs = self.outs

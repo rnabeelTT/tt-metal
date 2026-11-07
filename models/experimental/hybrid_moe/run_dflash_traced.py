@@ -46,7 +46,13 @@ def main():
     out_dir = sys.argv[1]
     os.makedirs(out_dir, exist_ok=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=96_000_000)
+    ncq = 2 if os.environ.get("HYB_FETCH_ASYNC") == "1" else 1  # CQ1: the async fetch writes
+    mesh = ttnn.open_mesh_device(
+        ttnn.MeshShape(1, 4),
+        l1_small_size=24576,
+        trace_region_size=96_000_000,
+        num_command_queues=ncq,
+    )
     res = {"runs": []}
     try:
         dr = load_drafter(mesh, K + 1)
@@ -80,14 +86,18 @@ def main():
             print(f"WARMUP done ({r['tok_s']} tok/s)", flush=True)
         # POC_FETCH_SWEEP="f:F,f:F": the prompts once per fetch setting (fraction f of the misses, at most F per layer and
         # step), in this process (direct fetch: both are plain attributes; the LRU keeps its contents across settings)
-        sweep = [tuple(c.split(":")) for c in os.environ.get("POC_FETCH_SWEEP", "").split(",") if c]
-        runs = [(float(f), int(F)) for f, F in sweep] or [None]
-        if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F in runs)):
+        # "f:F:a" = the same with the asynchronous CQ1 fetch (HYB_FETCH_ASYNC; the mesh is opened with 2 CQs then)
+        sweep = [c.split(":") for c in os.environ.get("POC_FETCH_SWEEP", "").split(",") if c]
+        runs = [(float(c[0]), int(c[1]), len(c) > 2 and c[2] == "a") for c in sweep] or [None]
+        if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F, _ in runs)):
             raise ValueError(f"POC_FETCH_SWEEP {runs} needs direct fetch and F <= HYB_LRU ({HYB.fetch.D})")
         jobs = [(cfg, p) for cfg in runs for p in prompts]
         for cfg, p_text in jobs:
             if cfg is not None:
-                HYB.fetch.f, HYB.fetch.F = cfg
+                HYB.fetch.commit(HYB.slot_of)  # writes of an async setting land before the mode changes
+                HYB.fetch.f, HYB.fetch.F, HYB.fetch.async_on = cfg
+                if cfg[2] and ncq < 2:
+                    raise ValueError("an async fetch setting needs HYB_FETCH_ASYNC=1 (two command queues)")
             r = srv.generate(p_text, NEW, gen.page_table[:1])
             if cfg is not None:
                 r["fetch"] = list(cfg)

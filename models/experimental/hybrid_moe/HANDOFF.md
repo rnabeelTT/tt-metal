@@ -37,6 +37,15 @@ Pieces (all traced, per-prompt re-capture):
   container) straight into their LRU slots (`pinx_write_at`, HYB_FETCH_DIRECT; before: staging + 6 in-trace
   `paged_fill_cache` per layer and pass); the CPU computes the rest on a worker thread. The per-layer crafted rows /
   host partial uploads also go zero-copy (`pin.PinnedRows`, HYB_PIN_UPLOADS).
+- Host step findings (2026-11-07, bench_pinx.py + timers): a Python worker thread's GIL hand-offs stalled the main
+  thread's device calls (pinned write 18 us -> 5 ms with a busy Python thread) -> CPU experts on hostk's C launcher
+  thread (HYB_HOSTK_ASYNC); with the int4 kernel streaming host DRAM a pinned write's enqueue takes ~390 us instead of
+  ~15 us -> fetch writes are enqueued before the CPU job starts; routing / crafting in C (HYB_CROUTE). 128K verify
+  ~56 -> ~50 ms/pass. CPU experts run at the host DRAM limit (~40 GB/s, 0.23 ms/expert; more threads +7%).
+- Fetch policy sweep (128K, runs/m27/r128k_sweep2, POC_FETCH_SWEEP): sync f=0.3 ~= f=0.5 (0.3 slightly better,
+  now the serving default); async CQ1 fetch (HYB_FETCH_ASYNC, experts resident from the next pass, the CPU computes all
+  this pass's misses) is SLOWER (verify 53-67 ms): device hits do not rise with more warming (~1300 of 1344 picks per
+  pass either way) and the CPU work doubles; CPU and PCIe share the same ~40 GB/s of host DRAM.
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the

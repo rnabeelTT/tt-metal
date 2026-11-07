@@ -20,7 +20,10 @@ miss, loaded from HYB_DEV_EXPERTS (build_dev_experts.py). Which misses to fetch:
 (FreeToken's recency rule; ties to the lower id); how many: f x misses, rounded stochastically and capped by F_MAX.
 
 env: HYB_LRU (D slots per layer, 0 = off), HYB_FETCH_FRAC (f, default 0.4), HYB_FETCH_MAX (F_MAX, default 2),
-HYB_DEV_EXPERTS (dir of <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin), HYB_FETCH_DIRECT (default 1 with HYB_PINX).
+HYB_DEV_EXPERTS (dir of <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin), HYB_FETCH_DIRECT (default 1 with HYB_PINX),
+HYB_FETCH_ASYNC (direct only, needs a second command queue): the fetch writes go on CQ1 and the fetched experts become
+resident from the NEXT pass (commit(): CQ0 waits for CQ1's writes before the pass's replay); this pass the CPU
+computes them with the other misses. The device never waits for a transfer, which overlaps the next segments.
 """
 
 from __future__ import annotations
@@ -58,6 +61,8 @@ class FetchCache:
         self.px = None
         self.direct = self.pinx_on and os.environ.get("HYB_FETCH_DIRECT", "1") == "1"
         self.rows = None  # pin.PinnedRows after finalize (HYB_PIN_UPLOADS)
+        self.async_on = self.direct and os.environ.get("HYB_FETCH_ASYNC", "0") == "1"
+        self.pending = []  # async: (layer, expert, slot) written on CQ1, resident after the next commit()
         self.mods = {}  # layer -> its fused MoE module (direct: the weights the fetched experts are written into)
         self.wdst = {}  # layer -> pinx destinations of its (up_gate, down) weights (direct)
         self.raw = {}  # layer -> (region id, {expert: index}, gate|up bytes per die, down bytes per die)
@@ -221,6 +226,18 @@ class FetchCache:
             "C": gs[1],
         }
 
+    def commit(self, slot_of):
+        """Async fetch, before a pass's replay (outside any capture): CQ0 waits for every write CQ1 has queued, then the
+        experts written since the last commit become resident (slot_of: HYB.slot_of, layer -> [E] slots)."""
+        if not self.pending:
+            return
+        ev = ttnn.record_event(self.mesh, cq_id=1)
+        ttnn.wait_for_event(0, ev)
+        for layer, e, s in self.pending:
+            if self.lru[layer].get(e) == s:  # not evicted again before the commit
+                slot_of[layer][e] = s
+        self.pending = []
+
     # -- device side (traced) -----------------------------------------------------------------------------------------
     def device_writes(self, mod):
         """The staged experts into their slots, then the sink back to zero (traced with the layer's experts)."""
@@ -261,7 +278,10 @@ class FetchCache:
                     s = lru.pop(victim)
                     slot_of[victim] = -1
                 lru[e] = s
-                slot_of[e] = s
+                if self.async_on:
+                    self.pending.append((layer, e, s))  # resident from the next pass on (commit)
+                else:
+                    slot_of[e] = s
                 fetched.append(e)
                 slots.append(s)
         stamp[picked] = self.step
@@ -279,8 +299,9 @@ class FetchCache:
             for e, s in zip(fetched, slots):
                 rid, og, od = self.raw_offsets(layer, e)
                 w0 = time.perf_counter()
-                self.px.write_at(dg, rid, og, s * ng, ng)
-                self.px.write_at(dd, rid, od, s * nd, nd)
+                cq = 1 if self.async_on else 0
+                self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
+                self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
                 st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
             st["fetched"] += len(fetched)
             st["t_fetch"] += time.perf_counter() - t0
