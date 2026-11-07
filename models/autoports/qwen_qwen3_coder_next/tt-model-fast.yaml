@@ -186,6 +186,26 @@ card:
     | p300 | 128 | 128 | 1 | 4 | 189 | 678 | 117.5 | 1.27 |
     | p300 | 1024 | 256 | 32 | 128 | 7,126 | 144 | 15.3 | 23.89 |
 
+    #### Prefill update (2026-11-07)
+
+    This revision prefills short prompts (up to 512 tokens) four at a time in one batched pass and spreads the MoE
+    expert dispatch over more cores (all profiles). Output is unchanged: greedy output matched token for token, one request
+    at a time and with eight concurrent requests, and the vLLM sampling conformance suite (74 tests) gives the same
+    results. Decode speed is unchanged. Measured 2026-11-07 on the published image, served as shipped; before = the same
+    build with both changes off. Random-token prompts, 128 output tokens, median TTFT over N requests. The tables below
+    were measured before this change; prompts over 512 tokens gain only from the dispatch change (the 2,048-token rows).
+
+    | Profile | Input tokens | Users | N | TTFT before -> after (ms) | Change |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 1 | 8 | 146 -> 150 | +3 % |
+    | p300x2 | 2,048 | 1 | 4 | 421 -> 356 | **-15 %** |
+    | p300x2 | 128 | 8 | 32 | 1,223 -> 876 | **-28 %** |
+    | p300x2 | 128 | 32 | 64 | 3,845 -> 2,264 | **-41 %** |
+    | p300 | 128 | 1 | 8 | 172 -> 162 | -6 % |
+    | p300 | 2,048 | 1 | 4 | 524 -> 448 | **-14 %** |
+    | p300 | 128 | 8 | 32 | 1,395 -> 972 | **-30 %** |
+    | p300 | 128 | 32 | 64 | 4,704 -> 2,784 | **-41 %** |
+
     #### p300x2
 
     Four-die rows measured on the previous revision, which differs only in the sampler top-k's index width (16 -> 32 bits, for two dies). This revision, same setup: 1 user 5.60 ms TPOT, real text 177.7 tok/s, 8 users 12.66 ms, 32 users 1024/256 52.7 ms.
