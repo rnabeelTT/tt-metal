@@ -114,12 +114,12 @@ serve_profiles:
     mesh_device: P300
     # the first two chips (on a 4-chip host: the two dies of the first board; fabric init needs every visible chip in
     # the mesh). A no-op on a single p300.
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
   - name: p150x2
     description: '`p300` on two p150 boards.'
     hardware: p150x2
     mesh_device: P150x2
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
 default_profile: p300x2
 
 verify:
