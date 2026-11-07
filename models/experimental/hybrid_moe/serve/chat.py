@@ -4,6 +4,7 @@
 usage: python serve/chat.py "your prompt" [max_tokens] [port]"""
 
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -12,7 +13,7 @@ prompt = sys.argv[1] if len(sys.argv) > 1 else "Explain in three sentences what 
 max_tokens = int(sys.argv[2]) if len(sys.argv) > 2 else 128
 port = sys.argv[3] if len(sys.argv) > 3 else "8000"
 body = {
-    "model": "qwen3.5-397b-hybrid",
+    "model": os.environ.get("MODEL", "minimax-m2.7-hybrid"),
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": max_tokens,
     "temperature": 0,
@@ -45,4 +46,6 @@ with urllib.request.urlopen(req, timeout=3600) as r:
                 print(piece, end="", flush=True)
 t1 = time.time()
 toks = (usage or {}).get("completion_tokens", n)
-print(f"\n\nTTFT {first - t0:.1f}s, decode {(toks - 1) / max(1e-6, t1 - first):.2f} tok/s, {toks} tokens, total {t1 - t0:.1f}s")
+print(
+    f"\n\nTTFT {first - t0:.1f}s, decode {(toks - 1) / max(1e-6, t1 - first):.2f} tok/s, {toks} tokens, total {t1 - t0:.1f}s"
+)

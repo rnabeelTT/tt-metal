@@ -28,6 +28,7 @@ class Pinx:
         lib.pinx_pin.argtypes = [vp, vp, u64]
         lib.pinx_dst.argtypes = [vp, u64, u64, u64]
         lib.pinx_write.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int]
+        lib.pinx_write_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_read.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64)]
         lib.pinx_dst_size.restype = u64
         lib.pinx_dst_size.argtypes = [ctypes.c_int]
@@ -53,6 +54,15 @@ class Pinx:
         tb = tile_bytes(tensor.dtype)
         return self.lib.pinx_dst(self.mp, tensor.buffer_address(), tiles * tb, tb), tiles * tb
 
+    def dst_rm(self, tensor):
+        """A destination view of an interleaved DRAM row-major bf16 tensor (one page per row)."""
+        shp = [int(v) for v in tensor.shape]  # per device
+        if "BFLOAT16" not in str(tensor.dtype):
+            raise ValueError(f"pinx: row-major destinations are bf16 here, got {tensor.dtype}")
+        page = shp[-1] * 2
+        size = int(np.prod(shp[:-1])) * page
+        return self.lib.pinx_dst(self.mp, tensor.buffer_address(), size, page), size
+
     def _offs(self, offsets):
         if len(offsets) != self.tp:
             raise ValueError(f"pinx: {len(offsets)} offsets for {self.tp} devices")
@@ -63,6 +73,15 @@ class Pinx:
         if rc != 0:
             raise RuntimeError(f"pinx_write returned {rc} (dst {dst}, region {region}, offsets {list(offsets)})")
 
+    def write_at(self, dst, region, offsets, dst_offset, size, cq_id=0):
+        """Region bytes [offsets[d], + size) into the destination's device-local bytes [dst_offset, + size)."""
+        rc = self.lib.pinx_write_at(self.mp, dst, region, self._offs(offsets), cq_id, int(dst_offset), int(size))
+        if rc != 0:
+            raise RuntimeError(
+                f"pinx_write_at returned {rc} (dst {dst}, region {region}, offsets {list(offsets)}, "
+                f"dst_offset {dst_offset}, size {size})"
+            )
+
     def read(self, dst, region, offsets):
         rc = self.lib.pinx_read(self.mp, dst, region, self._offs(offsets))
         if rc != 0:
@@ -71,3 +90,37 @@ class Pinx:
     def release(self):
         self.lib.pinx_release()
         self.keep = []
+
+
+class PinnedRows:
+    """Small replicated row-major bf16 uploads (the hybrid's crafted logits rows and host partial per layer) written
+    from slices of one pinned host region: no host tensor conversion, no copy into the command-queue hugepage. Each
+    (key, destination) owns its slice, rewritten only when the same key is uploaded again (the next pass of that layer,
+    after the device consumed the previous write)."""
+
+    def __init__(self, px, size=16 << 20):
+        self.px = px
+        self.rid, self.buf = px.region(size)
+        self.next = 0
+        self.slices = {}  # (key, destination address) -> host offset
+        self.dsts = {}  # destination address -> (pinx destination, bytes)
+
+    def put(self, key, dst, t):
+        """t: a torch bf16 tensor with the destination's per-device element count (replicated to every device)."""
+        addr = dst.buffer_address()
+        d = self.dsts.get(addr)
+        if d is None:
+            d = self.dsts[addr] = self.px.dst_rm(dst)
+        n = t.numel() * 2
+        if n != d[1]:
+            raise ValueError(f"PinnedRows: {n} bytes for a {d[1]}-byte destination {list(dst.shape)} (key {key})")
+        off = self.slices.get((key, addr))
+        if off is None:
+            off = self.slices[(key, addr)] = self.next
+            self.next += -(-n // 4096) * 4096
+            if self.next > len(self.buf):
+                raise RuntimeError(f"PinnedRows: region of {len(self.buf)} bytes is full ({len(self.slices)} slices)")
+        import torch
+
+        torch.from_numpy(self.buf[off : off + n]).view(torch.bfloat16).copy_(t.reshape(-1))
+        self.px.write(d[0], self.rid, [off] * self.px.tp)

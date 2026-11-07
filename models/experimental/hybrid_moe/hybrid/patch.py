@@ -1382,6 +1382,10 @@ def _put_host(self, B, host, put):
 
 
 def _put(self, dst, t, dt, lay):
+    rows = HYB.fetch.rows
+    if rows is not None and lay == ttnn.ROW_MAJOR_LAYOUT and dt == ttnn.bfloat16:  # pinned zero-copy (HYB_PIN_UPLOADS)
+        rows.put(self.layer_num, dst, t)
+        return
     t1 = time.perf_counter()
     h = ttnn.from_torch(t, dtype=dt, layout=lay, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device))
     HYB.st["t_up_conv"] += time.perf_counter() - t1

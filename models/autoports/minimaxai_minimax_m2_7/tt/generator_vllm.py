@@ -144,16 +144,31 @@ def _mtp_k_env() -> int:
     return 0
 
 
+def _ext_spec_env():
+    """QWEN35_EXT_SPEC="module:factory" + QWEN35_EXT_SPEC_K=k: an external single-user speculative step (e.g. the
+    hybrid-MoE DFlash drafter, models/experimental/hybrid_moe/dflash_serve.py) driven through MtpServing's single-user
+    interface; `factory(generator, k)` builds it. Returns (spec, k) or (None, 0)."""
+    spec = os.environ.get("QWEN35_EXT_SPEC", "")
+    if not spec:
+        return None, 0
+    k = int(os.environ.get("QWEN35_EXT_SPEC_K", "0"))
+    if ":" not in spec or k < 1:
+        raise ValueError(f"QWEN35_EXT_SPEC={spec!r} QWEN35_EXT_SPEC_K={k}: expected 'module:factory' and k >= 1")
+    return spec, k
+
+
 _MTP_K = _mtp_k_env()
+_EXT_SPEC, _EXT_SPEC_K = _ext_spec_env()
+_SPEC_K = _MTP_K or _EXT_SPEC_K
 # One source of truth for every consumer that reads the raw env (the model allocates the MTP bucket inputs behind
 # `QWEN35_MTP`): a server started WITHOUT the env (the bundle) crashed at the MTP warm-up with KeyError 'mtp_sel'
 # (2026-10-01 readiness relaunch) because the default-on decision lived only here.
 os.environ["QWEN35_MTP"] = str(_MTP_K)
-if _MTP_K > 0:
+if _SPEC_K > 0:
     # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin: import-time monkeypatches
     from models.autoports.minimaxai_minimax_m2_7.tt import mtp_plugin_shim
 
-    mtp_plugin_shim.apply(_MTP_K + 1)
+    mtp_plugin_shim.apply(_SPEC_K + 1)
 
 
 _VISION = False  # text-only checkpoint
@@ -187,7 +202,7 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
         # QWEN35_CHUNKED_PREFILL=1 (turn 7): prompts prefilled in scheduler chunks (whole 2048-token segments per step,
         # GDN state carried per request; doc/perf_pass/chunked_prefill_plan.md); off until validated
         "supports_chunked_prefill": os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1",
-        **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
+        **({"max_output_tokens_per_step": _SPEC_K + 1} if _SPEC_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
     # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
@@ -250,6 +265,14 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
             from models.autoports.minimaxai_minimax_m2_7.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
+        elif _EXT_SPEC is not None:
+            if B != 1:
+                raise ValueError(f"QWEN35_EXT_SPEC={_EXT_SPEC}: a single-user step needs --max-num-seqs 1 (got {B})")
+            import importlib
+
+            mod, fn = _EXT_SPEC.split(":")
+            self._mtp = getattr(importlib.import_module(mod), fn)(self._gen, _EXT_SPEC_K)
+            logger.info(f"external speculative step {_EXT_SPEC} (k={_EXT_SPEC_K}): {type(self._mtp).__name__}")
         if os.environ.get("QWEN35_FAULTHANDLER", "1") == "1":
             # `kill -USR1 <EngineCore pid>` dumps every thread's Python stack to the engine's stderr (the readiness
             # runner's server.log): the only introspection available for a host-side stall under vLLM (no ptrace).
@@ -408,8 +431,9 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
         self._gen.bind_kv_cache(kv, num_blocks, width)
         if self._mtp is not None:
             self._mtp.allocate_kv(shape, self._gen.kv_dtype)
-            hk = self._mtp.head.kv_cache[0]
-            logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
+            if hasattr(self._mtp, "head"):
+                hk = self._mtp.head.kv_cache[0]
+                logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
         logger.info(
             f"KV cache: vLLM {num_blocks} blocks (+1 scratch, {alloc_blocks} allocated) x {block} tokens, "
             f"{self._gen.kv_dtype}, {num_layers} attention layers, page-table width {width}"

@@ -12,12 +12,20 @@ multi-core for decode rows). Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, F
 Best config (128K): `FULL=20 LIB=/hyblib/minimax_m27_int4_s152 run_m27_dflash.sh <out> -e HYB_LRU=32
 -e HYB_FETCH_FRAC=0.5 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 -e HYB_STREAM_SLOTS=64`.
 
-Steady-state tok/s (no skipping; plain hybrid decode 17.2):
-| profile | full layers | short prompts | 8K-token code prompt |
-|---|---|---|---|
-| 128K | 20 | 32.6-37.3 | 27.8 |
-| 64K  | 36 | 39.0-39.7 (before the QK-norm fix) | 27.9 |
-| 32K  | 44 | 38.9-43.7 (before the QK-norm fix) | 30.2 |
+Steady-state tok/s (no skipping; plain hybrid decode 17.2), 128 tokens, held-out prompts zh / fr / es / Rust:
+| profile | full layers | verify ms/pass | zh | fr | es | Rust | 8K-token code prompt |
+|---|---|---|---|---|---|---|---|
+| 128K | 20 | ~56 | 30.2 | 38.6 | 36.3 | - | 27.1 |
+| 64K  | 36 | ~49.5 | 26.7 | 42.3 | 38.8 | 34.9 | 27.9 (older code) |
+| 32K  | 44 | ~45 | 38.6 | 49.2 | 48.2 | 39.7 | 30.2 (older code) |
+(64K / 32K: `runs/m27/r64k_v2`, `r32k_v2`, 2026-11-07; profile = `CTX=65536 FULL=36` / `CTX=32768 FULL=44`,
+HYB_STREAM_SLOTS=128.) Verify cost ~= 36.5 ms of device + ~0.46 ms of serial host work per hybrid layer.
+
+vLLM serving: `serve/serve_m27.sh` (env CTX 131072 / 65536 / 32768 picks FULL 20 / 36 / 44; SPEC=1 DFlash; DK drafts).
+The port's `generator_vllm` loads an external single-user speculative step through `QWEN35_EXT_SPEC=module:factory`
+(+ `QWEN35_EXT_SPEC_K`) with MtpServing's interface; `dflash_serve.py` `DFlashServing` is that step (and the
+standalone runner's). The plugin registers the port from `EXTRA_MODELS_DIR` (its `vllm_metadata.json`). Greedy only.
+Bench: `python serve/bench.py 128 8000`; chat: `serve/chat.py "prompt"`.
 
 Pieces (all traced, per-prompt re-capture):
 - DFlash (`dflash_tt.py` `DFlashDrafterPaged`, TP, paged K/V + paged SDPA-decode; 6-7 ms/draft); drafter context
@@ -26,7 +34,9 @@ Pieces (all traced, per-prompt re-capture):
 - `HYB_FULL_LAYERS` (`sim_full_layers.py`): layers that miss most hold all 256 experts (stock fused MoE).
 - `hybrid/fetch.py` (`HYB_LRU`): FreeToken-style split; fetched experts go zero-copy from pinned host memory
   (`hybrid/pin/pinx.cpp`, tt-metal experimental PinnedMemory; build: `hybrid/pin/build.sh` in an ubuntu:22.04
-  container) into LRU slots via in-trace `paged_fill_cache`; the CPU computes the rest on a worker thread.
+  container) straight into their LRU slots (`pinx_write_at`, HYB_FETCH_DIRECT; before: staging + 6 in-trace
+  `paged_fill_cache` per layer and pass); the CPU computes the rest on a worker thread. The per-layer crafted rows /
+  host partial uploads also go zero-copy (`pin.PinnedRows`, HYB_PIN_UPLOADS).
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the

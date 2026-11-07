@@ -70,26 +70,35 @@ int pinx_dst(void* mesh, uint64_t address, uint64_t size, uint64_t page_size) {
     return static_cast<int>(g_dsts.size() - 1);
 }
 
-// Device d of the mesh (row-major) <- region bytes [offsets[d], offsets[d] + size of the destination). Non-blocking:
-// the region must not change until the write completed (it never does: the library is read-only).
-int pinx_write(void* mesh, int dst, int region, const uint64_t* offsets, int cq_id) {
+// Device d of the mesh (row-major) <- region bytes [offsets[d], offsets[d] + size) into the destination's device-local
+// bytes [dst_offset, dst_offset + size) (size 0: the whole destination; dst_offset a multiple of its page size).
+// Non-blocking: the region must not change until the write completed.
+int pinx_write_at(
+    void* mesh, int dst, int region, const uint64_t* offsets, int cq_id, uint64_t dst_offset, uint64_t size) {
     auto& m = mesh_of(mesh);
     const auto& r = g_regions.at(region);
     const auto& buf = g_dsts.at(dst);
-    const uint64_t n = buf->device_local_size();
+    const uint64_t n = size ? size : buf->device_local_size();
+    if (dst_offset + n > buf->device_local_size() || dst_offset % buf->page_size() != 0) {
+        return -3;
+    }
     std::vector<dist::ShardDataTransfer> xfers;
     int i = 0;
     for (const auto& c : coords(m)) {
         if (offsets[i] + n > r.size) {
             return -2;
         }
-        auto x = dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(0, n));
+        auto x = dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(dst_offset, n));
         ttm::experimental::ShardDataTransferSetPinnedMemory(x, r.pinned);
         xfers.push_back(std::move(x));
         ++i;
     }
     m.mesh_command_queue(cq_id).enqueue_write_shards(buf, xfers, /*blocking=*/false);
     return 0;
+}
+
+int pinx_write(void* mesh, int dst, int region, const uint64_t* offsets, int cq_id) {
+    return pinx_write_at(mesh, dst, region, offsets, cq_id, 0, 0);
 }
 
 // Region bytes [offsets[d], ..) <- device d's destination buffer (raw device bytes, e.g. bfp4 tiles). Blocking.

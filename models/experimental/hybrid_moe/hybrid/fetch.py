@@ -7,7 +7,10 @@ stays until evicted, so a miss that recurs over the next steps (consecutive toke
 
 Slots per layer: [0, S) static (the plan's top S = C - 1 - D), [S, S + D) LRU, C - 1 the all-zero sink.
 
-Device side, per fused layer and step (inside the trace, after the host step that routed the layer): F_MAX
+Device side, direct (HYB_FETCH_DIRECT=1, default with HYB_PINX): the host step writes each fetched expert from its
+pinned host copy straight into its LRU slot of the layer's weights (one zero-copy PCIe write per weight, ordered on
+CQ0 ahead of the segment that computes the experts); nothing runs inside the trace and the sink is never written.
+Otherwise, per fused layer and step (inside the trace, after the host step that routed the layer): F_MAX
 paged_fill_cache writes of the model-wide staging buffers into the layer's [C, 1, H, W] views of its up_gate / down
 weights, at the slots in a device page table [F_MAX, 1] the host step wrote; staging rows with nothing to fetch point
 at the sink, which a last pair of writes from all-zero staging resets.
@@ -17,7 +20,7 @@ miss, loaded from HYB_DEV_EXPERTS (build_dev_experts.py). Which misses to fetch:
 (FreeToken's recency rule; ties to the lower id); how many: f x misses, rounded stochastically and capped by F_MAX.
 
 env: HYB_LRU (D slots per layer, 0 = off), HYB_FETCH_FRAC (f, default 0.4), HYB_FETCH_MAX (F_MAX, default 2),
-HYB_DEV_EXPERTS (dir of <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin).
+HYB_DEV_EXPERTS (dir of <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin), HYB_FETCH_DIRECT (default 1 with HYB_PINX).
 """
 
 from __future__ import annotations
@@ -53,6 +56,10 @@ class FetchCache:
         # fetch / stream writes read them straight over PCIe (no CPU memcpy into the command-queue hugepage)
         self.pinx_on = bool(self.dir) and os.environ.get("HYB_PINX", "1") == "1"
         self.px = None
+        self.direct = self.pinx_on and os.environ.get("HYB_FETCH_DIRECT", "1") == "1"
+        self.rows = None  # pin.PinnedRows after finalize (HYB_PIN_UPLOADS)
+        self.mods = {}  # layer -> its fused MoE module (direct: the weights the fetched experts are written into)
+        self.wdst = {}  # layer -> pinx destinations of its (up_gate, down) weights (direct)
         self.raw = {}  # layer -> (region id, {expert: index}, gate|up bytes per die, down bytes per die)
         self.shapes = None  # per-device ([1, 1, H, 2 Nl], [1, 1, Nl, H]) and dtypes of one expert (note_shapes)
 
@@ -124,7 +131,14 @@ class FetchCache:
             self.raw[L] = (rid, {e: i for i, e in enumerate(experts)}, ng, nd)
         ttnn.deallocate(conv_gu)
         ttnn.deallocate(conv_dn)
-        if self.dev is not None:
+        if os.environ.get("HYB_PIN_UPLOADS", "1") == "1":
+            from .pin import PinnedRows
+
+            self.rows = PinnedRows(px)  # the per-layer crafted rows / host partial uploads (patch._put)
+        if self.direct:
+            for L, mod in self.mods.items():
+                self.wdst[L] = (px.dst(mod.up_gate)[0], px.dst(mod.down)[0])
+        elif self.dev is not None:
             self.dev["pdst"] = [(px.dst(g)[0], px.dst(d)[0]) for g, d in zip(self.dev["gu"], self.dev["dn"])]
         if stream is not None and stream.dev is not None:
             sg, sd = stream.dev["stage"]
@@ -166,6 +180,9 @@ class FetchCache:
         staging on the first call."""
         ug, dn = mod.up_gate, mod.down
         gs, ds = [int(v) for v in ug.shape], [int(v) for v in dn.shape]
+        if self.direct:
+            self.mods[mod.layer_num] = mod
+            return
         mod._fetch_views = (ttnn.reshape(ug, [gs[1], 1, gs[2], gs[3]]), ttnn.reshape(dn, [ds[1], 1, ds[2], ds[3]]))
         if self.dev is not None:
             return
@@ -207,6 +224,8 @@ class FetchCache:
     # -- device side (traced) -----------------------------------------------------------------------------------------
     def device_writes(self, mod):
         """The staged experts into their slots, then the sink back to zero (traced with the layer's experts)."""
+        if self.direct:
+            return  # the host step wrote the fetched experts into their slots
         d = self.dev
         gv, dv = mod._fetch_views
         for j in range(self.F):
@@ -252,6 +271,18 @@ class FetchCache:
         """The fetched experts into the staging buffers and their slots into the page table (host -> device copies on
         CQ0, ahead of the segment that runs device_writes)."""
         t0 = time.perf_counter()
+        if self.direct:
+            if layer not in self.wdst:
+                raise RuntimeError(f"layer {layer}: direct fetch before finalize() (no pinned weight destinations)")
+            dg, dd = self.wdst[layer]
+            ng, nd = self.raw[layer][2], self.raw[layer][3]
+            for e, s in zip(fetched, slots):
+                rid, og, od = self.raw_offsets(layer, e)
+                self.px.write_at(dg, rid, og, s * ng, ng)
+                self.px.write_at(dd, rid, od, s * nd, nd)
+            st["fetched"] += len(fetched)
+            st["t_fetch"] += time.perf_counter() - t0
+            return
         d = self.dev
         for j, (e, s) in enumerate(zip(fetched, slots)):
             self.write_expert(layer, e, d["pdst"][j] if "pdst" in d else None, (d["gu"][j], d["dn"][j]))
