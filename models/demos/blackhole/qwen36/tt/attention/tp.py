@@ -1043,15 +1043,23 @@ class TPAttention:
                 if _masks is not None:
                     # One update call per row on the FULL sharded K / V: the kernel skips every user whose index is -1,
                     # so each call writes one row (no per-row slice / reshard: 2 ops per row instead of ~10).
+                    # per-row index tensors: shared by every layer when the caller built them once per pass
+                    # (rows_pos_rows: list of [B] int32, row b = -1 except position b), else sliced here
+                    _rows = getattr(self, "rows_pos_rows", None)
                     for b in range(B):
-                        pos_b = ttnn.reshape(ttnn.slice(_masks, (b, 0), (b + 1, B)), (B,))
+                        pos_b = (
+                            _rows[b]
+                            if _rows is not None
+                            else ttnn.reshape(ttnn.slice(_masks, (b, 0), (b + 1, B)), (B,))
+                        )
                         ttnn.experimental.paged_update_cache(
                             keys, k_sh, update_idxs_tensor=pos_b, page_table=page_table
                         )
                         ttnn.experimental.paged_update_cache(
                             values, v_sh, update_idxs_tensor=pos_b, page_table=page_table
                         )
-                        ttnn.deallocate(pos_b)
+                        if _rows is None:
+                            ttnn.deallocate(pos_b)
                     ttnn.deallocate(k_sh)
                     ttnn.deallocate(v_sh)
                 else:

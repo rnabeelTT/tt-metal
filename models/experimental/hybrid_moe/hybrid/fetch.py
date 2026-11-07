@@ -255,8 +255,13 @@ class FetchCache:
         d = self.dev
         for j, (e, s) in enumerate(zip(fetched, slots)):
             self.write_expert(layer, e, d["pdst"][j] if "pdst" in d else None, (d["gu"][j], d["dn"][j]))
-        pt = torch.full((self.F, 1), d["C"] - 1, dtype=torch.int32)  # unused rows: the sink (reset right after)
-        pt[: len(slots), 0] = torch.tensor(slots, dtype=torch.int32)
+        rows = tuple(slots) + (d["C"] - 1,) * (self.F - len(slots))  # unused rows: the sink (reset right after)
+        st["fetched"] += len(fetched)
+        if rows == d.get("pt_last"):  # the model-wide table already holds these slots (e.g. no fetch twice in a row)
+            st["t_fetch"] += time.perf_counter() - t0
+            return
+        d["pt_last"] = rows
+        pt = torch.tensor(rows, dtype=torch.int32).reshape(self.F, 1)
         ttnn.copy_host_to_device_tensor(
             ttnn.from_torch(
                 pt, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh)
@@ -264,4 +269,3 @@ class FetchCache:
             d["pt"],
         )
         st["t_fetch"] += time.perf_counter() - t0
-        st["fetched"] += len(fetched)

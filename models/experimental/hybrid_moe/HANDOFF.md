@@ -5,25 +5,39 @@ Read this first when resuming. Code: `~/FORK-tt-metal/models/experimental/hybrid
 Run data (`runs/`, `logs/`, `cache/`, `ref397/`) is gitignored. Formal plan: `docs/PLAN.md`; deviations under **Deviations**.
 The plugin fork `~/FORK-vllm-tt-plugin` has the same branch (no changes yet; the demo uses the image's plugin).
 
-## Current focus: MiniMax-M2.7 hybrid + DFlash (2026-11-06)
+## Current focus: MiniMax-M2.7 hybrid + DFlash (updated 2026-11-07)
 Goal: no skipping, a >=100K-context profile (128K target), max tok/s; shorter-context faster profiles allowed.
-Port: `models/autoports/minimaxai_minimax_m2_7` (copied from GLM-4.5-Air; full-width QK-norm in qwen36 `tp.py`).
-Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, FULL, LIB, PROMPTS, NEW) -> `run_dflash_traced.py`.
-- DFlash (`dflash_tt.py` `DFlashDrafterPaged`, TP over 4 dies, paged K/V + paged SDPA-decode, traced; 6-7 ms/pass;
-  matches the z-lab CPU reference 46/48 drafts). Verify = the port's 4-row decode, traced, tap layers all-gathered
-  into the drafter input. ~2.1-2.6 tokens/pass on chat prompts.
-- Trace rules learned: allocate persistent buffers (drafter) BEFORE the target's capture (freed trace intermediates
-  are reused and overwritten on replay); eager device work after trace replays hung the next replay -> traces are
-  released and re-captured per prompt (0.2 s).
-- Results at 128K context (tok/s steady state): plain hybrid decode 17.2; DFlash 19-21; + `HYB_FULL_LAYERS` 20
-  (layers 2-20,22,39,49 hold all 256 experts, stock fused MoE, no host step; `sim_full_layers.py`) 26.3
-  (30.5 / 31.74 GiB per die). HYB_DEVCRAFT for sigmoid routers: no gain (off). Kernels need slot counts % 64.
-- In progress: `HYB_LRU` fetch (`hybrid/fetch.py`, FreeToken policy: share f of misses copied into LRU slots by an
-  in-trace `paged_fill_cache` with a device page table, CPU computes the rest concurrently; sim -40% host time),
-  prefill streaming (`hybrid/stream.py`), host data from `build_dev_experts.py` (bfp4 per-die shards, 48 GB) +
-  `build_int4_library.py` HYB_LIB_COLD=plan:152 (54 GB).
-- Bug fixed 2026-11-06: prefill dummy picks pointed at slot 0 (scatter could overwrite the slot-0 expert's weight);
-  now the zero sink. Earlier teacher-forced quality numbers came through that path: re-measure.
+Port: `models/autoports/minimaxai_minimax_m2_7` (from GLM-4.5-Air; full-width QK-norm in qwen36 `tp.py`, sharded
+multi-core for decode rows). Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, FULL, LIB, PROMPTS, NEW).
+Best config (128K): `FULL=20 LIB=/hyblib/minimax_m27_int4_s152 run_m27_dflash.sh <out> -e HYB_LRU=32
+-e HYB_FETCH_FRAC=0.5 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 -e HYB_STREAM_SLOTS=64`.
+
+Steady-state tok/s (no skipping; plain hybrid decode 17.2):
+| profile | full layers | short prompts | 8K-token code prompt |
+|---|---|---|---|
+| 128K | 20 | 32.6-37.3 | 27.8 |
+| 64K  | 36 | 39.0-39.7 (before the QK-norm fix) | 27.9 |
+| 32K  | 44 | 38.9-43.7 (before the QK-norm fix) | 30.2 |
+
+Pieces (all traced, per-prompt re-capture):
+- DFlash (`dflash_tt.py` `DFlashDrafterPaged`, TP, paged K/V + paged SDPA-decode; 6-7 ms/draft); drafter context
+  window 1024 with refills (its acceptance falls with longer context: `window_oracle.py`); verify = the port's
+  4-row decode, tap layers all-gathered on device. ~2.0-2.6 tokens/pass.
+- `HYB_FULL_LAYERS` (`sim_full_layers.py`): layers that miss most hold all 256 experts (stock fused MoE).
+- `hybrid/fetch.py` (`HYB_LRU`): FreeToken-style split; fetched experts go zero-copy from pinned host memory
+  (`hybrid/pin/pinx.cpp`, tt-metal experimental PinnedMemory; build: `hybrid/pin/build.sh` in an ubuntu:22.04
+  container) into LRU slots via in-trace `paged_fill_cache`; the CPU computes the rest on a worker thread.
+- Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
+- `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
+- Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the
+  Qwen fused attn-decode op does not fit M2.7: per-head norm + gate), MoE kernels ~250 (near DRAM bandwidth for
+  up to 32 experts), QK-norm 110 -> ~20 us after the sharded fix. Profiling recipe: TT_METAL_DEVICE_PROFILER=1 with
+  a writable /opt/tt-metal/generated mount; aggregate profile_log_device.csv (cache/prof_seq.py; the stock
+  process_ops_logs.py breaks on this pandas).
+- Trace rules: allocate persistent buffers before the target's capture; no eager device work between replays
+  (re-capture per prompt / drafter refill).
+- Host knobs: vm.swappiness=10 set at runtime (sysctl, not persistent).
+- Bug fixed: prefill dummy picks pointed at slot 0 (scatter could overwrite the slot-0 expert); re-measure quality.
 
 ## Goal
 Serve Qwen3.5-397B-A17B (FP8 checkpoint, 512 experts/layer, top-10) on the QB2 (4× Blackhole p300c, 127 GiB) at batch 1:

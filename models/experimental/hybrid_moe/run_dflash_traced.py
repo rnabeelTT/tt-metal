@@ -76,6 +76,10 @@ class Verify:
         x = m.embd(m._decode_tokens_view(self.tok, BW))
         x = ttnn.to_memory_config(ttnn.reshape(x, (1, 1, BW, x.shape[-1])), DRAM)
         taps = []
+        # the per-row KV-write index tensors, once per pass for every layer (instead of slice + reshape per layer)
+        row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
+        for layer in m.layers:
+            layer.attention.rows_pos_rows = row_idx
         for li, layer in enumerate(m.layers):
             y = rows.layer_forward_rows(
                 layer,
@@ -92,6 +96,10 @@ class Verify:
                 taps.append(ttnn.all_gather(y, dim=3, topology=ttnn.Topology.Linear, memory_config=DRAM))
             ttnn.deallocate(x)
             x = y
+        for layer in m.layers:
+            layer.attention.rows_pos_rows = None
+        for t in row_idx:
+            ttnn.deallocate(t)
         cat = ttnn.concat(taps, dim=-1)  # [1, 1, BW, n_taps * H], replicated
         ttnn.copy(cat, self.dr.c_taps[R])
         for t in taps + [cat, cos, sin]:
