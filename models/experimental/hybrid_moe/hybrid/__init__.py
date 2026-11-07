@@ -48,6 +48,8 @@ def install():
         os.environ["QWEN35_MTP"] = str(mtp)
         # rows ops up to the MTP verify width; >= 2 for the one-row decode through the 2-row kernels (HYB_SINGLE_ROWS)
         os.environ["QWEN35_MOE_FUSED_ROWS_MAX"] = str(max(2, 1 << mtp.bit_length()) if mtp else 2)
+        if os.environ.get("HYB_ROWS"):  # multi-row verify width without the MTP head (e.g. DFlash: 4 rows)
+            os.environ["QWEN35_MOE_FUSED_ROWS_MAX"] = os.environ["HYB_ROWS"]
         if os.environ.get("HYB_BOUNDARY", "0") == "1":  # 397B full model: slower and degraded text (2026-11-04)
             # production decode boundary: replicated residual, fabric all-reduce + add + norm in one program, the
             # router matmul and the next layer's in-projection inside it (patch._forward_fused handles "fabric")

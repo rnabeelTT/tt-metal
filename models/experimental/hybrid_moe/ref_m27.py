@@ -7,7 +7,8 @@ next-token distribution (top-32 log-probs, NLL of the real next token) for later
 
 usage (host python_env, no device): python ref_m27.py <texts.json> <out dir>
 Writes <out dir>/routing.npz (names, ids [B, L, T, 8] uint8, w [B, L, T, 8] fp16) and ref_<name>.npz per sequence.
-env: REF_LAYERS (default all 62), REF_THREADS (default 16), HF_HUB (default ~/.cache/huggingface/hub).
+env: REF_LAYERS (default all 62), REF_THREADS (default 16), HF_HUB (default ~/.cache/huggingface/hub),
+REF_TAPS (comma list of layers whose outputs are saved as <out dir>/taps.pt [B, T, n, H] bf16, e.g. DFlash's taps).
 """
 
 import glob
@@ -110,6 +111,8 @@ def main():
     x = torch.nn.functional.embedding(ids, get("model.embed_tokens.weight"))
     pos = torch.arange(T).view(1, -1).expand(B, -1)
     pe = M.MiniMaxM2RotaryEmbedding(cfg)(x, pos)
+    taps = [int(t) for t in os.environ.get("REF_TAPS", "").split(",") if t]  # layers whose outputs to save
+    tap_out = torch.zeros(B, T, len(taps), cfg.hidden_size, dtype=torch.bfloat16) if taps else None
     for li in range(L):
         t0 = time.time()
         layer = load_layer(cfg, li)
@@ -124,10 +127,16 @@ def main():
 
         layer.mlp.gate.forward = rec
         x = layer(x, position_embeddings=pe, attention_mask=None, position_ids=pos)
-        print(f"layer {li} load {t1 - t0:.1f}s fwd {time.time() - t1:.1f}s |x| {x.float().norm(dim=-1).mean():.1f}",
-              flush=True)
+        if li in taps:
+            tap_out[:, :, taps.index(li)] = x
+        print(
+            f"layer {li} load {t1 - t0:.1f}s fwd {time.time() - t1:.1f}s |x| {x.float().norm(dim=-1).mean():.1f}",
+            flush=True,
+        )
         del layer
     np.savez(os.path.join(out_dir, "routing.npz"), names=np.array(names), ids=r_ids, w=r_w)
+    if taps:
+        torch.save({"names": names, "layers": taps, "taps": tap_out}, os.path.join(out_dir, "taps.pt"))
     if L < cfg.num_hidden_layers:
         return
     norm = M.MiniMaxM2RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
@@ -139,10 +148,17 @@ def main():
         nxt = ids[b, 1:]
         nll = -lp[:-1].gather(1, nxt[:, None])[:, 0]
         top = lp.topk(32, -1)
-        np.savez(os.path.join(out_dir, f"ref_{n}.npz"), top_ids=top.indices.numpy().astype(np.int32),
-                 top_lp=top.values.numpy().astype(np.float16), nll=nll.numpy(), acc=(lp[:-1].argmax(-1) == nxt).numpy())
-        print(f"REF {n} nll {float(nll.mean()):.3f} acc {float((lp[:-1].argmax(-1) == nxt).float().mean()):.3f}",
-              flush=True)
+        np.savez(
+            os.path.join(out_dir, f"ref_{n}.npz"),
+            top_ids=top.indices.numpy().astype(np.int32),
+            top_lp=top.values.numpy().astype(np.float16),
+            nll=nll.numpy(),
+            acc=(lp[:-1].argmax(-1) == nxt).numpy(),
+        )
+        print(
+            f"REF {n} nll {float(nll.mean()):.3f} acc {float((lp[:-1].argmax(-1) == nxt).float().mean()):.3f}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

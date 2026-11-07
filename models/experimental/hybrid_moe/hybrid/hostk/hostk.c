@@ -30,6 +30,9 @@
 #define MAXR 16
 #define MAXE 640
 #define MAXT 32
+#ifndef HOSTK_PF
+#define HOSTK_PF 0  // software prefetch distance in bytes ahead of the weight stream (0: off)
+#endif
 #define SPIN 2000  // ~50 us of pause before futex sleep: a longer spin starves the host step's other threads
 
 typedef struct {
@@ -100,6 +103,14 @@ static void gemv_block(
             const uint8_t* pl = w + (size_t)K * 16 + (size_t)g * gs * 16;
             const __m512i m15 = _mm512_set1_epi32(15), m3 = _mm512_set1_epi32(3);
             for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
+#if HOSTK_PF > 0
+                if (!(k & 1)) {  // one 64-byte line every two k (32 bytes per k in the torch pack)
+                    _mm_prefetch((const char*)(p + HOSTK_PF), _MM_HINT_T0);
+                    if (layout == 1) {
+                        _mm_prefetch((const char*)(pl + HOSTK_PF), _MM_HINT_T0);
+                    }
+                }
+#endif
                 __m512 f[4];
                 if (layout == 0) {
                     __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));

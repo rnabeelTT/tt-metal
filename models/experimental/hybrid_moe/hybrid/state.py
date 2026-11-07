@@ -172,3 +172,37 @@ class HybridStateDict(StreamingStateDict):
             self._down_stash[li] = dn_t
             return gu_t
         return dn_t
+
+
+def hybrid_fused_state_dict(port, checkpoint_dir, *, resident_fn):
+    """The port's own ``StreamingStateDict`` (it already fuses per-expert checkpoints and dequantizes FP8), with the
+    fused routed experts of each layer restricted to that layer's RESIDENT experts in slot order (id -1: an all-zero
+    expert, the fused hybrid's sink slot), and ``expert(li, e)`` for host compute without an int4 library."""
+    import importlib
+
+    base = importlib.import_module(f"models.autoports.{port}.tt.weights").StreamingStateDict
+
+    class _Hybrid(base):
+        def _fused_experts(self, layer_idx, which):
+            per = self._experts[layer_idx]
+            ids = list(resident_fn(layer_idx))
+            real = [e for e in ids if e >= 0]
+            if which == "gate_up_proj":
+                one = lambda e: torch.cat(
+                    [self._hf(per[(e, "gate_proj")]), self._hf(per[(e, "up_proj")])], 0
+                )  # noqa: E731
+            else:
+                one = lambda e: self._hf(per[(e, "down_proj")])  # noqa: E731
+            first = one(real[0])
+            out = torch.zeros((len(ids), *first.shape), dtype=first.dtype)
+            for slot, e in enumerate(ids):
+                if e >= 0:
+                    out[slot] = first if e == real[0] else one(e)
+            return out
+
+        def expert(self, li, e):
+            per = self._experts[li]
+            gu = torch.cat([self._hf(per[(e, "gate_proj")]), self._hf(per[(e, "up_proj")])], 0).to(torch.bfloat16)
+            return gu, self._hf(per[(e, "down_proj")]).to(torch.bfloat16)
+
+    return _Hybrid(checkpoint_dir)

@@ -5,6 +5,26 @@ Read this first when resuming. Code: `~/FORK-tt-metal/models/experimental/hybrid
 Run data (`runs/`, `logs/`, `cache/`, `ref397/`) is gitignored. Formal plan: `docs/PLAN.md`; deviations under **Deviations**.
 The plugin fork `~/FORK-vllm-tt-plugin` has the same branch (no changes yet; the demo uses the image's plugin).
 
+## Current focus: MiniMax-M2.7 hybrid + DFlash (2026-11-06)
+Goal: no skipping, a >=100K-context profile (128K target), max tok/s; shorter-context faster profiles allowed.
+Port: `models/autoports/minimaxai_minimax_m2_7` (copied from GLM-4.5-Air; full-width QK-norm in qwen36 `tp.py`).
+Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, FULL, LIB, PROMPTS, NEW) -> `run_dflash_traced.py`.
+- DFlash (`dflash_tt.py` `DFlashDrafterPaged`, TP over 4 dies, paged K/V + paged SDPA-decode, traced; 6-7 ms/pass;
+  matches the z-lab CPU reference 46/48 drafts). Verify = the port's 4-row decode, traced, tap layers all-gathered
+  into the drafter input. ~2.1-2.6 tokens/pass on chat prompts.
+- Trace rules learned: allocate persistent buffers (drafter) BEFORE the target's capture (freed trace intermediates
+  are reused and overwritten on replay); eager device work after trace replays hung the next replay -> traces are
+  released and re-captured per prompt (0.2 s).
+- Results at 128K context (tok/s steady state): plain hybrid decode 17.2; DFlash 19-21; + `HYB_FULL_LAYERS` 20
+  (layers 2-20,22,39,49 hold all 256 experts, stock fused MoE, no host step; `sim_full_layers.py`) 26.3
+  (30.5 / 31.74 GiB per die). HYB_DEVCRAFT for sigmoid routers: no gain (off). Kernels need slot counts % 64.
+- In progress: `HYB_LRU` fetch (`hybrid/fetch.py`, FreeToken policy: share f of misses copied into LRU slots by an
+  in-trace `paged_fill_cache` with a device page table, CPU computes the rest concurrently; sim -40% host time),
+  prefill streaming (`hybrid/stream.py`), host data from `build_dev_experts.py` (bfp4 per-die shards, 48 GB) +
+  `build_int4_library.py` HYB_LIB_COLD=plan:152 (54 GB).
+- Bug fixed 2026-11-06: prefill dummy picks pointed at slot 0 (scatter could overwrite the slot-0 expert's weight);
+  now the zero sink. Earlier teacher-forced quality numbers came through that path: re-measure.
+
 ## Goal
 Serve Qwen3.5-397B-A17B (FP8 checkpoint, 512 experts/layer, top-10) on the QB2 (4× Blackhole p300c, 127 GiB) at batch 1:
 the device holds the shared layers plus a cache of C experts per layer; missed experts are computed on the host CPU

@@ -11,6 +11,8 @@ Env (read at install):
   HYB_SKIP         routing-weight threshold: missed experts below it are dropped (default 0: none)
   HYB_PLAN_MIN_SCORE  plan counts only picks with routing weight >= this (default HYB_SKIP; needs recorded scores)
   HYB_SINGLE_ROWS  1 (default): one decode row runs the 2-row fused kernels (accuracy, see _kernel_rows)
+  HYB_FULL_LAYERS  comma list of layers that hold all E experts on the device and run the port's own MoE decode (no
+                   host step, no trace split): the device memory the host-heavy layers buy back (sim_full_layers.py)
   HYB_DEVCRAFT     1: the fused kernels' crafted logits rows are built on the device (_dc_craft), the host reads the
                    router logits without blocking and routes / computes the misses while the device runs the experts
                    (one host round trip per layer on the device's critical path instead of two)
@@ -24,6 +26,8 @@ Env (read at install):
   HYB_HOSTK        1 (default): one layer's missed experts in one call of the fused C kernel (hybrid/hostk; build it
                    on the host with `python -m hybrid.hostk`); 0: per-expert torch int4 matmuls
   HYB_HOSTK_THREADS threads of that kernel's pool (default 4: 2-4 saturate DRAM)
+  HYB_PLAN_WEIGHT  count (default) | mass: rank the plan's experts by picks or by summed routing weight
+  HYB_PORT         the patched autoport (default qwen_qwen3_5_122b_a10b; minimaxai_minimax_m2_7)
   HYB_LOWBIT       missed experts whose largest routing weight in the step is below this (and not skipped) read only
                    the top 2 bits of their int4 weights (hostk bit-plane layout: half the weight bytes, ~0.5 relative
                    output error instead of the 1.0 of skipping); 0 (default): every computed miss is full int4
@@ -46,12 +50,25 @@ import ttnn
 
 from . import hostk
 
+# The autoport the overlay patches (models/autoports/<HYB_PORT>/tt): the Qwen3.5-122B port (default, serving the 397B)
+# or a port of the same lineage, e.g. minimaxai_minimax_m2_7 (sigmoid + bias router, no shared expert).
+PORT = os.environ.get("HYB_PORT", "qwen_qwen3_5_122b_a10b")
+
+
+def _port(mod):
+    import importlib
+
+    return importlib.import_module(f"models.autoports.{PORT}.tt.{mod}")
+
 
 class HybridState:
     def __init__(self):
         self.E = None
         self.C = int(os.environ.get("HYB_SLOTS", "0") or 0)
         self.D = int(os.environ.get("HYB_DYN_SLOTS", "0") or 0)
+        # layers whose MoE holds all E experts on the device and runs the port's own decode (no host step)
+        self.full_layers = {int(v) for v in os.environ.get("HYB_FULL_LAYERS", "").split(",") if v.strip()}
+        self._full_build = False  # set while such a layer builds: its fused decode keeps the port's own router
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
@@ -67,6 +84,10 @@ class HybridState:
             os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip))
         )  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
+        # HYB_PLAN_WEIGHT: "count" (default: picks, thresholded by HYB_PLAN_MIN_SCORE) or "mass" (summed routed weight)
+        self.plan_weight = os.environ.get("HYB_PLAN_WEIGHT", "count")
+        if self.plan_weight not in ("count", "mass"):
+            raise ValueError(f"HYB_PLAN_WEIGHT={self.plan_weight}: expected count or mass")
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
         self.sd = None
@@ -79,6 +100,8 @@ class HybridState:
         self._freq = None
         self.crafted_rm = {}  # fused hybrid: rows -> the model-wide crafted logits rows (row-major DRAM), _fused_step1
         self.lib = {}  # layer -> future of the layer's host library
+        self.router_kind = "softmax"
+        self.sel_bias = {}  # layer -> [E] selection bias (sigmoid_bias routers)
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
         if self.hostk:
@@ -91,6 +114,13 @@ class HybridState:
         self.loader = ThreadPoolExecutor(max_workers=1)
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=int(os.environ.get("HYB_PREP_WORKERS", "2")))
+        from .fetch import FetchCache
+
+        self.fetch = FetchCache()  # HYB_LRU: fetched experts in LRU slots (hybrid/fetch.py)
+        self.cpu_pool = ThreadPoolExecutor(max_workers=1)  # HYB_LRU: the CPU experts run while the fetches copy
+        from .stream import PrefillStream
+
+        self.stream = PrefillStream(self.fetch)  # prefill: missed experts with enough tokens computed on the device
         self.record = None
         self.enabled = True
         self.reset_stats()
@@ -119,6 +149,10 @@ class HybridState:
             "host_experts": 0,
             "t_route": 0.0,
             "t_craft": 0.0,
+            "t_fetch": 0.0,
+            "fetched": 0,
+            "t_stream": 0.0,
+            "streamed": 0,
         }
 
     # -- static plan ----------------------------------------------------------------------------------------------
@@ -126,6 +160,14 @@ class HybridState:
         if layer in self.resident:
             return self.resident[layer]
         E, C = self.E, self.C
+        if layer in self.full_layers:  # every expert on the device, in id order
+            ids = list(range(E))
+            self.resident[layer] = ids
+            self.slot_of[layer] = np.arange(E, dtype=np.int32)
+            self.dyn_of[layer] = np.full(E, -1, dtype=np.int32)
+            self.dyn_lru[layer] = OrderedDict()
+            self.dyn_free[layer] = []
+            return ids
         if self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             z = np.load(self.plan_path)
             layers = [int(v) for v in z["layers"]]
@@ -135,20 +177,27 @@ class HybridState:
                     a = z[k]
                     # with scores (s<k>) and a threshold, count only the picks the host would compute on a miss
                     sk = "s" + k[1:]
-                    w = (
-                        (z[sk] >= self.plan_min_score).astype(np.float64)
-                        if (self.plan_min_score > 0 and sk in z.files)
-                        else np.ones(a.shape)
-                    )
+                    if self.plan_weight == "mass" and sk in z.files:  # rank by routed weight (sim_m27.py's order)
+                        w = z[sk].astype(np.float64)
+                    elif self.plan_min_score > 0 and sk in z.files:
+                        w = (z[sk] >= self.plan_min_score).astype(np.float64)
+                    else:
+                        w = np.ones(a.shape)
                     for li, L in enumerate(layers):
                         np.add.at(f[L], a[:, li, :].ravel(), w[:, li, :].ravel())
             self._freq = f
         n_real = C - 1 if self.fused else C  # fused: the last slot is the all-zero sink (expert id -1)
         if self._freq is not None and layer < self._freq.shape[0] and self._freq[layer].sum() > 0:
-            ids = list(np.argsort(-self._freq[layer], kind="stable")[:n_real])
+            rank = list(np.argsort(-self._freq[layer], kind="stable"))
         else:
-            ids = list(range(n_real))
-        ids = [int(i) for i in ids] + ([-1] if self.fused else [])
+            rank = list(range(E))
+        if self.fetch.on:  # static top C - 1 - D, then the D LRU slots (empty: zero experts), then the sink
+            if not self.fused:
+                raise ValueError("HYB_LRU needs the fused hybrid (HYB_FUSED=1)")
+            ids = self.fetch.plan_layer(layer, E, C, rank)
+            n_real = C - 1 - self.fetch.D
+        else:
+            ids = [int(i) for i in rank[:n_real]] + ([-1] if self.fused else [])
         self.resident[layer] = ids
         so = np.full(E, -1, dtype=np.int32)
         so[ids[:n_real]] = np.arange(n_real, dtype=np.int32)
@@ -176,13 +225,22 @@ class HybridState:
         """
         t0 = time.perf_counter()
         d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
+        # a library may hold a subset of the experts (build_int4_library.py HYB_LIB_COLD): file row of each expert id
+        pos = np.full(self.E, -1, dtype=np.int64)
+        lib_ids = d["experts"].numpy() if "experts" in d else np.arange(self.E)
+        pos[lib_ids] = np.arange(len(lib_ids))
         if not self.lib_resident:
             if self.lowbit > 0:
                 raise ValueError(f"HYB_LOWBIT={self.lowbit} needs the RAM-resident library (HYB_LIB_RESIDENT=1)")
-            d["row"] = np.arange(self.E, dtype=np.int64)
+            d["row"] = pos
             return d
         cold = np.flatnonzero(self.slot_of[layer] < 0) if layer in self.slot_of else np.arange(self.E)
-        idx = torch.from_numpy(cold)
+        if (pos[cold] < 0).any():
+            raise RuntimeError(
+                f"layer {layer}: experts {cold[pos[cold] < 0][:8].tolist()}... can miss on the device but are not in "
+                f"the host library {self.lib_dir} ({len(lib_ids)} experts)"
+            )
+        idx = torch.from_numpy(pos[cold])
         out = {k: d[k].index_select(0, idx).contiguous() for k in ("gu_p", "gu_sz", "dn_p", "dn_sz")}
         out["gs"] = d["gs"]
         if self.lowbit > 0:  # bit-plane layout, in place on the RAM copies (same bytes, read by hostk)
@@ -194,6 +252,40 @@ class HybridState:
         out["row"] = row
         self.st["t_lib_load"] += time.perf_counter() - t0
         return out
+
+    def host_prepare(self, layer, X, ids, sc, miss_mask):
+        """host_compute for a worker thread: the routing tensors and the kernel arguments built here (caller's
+        thread); returns (run, out): run() makes only the C call (no GIL), after which out [R, H] fp32 holds the
+        result. None when the int4 kernel does not apply (the caller falls back to host_compute)."""
+        R, H = X.shape
+        if not (self.hostk and self.lib_dir and R <= hostk.MAXR) or not miss_mask.any():
+            return None
+        out = torch.zeros(R, H, dtype=torch.float32)
+        lib = self.lib_layer(layer)
+        ex = torch.unique(ids[miss_mask])
+        rows = torch.from_numpy(lib["row"][ex.numpy()])
+        if (rows < 0).any():
+            raise RuntimeError(f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static")
+        W = ((ids[None] == ex[:, None, None]) & miss_mask[None]).float().mul_(sc.float()[None]).sum(-1)
+        lo = (W.amax(1) < self.lowbit).to(torch.int8) if lib.get("planar") else None
+        Xf = X.float().contiguous()
+        rows, W = rows.contiguous(), W.contiguous()
+        call = hostk.moe_prepared(lib, Xf, rows, W, out, lo=lo)
+        self.st["host_experts"] += len(ex)
+        self.st["lowbit"] += int(lo.sum()) if lo is not None else 0
+        keep = (Xf, rows, W, lo, lib)  # alive until the call has run (run.keep)
+
+        def run():
+            if run.keep is None:
+                raise RuntimeError("host_prepare: run() called twice")
+            t0 = time.perf_counter()
+            call()
+            self.st["t_host"] += time.perf_counter() - t0
+            run.keep = None  # the closure held the argument tensors (keep) until the call had run
+            return out
+
+        run.keep = keep
+        return run
 
     def host_compute(self, layer, X, ids, sc, miss_mask):
         """X [R, H] bf16, ids/sc [R, k], miss_mask [R, k] -> [R, H] fp32: the missed experts' weighted sum."""
@@ -327,19 +419,22 @@ def install():
     from .seg import SEG
 
     SEG.on_log = _log_stats
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import model_config as mc
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import moe as moe_mod
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import optimized_decoder as od
-
-    from .state import HybridStateDict
+    mc, moe_mod, od = _port("model_config"), _port("moe"), _port("optimized_decoder")
 
     def load_state_dict(self):
         HYB.E = int(self.num_experts)
         if not HYB.C or HYB.C > HYB.E:
             HYB.C = HYB.E
-        sd = HybridStateDict(
-            self.CKPT_DIR, linear_q_dim=self.linear_q_dim, linear_k_dim=self.linear_k_dim, resident_fn=HYB.plan
-        )
+        if PORT == "qwen_qwen3_5_122b_a10b":
+            from .state import HybridStateDict
+
+            sd = HybridStateDict(
+                self.CKPT_DIR, linear_q_dim=self.linear_q_dim, linear_k_dim=self.linear_k_dim, resident_fn=HYB.plan
+            )
+        else:
+            from .state import hybrid_fused_state_dict
+
+            sd = hybrid_fused_state_dict(PORT, self.CKPT_DIR, resident_fn=HYB.plan)
         HYB.sd = sd
         return sd
 
@@ -354,6 +449,15 @@ def install():
             orig_init(self, mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
             self._hyb_on = False
             return
+        if layer_num in HYB.full_layers:  # HYB_FULL_LAYERS: all experts on the device, the port's own forward
+            HYB.plan(layer_num)
+            HYB._full_build = True
+            try:
+                orig_init(self, mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
+            finally:
+                HYB._full_build = False
+            self._hyb_on = False
+            return
         HYB.plan(layer_num)
         if HYB.lib_dir and not HYB.defer_lib:
             HYB.lib_layer_async(layer_num)  # load this layer's host library while the rest of the model builds
@@ -364,6 +468,11 @@ def install():
             args.num_experts = E
         self.num_experts = HYB.C
         self.E_full = E
+        HYB.router_kind = getattr(args, "router_kind", "softmax")
+        if HYB.router_kind == "sigmoid_bias":  # the host's sigmoid + bias selection (_route_host) needs the bias
+            HYB.sel_bias[layer_num] = state_dict["gate.e_score_correction_bias"].float().numpy()
+        elif HYB.router_kind != "softmax":
+            raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax or sigmoid_bias")
         if int(self.router_w.shape[-1]) != E:
             raise RuntimeError(f"router width {self.router_w.shape} != E {E}")
         self._hyb_fused = False
@@ -379,6 +488,13 @@ def install():
         self._static_attrs = None
         self._dyn_attrs = None
         self._hyb_bufs = {}  # T -> persistent device buffers the host step writes (allocated before any capture)
+        if HYB.fetch.dir and self._hyb_fused:  # device-format copies of the experts that can miss (fetch, stream)
+            if HYB.fetch.on:
+                HYB.fetch.init_layer(self)
+            if HYB.stream.on:
+                HYB.stream.init(self)
+            missable = np.flatnonzero(HYB.slot_of[layer_num] < 0).tolist()
+            self._fetch_load = HYB.loader.submit(HYB.fetch.load_host, layer_num, missable)
         if HYB.D and HYB.C < E:
             D, tp, H, N, Nl = HYB.D, self.num_devices, self.hidden, self.inter, self.inter_local
             rep = ttnn.ReplicateTensorToMesh(mesh_device)
@@ -421,6 +537,25 @@ def install():
     f_orig = moe_fused.FusedMoEDecode.__init__
 
     def f_init(fself, mesh_device, args, *, num_experts, router_weight, shared_gate_weight, hidden, **kw):
+        if HYB._full_build:  # a HYB_FULL_LAYERS layer: the port's fused decode as is
+            return f_orig(
+                fself,
+                mesh_device,
+                args,
+                num_experts=num_experts,
+                router_weight=router_weight,
+                shared_gate_weight=shared_gate_weight,
+                hidden=hidden,
+                **kw,
+            )
+        if kw.get("router") == "sigb" and HYB.enabled and HYB.fused:
+            # the hybrid feeds the kernels crafted rows of log-weights, whose softmax top-k reproduces the model's
+            # normalized sigmoid weights (they sum to 1 over the top-k like softmax's); the host does the sigmoid + bias
+            # selection on the E-wide logits of the router built below
+            if router_weight is None:
+                raise ValueError("HYB_FUSED with a sigmoid-bias router needs the port to pass router_weight")
+            kw = {k: v for k, v in kw.items() if k not in ("selection_bias", "router_logits")}
+            kw["router"] = "softmax"
         E_true = int(router_weight.shape[0])
         f_orig(
             fself,
@@ -440,7 +575,8 @@ def install():
         ttnn.deallocate(fself.router_w)
         rw = torch.zeros(hidden, E_true + TILE_W)
         rw[:, :E_true] = router_weight.T.float()
-        rw[:, E_true] = shared_gate_weight.reshape(-1).float()
+        if shared_gate_weight is not None:  # no shared expert (MiniMax-M2): column E stays 0, never read
+            rw[:, E_true] = shared_gate_weight.reshape(-1).float()
         fself.router_w = ttnn.from_torch(
             rw,
             dtype=ttnn.bfloat16,
@@ -465,7 +601,7 @@ def install():
     moe_mod.Qwen35MoE.forward = _forward
     # prefill stays eager: the per-bucket prefill traces would capture the MoE host step (decode-only by design);
     # without a bucket trace the model's prefill falls back to its stock (eager) path
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import generator as gen_mod
+    gen_mod = _port("generator")
 
     gen_mod.Qwen35MoeGenerator._warm_prefill_traces = lambda self: None
     if HYB.defer_lib:
@@ -474,7 +610,7 @@ def install():
 
 def _install_mtp_head():
     """Start the deferred host-library loads (HybridState.defer_lib) once the MTP head is built and its state freed."""
-    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp as mtp_mod
+    mtp_mod = _port("mtp")
 
     h_orig = mtp_mod.Qwen35MtpHead.__init__
 
@@ -494,6 +630,22 @@ def _routed(self, x4, scores, ids, T, mode):
             return self._routed_gather(x4, scores, ids, T)
         return self._routed_masked(x4, scores, ids, T, chunk=32)
     return self._routed_masked(x4, scores, ids, T, chunk=self.PREFILL_CHUNK)
+
+
+def _routed_with(self, attrs, x4, sc, ids, T, mode):
+    """_routed over another expert tensor set (attrs: up_gate / down / ones_mask / num_experts and the per-set
+    dispatch caches), the layer's own restored after."""
+    own = {k: getattr(self, k, None) for k in attrs}
+    for k, v in attrs.items():
+        setattr(self, k, v)
+    try:
+        return _routed(self, x4, sc, ids, T, mode)
+    finally:
+        for k in ("_pairs_masks", "_dispatch"):
+            if k in attrs:
+                attrs[k] = getattr(self, k, None)
+        for k, v in own.items():
+            setattr(self, k, v)
 
 
 def _routed_dyn(self, x4, d_sc, d_ids, T, mode):
@@ -530,6 +682,15 @@ def _finish(self, out, orig, partial):
     if list(out.shape) != orig:
         out = ttnn.reshape(out, orig)
     return out
+
+
+def _plus_shared(self, routed, x4, free=True):
+    """routed + the shared expert; a port without one (``has_shared`` False, MiniMax-M2) returns routed itself."""
+    if not getattr(self, "has_shared", True):
+        return routed
+    if not free:
+        return ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    return _add(routed, self._shared(x4))
 
 
 def _add(a, b):
@@ -576,16 +737,26 @@ def _rm_buffer(mesh_device, rows, width):
     )
 
 
-def _route_host(self, lg, m):
+def _route_host(self, lg, m, ids=None):
     """True top-k routing of m rows from the E-wide logits lg [m, >= E] (numpy): ids / scores [m, k], each pick's
-    static slot, the resident mask and the host-computed misses (not skipped); updates the hit and skip counters."""
+    static slot, the resident mask and the host-computed misses (not skipped); updates the hit and skip counters.
+    ids: the selection made on the device (HYB_DEVCRAFT, sigmoid_bias), used as given."""
     E, k, L = HYB.E, self.top_k, self.layer_num
     t0 = time.perf_counter()
     z = lg[:, :E]
-    ids = np.argpartition(-z, k, axis=1)[:, :k]
-    zs = np.take_along_axis(z, ids, 1)
-    e = np.exp(zs - zs.max(1, keepdims=True))
-    sc = e / e.sum(1, keepdims=True)  # softmax over the top-k logits == softmax over all E, top-k, renormalized
+    if HYB.router_kind == "sigmoid_bias":  # MiniMax-M2 / GLM: select on sigmoid + bias, weight by normalized sigmoid
+        sg = 1.0 / (1.0 + np.exp(-z))
+        if ids is None:
+            ids = np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k]
+        elif (ids < 0).any() or (ids >= E).any():
+            raise RuntimeError(f"layer {L}: device-selected expert ids out of range: {ids.tolist()}")
+        sw = np.take_along_axis(sg, ids, 1)
+        sc = sw / sw.sum(1, keepdims=True)
+    else:
+        ids = np.argpartition(-z, k, axis=1)[:, :k]
+        zs = np.take_along_axis(z, ids, 1)
+        e = np.exp(zs - zs.max(1, keepdims=True))
+        sc = e / e.sum(1, keepdims=True)  # softmax over the top-k logits == softmax over all E, top-k, renormalized
     slot = HYB.slot_of[L][ids]
     res = slot >= 0
     miss = ~res
@@ -623,6 +794,12 @@ def _fused_step1(self, x, logits, B):
     lg = ttnn.to_torch(_die0(logits)).reshape(m, -1).float().numpy()
     HYB.st["t_read"] += time.perf_counter() - t0
     ids, sc, slot, res, miss = _route_host(self, lg, m)
+    fetch = None
+    if HYB.fetch.on:  # a share of the misses goes to LRU slots: resident from here on
+        fetch = HYB.fetch.choose(self.layer_num, ids, HYB.slot_of[self.layer_num])
+        slot = HYB.slot_of[self.layer_num][ids]
+        res = slot >= 0
+        miss = miss & ~res
     t0 = time.perf_counter()
     row = np.full((1, 1, m, C + TILE_W), HYB.filler, dtype=np.float32)
     row[..., C:] = 0.0
@@ -644,8 +821,13 @@ def _fused_step1(self, x, logits, B):
         xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
         B["job"] = _job(self, xh, ids, sc, miss)
+        if fetch is not None:  # the CPU experts run while the fetched ones copy (the worker only makes the C call)
+            run = HYB.host_prepare(*B["job"])
+            B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
     else:
         B["job"] = None
+    if fetch is not None:
+        HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
 
 
 def _job(self, xh, ids, sc, miss):
@@ -689,6 +871,16 @@ def _dc_consts(self):
     sinkhot = torch.zeros(1, C + TILE_W)
     sinkhot[0, C - 1] = 1.0
     rep = ttnn.ReplicateTensorToMesh(self.device)
+    sbias = None
+    if HYB.router_kind == "sigmoid_bias":  # selection bias, FP32 (the selection compares sigmoids ~1e-3 apart)
+        sbias = ttnn.from_torch(
+            torch.from_numpy(HYB.sel_bias[L]).float().reshape(1, 1, 1, E),
+            dtype=ttnn.float32,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=rep,
+        )
     c = self._dc = {
         k: ttnn.from_torch(
             v.reshape(1, 1, *v.shape).to(torch.bfloat16),
@@ -700,6 +892,7 @@ def _dc_consts(self):
         )
         for k, v in (("P", P), ("bias", bias), ("keep", keep), ("nonres", nonres), ("sinkhot", sinkhot))
     }
+    c["sbias"] = sbias
     return c
 
 
@@ -710,6 +903,8 @@ def _dc_craft(self, logits, m, mk):
     exp(z - mx)) (mx = the largest logit), column C the shared-expert gate logit. Returns the L1 tile [1, 1, mk, C+32].
     """
     c = _dc_consts(self)
+    if HYB.router_kind == "sigmoid_bias":
+        return _dc_craft_sigmoid(self, c, logits, m, mk)
     E, k = HYB.E, self.top_k
     dram = ttnn.DRAM_MEMORY_CONFIG
     zE = ttnn.slice(logits, [0, 0, 0, 0], [1, 1, m, E])
@@ -762,13 +957,70 @@ def _dc_craft(self, logits, m, mk):
     return out
 
 
-def _dc_read(self, x, logits, B):
+def _dc_craft_sigmoid(self, c, logits, m, mk):
+    """HYB_DEVCRAFT for a sigmoid + bias router (MiniMax-M2): per row, select the top k of sigmoid(z) + bias (FP32),
+    weight by sigmoid(z) normalized over the k. The crafted rows: ln(sigmoid(z)) at each selected resident expert's
+    slot, the sink = ln(sum of sigmoid(z) over the selected misses), filler elsewhere, column C = logit column E (0
+    without a shared expert): the kernels' softmax over those entries is sigmoid(z) / (sum over the k) for every
+    resident pick (the sink takes the missed share). Returns (crafted L1 tile [1, 1, mk, C+32], the selected expert
+    ids [1, 1, m, k] row-major: the host routes the misses from the SAME selection, never its own ranking)."""
+    E, k = HYB.E, self.top_k
+    dram = ttnn.DRAM_MEMORY_CONFIG
+    zE = ttnn.slice(logits, [0, 0, 0, 0], [1, 1, m, E])  # FP32
+    sg = ttnn.sigmoid(zE)
+    ttnn.deallocate(zE)
+    sel = ttnn.add(sg, c["sbias"])
+    vals, idx = ttnn.topk(sel, k=k, dim=-1, largest=True, sorted=True)
+    t = ttnn.slice(vals, [0, 0, 0, k - 1], [1, 1, m, k])
+    ttnn.deallocate(vals)
+    cond = ttnn.ge(sel, t)
+    ttnn.deallocate(sel)
+    ttnn.deallocate(t)
+    # sink: ln(sum of the selected misses' sigmoids)
+    sgm = ttnn.where(cond, sg, 0.0)
+    ms = ttnn.sum(ttnn.mul(sgm, ttnn.typecast(c["nonres"], ttnn.float32)), dim=-1, keepdim=True)
+    ttnn.deallocate(sgm)
+    sink = ttnn.typecast(ttnn.log(ttnn.add(ms, 1e-30)), ttnn.bfloat16)
+    ttnn.deallocate(ms)
+    # selected experts: ln(sigmoid), the rest filler; the padding columns (E: 0 without a shared expert) as they are
+    lsg = ttnn.log(sg)
+    ttnn.deallocate(sg)
+    zm = ttnn.where(cond, lsg, HYB.filler)
+    ttnn.deallocate(cond)
+    ttnn.deallocate(lsg)
+    pad = ttnn.slice(logits, [0, 0, 0, E], [1, 1, m, E + TILE_W])
+    full = ttnn.typecast(ttnn.concat([zm, pad], dim=-1), ttnn.bfloat16)
+    ttnn.deallocate(zm)
+    ttnn.deallocate(pad)
+    f = self._fused
+    slots = ttnn.matmul(full, c["P"], compute_kernel_config=f.router_ckc, memory_config=dram)
+    ttnn.deallocate(full)
+    sb = ttnn.add(slots, c["bias"])
+    ttnn.deallocate(slots)
+    st = ttnn.mul(sink, c["sinkhot"])
+    ttnn.deallocate(sink)
+    l1 = ttnn.L1_MEMORY_CONFIG
+    if mk == m:
+        out = ttnn.add(sb, st, memory_config=l1)
+    else:
+        one = ttnn.add(sb, st, memory_config=dram)
+        out = ttnn.concat([one] * (mk // m), dim=2, memory_config=l1)
+        ttnn.deallocate(one)
+    ttnn.deallocate(sb)
+    ttnn.deallocate(st)
+    ids = ttnn.to_layout(idx, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
+    ttnn.deallocate(idx)
+    return out, ids
+
+
+def _dc_read(self, x, logits, B, ids=None):
     """HYB_DEVCRAFT host step 1: queue the reads of the router logits and the MoE input rows (row-major DRAM) and
-    return at once, so the experts are queued right behind them."""
+    return at once, so the experts are queued right behind them. ids: the device's selection (sigmoid_bias)."""
     t0 = time.perf_counter()
     B["dc"] = (
         ttnn.from_device(logits, blocking=False),
         ttnn.from_device(x, blocking=False),
+        ttnn.from_device(ids, blocking=False) if ids is not None else None,
         ttnn.record_event(self.device, 0),
     )
     HYB.st["t_read"] += time.perf_counter() - t0
@@ -777,13 +1029,16 @@ def _dc_read(self, x, logits, B):
 def _dc_step2(self, B):
     """HYB_DEVCRAFT host step 2 (the device runs the resident experts meanwhile): wait for the reads, route, compute
     the misses, write the host partial (_host_step2)."""
-    h_lg, h_x, ev = B.pop("dc")
+    h_lg, h_x, h_ids, ev = B.pop("dc")
     m = int(B["shapes"]["T"])
     t0 = time.perf_counter()
     ttnn.event_synchronize(ev)
     lg = ttnn.to_torch(ttnn.get_device_tensors(h_lg)[0]).reshape(m, -1).float().numpy()
+    sel = None
+    if h_ids is not None:
+        sel = ttnn.to_torch(ttnn.get_device_tensors(h_ids)[0]).reshape(m, -1)[:, : self.top_k].long().numpy()
     HYB.st["t_read"] += time.perf_counter() - t0
-    ids, sc, slot, res, miss = _route_host(self, lg, m)
+    ids, sc, slot, res, miss = _route_host(self, lg, m, ids=sel)
     if miss.any():
         xh = ttnn.to_torch(ttnn.get_device_tensors(h_x)[0]).reshape(m, -1).to(torch.bfloat16)
         B["job"] = _job(self, xh, ids, sc, miss)
@@ -804,11 +1059,20 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     dram = ttnn.DRAM_MEMORY_CONFIG
     if logits is None:
         logits = ttnn.linear(
-            x4, f.router_w, compute_kernel_config=f.router_ckc, program_config=f.router_pc, memory_config=dram
+            x4,
+            f.router_w,
+            compute_kernel_config=f.router_ckc,
+            program_config=f.router_pc,
+            memory_config=dram,
+            # sigmoid + bias selection compares sigmoid values ~1e-3 apart: FP32 logits, as the model computes them
+            dtype=ttnn.float32 if HYB.router_kind == "sigmoid_bias" else None,
         )
     m = int(x4.shape[-2])
     mk = _kernel_rows(m)
     crafted = _dc_craft(self, logits, m, mk) if HYB.devcraft else None
+    dc_ids = None
+    if isinstance(crafted, tuple):
+        crafted, dc_ids = crafted
     # the host step reads one row of each (row-major, DRAM: they stay allocated for the trace's life, no live L1)
     lg_rm = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     ttnn.deallocate(logits)
@@ -816,7 +1080,7 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     B = _fused_bufs(self, m)
     h_x = ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
     if HYB.devcraft:  # reads queued behind the router, the experts right behind them; the host routes meanwhile
-        step1 = lambda: _dc_read(self, h_x, logits, B)  # noqa: E731
+        step1 = lambda: _dc_read(self, h_x, logits, B, dc_ids)  # noqa: E731
         step2 = lambda: _dc_step2(self, B)  # noqa: E731
     elif HYB.overlap:  # host experts in a second step, while the device runs the fused experts
         step1 = lambda: _fused_step1(self, h_x, logits, B)  # noqa: E731
@@ -825,6 +1089,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         step1 = lambda: (_fused_step1(self, h_x, logits, B), _host_step2(self, B))  # noqa: E731
         step2 = None
     step1() if not SEG.capturing else SEG.split(step1)
+    if HYB.fetch.on:  # the experts staged by step 1 into their LRU slots (and the sink back to zero)
+        HYB.fetch.device_writes(self)
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
     # the kernels read the crafted rows as an L1 BF16 tile (their face reads need L1 alignment: never a DRAM tile)
     if crafted is None:
@@ -851,6 +1117,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
         ttnn.deallocate(logits)
         ttnn.deallocate(h_x)
+        if dc_ids is not None:
+            ttnn.deallocate(dc_ids)
     host = ttnn.to_layout(B["host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
         if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
@@ -914,6 +1182,8 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     from .seg import SEG
 
     if not getattr(self, "_hyb_on", True):
+        if partial is False and logits is None:  # ports whose MoE forward takes only (x, mode) (MiniMax-M2)
+            return _orig_forward(self, x, mode=mode)
         return _orig_forward(self, x, mode=mode, partial=partial, logits=logits)
 
     orig = list(x.shape)
@@ -931,7 +1201,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         routed = _routed(self, x4, scores, ids, T, mode)
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
-        return _finish(self, _add(routed, self._shared(x4)), orig, partial)
+        return _finish(self, _plus_shared(self, routed, x4), orig, partial)
 
     if SEG.capturing and mode == "prefill":
         raise RuntimeError(f"layer {self.layer_num}: prefill MoE inside a trace capture (prefill must stay eager)")
@@ -948,7 +1218,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
             routed = ttnn.add(
                 routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode), memory_config=ttnn.DRAM_MEMORY_CONFIG
             )
-        out = ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        out = _plus_shared(self, routed, x4, free=False)
         if HYB.overlap:
             SEG.split(lambda: _host_step2(self, B))  # host experts run while the segment above executes
         out = ttnn.add(out, B["host"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
@@ -969,7 +1239,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
             routed = ttnn.add(
                 routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode), memory_config=ttnn.DRAM_MEMORY_CONFIG
             )
-        out = ttnn.add(routed, self._shared(x4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        out = _plus_shared(self, routed, x4, free=False)
         out = ttnn.add(out, B["host"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
@@ -978,13 +1248,24 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     t1 = time.perf_counter()
     n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
     n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
+    s_ids = s_sc = None
+    if dec.get("stream") is not None:
+        experts, sidx, ssc = dec["stream"]
+        s_ids = _upload_like(self, sidx, ids, torch.int32)
+        s_sc = _upload_like(self, ssc, scores, torch.bfloat16)
     ttnn.deallocate(ids)
     ttnn.deallocate(scores)
     HYB.st["t_up"] += time.perf_counter() - t1
     routed = _routed(self, x4, n_sc, n_ids, T, mode)
     ttnn.deallocate(n_sc)
     ttnn.deallocate(n_ids)
-    out = _add(routed, self._shared(x4))
+    if s_ids is not None:  # the streamed experts: the same routed call over the staging weights
+        HYB.stream.upload(self.layer_num, experts, HYB.st)
+        r2 = _routed_with(self, self._stream_attrs, x4, s_sc, s_ids, T, mode)
+        ttnn.deallocate(s_sc)
+        ttnn.deallocate(s_ids)
+        routed = _add(routed, r2)
+    out = _plus_shared(self, routed, x4)
     if bool(dec["host"].abs().sum() > 0):
         t0 = time.perf_counter()
         shp = [int(s) for s in out.shape]
@@ -1106,6 +1387,8 @@ def _host_step2(self, B):
         if B.get("host_zero"):
             return
         host = torch.zeros(1, B["shapes"]["H"], dtype=torch.float32)
+    elif hasattr(job, "result"):  # started in step 1 (HYB_LRU)
+        host = job.result()
     else:
         host = HYB.host_compute(*job)
     t0 = time.perf_counter()
@@ -1209,6 +1492,13 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         HYB.st["skipped"] += int(drop.sum())
         HYB.st["skipped_mass"] += float(sch[:valid][drop].sum())
         v_miss = v_miss & ~drop
+    stream = None
+    if mode == "prefill" and HYB.stream.on and bool(v_miss.any()):
+        stream = HYB.stream.plan(L, idh[:valid], v_miss)
+        if stream is not None:  # these picks run on the device from the staging (hybrid/stream.py)
+            smask, sidx, experts = stream
+            v_miss = v_miss & ~smask
+            stream = (experts, sidx, torch.where(smask, sch[:valid], torch.zeros_like(sch[:valid])))
     if bool(v_miss.any()):
         t1 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
@@ -1218,7 +1508,10 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     else:
         job = None
         host = torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
-    z = torch.zeros_like(s_slot)
+    # non-resident picks need SOME index: the all-zero sink slot when there is one (fused: C - 1), never a real
+    # expert's slot. The prefill routing matrix is a scatter of (index, score) per pick, and a zero-score pick aimed at
+    # slot 0 could overwrite a real pick of the slot-0 expert in the same row.
+    z = torch.full_like(s_slot, HYB.C - 1 if HYB.fused else 0)
     zf = torch.zeros_like(sch)
     return {
         "ids": torch.where(in_s, s_slot, z),
@@ -1227,4 +1520,5 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         "dsc": torch.where(in_d, sch, zf),
         "host": host,
         "job": job,
+        "stream": stream,
     }

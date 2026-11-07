@@ -53,7 +53,27 @@ def planarize(p, inverse=False):
         raise RuntimeError(f"hostk_planarize returned {rc} (shape {tuple(p.shape)})")
 
 
+def moe_prepared(lib_t, X, rows, W, out, lo=None):
+    """moe() split for threads: the checks and the argument list here (the caller's thread, holding the GIL), the
+    returned zero-argument function only makes the C call (ctypes releases the GIL for it). The tensors must stay
+    alive until it has run."""
+    import functools
+
+    args = _moe_args(lib_t, X, rows, W, out, lo)
+    return functools.partial(_call, args, X.shape, rows.numel())
+
+
+def _call(args, shape, n):
+    rc = _lib.hostk_moe(*args)
+    if rc != 0:
+        raise RuntimeError(f"hostk_moe returned {rc} (R, H = {tuple(shape)}, E={n})")
+
+
 def moe(lib_t, X, rows, W, out, lo=None):
+    _call(_moe_args(lib_t, X, rows, W, out, lo), X.shape, rows.numel())
+
+
+def _moe_args(lib_t, X, rows, W, out, lo=None):
     """out [R, H] fp32 += the weighted experts: X [R, H] fp32, rows [E] int64 (library rows), W [E, R] fp32
     (0 = row does not use the expert). lib_t: the layer's gu_p / gu_sz / dn_p / dn_sz / gs tensors (contiguous),
     with "planar" set once planarize() ran on gu_p / dn_p. lo [E] int8 (bit-plane layout only): 1 = that expert
@@ -71,7 +91,7 @@ def moe(lib_t, X, rows, W, out, lo=None):
     for t in (X, rows, W, out) + ((lo,) if lo is not None else ()):
         if not t.is_contiguous():
             raise ValueError("hostk.moe: non-contiguous input")
-    rc = _lib.hostk_moe(
+    return (
         R,
         H,
         I,
@@ -88,5 +108,3 @@ def moe(lib_t, X, rows, W, out, lo=None):
         lib_t["dn_sz"].data_ptr(),
         out.data_ptr(),
     )
-    if rc != 0:
-        raise RuntimeError(f"hostk_moe returned {rc} (R={R} H={H} I={I} E={rows.numel()})")

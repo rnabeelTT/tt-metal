@@ -30,7 +30,9 @@ if os.environ.get("POC_PROMPT_SET"):  # prompts_v2: "train", "heldout" or "all" 
     PROMPTS = {"train": prompts_v2.TRAIN, "heldout": prompts_v2.HELDOUT, "all": prompts_v2.TRAIN + prompts_v2.HELDOUT}[
         os.environ["POC_PROMPT_SET"]
     ]
-from models.autoports.qwen_qwen3_5_122b_a10b.tt.generator import build_generator  # noqa: E402
+from hybrid.patch import PORT, _port  # noqa: E402
+
+build_generator = _port("generator").build_generator
 
 N_PROMPTS = int(os.environ.get("POC_PROMPTS", "2"))
 PROMPT_START = int(os.environ.get("POC_PROMPT_START", "0"))  # held-out prompts: start past the plan's
@@ -49,7 +51,7 @@ def main():
         if os.environ.get("POC_LAYERS"):
             kw["layer_indices"] = [int(i) for i in os.environ["POC_LAYERS"].split(",")]
         gen = build_generator(
-            "models/autoports/qwen_qwen3_5_122b_a10b",
+            f"models/autoports/{PORT}",
             mesh,
             max_seq_len=int(os.environ.get("POC_MAX_SEQ", "2048")),
             warm_decode_trace=os.environ.get("POC_TRACE") == "1",

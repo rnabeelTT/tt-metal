@@ -5,6 +5,7 @@ P=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); cd "$P" && mkdir -p "$O" logs
   --device /dev/tenstorrent --ipc host \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   -v $HOME/.cache/huggingface:/hf -v $P:/poc -v $P/cache:/cache -v $HOME/.cache/hybrid-moe:/hyblib \
+  ${FORK:+-v $HOME/FORK-tt-metal/models:/opt/tt-metal/models} \
   --user "$(id -u):$(id -g)" -w /opt/tt-metal \
   -e ARCH_NAME=blackhole -e HF_MODEL=${HF_MODEL:-Qwen/Qwen3.5-122B-A10B} -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e TT_METAL_LOGGER_LEVEL=Error -e HOME=/tmp \
