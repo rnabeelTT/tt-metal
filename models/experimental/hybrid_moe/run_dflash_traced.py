@@ -186,7 +186,13 @@ def main():
             body = "\n\n".join(f"# file: {os.path.basename(f)}\n" + open(f).read() for f in files.split(","))
             text = tok.decode(tok.encode(body)[:long_n])
             prompts.append("Here is some Python code:\n\n" + text + "\n\nExplain what this code does, file by file.")
-        for p_text in prompts:
+        # warm-up (POC_WARMUP tokens, default 64, 0 = off): one throwaway generation first, so the measured prompts
+        # see filled LRU slots and touched pinned / locked host pages (a serving process does this at startup)
+        warm_n = int(os.environ.get("POC_WARMUP", "64"))
+        if warm_n:
+            prompts = ["Write a haiku about the sea."] + prompts
+        for pi, p_text in enumerate(prompts):
+            n_new = warm_n if (warm_n and pi == 0) else NEW
             chat = tok.apply_chat_template(
                 [{"role": "user", "content": p_text}], add_generation_prompt=True, enable_thinking=False, tokenize=False
             )
@@ -295,7 +301,7 @@ def main():
             HYB.reset_stats()
             pos, prev_acc = P, []
             t1 = time.time()
-            while len(out) < NEW:
+            while len(out) < n_new:
                 a0 = time.perf_counter()
                 if dr.need_refill():  # the window is full: refill from the last W features (traces re-captured)
                     ttnn.synchronize_device(mesh)
@@ -385,6 +391,9 @@ def main():
             }
             print("DFLASHT " + json.dumps({k: v for k, v in r.items() if k != "text"}), flush=True)
             print("TEXT " + json.dumps(r["text"][:300]), flush=True)
+            if warm_n and pi == 0:
+                print(f"WARMUP done ({r['tok_s']} tok/s)", flush=True)
+                continue
             res["runs"].append(r)
             json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
     finally:
