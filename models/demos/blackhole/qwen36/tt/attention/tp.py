@@ -508,6 +508,8 @@ class TPAttention:
         normalized by the global statistic with its gamma slice (rms_norm_post_all_gather)."""
         qd, kd = self.NH * self.HD, self.NKV * self.HD
         sh = list(qkv.shape)
+        if sh[2] <= 32 and self.args.num_devices > 1 and os.environ.get("QK_NORM_SHARDED", "1") == "1":
+            return self._full_qk_norm_sharded(qkv, qd, kd, sh)
         parts = []
         for lo, hi, gamma in ((0, qd, self.tw["q_norm_full"]), (qd, qd + kd, self.tw["k_norm_full"])):
             x = ttnn.slice(qkv, (0, 0, 0, lo), (sh[0], sh[1], sh[2], hi), memory_config=ttnn.DRAM_MEMORY_CONFIG)
@@ -530,6 +532,56 @@ class TPAttention:
             ttnn.deallocate(stats)
             ttnn.deallocate(x)
         v = ttnn.slice(qkv, (0, 0, 0, qd + kd), (sh[0], sh[1], sh[2], sh[3]), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        out = ttnn.concat([parts[0], parts[1], v], dim=-1, memory_config=qkv.memory_config())
+        for t in (parts[0], parts[1], v, qkv):
+            ttnn.deallocate(t)
+        return out
+
+    def _qk_shard_cfg(self, width):
+        """Width-sharded L1 layout + sharded-layernorm program for a [.., <= 32 rows, width] decode slice: the norm's
+        statistics and normalization then run on several cores (the DRAM-interleaved distributed norm runs a one-row
+        slice on 1-2 cores: ~110 us of a 4-row M2.7 layer step)."""
+        cache = self.__dict__.setdefault("_qk_shard_cfgs", {})
+        if width in cache:
+            return cache[width]
+        tiles = width // 32
+        ncores = next(c for c in (16, 12, 8, 6, 4, 3, 2, 1) if tiles % c == 0)
+        gx = next(x for x in (8, 6, 4, 3, 2, 1) if ncores % x == 0)
+        grid = ttnn.CoreGrid(y=ncores // gx, x=gx)
+        mem = ttnn.create_sharded_memory_config(
+            shape=(1, 1, 32, width), core_grid=grid, strategy=ttnn.ShardStrategy.WIDTH
+        )
+        per = tiles // ncores
+        prog = ttnn.LayerNormShardedMultiCoreProgramConfig(
+            compute_with_storage_grid_size=(gx, ncores // gx), subblock_w=per, block_h=1, block_w=per, inplace=False
+        )
+        stats = ttnn.create_sharded_memory_config(
+            shape=[1, 1, 32, 32 * self.args.num_devices],
+            core_grid=ttnn.CoreGrid(y=1, x=1),
+            strategy=ttnn.ShardStrategy.WIDTH,
+        )
+        cache[width] = (mem, prog, stats)
+        return cache[width]
+
+    def _full_qk_norm_sharded(self, qkv, qd, kd, sh):
+        """_full_qk_norm for decode rows (<= 32): q and k each width-sharded over several cores for the distributed
+        RMSNorm (rms_norm_pre_all_gather -> all_gather of the stats -> rms_norm_post_all_gather)."""
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        parts = []
+        for lo, hi, gamma in ((0, qd, self.tw["q_norm_full"]), (qd, qd + kd, self.tw["k_norm_full"])):
+            mem, prog, smem = self._qk_shard_cfg(hi - lo)
+            x = ttnn.slice(qkv, (0, 0, 0, lo), (sh[0], sh[1], sh[2], hi), memory_config=mem)
+            stats = ttnn.rms_norm_pre_all_gather(x, program_config=prog, dtype=ttnn.bfloat16)
+            gathered = ttnn.all_gather(
+                stats, dim=-1, num_links=1, topology=self.args.ccl_topology(), memory_config=smem
+            )
+            ttnn.deallocate(stats)
+            y = ttnn.rms_norm_post_all_gather(x, gathered, epsilon=1e-6, weight=gamma, program_config=prog)
+            ttnn.deallocate(gathered)
+            ttnn.deallocate(x)
+            parts.append(ttnn.to_memory_config(y, dram))  # the sharded post keeps the input's sharding
+            ttnn.deallocate(y)
+        v = ttnn.slice(qkv, (0, 0, 0, qd + kd), (sh[0], sh[1], sh[2], sh[3]), memory_config=dram)
         out = ttnn.concat([parts[0], parts[1], v], dim=-1, memory_config=qkv.memory_config())
         for t in (parts[0], parts[1], v, qkv):
             ttnn.deallocate(t)

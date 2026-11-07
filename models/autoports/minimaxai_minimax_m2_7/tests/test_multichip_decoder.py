@@ -1481,3 +1481,28 @@ def test_perf_moe_prefill(mesh_device, layer_idx, seq_len):
     for name, ms in phases:
         print(f"PERF_MOE_PHASE {name}: {ms:.3f} ms (host wall incl. sync)")
     print(f"PERF_MOE linear_attention moe_prefill_{seq_len}: mesh(1x{TP}) {total:.3f} ms host wall with flushes")
+
+
+@pytest.mark.real_weights
+@mesh_tp()
+@pytest.mark.parametrize(("layer_idx", "seq_len"), [(L3, 37)], ids=["attn_37"])
+def test_mc_real_weight_decode_qk_paths(mesh_device, layer_idx, seq_len):
+    """Real weights, decode only: the full-width QK-norm's sharded decode path (QK_NORM_SHARDED=1) vs the interleaved
+    one and vs HF, at the same position (the prefill's own PCC is the bfp4-expert baseline, not checked here)."""
+    h = _mc(mesh_device, layer_idx, batch=1, max_seq_len=4096, real=True)
+    hidden = _hidden(1, seq_len, h.H, seed=prefill_seed(seq_len))
+    _prefill_users(h, hidden)
+    dec = _hidden(1, 1, h.H, seed=decode_seed(seq_len))
+    pos = torch.tensor([seq_len])
+    ref = h.hf_decode(dec, pos)
+    outs = {}
+    for v in ("0", "1"):
+        os.environ["QK_NORM_SHARDED"] = v
+        outs[v] = h.tt_decode(dec, pos)
+    os.environ.pop("QK_NORM_SHARDED", None)
+    for v, o in outs.items():
+        print(f"QKPATH sharded={v}: decode vs HF PCC {comp_pcc(ref, o)[1]}")
+    print(f"QKPATH sharded vs interleaved PCC {comp_pcc(outs['0'], outs['1'])[1]}")
+    _pcc("QKPATH sharded vs interleaved decode", outs["0"], outs["1"], 0.9999)
+    gap = comp_pcc(ref, outs["0"])[1] - comp_pcc(ref, outs["1"])[1]
+    assert gap < 1e-3, f"sharded path {gap:.5f} PCC further from HF than the interleaved one"
