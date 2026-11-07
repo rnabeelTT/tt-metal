@@ -217,7 +217,22 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
         dtype=_wdt,
     )
     # QK norms: HF-correct zero-centered (1+weight), used uniformly at prefill AND decode
-    if qk_norm:
+    if qk_norm == "full":
+        # one RMSNorm over all heads' q (and over all k), before the head split (MiniMax-M2 "per_layer" qk-norm): each
+        # die normalizes its own q_d / k_d slice with the sum of squares of every die (distributed rmsnorm), so its
+        # gamma is the matching slice, plain (no +1), in the distributed norm's ROW_MAJOR [1, 1, W/32, 32] layout
+        for name in ("q_norm", "k_norm"):
+            g = state_dict[name + ".weight"].to(torch.bfloat16)
+            tw[name + "_full"] = ttnn.as_tensor(
+                g.reshape(1, 1, -1, tpc.TILE_SIZE),
+                dtype=ttnn.bfloat16,
+                device=mesh,
+                mesh_mapper=ttnn.ShardTensor2dMesh(mesh, dims=(None, 2), mesh_shape=list(mesh.shape)),
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                cache_file_name=c(name + "_full"),
+            )
+    elif qk_norm:
         tw["q_norm"] = tpc.replicate(state_dict["q_norm.weight"].to(torch.float32) + 1.0, mesh, None)
         tw["k_norm"] = tpc.replicate(state_dict["k_norm.weight"].to(torch.float32) + 1.0, mesh, None)
     return tw
@@ -267,6 +282,7 @@ class TPAttention:
         # architecture flags (must match load_attention_weights_tp): output gate / q-k norm / fused q|k|v bias
         self._gated = getattr(args, "attn_gated", True)
         self._qk_norm = "q_norm" in tw
+        self._qk_norm_full = "q_norm_full" in tw
         self._qkv_bias = tw.get("qkv_bias")
         # Fuse prefill norm-allgather + fused-QKV in-proj (all_gather_minimal_matmul_async).
         # Norm's prefill post-AG disabled in layer.py; decode path unchanged.
@@ -288,6 +304,7 @@ class TPAttention:
         self._attn_ops = None
         if (
             os.environ.get("QWEN35_ATTN_DECODE_OPS", "0") == "1"
+            and self._qk_norm  # the prep op applies per-head q/k norms (not the full-width "full" norm, not none)
             and self._fused_qkv
             and getattr(args, "proj_1d_decode", False)
             and getattr(args, "out_proj_1d_decode", None) in (None, True)
@@ -330,7 +347,10 @@ class TPAttention:
 
     def _forward_decode_ops(self, x, cur_pos_tt, cos_tt, sin_tt, page_table, partial):
         qkv = tpc.matmul_1d_decode(
-            x, self.tw["wqkv_fused"], self.args.attn_qkv_decode_1d_progcfg, self.compute_cfg,
+            x,
+            self.tw["wqkv_fused"],
+            self.args.attn_qkv_decode_1d_progcfg,
+            self.compute_cfg,
             out_memory_config=ttnn.DRAM_MEMORY_CONFIG,  # L1 measured slower for the prep's row reads (bank contention)
         )
         return self._forward_decode_ops_from(qkv, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
@@ -347,23 +367,37 @@ class TPAttention:
         ttnn.deallocate(v)
         grid = self.mesh.compute_with_storage_grid_size()
         cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=(grid.x, grid.y), exp_approx_mode=False,
+            compute_with_storage_grid_size=(grid.x, grid.y),
+            exp_approx_mode=False,
             q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
             k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),
         )
         attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
-            q, self.paged_k, self.paged_v, page_table_tensor=page_table, cur_pos_tensor=cur_pos_tt, scale=self.scale,
-            program_config=cfg, memory_config=ttnn.L1_MEMORY_CONFIG,
+            q,
+            self.paged_k,
+            self.paged_v,
+            page_table_tensor=page_table,
+            cur_pos_tensor=cur_pos_tt,
+            scale=self.scale,
+            program_config=cfg,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
         )
         ttnn.deallocate(q)
         y = post(attn_out, gate, B)
         ttnn.deallocate(attn_out)
         ttnn.deallocate(gate)
         # fabric boundary (one row): an L1 BF16 partial, read in place by the boundary's packers
-        fabric = partial and B <= getattr(self.args, "fabric_boundary_rows", 1) and getattr(self.args, "fabric_boundary", False)
+        fabric = (
+            partial
+            and B <= getattr(self.args, "fabric_boundary_rows", 1)
+            and getattr(self.args, "fabric_boundary", False)
+        )
         d = ttnn.bfloat16 if fabric else getattr(self.args, "out_proj_decode_dtype", None)
         part = ttnn.linear(
-            y, self.tw["wo"], compute_kernel_config=self.compute_cfg, program_config=self.args.attn_wo_decode_1d_progcfg,
+            y,
+            self.tw["wo"],
+            compute_kernel_config=self.compute_cfg,
+            program_config=self.args.attn_wo_decode_1d_progcfg,
             memory_config=ttnn.L1_MEMORY_CONFIG if fabric else ttnn.DRAM_MEMORY_CONFIG,
             **({"dtype": d} if d is not None else {}),
         )
@@ -372,7 +406,12 @@ class TPAttention:
         if partial:
             return part
         return tt_all_reduce(
-            part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=self.args.ccl_topology(),
+            part,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
 
@@ -443,6 +482,8 @@ class TPAttention:
             qkv_b = ttnn.add(qkv, self._qkv_bias, memory_config=qkv.memory_config())
             ttnn.deallocate(qkv)
             qkv = qkv_b
+        if self._qk_norm_full:
+            qkv = self._full_qk_norm(qkv)
         if not self._gated:
             # [q|k|v] per device, no gate block: the whole output is the contiguous q|k|v block (_make_heads*: vp=None
             # sentinel, gate None)
@@ -460,6 +501,39 @@ class TPAttention:
         gate = ttnn.slice(qkv, (0, 0, 0, qkv3_dim), (sh[0], sh[1], sh[2], qkv3_dim + gate_dim))
         ttnn.deallocate(qkv)
         return qkv3, gate, None
+
+    def _full_qk_norm(self, qkv):
+        """[q_d | k_d | v_d] -> the same with q_d and k_d RMS-normalized over the FULL q (all heads of every die) and
+        the full k: local sums of squares (rms_norm_pre_all_gather), gathered over the dies, then each die's slice
+        normalized by the global statistic with its gamma slice (rms_norm_post_all_gather)."""
+        qd, kd = self.NH * self.HD, self.NKV * self.HD
+        sh = list(qkv.shape)
+        parts = []
+        for lo, hi, gamma in ((0, qd, self.tw["q_norm_full"]), (qd, qd + kd, self.tw["k_norm_full"])):
+            x = ttnn.slice(qkv, (0, 0, 0, lo), (sh[0], sh[1], sh[2], hi), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            stats = ttnn.rms_norm_pre_all_gather(x, compute_kernel_config=self.compute_cfg, dtype=ttnn.bfloat16)
+            if self.args.num_devices > 1:
+                gathered = ttnn.all_gather(
+                    stats,
+                    dim=-1,
+                    num_links=1,
+                    topology=self.args.ccl_topology(),
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                )
+                ttnn.deallocate(stats)
+                stats = gathered
+            parts.append(
+                ttnn.rms_norm_post_all_gather(
+                    x, stats, epsilon=1e-6, weight=gamma, compute_kernel_config=self.compute_cfg
+                )
+            )
+            ttnn.deallocate(stats)
+            ttnn.deallocate(x)
+        v = ttnn.slice(qkv, (0, 0, 0, qd + kd), (sh[0], sh[1], sh[2], sh[3]), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        out = ttnn.concat([parts[0], parts[1], v], dim=-1, memory_config=qkv.memory_config())
+        for t in (parts[0], parts[1], v, qkv):
+            ttnn.deallocate(t)
+        return out
 
     def _col_proj(self, x, weight, decode_progcfg):
         """Column-parallel projection; DRAM-sharded decode matmul when enabled."""
