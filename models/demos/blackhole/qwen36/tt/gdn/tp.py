@@ -1324,7 +1324,9 @@ class TPGatedDeltaNet:
         _extra = {"const_tiles": self._fused_const_tiles} if _use_fused else {}
         # Exact tail: the single-user forward_prefill's output ops (head-major norm + concat heads, fp32 fused
         # out-proj reduce-scatter) over the B*T rows, so a user's rows are bit-identical to its single admission.
-        _exact_tail = exact_tail and BATCHED_EXACT_TAIL and self._gdn_fuse_out and self._fuse_out_mmrs_prefill
+        # (both out-proj forms: the fused matmul + reduce-scatter where the ring allows it, else - 2 dies - the
+        # single path's row projection + all-reduce; the batched fallback below differs from both)
+        _exact_tail = exact_tail and BATCHED_EXACT_TAIL and self._gdn_fuse_out
         o, final_state = _delta_fn(
             q,
             k,
@@ -1405,12 +1407,26 @@ class TPGatedDeltaNet:
             gated = _silu_mul(out_f, zf, _dram)
             ttnn.deallocate(out_f)
             ttnn.deallocate(z)
-            x_out = ttnn.reshape(gated, (1, 1, B * T, gated.shape[-1]))
-            out = tpc.matmul_reduce_scatter_prefill(
-                x_out, tw["out"], self.tt_ccl, self.cfg, self.args.ccl_topology(), self.args.num_devices, ttnn.float32
-            )
+            if self._fuse_out_mmrs_prefill:
+                x_out = ttnn.reshape(gated, (1, 1, B * T, gated.shape[-1]))
+                out = tpc.matmul_reduce_scatter_prefill(
+                    x_out, tw["out"], self.tt_ccl, self.cfg, self.args.ccl_topology(), self.args.num_devices, ttnn.float32
+                )
+                ttnn.deallocate(gated)
+                return out
+            # the single forward_prefill's unfused out-proj (no ring, e.g. 2 dies): row projection + all-reduce
+            partial = self._row_proj(gated, tw["out"])
             ttnn.deallocate(gated)
-            return out
+            partial = ttnn.reshape(partial, (1, 1, B * T, partial.shape[-1]))
+            return tt_all_reduce(
+                partial,
+                self.mesh,
+                self.tt_ccl,
+                cluster_axis=0,
+                dim=3,
+                topology=self.args.ccl_topology(),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
         out_n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6)
         ttnn.deallocate(o)
         out_f = ttnn.reshape(out_n, (B, T, self.value_dim_tp))
