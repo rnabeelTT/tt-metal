@@ -102,12 +102,12 @@ serve_profiles:
     description: 'Default and fastest profile: four dies.'
     hardware: p300x2
     mesh_device: P300x2
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch: served A/B 2026-11-07 greedy identical, TTFT 2048x1 421->347 ms, 32x128 3845->2314 ms; step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
     description: '`p300x2` on four p150 boards.'
     hardware: p150x4
     mesh_device: P150x4
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch: served A/B 2026-11-07 greedy identical, TTFT 2048x1 421->347 ms, 32x128 3845->2314 ms; step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
     description: 'Two dies: the same features with routed experts at bfp4.'
     hardware: p300

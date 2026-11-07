@@ -318,6 +318,39 @@ class Qwen35MoeModel(Qwen36Model):
         for dn, rec, conv in zip(dn_layers, recs, convs):
             dn.write_slot(slot, rec, conv)
 
+    def _write_scratch_slot_eager(self, slot):
+        """The served slot write as one op sequence: device clones of the B=1 prefill scratch (the request's state right
+        after its prefill) written into decode ``slot`` - exactly ``_write_gdn_slot_device(slot,
+        *_snapshot_gdn_scratch_device())``, but read straight from the persistent scratch so it can be traced."""
+        self._ensure_gdn_prefill_scratch()
+        for dn, rec, conv, *_ in self._gdn_prefill_scratch:
+            dn.write_slot(slot, ttnn.clone(rec), [ttnn.clone(c) for c in conv])
+
+    def capture_slot_write_traces(self, slots):
+        """One trace per decode slot of :meth:`_write_scratch_slot_eager` (QWEN35_SLOT_WRITE_TRACE): the ~700 small
+        clone / slice / concat / copy ops of an admission's GDN state write were host-dispatch bound (~15 ms of every
+        served prefill). Called with the batched decode buffers bound, after every program is warm. Returns the slots."""
+        traces = self.__dict__.setdefault("_slot_write_traces", {})
+        for s in slots:
+            if s in traces:
+                continue
+            ttnn.synchronize_device(self.device)
+            tid = ttnn.begin_trace_capture(self.device, cq_id=0)
+            self._write_scratch_slot_eager(int(s))
+            ttnn.end_trace_capture(self.device, tid, cq_id=0)
+            traces[s] = tid
+        ttnn.synchronize_device(self.device)
+        return sorted(traces)
+
+    def write_scratch_slot(self, slot):
+        """Served admission: the scratch -> slot write (traced when captured, else the same ops eagerly). Call with the
+        batched decode buffers bound, before the scratch is reused."""
+        tid = self.__dict__.get("_slot_write_traces", {}).get(int(slot))
+        if tid is not None:
+            ttnn.execute_trace(self.device, tid, cq_id=0, blocking=False)
+        else:
+            self._write_scratch_slot_eager(int(slot))
+
     def _decode_tokens_view(self, tokens, B):
         """The B decode tokens out of the persistent [1,1,1,S] buffer as a ``[1, B]`` uint32 row (a legacy [B,1] buffer
         passes through). Stage 10: the row layout makes the embedding emit ``[1, B, dim]``, so the decode step's
