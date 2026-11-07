@@ -46,9 +46,15 @@ class FetchCache:
         self.lru = {}  # layer -> OrderedDict expert -> slot (least recent first)
         self.free = {}  # layer -> free LRU slots
         self.stamp = {}  # layer -> [E] last step each expert was routed (-1: never)
-        self.host = {}  # (layer, expert) -> (gu, dn) host tensors in the device format
+        self.host = {}  # (layer, expert) -> (gu, dn) host tensors in the device format (until finalize)
         self.step = 0
         self.dev = None  # model-wide staging, created on the first layer (before any capture)
+        # HYB_PINX: the device-format experts as raw device bytes in host memory pinned for the mesh (hybrid/pin):
+        # fetch / stream writes read them straight over PCIe (no CPU memcpy into the command-queue hugepage)
+        self.pinx_on = bool(self.dir) and os.environ.get("HYB_PINX", "1") == "1"
+        self.px = None
+        self.raw = {}  # layer -> (region id, {expert: index}, gate|up bytes per die, down bytes per die)
+        self.shapes = None  # per-device ([1, 1, H, 2 Nl], [1, 1, Nl, H]) and dtypes of one expert (note_shapes)
 
     @property
     def on(self):
@@ -68,6 +74,92 @@ class FetchCache:
         for e in experts:
             p = os.path.join(self.dir, f"{layer}_{e}")
             self.host[(layer, e)] = (ttnn.load_tensor(p + "_gu.tensorbin"), ttnn.load_tensor(p + "_dn.tensorbin"))
+
+    def note_shapes(self, mod):
+        if self.shapes is None:
+            ug, dn = mod.up_gate, mod.down
+            gs, ds = [int(v) for v in ug.shape], [int(v) for v in dn.shape]
+            self.shapes = ([1, 1, gs[2], gs[3]], [1, 1, ds[2], ds[3]], ug.dtype, dn.dtype, mod.device)
+
+    def finalize(self, loader=None, stream=None):
+        """After the model build, before any trace capture (HYB_PINX): every loaded device-format expert -> raw device
+        bytes in a pinned per-layer host region (written to a staging tensor the regular way, read back raw), the host
+        tensors dropped; destination views for the fetch / stream staging."""
+        if not self.pinx_on or self.shapes is None:
+            return
+        if loader is not None:
+            loader.submit(lambda: None).result()  # the queued load_host calls are done
+        from .pin import Pinx
+
+        gsh, dsh, gdt, ddt, mesh = self.shapes
+        self.mesh = mesh
+        px = self.px = Pinx(mesh)
+        tp = px.tp
+        kw = dict(layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        conv_gu = ttnn.from_torch(
+            torch.zeros(gsh[0], gsh[1], gsh[2], tp * gsh[3]),
+            dtype=gdt,
+            mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+            **kw,
+        )
+        conv_dn = ttnn.from_torch(
+            torch.zeros(dsh[0], dsh[1], tp * dsh[2], dsh[3]),
+            dtype=ddt,
+            mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2),
+            **kw,
+        )
+        (dg, ng), (dd, nd) = px.dst(conv_gu), px.dst(conv_dn)
+        t0 = time.perf_counter()
+        layers = sorted({L for L, _ in self.host})
+        for L in layers:
+            experts = sorted(e for (l2, e) in self.host if l2 == L)
+            rid, _ = px.region(len(experts) * tp * (ng + nd))
+            for i, e in enumerate(experts):
+                gu, dn = self.host.pop((L, e))
+                base = i * tp * (ng + nd)
+                ttnn.copy_host_to_device_tensor(gu, conv_gu)
+                px.read(dg, rid, [base + d * ng for d in range(tp)])
+                ttnn.copy_host_to_device_tensor(dn, conv_dn)
+                px.read(dd, rid, [base + tp * ng + d * nd for d in range(tp)])
+            self.raw[L] = (rid, {e: i for i, e in enumerate(experts)}, ng, nd)
+        ttnn.deallocate(conv_gu)
+        ttnn.deallocate(conv_dn)
+        if self.dev is not None:
+            self.dev["pdst"] = [(px.dst(g)[0], px.dst(d)[0]) for g, d in zip(self.dev["gu"], self.dev["dn"])]
+        if stream is not None and stream.dev is not None:
+            sg, sd = stream.dev["stage"]
+            stream.dev["pdst"] = (px.dst(sg)[0], px.dst(sd)[0])
+        print(
+            f"HYB_PINX: {sum(len(v[1]) for v in self.raw.values())} experts of {len(layers)} layers pinned "
+            f"({time.perf_counter() - t0:.1f} s)",
+            flush=True,
+        )
+
+    def has_expert(self, layer, e):
+        return (layer, e) in self.host or (layer in self.raw and e in self.raw[layer][1])
+
+    def raw_offsets(self, layer, e):
+        """(region, gate|up offsets per die, down offsets per die) of a pinned expert."""
+        rid, idx, ng, nd = self.raw[layer]
+        tp = self.px.tp
+        base = idx[e] * tp * (ng + nd)
+        return rid, [base + d * ng for d in range(tp)], [base + tp * ng + d * nd for d in range(tp)]
+
+    def write_expert(self, layer, e, dst_pair, host_pair):
+        """One expert into a staging pair: zero-copy from the pinned region, else the regular host -> device copy."""
+        if self.px is not None and layer in self.raw:
+            rid, og, od = self.raw_offsets(layer, e)
+            self.px.write(dst_pair[0], rid, og)
+            self.px.write(dst_pair[1], rid, od)
+            return
+        gu, dn = self.host[(layer, e)]
+        ttnn.copy_host_to_device_tensor(gu, host_pair[0])
+        ttnn.copy_host_to_device_tensor(dn, host_pair[1])
+
+    def release(self):
+        if self.px is not None:
+            self.px.release()
+            self.px = None
 
     def init_layer(self, mod):
         """Per fused layer, before any capture: the [C, 1, *, *] views of its expert weights, and the model-wide
@@ -162,9 +254,7 @@ class FetchCache:
         t0 = time.perf_counter()
         d = self.dev
         for j, (e, s) in enumerate(zip(fetched, slots)):
-            gu, dn = self.host[(layer, e)]
-            ttnn.copy_host_to_device_tensor(gu, d["gu"][j])
-            ttnn.copy_host_to_device_tensor(dn, d["dn"][j])
+            self.write_expert(layer, e, d["pdst"][j] if "pdst" in d else None, (d["gu"][j], d["dn"][j]))
         pt = torch.full((self.F, 1), d["C"] - 1, dtype=torch.int32)  # unused rows: the sink (reset right after)
         pt[: len(slots), 0] = torch.tensor(slots, dtype=torch.int32)
         ttnn.copy_host_to_device_tensor(

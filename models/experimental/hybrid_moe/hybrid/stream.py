@@ -90,7 +90,7 @@ class PrefillStream:
         keep = [
             (int(c), int(x))
             for x, c in zip(e.tolist(), n.tolist())
-            if c >= self.min_tokens and (layer, x) in self.fetch.host
+            if c >= self.min_tokens and self.fetch.has_expert(layer, x)
         ]
         if not keep:
             return None
@@ -110,9 +110,7 @@ class PrefillStream:
         sg, sd = d["stage"]
         rep = ttnn.ReplicateTensorToMesh(d["mesh"])
         for j, e in enumerate(experts):
-            gu, dn = self.fetch.host[(layer, e)]
-            ttnn.copy_host_to_device_tensor(gu, sg)
-            ttnn.copy_host_to_device_tensor(dn, sd)
+            self.fetch.write_expert(layer, e, d.get("pdst"), (sg, sd))
             ttnn.copy_host_to_device_tensor(
                 ttnn.from_torch(
                     torch.tensor([[j]], dtype=torch.int32),

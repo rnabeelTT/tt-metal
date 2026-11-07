@@ -164,6 +164,7 @@ def main():
         for li in range(len(model.layers)):
             HYB.lib_layer(li)
         print(f"host library resident ({time.time() - t0:.1f} s wait)", flush=True)
+        HYB.fetch.finalize(HYB.loader, HYB.stream)  # HYB_PINX: pinned zero-copy expert library (before any capture)
         ver = Verify(gen, dr)
         # warm (compile + the hybrid's per-width buffers), then capture; positions far from any real prompt's rows
         ver.stage([0] * R, list(range(8, 8 + R)), page_table)
@@ -387,6 +388,7 @@ def main():
             res["runs"].append(r)
             json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
     finally:
+        HYB.fetch.release()  # pinned regions / views before the mesh closes
         ttnn.close_mesh_device(mesh)
         ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
 

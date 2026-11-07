@@ -250,6 +250,9 @@ class HybridState:
         row = np.full(self.E, -1, dtype=np.int64)
         row[cold] = np.arange(len(cold))
         out["row"] = row
+        if os.environ.get("HYB_MLOCK", "1") == "1":  # resident, never swapped (also pre-faults every page)
+            for k in ("gu_p", "gu_sz", "dn_p", "dn_sz"):
+                _mlock(out[k])
         self.st["t_lib_load"] += time.perf_counter() - t0
         return out
 
@@ -363,6 +366,19 @@ class HybridState:
             down_t, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2)
         )
         return h_gu, h_dn
+
+
+def _mlock(t):
+    """mlock a CPU tensor's storage (the host expert library: the page cache of the checkpoint load otherwise pushes
+    it to swap, and a swapped-in expert costs the host step milliseconds). Needs an unlimited memlock rlimit
+    (run_in_image.sh: --ulimit memlock=-1); raises when the lock is refused."""
+    import ctypes
+
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    n = t.numel() * t.element_size()
+    if n and libc.mlock(ctypes.c_void_p(t.data_ptr()), ctypes.c_size_t(n)) != 0:
+        err = ctypes.get_errno()
+        raise RuntimeError(f"mlock of {n} bytes failed (errno {err}): raise the memlock limit or set HYB_MLOCK=0")
 
 
 TILE_W = 32
@@ -489,6 +505,7 @@ def install():
         self._dyn_attrs = None
         self._hyb_bufs = {}  # T -> persistent device buffers the host step writes (allocated before any capture)
         if HYB.fetch.dir and self._hyb_fused:  # device-format copies of the experts that can miss (fetch, stream)
+            HYB.fetch.note_shapes(self)
             if HYB.fetch.on:
                 HYB.fetch.init_layer(self)
             if HYB.stream.on:

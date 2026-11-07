@@ -2,7 +2,7 @@
 # usage: run_in_image.sh <script.py> <out_dir> [extra docker -e args...]
 S=$1; O=$2; shift 2
 P=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); cd "$P" && mkdir -p "$O" logs cache && docker run --rm --name hybrid-moe-poc \
-  --device /dev/tenstorrent --ipc host \
+  --device /dev/tenstorrent --ipc host --ulimit memlock=-1:-1 \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   -v $HOME/.cache/huggingface:/hf -v $P:/poc -v $P/cache:/cache -v $HOME/.cache/hybrid-moe:/hyblib \
   ${FORK:+-v $HOME/FORK-tt-metal/models:/opt/tt-metal/models} \
