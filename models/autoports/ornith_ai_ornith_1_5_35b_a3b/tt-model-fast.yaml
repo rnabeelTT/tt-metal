@@ -76,8 +76,7 @@ serve:
     QWEN35_VISION: "1"
     QWEN35_VISION_MAX_IMAGES: "4"
     QWEN35_VISION_MAX_PIXELS: "4194304"
-    QWEN35_BATCHED_PREFILL: "1"  # served A/B 2026-11-07: greedy 8/8+8/8 identical, TTFT 32x128 2723->1923 ms
-    QWEN35_DISPATCH_MC: "1"  # multi-core MoE dispatch, served A/B 2026-11-07: greedy identical, TTFT 2048x1 296->249 ms
+    QWEN35_BATCHED_PREFILL: "0"  # ON in the four-die profiles below (validated there only)
     VLLM_ENGINE_READY_TIMEOUT_S: "3600"
     # the fused decode path (fusion/HANDOFF.md steps 1-3)
     QWEN35_MOE_FUSED_DECODE: "1"
@@ -101,12 +100,12 @@ serve_profiles:
     description: 'Fastest profile: four dies, text and images.'
     hardware: p300x2
     mesh_device: P300x2
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch (served A/B 2026-11-07: greedy identical, conformance unchanged, TTFT 32x128 2726->1785 ms, 2048x1 296->248); step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
     description: '`p300x2` on four p150 boards.'
     hardware: p150x4
     mesh_device: P150x4
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch (served A/B 2026-11-07: greedy identical, conformance unchanged, TTFT 32x128 2726->1785 ms, 2048x1 296->248); step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
     description: 'Default: two dies, text and images, at about 60 % of the four-die single-user speed.'
     hardware: p300
