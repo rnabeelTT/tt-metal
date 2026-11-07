@@ -110,12 +110,12 @@ serve_profiles:
     description: 'Default: two dies, text and images, at about 60 % of the four-die single-user speed.'
     hardware: p300
     mesh_device: P300
-    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # the first two chips: fabric init needs every visible chip in the mesh; batched prefill + dispatch_mc: served A/B 2026-11-07 greedy identical, conformance 74/74, TTFT 32x128 3506->2145 ms
   - name: p150x2
     description: '`p300` on two p150 boards.'
     hardware: p150x2
     mesh_device: P150x2
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
   - name: p150
     description: 'One die: text only, routed experts at bfp4, MTP speculative decoding on.'
     hardware: p150
