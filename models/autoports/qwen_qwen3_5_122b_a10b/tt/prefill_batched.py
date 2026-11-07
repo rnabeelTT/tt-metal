@@ -21,12 +21,17 @@ single-user path), first chunk only (``chunk_start == 0``), no MTP head rows (ba
 Persistent per-(bucket, B) inputs + host->device staging (no allocation per request) so a later step can capture one
 trace per bucket exactly like the single-user buckets.
 """
+import os
+
 import torch
 
 import ttnn
 from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_multi import RowsLen, rebuild_batched_conv_carry
 from models.tt_transformers.tt.common import Mode
 
+# the attention SDPA in the single-user bucket's exact form (QWEN35_BATCHED_EXACT_SDPA, default on): with it every
+# batched admission is bit-identical to the same prompt admitted alone (tools/batched_exact.py)
+EXACT_SDPA = os.environ.get("QWEN35_BATCHED_EXACT_SDPA", "1") == "1"
 GDN_BATCH_CAP = 4  # the chunk-scan kernel maps one (user, head) row per core: B * Nv_tp <= 32 at TP = 4
 MAX_BATCHED_BUCKET = 512  # longest bucket the batched pass serves (the launch-bound regime; longer prompts go single)
 
@@ -178,6 +183,12 @@ class BatchedPrefill:
             "full_pt": [rm(torch.zeros(1, int(max_blocks), dtype=torch.int32), ttnn.int32) for _ in range(B)],
             "chunk_pt": [rm(torch.zeros(1, bucket // bs, dtype=torch.int32), ttnn.int32) for _ in range(B)],
             "len": RowsLen(dev, B, bucket, conv_k),
+            # chunk start 0 as a device tensor: the attention layers run the single-user bucket's flexible SDPA form
+            # (bit-identical admissions, see TPAttention.forward_prefill_paged_batched)
+            "csi": ttnn.from_torch(
+                torch.zeros(1, dtype=torch.int32), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev,
+                mesh_mapper=rep,
+            ),
             "logit_sel": tl(torch.zeros(1, 1, 32, B * bucket, dtype=torch.bfloat16), ttnn.bfloat16),
             # final-normed hidden of every user's last prompt position (rows 0..B-1): the MTP head's "hidden that
             # produced the first token" (MtpServing.note_batched), written inside the pass
@@ -250,7 +261,13 @@ class BatchedPrefill:
             keep_sharded=bool(getattr(args, "attn_norm_out_sharded", False)),
         )
         a = layer.attention.forward_prefill_paged_batched(
-            n, bi["cos"], bi["sin"], bi["full_pt"], chunk_page_tables=bi["chunk_pt"], user_ids=[0] * B
+            n,
+            bi["cos"],
+            bi["sin"],
+            bi["full_pt"],
+            chunk_page_tables=bi["chunk_pt"],
+            user_ids=[0] * B,
+            chunk_start_idx_tensor=bi["csi"] if EXACT_SDPA else None,
         )
         if n.is_allocated():
             ttnn.deallocate(n)
@@ -266,7 +283,8 @@ class BatchedPrefill:
         n = layer._decode_norm(layer.attention_norm, x, Mode.PREFILL, cfg)
         xb = ttnn.reshape(n, (B, T, n.shape[-1]))  # the batched chunk form takes [B, T, dim(/tp)] (flattens it again)
         rebuild_batched_conv_carry(dn)  # [B, K-1, D] from the (zeroed) decode taps: device-only, trace-safe
-        out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=bi["len"], carry=True)
+        out = dn.forward_prefill_batched(xb, chunk_size=int(args.gdn_chunk_size), valid_lens=bi["len"], carry=True,
+                                         exact_tail=EXACT_SDPA)
         if n.is_allocated():
             ttnn.deallocate(n)
         a = ttnn.reshape(out, (1, 1, B * T, out.shape[-1]))  # [1,B,T,dim/TP] -> rows
@@ -322,7 +340,7 @@ class BatchedPrefill:
         return logits, logits_sh
 
     # ---------------------------------------------------------------- entry point, warm-up, traces ----------------
-    def prefill(self, tokens, lens, page_table, slots, bucket=None):
+    def prefill(self, tokens, lens, page_table, slots, bucket=None, need_host=True):
         """Batched prefill of n <= B text prompts (first chunk, all fitting ``bucket``): stage, run (the bucket's trace
         when captured, else eager) on the bound and zeroed scratch, write the slots. Returns ``(logits [n, 1, vocab]
         host, logits_sharded [1, 1, 32, vocab/TP] device (row u = request u, the on-device sampler's input),
@@ -347,11 +365,12 @@ class BatchedPrefill:
         finally:
             self.unbind(prev)
         self.write_slots([int(s) for s in slots])
-        host = ttnn.to_torch(ttnn.get_device_tensors(logits)[0]).float()  # [1,1,32,V] (one replica)
+        # the served sampler reads logits_sh on device: the full-vocab host copy only when asked (need_host)
+        host = ttnn.to_torch(ttnn.get_device_tensors(logits)[0]).float() if need_host else None  # [1,1,32,V]
         hid = ttnn.to_torch(ttnn.get_device_tensors(bi["hid"])[0])[0, 0, :n].clone()  # [n, dim] bf16
         if tr is None:
             ttnn.deallocate(logits)
-        return host[0, 0, :n].reshape(n, 1, -1), logits_sh, hid
+        return (host[0, 0, :n].reshape(n, 1, -1) if need_host else None), logits_sh, hid
 
     @staticmethod
     def _warm_lens(bucket, B):

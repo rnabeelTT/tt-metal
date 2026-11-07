@@ -78,7 +78,8 @@ serve:
     # unchanged) but the first-token numerics then differ from a single admission (batched GDN form, PCC 0.9995), and
     # the parameter-conformance suite's seeded-reproducibility / greedy-consistency tests across batch compositions
     # failed (12 / 73, bundle run 8). Off keeps 73 / 73; turn on for throughput-first deployments.
-    QWEN35_BATCHED_PREFILL: "0"
+    QWEN35_BATCHED_PREFILL: "1"  # served A/B 2026-11-07: greedy 8/8+8/8 identical, TTFT 32x128 4789->3025 ms
+    QWEN35_DISPATCH_MC: "1"  # multi-core MoE dispatch, served A/B 2026-11-07: greedy identical, TTFT 2048x1 555->487 ms (Ornith-122B)
   # Thinking ON by default (owner decision 2026-10-02; the model's own default): a plain chat request reasons first and
   # answers in `content`; the reasoning arrives in the message's `reasoning` field (vLLM 0.26; `reasoning_content` in
   # older clients). Clients turn it off per request with "chat_template_kwargs": {"enable_thinking": false}. Caveats
