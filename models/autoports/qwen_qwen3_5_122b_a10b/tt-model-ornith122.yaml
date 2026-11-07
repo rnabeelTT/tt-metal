@@ -217,6 +217,22 @@ card:
     | p300x2 | 1024 | 256 | 32 | 128 | 12,072 | 85 | 21.2 | 23.98 |
     | p300x2-longctx | 128 | 128 | 1 | 4 | 219 | 584 | 132.6 | 1.17 |
 
+    #### Prefill update (2026-11-07)
+
+    This revision prefills short prompts (up to 512 tokens) four at a time in one batched pass and spreads the MoE
+    expert dispatch over more cores (on in every profile; measured on p300x2, the p300x2-longctx rows were not remeasured). Output is unchanged: greedy output matched token for token, one request
+    at a time and with eight concurrent requests, and the vLLM sampling conformance suite (74 tests) gives the same
+    results. Decode speed is unchanged. Measured 2026-11-07 on the published image, served as shipped; before = the same
+    build with both changes off. Random-token prompts, 128 output tokens, median TTFT over N requests. The tables below
+    were measured before this change; prompts over 512 tokens gain only from the dispatch change (the 2,048-token rows).
+
+    | Profile | Input tokens | Users | N | TTFT before -> after (ms) | Change |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 1 | 8 | 176 -> 185 | +5 % |
+    | p300x2 | 2,048 | 1 | 4 | 555 -> 519 | -6 % |
+    | p300x2 | 128 | 8 | 32 | 1,411 -> 1,009 | **-28 %** |
+    | p300x2 | 128 | 32 | 64 | 4,848 -> 2,874 | **-41 %** |
+
     #### p300x2 (default profile)
 
     Real text, single user (12 chat prompts x 384 output tokens, temperature 0, median per prompt): **131.7 tok/s** (Qwen3.5-122B-A10B on the same code: 131.8).
