@@ -913,6 +913,23 @@ class TPAttention:
             self._kv_shard_cfg_cache[B] = cfg
         return cfg
 
+    def _kv_shard_cfg_v(self, B):
+        """The rows-mode V shard for paged_fused_update_cache: B cores on core row 1 (K's _kv_shard_cfg(B) for B <= 8
+        sits on row 0), one user per core."""
+        cfg = self._kv_shard_cfg_cache.get(("v", B))
+        if cfg is None:
+            if B > 8:
+                raise ValueError(f"rows-mode fused K/V update supports up to 8 rows, got {B}")
+            cfg = ttnn.create_sharded_memory_config(
+                shape=(ttnn.TILE_SIZE, self.HD),
+                core_grid=ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 1), ttnn.CoreCoord(B - 1, 1))}),
+                strategy=ttnn.ShardStrategy.HEIGHT,
+                orientation=ttnn.ShardOrientation.ROW_MAJOR,
+                use_height_and_width_as_shard_shape=True,
+            )
+            self._kv_shard_cfg_cache[("v", B)] = cfg
+        return cfg
+
     def _out_mmrs_decode(self, gated, weight, B):
         """Decode wo projection fused with the dim=3 reduce-scatter (``matmul_reduce_scatter_async``): x [.,B,K_local]
         bf16 -> [1,1,B,dim/nd] fractured. Persistent intermediate/output buffers are built once per logical B."""
@@ -1046,18 +1063,30 @@ class TPAttention:
                     # per-row index tensors: shared by every layer when the caller built them once per pass
                     # (rows_pos_rows: list of [B] int32, row b = -1 except position b), else sliced here
                     _rows = getattr(self, "rows_pos_rows", None)
+                    # QWEN35_ROWS_FUSED_KV (default on): K and V of a row in ONE paged_fused_update_cache (its two inputs
+                    # must be sharded on disjoint cores: V moves to the next core row)
+                    fused_kv = os.environ.get("QWEN35_ROWS_FUSED_KV", "1") == "1"
+                    if fused_kv:
+                        v_sh2 = ttnn.to_memory_config(v_sh, self._kv_shard_cfg_v(B))
+                        ttnn.deallocate(v_sh)
+                        v_sh = v_sh2
                     for b in range(B):
                         pos_b = (
                             _rows[b]
                             if _rows is not None
                             else ttnn.reshape(ttnn.slice(_masks, (b, 0), (b + 1, B)), (B,))
                         )
-                        ttnn.experimental.paged_update_cache(
-                            keys, k_sh, update_idxs_tensor=pos_b, page_table=page_table
-                        )
-                        ttnn.experimental.paged_update_cache(
-                            values, v_sh, update_idxs_tensor=pos_b, page_table=page_table
-                        )
+                        if fused_kv:
+                            ttnn.experimental.paged_fused_update_cache(
+                                keys, k_sh, values, v_sh, update_idxs_tensor=pos_b, page_table=page_table
+                            )
+                        else:
+                            ttnn.experimental.paged_update_cache(
+                                keys, k_sh, update_idxs_tensor=pos_b, page_table=page_table
+                            )
+                            ttnn.experimental.paged_update_cache(
+                                values, v_sh, update_idxs_tensor=pos_b, page_table=page_table
+                            )
                         if _rows is None:
                             ttnn.deallocate(pos_b)
                     ttnn.deallocate(k_sh)

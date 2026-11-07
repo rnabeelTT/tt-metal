@@ -278,8 +278,10 @@ class FetchCache:
             ng, nd = self.raw[layer][2], self.raw[layer][3]
             for e, s in zip(fetched, slots):
                 rid, og, od = self.raw_offsets(layer, e)
+                w0 = time.perf_counter()
                 self.px.write_at(dg, rid, og, s * ng, ng)
                 self.px.write_at(dd, rid, od, s * nd, nd)
+                st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
             st["fetched"] += len(fetched)
             st["t_fetch"] += time.perf_counter() - t0
             return

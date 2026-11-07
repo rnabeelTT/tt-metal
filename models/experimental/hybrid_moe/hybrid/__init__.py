@@ -39,6 +39,10 @@ _ENV_ON = {
 
 
 def install():
+    if os.environ.get("HYB_SWITCH_US"):  # GIL switch interval (default 5000 us): how long a Python thread may hold it
+        import sys
+
+        sys.setswitchinterval(float(os.environ["HYB_SWITCH_US"]) * 1e-6)
     for k, v in _ENV_OFF.items():
         os.environ[k] = v
     if os.environ.get("HYB_FUSED", "1") == "1":

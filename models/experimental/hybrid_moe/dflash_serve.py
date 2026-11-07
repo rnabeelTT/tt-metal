@@ -188,6 +188,9 @@ class DFlashServing:
             HYB.lib_layer(li)
         logger.info(f"DFlash: host library resident ({time.time() - t0:.1f} s wait)")
         HYB.fetch.finalize(HYB.loader, HYB.stream)  # HYB_PINX: pinned zero-copy expert library (before any capture)
+        import threading
+
+        logger.info(f"DFlash: python threads {[t.name for t in threading.enumerate()]}")
         self.ver = Verify(self.gen, self.dr, self.R)
         # positions far from any real prompt's rows, on the warm-up page table (blocks the warm-up owns)
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), self.gen.page_table[0])

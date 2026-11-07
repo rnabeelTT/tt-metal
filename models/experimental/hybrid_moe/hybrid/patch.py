@@ -104,6 +104,11 @@ class HybridState:
         self.sel_bias = {}  # layer -> [E] selection bias (sigmoid_bias routers)
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
+        # HYB_CROUTE (default 1 with hostk): the decode host step's routing and crafted rows in C (hostk_route / _craft)
+        self.croute = self.hostk and os.environ.get("HYB_CROUTE", "1") == "1"
+        # HYB_HOSTK_ASYNC (default 1 with hostk): the CPU experts of a decode step start on hostk's own C thread instead
+        # of a Python thread-pool worker, whose GIL hand-offs stalled the main thread's device calls (bench_pinx.py)
+        self.hostk_async = self.hostk and os.environ.get("HYB_HOSTK_ASYNC", "1") == "1"
         if self.hostk:
             hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "4")))
         if self.lowbit > 0 and not self.hostk:
@@ -153,7 +158,13 @@ class HybridState:
             "fetched": 0,
             "t_stream": 0.0,
             "streamed": 0,
+            "t_wait": 0.0,  # host step 2 waiting for the CPU experts
+            "t_exec": 0.0,  # trace segment enqueues (seg.py)
+            "t_cb": 0.0,  # host callbacks between segments, wall (seg.py)
         }
+        from .seg import SEG
+
+        SEG.host_st = self.st
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -288,6 +299,16 @@ class HybridState:
             return out
 
         run.keep = keep
+
+        def start():  # HYB_HOSTK_ASYNC: the same call on hostk's C launcher thread (no Python worker thread)
+            run.keep = None
+
+            def done(dt):
+                self.st["t_host"] += dt
+
+            return hostk.AsyncMoe(call, out, keep, on_done=done)
+
+        run.start = start
         return run
 
     def host_compute(self, layer, X, ids, sc, miss_mask):
@@ -761,7 +782,9 @@ def _route_host(self, lg, m, ids=None):
     E, k, L = HYB.E, self.top_k, self.layer_num
     t0 = time.perf_counter()
     z = lg[:, :E]
-    if HYB.router_kind == "sigmoid_bias":  # MiniMax-M2 / GLM: select on sigmoid + bias, weight by normalized sigmoid
+    if HYB.router_kind == "sigmoid_bias" and ids is None and HYB.croute:  # one C call (hostk_route)
+        ids, sc = hostk.route(lg, k, HYB.sel_bias[L])
+    elif HYB.router_kind == "sigmoid_bias":  # MiniMax-M2 / GLM: select on sigmoid + bias, weight by normalized sigmoid
         sg = 1.0 / (1.0 + np.exp(-z))
         if ids is None:
             ids = np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k]
@@ -818,14 +841,18 @@ def _fused_step1(self, x, logits, B):
         res = slot >= 0
         miss = miss & ~res
     t0 = time.perf_counter()
-    row = np.full((1, 1, m, C + TILE_W), HYB.filler, dtype=np.float32)
-    row[..., C:] = 0.0
-    row[0, 0, :, C] = lg[:, E]  # shared-expert gate logit (router column E)
-    r_i, k_i = np.nonzero(res)
-    row[0, 0, r_i, slot[r_i, k_i]] = np.log(sc[r_i, k_i])
-    miss_mass = (sc * ~res).sum(1)  # computed and skipped misses: their routing mass goes to the zero sink
-    has = miss_mass > 1e-6
-    row[0, 0, has, C - 1] = np.log(miss_mass[has])
+    row = np.empty((1, 1, m, C + TILE_W), dtype=np.float32)
+    if HYB.croute and HYB.skip == 0:
+        hostk.craft(ids, sc.astype(np.float32, copy=False), HYB.slot_of[self.layer_num], C, HYB.filler, lg, E, row)
+    else:
+        row.fill(HYB.filler)
+        row[..., C:] = 0.0
+        row[0, 0, :, C] = lg[:, E]  # shared-expert gate logit (router column E)
+        r_i, k_i = np.nonzero(res)
+        row[0, 0, r_i, slot[r_i, k_i]] = np.log(sc[r_i, k_i])
+        miss_mass = (sc * ~res).sum(1)  # computed and skipped misses: their routing mass goes to the zero sink
+        has = miss_mass > 1e-6
+        row[0, 0, has, C - 1] = np.log(miss_mass[has])
     HYB.st["t_craft"] += time.perf_counter() - t0
     t0 = time.perf_counter()
     mk = _kernel_rows(m)
@@ -838,13 +865,18 @@ def _fused_step1(self, x, logits, B):
         xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
         B["job"] = _job(self, xh, ids, sc, miss)
-        if fetch is not None:  # the CPU experts run while the fetched ones copy (the worker only makes the C call)
-            run = HYB.host_prepare(*B["job"])
-            B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
     else:
         B["job"] = None
     if fetch is not None:
+        # the fetch writes are enqueued BEFORE the CPU experts start: with the int4 kernel streaming host DRAM, each
+        # pinned write's enqueue took ~390 us instead of ~15 us (bench_pinx.py)
         HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
+        if B["job"] is not None:  # the CPU experts run while the fetched ones copy (the worker only makes the C call)
+            run = HYB.host_prepare(*B["job"])
+            if run is not None and HYB.hostk_async:
+                B["job"] = run.start()
+            else:
+                B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
 
 
 def _job(self, xh, ids, sc, miss):
@@ -1409,7 +1441,9 @@ def _host_step2(self, B):
             return
         host = torch.zeros(1, B["shapes"]["H"], dtype=torch.float32)
     elif hasattr(job, "result"):  # started in step 1 (HYB_LRU)
+        t0 = time.perf_counter()
         host = job.result()
+        HYB.st["t_wait"] += time.perf_counter() - t0
     else:
         host = HYB.host_compute(*job)
     t0 = time.perf_counter()

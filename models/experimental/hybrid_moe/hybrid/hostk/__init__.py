@@ -4,6 +4,7 @@
 
 import ctypes
 import os
+import time
 import subprocess
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +38,10 @@ def load(nthreads, so=_SO):
             + [ctypes.c_void_p] * 5
         )
         lib.hostk_planarize.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_int]
+        lib.hostk_moe_async.argtypes = lib.hostk_moe.argtypes
+        vp, ci = ctypes.c_void_p, ctypes.c_int
+        lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
+        lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
         lib.hostk_init(int(nthreads))
         _lib = lib
     return _lib
@@ -67,6 +72,28 @@ def _call(args, shape, n):
     rc = _lib.hostk_moe(*args)
     if rc != 0:
         raise RuntimeError(f"hostk_moe returned {rc} (R, H = {tuple(shape)}, E={n})")
+
+
+class AsyncMoe:
+    """moe_prepared's call started on hostk's C launcher thread (no Python thread: see hostk_moe_async); result()
+    waits (GIL released) and returns out. keep: the argument tensors, alive until then."""
+
+    def __init__(self, call, out, keep, on_done=None):
+        args, shape, n = call.args
+        self.out, self.keep, self.on_done, self.shape, self.n = out, keep, on_done, shape, n
+        self.t0 = time.perf_counter()
+        rc = _lib.hostk_moe_async(*args)
+        if rc != 0:
+            raise RuntimeError(f"hostk_moe_async returned {rc} (R, H = {tuple(shape)}, E={n})")
+
+    def result(self):
+        rc = _lib.hostk_moe_wait()
+        if rc != 0:
+            raise RuntimeError(f"hostk_moe (async) returned {rc} (R, H = {tuple(self.shape)}, E={self.n})")
+        if self.on_done is not None:
+            self.on_done(time.perf_counter() - self.t0)
+        self.keep = None
+        return self.out
 
 
 def moe(lib_t, X, rows, W, out, lo=None):
@@ -107,4 +134,37 @@ def _moe_args(lib_t, X, rows, W, out, lo=None):
         lib_t["dn_p"].data_ptr(),
         lib_t["dn_sz"].data_ptr(),
         out.data_ptr(),
+    )
+
+
+def route(lg, k, bias):
+    """Sigmoid + bias top-k routing of the rows of lg [m, ld] float32 over the first E = len(bias) columns (selection
+    on sigmoid + bias, weights = the selected sigmoids normalized); returns ids [m, k] int64, sc [m, k] float32."""
+    import numpy as np
+
+    m, ld = lg.shape
+    E = len(bias)
+    ids = np.empty((m, k), dtype=np.int64)
+    sc = np.empty((m, k), dtype=np.float32)
+    rc = _lib.hostk_route(lg.ctypes.data, m, ld, E, k, 1, bias.ctypes.data, ids.ctypes.data, sc.ctypes.data)
+    if rc != 0:
+        raise RuntimeError(f"hostk_route returned {rc} (m {m}, E {E}, k {k})")
+    return ids, sc
+
+
+def craft(ids, sc, slot_of, C, filler, lg, E, row):
+    """The crafted logits rows into row [m, C + 32] float32 (see hostk_craft); returns the resident picks."""
+    m, k = ids.shape
+    return _lib.hostk_craft(
+        m,
+        k,
+        ids.ctypes.data,
+        sc.ctypes.data,
+        slot_of.ctypes.data,
+        C,
+        float(filler),
+        lg.ctypes.data,
+        lg.shape[1],
+        E,
+        row.ctypes.data,
     )

@@ -34,6 +34,11 @@ HYB_KEYS = (
     "t_fetch",
     "t_route",
     "t_craft",
+    "t_sync",
+    "t_wait",
+    "t_exec",
+    "t_cb",
+    "t_fetch_w",
 )
 
 
@@ -73,11 +78,22 @@ def main():
         if warm_n:
             r = srv.generate("Write a haiku about the sea.", warm_n, gen.page_table[:1])
             print(f"WARMUP done ({r['tok_s']} tok/s)", flush=True)
-        for p_text in prompts:
+        # POC_FETCH_SWEEP="f:F,f:F": the prompts once per fetch setting (fraction f of the misses, at most F per layer and
+        # step), in this process (direct fetch: both are plain attributes; the LRU keeps its contents across settings)
+        sweep = [tuple(c.split(":")) for c in os.environ.get("POC_FETCH_SWEEP", "").split(",") if c]
+        runs = [(float(f), int(F)) for f, F in sweep] or [None]
+        if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F in runs)):
+            raise ValueError(f"POC_FETCH_SWEEP {runs} needs direct fetch and F <= HYB_LRU ({HYB.fetch.D})")
+        jobs = [(cfg, p) for cfg in runs for p in prompts]
+        for cfg, p_text in jobs:
+            if cfg is not None:
+                HYB.fetch.f, HYB.fetch.F = cfg
             r = srv.generate(p_text, NEW, gen.page_table[:1])
+            if cfg is not None:
+                r["fetch"] = list(cfg)
             n = max(1, r["passes"])
             r["hyb_per_pass_ms_or_n"] = {
-                k: round(HYB.st[k] / n * (1e3 if k.startswith("t_") else 1), 2) for k in HYB_KEYS
+                k: round(HYB.st.get(k, 0.0) / n * (1e3 if k.startswith("t_") else 1), 2) for k in HYB_KEYS
             }
             text = gen.tokenizer.decode(r.pop("ids"))
             r = {"prompt": p_text[:80], **r}

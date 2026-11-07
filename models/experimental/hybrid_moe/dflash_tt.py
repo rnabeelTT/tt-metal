@@ -429,6 +429,16 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
             )
             for n in (rows, bs)
         }
+        self.shard_v = {
+            n: ttnn.create_sharded_memory_config(
+                shape=(ttnn.TILE_SIZE, self.HD),
+                core_grid=ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 1), ttnn.CoreCoord(n - 1, 1))}),
+                strategy=ttnn.ShardStrategy.HEIGHT,
+                orientation=ttnn.ShardOrientation.ROW_MAJOR,
+                use_height_and_width_as_shard_shape=True,
+            )
+            for n in (rows, bs)
+        }
         grid = mesh.compute_with_storage_grid_size()
         self.sdpa_cfg = ttnn.SDPAProgramConfig(
             compute_with_storage_grid_size=(grid.x, grid.y), exp_approx_mode=False, q_chunk_size=0, k_chunk_size=0
@@ -466,10 +476,12 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
             k = ttnn.pad(k, [1, n, ttnn.TILE_SIZE, self.HD], [0, 0, 0, 0], 0.0)
             v = ttnn.pad(v, [1, n, ttnn.TILE_SIZE, self.HD], [0, 0, 0, 0], 0.0)
         ks = ttnn.to_memory_config(k, self.shard[n])
-        vs = ttnn.to_memory_config(v, self.shard[n])
+        # K and V of a row in one paged_fused_update_cache (its inputs on disjoint cores: V on the next core row)
+        vs = ttnn.to_memory_config(v, self.shard_v[n])
         for j in range(n):
-            ttnn.experimental.paged_update_cache(L["K"], ks, update_idxs_tensor=idx_rows[j], page_table=self.pt[n])
-            ttnn.experimental.paged_update_cache(L["V"], vs, update_idxs_tensor=idx_rows[j], page_table=self.pt[n])
+            ttnn.experimental.paged_fused_update_cache(
+                L["K"], ks, L["V"], vs, update_idxs_tensor=idx_rows[j], page_table=self.pt[n]
+            )
         ttnn.deallocate(ks)
         ttnn.deallocate(vs)
 

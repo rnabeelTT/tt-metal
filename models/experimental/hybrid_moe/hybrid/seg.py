@@ -35,8 +35,11 @@ class SegTrace:
         self.active = None
         self.traces = {}  # key(first real id) -> [(real id, fn | None)]
         self.stats = {"replays": 0, "segments": 0}
-        self.log_every = int(os.environ.get("HYB_LOG_EVERY", "0"))  # serving diagnostics: host-step stats every N replays
+        self.log_every = int(
+            os.environ.get("HYB_LOG_EVERY", "0")
+        )  # serving diagnostics: host-step stats every N replays
         self.on_log = None
+        self.host_st = None
 
     @property
     def capturing(self):
@@ -71,10 +74,16 @@ class SegTrace:
             return _orig["exec"](mesh, tid, cq_id=cq_id, blocking=blocking)
         if self.stats.get("t_first") is None:
             self.stats["t_first"] = time.time()  # first traced decode step: everything before it is prefill (TTFT)
+        st = self.host_st  # optional timing sink (patch.HYB.st): enqueue vs callback wall time
         for real, fn in segs:
+            t0 = time.perf_counter()
             _orig["exec"](mesh, real, cq_id=cq_id, blocking=False)
+            t1 = time.perf_counter()
             if fn is not None:
                 fn()
+            if st is not None:
+                st["t_exec"] = st.get("t_exec", 0.0) + t1 - t0
+                st["t_cb"] = st.get("t_cb", 0.0) + time.perf_counter() - t1
         self.stats["replays"] += 1
         self.stats["segments"] += len(segs)
         if self.log_every and self.stats["replays"] % self.log_every == 0 and self.on_log is not None:
@@ -96,6 +105,7 @@ SEG = SegTrace()
 def install():
     ttnn.begin_trace_capture = lambda mesh, cq_id=0: SEG.begin(mesh, cq_id=cq_id)
     ttnn.end_trace_capture = lambda mesh, tid, cq_id=0: SEG.end(mesh, tid, cq_id=cq_id)
-    ttnn.execute_trace = lambda mesh, tid, cq_id=0, blocking=True: SEG.execute(mesh, tid, cq_id=cq_id,
-                                                                               blocking=blocking)
+    ttnn.execute_trace = lambda mesh, tid, cq_id=0, blocking=True: SEG.execute(
+        mesh, tid, cq_id=cq_id, blocking=blocking
+    )
     ttnn.release_trace = lambda mesh, tid: SEG.release(mesh, tid)

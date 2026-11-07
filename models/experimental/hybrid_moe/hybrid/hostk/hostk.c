@@ -404,3 +404,187 @@ int hostk_planarize(uint8_t* p, int64_t nblocks, int K, int inverse) {
     free(tmp);
     return 0;
 }
+
+// ---- routing + crafted rows for the hybrid's host step 1 (one C call each instead of ~20 numpy calls per layer) ----
+// Top-k of m rows of router logits lg [m, ld] over E experts: sigmoid_bias = 1 selects on sigmoid(z) + bias and weighs
+// by the selected sigmoids normalized; else selects on z and weighs by the softmax over the selected logits.
+// Writes ids [m, k] (int64) and sc [m, k] (float32); the order within a row is the selection order (largest first).
+int hostk_route(
+    const float* lg, int m, int ld, int E, int k, int sigmoid_bias, const float* bias, int64_t* ids, float* sc) {
+    if (k <= 0 || k > 64 || E > 4096) {
+        return -1;
+    }
+    float key[4096], val[4096];
+    for (int r = 0; r < m; r++) {
+        const float* z = lg + (int64_t)r * ld;
+        for (int e = 0; e < E; e++) {
+            if (sigmoid_bias) {
+                val[e] = 1.0f / (1.0f + expf(-z[e]));
+                key[e] = val[e] + bias[e];
+            } else {
+                val[e] = z[e];
+                key[e] = z[e];
+            }
+        }
+        int sel[64];
+        for (int j = 0; j < k; j++) {  // k passes of argmax (k = 8 over E = 256: cheaper than a sort)
+            int b = -1;
+            float bv = -INFINITY;
+            for (int e = 0; e < E; e++) {
+                if (key[e] > bv) {
+                    bv = key[e];
+                    b = e;
+                }
+            }
+            sel[j] = b;
+            key[b] = -INFINITY;
+        }
+        float s = 0.0f, mx = -INFINITY;
+        if (!sigmoid_bias) {
+            for (int j = 0; j < k; j++) {
+                mx = fmaxf(mx, val[sel[j]]);
+            }
+        }
+        for (int j = 0; j < k; j++) {
+            float w = sigmoid_bias ? val[sel[j]] : expf(val[sel[j]] - mx);
+            sc[r * k + j] = w;
+            s += w;
+        }
+        for (int j = 0; j < k; j++) {
+            sc[r * k + j] /= s;
+            ids[r * k + j] = sel[j];
+        }
+    }
+    return 0;
+}
+
+// The fused kernels' crafted logits rows row [m, C + 32]: filler at every slot, 0 in the 32 tail columns except the
+// shared-expert gate logit lg[r, E] at column C, ln(score) at each resident pick's slot (slot_of[id] >= 0) and
+// ln(missed mass) at the sink C - 1 when the row has misses. Returns the number of resident picks.
+int hostk_craft(
+    int m,
+    int k,
+    const int64_t* ids,
+    const float* sc,
+    const int32_t* slot_of,
+    int C,
+    float filler,
+    const float* lg,
+    int ld,
+    int E,
+    float* row) {
+    int hits = 0;
+    const int W = C + 32;
+    for (int r = 0; r < m; r++) {
+        float* o = row + (int64_t)r * W;
+        for (int c = 0; c < C; c++) {
+            o[c] = filler;
+        }
+        for (int c = C; c < W; c++) {
+            o[c] = 0.0f;
+        }
+        o[C] = lg[(int64_t)r * ld + E];
+        float miss = 0.0f;
+        for (int j = 0; j < k; j++) {
+            int s = slot_of[ids[r * k + j]];
+            if (s >= 0) {
+                o[s] = logf(sc[r * k + j]);
+                hits++;
+            } else {
+                miss += sc[r * k + j];
+            }
+        }
+        if (miss > 1e-6f) {
+            o[C - 1] = logf(miss);
+        }
+    }
+    return hits;
+}
+
+// ---- asynchronous hostk_moe: a C launcher thread runs the call, so the hybrid's host step needs no Python worker
+// thread (a Python thread holding the GIL delayed every ctypes / ttnn call of the main thread by up to the 5 ms
+// switch interval: pinned writes 18 us -> 5 ms in bench_pinx.py). One call in flight at a time.
+typedef struct {
+    int R, H, I, gs, E, planar;
+    const float* X;
+    const int64_t* rows;
+    const float* W;
+    const int8_t* lo;
+    const uint8_t *gu_p, *dn_p;
+    const uint16_t *gu_sz, *dn_sz;
+    float* out;
+} moe_args_t;
+static moe_args_t g_a;
+static pthread_t g_launch;
+static int g_launch_up = 0, g_pending = 0, g_busy = 0, g_rc = 0;
+static pthread_mutex_t g_am = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_ac = PTHREAD_COND_INITIALIZER;
+
+static void* launcher(void* arg) {
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&g_am);
+        while (!g_pending) {
+            pthread_cond_wait(&g_ac, &g_am);
+        }
+        g_pending = 0;
+        g_busy = 1;
+        moe_args_t a = g_a;
+        pthread_mutex_unlock(&g_am);
+        int rc = hostk_moe(
+            a.R, a.H, a.I, a.gs, a.X, a.E, a.rows, a.W, a.lo, a.planar, a.gu_p, a.gu_sz, a.dn_p, a.dn_sz, a.out);
+        pthread_mutex_lock(&g_am);
+        g_rc = rc;
+        g_busy = 0;
+        pthread_cond_broadcast(&g_ac);
+        pthread_mutex_unlock(&g_am);
+    }
+    return NULL;
+}
+
+// Same arguments as hostk_moe; returns at once (0), or -5 when a call is still in flight, -6 if the thread failed.
+int hostk_moe_async(
+    int R,
+    int H,
+    int I,
+    int gs,
+    const float* X,
+    int E,
+    const int64_t* rows,
+    const float* W,
+    const int8_t* lo,
+    int planar,
+    const uint8_t* gu_p,
+    const uint16_t* gu_sz,
+    const uint8_t* dn_p,
+    const uint16_t* dn_sz,
+    float* out) {
+    pthread_mutex_lock(&g_am);
+    if (!g_launch_up) {
+        if (pthread_create(&g_launch, NULL, launcher, NULL) != 0) {
+            pthread_mutex_unlock(&g_am);
+            return -6;
+        }
+        g_launch_up = 1;
+    }
+    if (g_pending || g_busy) {
+        pthread_mutex_unlock(&g_am);
+        return -5;
+    }
+    g_a = (moe_args_t){R, H, I, gs, E, planar, X, rows, W, lo, gu_p, dn_p, gu_sz, dn_sz, out};
+    g_pending = 1;
+    pthread_cond_broadcast(&g_ac);
+    pthread_mutex_unlock(&g_am);
+    return 0;
+}
+
+// Blocks until the asynchronous call finished; returns its hostk_moe code.
+int hostk_moe_wait(void) {
+    pthread_mutex_lock(&g_am);
+    while (g_pending || g_busy) {
+        pthread_cond_wait(&g_ac, &g_am);
+    }
+    int rc = g_rc;
+    pthread_mutex_unlock(&g_am);
+    return rc;
+}
