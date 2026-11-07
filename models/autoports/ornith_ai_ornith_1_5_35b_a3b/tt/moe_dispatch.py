@@ -62,6 +62,8 @@ SORT_ON_UINT16 = DISPATCH_MODE == "sort_u16"
 # Un-dispatch through the multi-core gather-add kernel (ttnn.experimental.moe_gather_add_rows) instead of k x
 # (slice + embedding gather + add); only available with the kernel dispatch (it consumes the raw undispatch stick).
 UNDISPATCH_KERNEL = DISPATCH_MODE == "kernel" and os.environ.get("QWEN35_UNDISPATCH_KERNEL", "1") == "1"
+DISPATCH_MC = os.environ.get("QWEN35_DISPATCH_MC", "0") == "1"
+from models.demos.blackhole.qwen36.tt.moe_prefill import dispatch_mc as _dmc  # noqa: E402
 # Grouped (indices=) sparse matmuls never read the [1, G, 1, E] one-hot sparsity operand: build(mask=False) hands them a
 # cached placeholder instead of the per-call eq / typecast / to_layout chain (~0.3 ms per 2048-token MoE layer)
 CONST_GROUP_MASK = os.environ.get("QWEN35_CONST_GROUP_MASK", "1") == "1"
@@ -475,8 +477,12 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G, mask=True):
     # the op reads the tiled [1,1,T,k] top-k outputs in place (uint16 ids, bf16 scores): no typecast / untilize / reshape
     ids_t = self._tiled(ids)
     sc_t = self._tiled(scores)
-    op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
-    src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=dram, pad_group_id=self.pad_group_id)
+    if DISPATCH_MC and _dmc.fits(T, E, k, Rd, gs):
+        # multi-core (moe_prefill/dispatch_mc.py): the same outputs bit for bit, ~N x less per-core work
+        src_tok, w_disp, group_ids, und = _dmc.dispatch_mc(ids_t, sc_t, E, k, gs, Rd, pad_group_id=self.pad_group_id)
+    else:
+        op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
+        src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=dram, pad_group_id=self.pad_group_id)
     for t in (ids_t, sc_t):
         if t is not ids and t is not scores:
             ttnn.deallocate(t)

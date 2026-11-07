@@ -4,7 +4,7 @@
 # ~/.cache/huggingface and thinking off by default (the scorecard's eval setting).
 # PORT (default 20000) / DEVS (TT_VISIBLE_DEVICES, default 0,1 for p300): two p300 servers side by side on the two chip
 # pairs, e.g. the published reference on 0,1 :20000 and a development build on DEVS=2,3 PORT=20001.
-# MAXSEQS overrides --max-num-seqs (32). MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
+# KERNELS (see below) mounts edited device-kernel sources. MAXSEQS overrides --max-num-seqs (32). MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
 # MODEL_ID (default Ornith) picks the serving recipe (Qwen/Qwen3-Coder-Next, Qwen/Qwen3.5-122B-A10B,
 # zai-org/GLM-4.5-Air too); CACHE_NAME the host cache dir.
 set -e
@@ -41,6 +41,9 @@ esac
 KCACHE=${KCACHE:-$CACHE/cache}
 METAL=${METAL:-$(cd "$(dirname "$0")/../../../../.." && pwd)}
 MNT=""; [ "${MODELS:-0}" = 1 ] && MNT="--volume $METAL/models:/opt/tt-metal/models:ro"
+# KERNELS="rel/path.cpp ..." mounts those device-kernel sources (JIT-compiled) from this checkout; give them their own
+# KCACHE, since the kernel cache is not keyed by source contents
+for k in ${KERNELS:-}; do MNT+=" --volume $METAL/$k:/opt/tt-metal/$k:ro"; done
 mkdir -p $KCACHE $CACHE/weights $CACHE/tensors
 docker rm -f $NAME >/dev/null 2>&1 || true
 docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --ipc host \

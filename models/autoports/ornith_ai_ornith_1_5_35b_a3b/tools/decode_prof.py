@@ -119,6 +119,7 @@ def main():
     ap.add_argument("--warm", type=int, default=2)
     ap.add_argument("--top", type=int, default=60)
     ap.add_argument("--prefill", type=int, default=0, help="profile one prefill of this many tokens instead of decode")
+    ap.add_argument("--calls", default="", help="comma list of label substrings: print every matching program in order")
     args = ap.parse_args()
     B = args.batch
     layers = [int(x) for x in args.layers.split(",")]
@@ -199,6 +200,12 @@ def main():
           f"profile data)", flush=True)
     for lab, (d, n) in sorted(by.items(), key=lambda kv: -kv[1][0])[: args.top]:
         print(f"  {d:8.1f} us {100 * d / max(tot, 1e-9):5.1f}%  x{n:<3d} {lab}", flush=True)
+    if args.calls:
+        keys = args.calls.split(",")
+        for i in range(first_id, last_id):
+            lab = OWN.get(i, "<untracked>")
+            if i in dur and any(k in lab for k in keys):
+                print(f"  CALL {i} {dur[i]:8.1f} us {lab}", flush=True)
     if mesh is not None:
         getattr(gen, "teardown", lambda: None)()
         ttnn.close_mesh_device(mesh)

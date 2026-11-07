@@ -606,7 +606,25 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                     prompt_tokens=tokens[u : u + 1, : plens[u]].to(torch.long).repeat(total_batch, 1),
                     empty_slots=[slots[u]],
                 )
-                tt_tokens, _ = sampling_module.sample(logits_sh, enable_trace=False)
+                # QWEN35_ROWS_TOPK samples only the first `_active_trace_bucket` rows (the live decode width). A batched
+                # admission's request can sit past it (row 3 under a width-2 decode got another row's stale top-k:
+                # concurrent greedy 7/8): widen to the power-of-two width covering `row` for this draw (row-independent
+                # top-k, so rows < width are unchanged; widths 1..8 are the decode buckets' already-compiled programs)
+                bucket = getattr(sampling_module, "_active_trace_bucket", None)
+                widen = bucket is not None and row >= bucket
+                if widen:
+                    sampling_module._active_trace_bucket = 1 << row.bit_length()
+                # penalties rewrite the logits in place (apply_penalties output_tensor=logits): a batched admission's
+                # rows share one logits tensor, so a penalised request's draw shifted the later requests' rows
+                # (conformance test_repetition_penalty_mixed_batch). Sample from a copy whenever penalties are on.
+                src = ttnn.clone(logits_sh) if getattr(sampling_module, "_penalties_active", False) else logits_sh
+                try:
+                    tt_tokens, _ = sampling_module.sample(src, enable_trace=False)
+                finally:
+                    if widen:
+                        sampling_module._active_trace_bucket = bucket
+                    if src is not logits_sh:
+                        ttnn.deallocate(src)
                 return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[row])
 
         logger.info(
