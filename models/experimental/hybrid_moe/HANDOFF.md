@@ -55,6 +55,15 @@ Pieces (all traced, per-prompt re-capture):
   all-gather, explicit 1D program configs (bench_drmm.py: default linear 70-240 GB/s, 1D ~320-350). Traced drafter
   pass 5.7 -> 4.1 ms (dbg_dflash_paged: same 46/48 agreement); 128K (runs/m27/r128k_drf) draft 6.5 -> 5.1 ms/pass,
   fr / es / Rust 44.3 / 40.6 / 42.2 tok/s.
+- 128K memory (2026-11-08): FULL=20 leaves ~1.2 GiB/die after warm-up; the startup peak is the all-logits prefill
+  warm-up's vocab all-gather (0.4-0.8 GB). FULL=28 OOMs there; FULL=24 fits with QWEN35_WARM_ALL_LOGITS=0 (0.7 GiB
+  left, 8K prompt OK) but gains only ~1-2% verify (runs/m27/r128k_f24) -> 128K stays FULL=20 (keeps all-logits).
+- Host findings (2026-11-08): DDR5 runs at 3600 MT/s (4 x 64 GB, 2 DIMMs/channel; rated 5600): measured read ceiling
+  ~45-54 GB/s, the int4 kernel gets ~40 -> a BIOS memory-speed change would speed the CPU experts directly. Small
+  device reads cost ~22 us (bench_read.py) and pinned row writes ~10 us idle (bench_put.py) but ~40-50 us inside the
+  decode loop (t_up_w; cause not found: not hostk cache pollution, not worker spin).
+- DK=4 (5 verify rows in the 8-row kernels: HROWS=8 DK=4 run_m27_dflash.sh; the pad rows repeat the last row, KV
+  write masked): 2.3-2.5 tokens/pass vs 2.1-2.4 at DK=3 but verify +6 ms -> 37.9 / 40.0 / 42.9 tok/s, no gain; DK=3.
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the

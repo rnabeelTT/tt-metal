@@ -85,14 +85,19 @@ class Verify:
         row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
         if row.numel() < self.W:  # the plugin's row may be narrower than the bound width: the tail is never read
             row = torch.cat([row, torch.zeros(self.W - row.numel(), dtype=torch.int32)])
+        n = len(positions)
+        if n > self.BW or len(tokens) != n:
+            raise ValueError(f"verify stage: {len(tokens)} tokens / {n} positions for {self.BW} rows")
+        pad = self.BW - n  # R below the kernel width (rows_width): the last row repeated, its KV write masked off
         tok, pos, rot, pt = self.model.prepare_decode_inputs_host(
-            torch.tensor(tokens, dtype=torch.int32),
-            torch.tensor(positions, dtype=torch.int32),
+            torch.tensor(list(tokens) + [tokens[-1]] * pad, dtype=torch.int32),
+            torch.tensor(list(positions) + [positions[-1]] * pad, dtype=torch.int32),
             row[: self.W].repeat(self.BW, 1),
         )
         for h, d in ((tok, self.tok), (pos, self.pos), (rot, self.rot), (pt, self.pt)):
             ttnn.copy_host_to_device_tensor(h, d)
-        ttnn.copy_host_to_device_tensor(self.rows.rows_pos_masks_host(list(positions), self.BW), self.masks)
+        masks = self.rows.rows_pos_masks_host(list(positions) + [-1] * pad, self.BW)
+        ttnn.copy_host_to_device_tensor(masks, self.masks)
 
     def body(self):
         m, BW = self.model, self.BW
@@ -125,6 +130,9 @@ class Verify:
         for t in row_idx:
             ttnn.deallocate(t)
         cat = ttnn.concat(taps, dim=-1)  # [1, 1, BW, n_taps * H], replicated
+        if self.BW > self.R:  # the padded rows are not context
+            taps.append(cat)
+            cat = ttnn.slice(cat, (0, 0, 0, 0), (1, 1, self.R, int(cat.shape[-1])), memory_config=DRAM)
         ttnn.copy(cat, self.dr.c_taps[self.R])
         for t in taps + [cat, cos, sin]:
             ttnn.deallocate(t)
