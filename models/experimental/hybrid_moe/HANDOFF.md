@@ -51,6 +51,10 @@ Pieces (all traced, per-prompt re-capture):
   `paged_fused_update_cache` per row (V on core row 1). Layer PCC 0.99999; in-process A/B at 128K
   (runs/m27/r128k_ab, POC_AB_ROWS_OPS): device t_read 30.1 -> 26.7 ms/pass, verify ~52 -> ~44.5 ms, es/Rust 38 -> 42
   tok/s. Greedy text diverges after a few tokens (near-ties), outputs coherent.
+- Drafter projections (2026-11-08, DFLASH_FUSED default 1): q|k|v and gate|up fused per die, fc column-split +
+  all-gather, explicit 1D program configs (bench_drmm.py: default linear 70-240 GB/s, 1D ~320-350). Traced drafter
+  pass 5.7 -> 4.1 ms (dbg_dflash_paged: same 46/48 agreement); 128K (runs/m27/r128k_drf) draft 6.5 -> 5.1 ms/pass,
+  fr / es / Rust 44.3 / 40.6 / 42.2 tok/s.
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the

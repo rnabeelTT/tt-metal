@@ -445,6 +445,70 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
         )
         self.traces, self.outs = {}, {}
         self.ctx_len = self.base = 0
+        # DFLASH_FUSED (default 1, tp): q|k|v and gate|up fused per die, fc split by column (+ all-gather), and the
+        # decode-row projections on explicit 1D program configs (the default ttnn.linear ran these skinny matmuls at
+        # 70-240 GB/s of DRAM bandwidth, the 1D configs at ~320-350: bench_drmm.py)
+        self.fused = tp and os.environ.get("DFLASH_FUSED", "1") == "1"
+        self._mm_cfgs = {}
+        if self.fused:
+            for L in self.layers:
+                L["qkv"] = ttnn.concat([L["q"], L["k"], L["v"]], dim=-1, memory_config=DRAM)
+                L["gu"] = ttnn.concat([L["gate"], L["up"]], dim=-1, memory_config=DRAM)
+                for name in ("q", "k", "v", "gate", "up"):
+                    ttnn.deallocate(L.pop(name))
+            f = safe_open(os.path.join(snapshot, "model.safetensors"), "pt")
+            ttnn.deallocate(self.fc)
+            self.fc = ttnn.from_torch(
+                f.get_tensor("fc.weight").T.contiguous(),
+                dtype=dtype,
+                layout=ttnn.TILE_LAYOUT,
+                device=mesh,
+                mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+                memory_config=DRAM,
+            )
+
+    def _mm(self, x, wt):
+        """A projection of <= 32 rows on an explicit 1D (mcast_in0) program config (at most 64 cores); more rows (the
+        eager prompt fill) on the default linear."""
+        M, K, N = int(x.shape[-2]), int(wt.shape[-2]), int(wt.shape[-1])
+        if not self.fused or M > ttnn.TILE_SIZE:
+            return self._lin(x, wt)
+        key = (M, K, N)
+        if key not in self._mm_cfgs:
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            gx = self.mesh.compute_with_storage_grid_size().x
+            self._mm_cfgs[key] = tpc.create_matmul_1d_decode_progcfg(M, K, N, min(64, N // ttnn.TILE_SIZE), grid_w=gx)
+        return ttnn.linear(x, wt, compute_kernel_config=self.ckc, program_config=self._mm_cfgs[key], memory_config=DRAM)
+
+    def _ctx(self, taps):
+        """context features [1, 1, n, n_taps * H] -> fc -> hidden_norm (fc column-split + all-gather when fused)"""
+        c = self._mm(taps, self.fc)
+        if self.fused:
+            g = ttnn.all_gather(c, dim=-1, num_links=1, topology=ttnn.Topology.Linear, memory_config=DRAM)
+            ttnn.deallocate(c)
+            c = g
+        return self._rms(c, self.hidden_norm)
+
+    def _proj(self, x, L, n, names):
+        """the named projections ("q" / "k" / "v") of n rows, each [1, 1, n, nh * HD] (one fused matmul + slices)"""
+        if not self.fused:
+            return [self._mm(x, L[nm]) for nm in names]
+        y = self._mm(x, L["qkv"])
+        w = self.nh * self.HD
+        outs = [ttnn.slice(y, (0, 0, 0, i * w), (1, 1, n, (i + 1) * w)) for i in ("qkv".index(nm) for nm in names)]
+        ttnn.deallocate(y)
+        return outs
+
+    def _mlp(self, h2):
+        if not self.fused:
+            return ttnn.multiply(ttnn.silu(self._mm(h2, self.L_cur["gate"])), self._mm(h2, self.L_cur["up"]))
+        gu = self._mm(h2, self.L_cur["gu"])
+        n, w = int(h2.shape[-2]), int(gu.shape[-1]) // 2
+        g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, n, w))
+        u = ttnn.slice(gu, (0, 0, 0, w), (1, 1, n, 2 * w))
+        ttnn.deallocate(gu)
+        return ttnn.multiply(ttnn.silu(g), u)
 
     @staticmethod
     def _put_i32(dev_t, host):
@@ -491,17 +555,20 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
     # -- bodies ----------------------------------------------------------------------------------------------------
     def pass_body(self):
         n, bs, scale = self.rows, self.bs, self.HD**-0.5
-        c = self._rms(self._lin(self.c_taps[n], self.fc), self.hidden_norm)
+        c = self._ctx(self.c_taps[n])
         c_rows, b_rows = self._idx_rows(self.c_idx, n), self._idx_rows(self.b_idx, bs)
         x = self.d_x
         for L in self.layers:
-            kc = self._rope_u(self._rms(self._users(self._lin(c, L["k"]), n), L["k_norm"]), self.c_cos, self.c_sin)
-            vc = self._users(self._lin(c, L["v"]), n)
+            self.L_cur = L
+            kc, vc = self._proj(c, L, n, "kv")
+            kc = self._rope_u(self._rms(self._users(kc, n), L["k_norm"]), self.c_cos, self.c_sin)
+            vc = self._users(vc, n)
             self._write_rows(L, kc, vc, n, c_rows)
             h = self._rms(x, L["in_norm"])
-            q = self._rope_u(self._rms(self._users(self._lin(h, L["q"]), bs), L["q_norm"]), self.d_cos, self.d_sin)
-            kb = self._rope_u(self._rms(self._users(self._lin(h, L["k"]), bs), L["k_norm"]), self.d_cos, self.d_sin)
-            vb = self._users(self._lin(h, L["v"]), bs)
+            q, kb, vb = self._proj(h, L, bs, "qkv")
+            q = self._rope_u(self._rms(self._users(q, bs), L["q_norm"]), self.d_cos, self.d_sin)
+            kb = self._rope_u(self._rms(self._users(kb, bs), L["k_norm"]), self.d_cos, self.d_sin)
+            vb = self._users(vb, bs)
             self._write_rows(L, kb, vb, bs, b_rows)
             o = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
@@ -514,10 +581,9 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
                 memory_config=DRAM,
             )  # [1, bs, NH, HD]
             o = ttnn.reshape(o, (1, 1, bs, self.nh * self.HD))
-            x = ttnn.add(x, self._reduce(self._lin(o, L["o"])))
+            x = ttnn.add(x, self._reduce(self._mm(o, L["o"])))
             h2 = self._rms(x, L["post_norm"])
-            mlp = ttnn.multiply(ttnn.silu(self._lin(h2, L["gate"])), self._lin(h2, L["up"]))
-            x = ttnn.add(x, self._reduce(self._lin(mlp, L["down"])))
+            x = ttnn.add(x, self._reduce(self._mm(self._mlp(h2), L["down"])))
         h = self._rms(x, self.norm)
         logits = ttnn.linear(h, self.lm_head, memory_config=DRAM)
         return argmax_max(logits)
@@ -540,11 +606,12 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
             mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
             memory_config=DRAM,
         )
-        c = self._rms(self._lin(taps, self.fc), self.hidden_norm)
+        c = self._ctx(taps)
         cos, sin = self._cos_sin(list(range(start, start + S)))  # [1, 1, S, HD]
         for L in self.layers:
-            k = self._rope(self._rms(self._heads_n(self._lin(c, L["k"]), S), L["k_norm"]), cos, sin)  # [1, nh, S, HD]
-            v = self._heads_n(self._lin(c, L["v"]), S)
+            k, v = self._proj(c, L, S, "kv")
+            k = self._rope(self._rms(self._heads_n(k, S), L["k_norm"]), cos, sin)  # [1, nh, S, HD]
+            v = self._heads_n(v, S)
             ttnn.experimental.paged_fill_cache(L["K"], k, self.pt[1], batch_idx=0)
             ttnn.experimental.paged_fill_cache(L["V"], v, self.pt[1], batch_idx=0)
             for x in (k, v):
