@@ -33,16 +33,52 @@ from models.tt_transformers.tt.common import Mode
 # batched admission is bit-identical to the same prompt admitted alone (tools/batched_exact.py)
 EXACT_SDPA = os.environ.get("QWEN35_BATCHED_EXACT_SDPA", "1") == "1"
 GDN_BATCH_CAP = 4  # the chunk-scan kernel maps one (user, head) row per core: B * Nv_tp <= 32 at TP = 4
-MAX_BATCHED_BUCKET = 512  # longest bucket the batched pass serves (the launch-bound regime; longer prompts go single)
+MAX_BATCHED_BUCKET = 512  # longest bucket the B = 4 pass serves (the launch-bound regime)
+# A pass never has more rows (B x bucket) than the single-user path's prefill segment (2048 rows on 2 / 4 dies, 1024 on
+# one die), so no op sees more rows than a lone segment-length prompt does: one die serves B = 4 up to the 256 bucket.
+#
+# Wide groups (QWEN35_BATCHED_WIDE=1, default OFF): pairs in the next bucket up (1024 on 2 / 4 dies) as one segment-sized
+# pass (B = 2). Bit-exact (tools/batched_exact_ncols.py BP_B=2; served greedy identical) but below the 10 % bar: served
+# Ornith-35B 2026-11-08, TTFT 1024-token prompts x 32 users 5032 -> 4720 ms (-6 %) on 4 dies, 6832 -> 6283 (-8 %) on 2.
+# A 1024-row prefill is compute bound (~150 ms in the step), a 2048-row pair ~274 ms: only the fixed per-pass cost goes.
+WIDE = os.environ.get("QWEN35_BATCHED_WIDE", "0") == "1"
+
+
+def _segment(model):
+    return int(getattr(model, "PREFILL_SEGMENT", 2048))
+
+
+def batch_cap(model):
+    """Largest B the batched GDN chunk scan takes on this mesh: one (user, value-head) scan row per core, so
+    B * Nv_tp <= compute cores (chunk_gdn_phased_program_factory.cpp distribute_scan): 4 on 2 / 4 dies, 3 on one die
+    (Ornith-35B: 32 value heads per die). With the row cap (B x bucket <= the 1024-row segment) one die batches the
+    128 / 256 buckets: served p150 2026-11-08 TTFT 128 x 32 users 4719 -> 3282 ms, greedy and conformance unchanged."""
+    g = model.device.compute_with_storage_grid_size()
+    nv = next(l.attention.Nv for l in model.layers if not l.is_full_attention)
+    return max(1, min(GDN_BATCH_CAP, (g.x * g.y) // nv))
+
+
+def wide_spec(model):
+    """(B, buckets) of the wide driver for this model, or None (off, or no bucket left that a pair fits)."""
+    seg = _segment(model)
+    narrow = [b for b in model._PREFILL_MASK_BUCKETS if b <= MAX_BATCHED_BUCKET and batch_cap(model) * b <= seg]
+    wide = tuple(b for b in model._PREFILL_MASK_BUCKETS if b not in narrow and 2 * b <= seg)
+    if not WIDE or not wide:
+        return None
+    return 2, wide
 
 
 class BatchedPrefill:
     """Batched short-prompt prefill driver bound to one model (see the module docstring)."""
 
-    def __init__(self, model, B=GDN_BATCH_CAP):
+    def __init__(self, model, B=GDN_BATCH_CAP, buckets=None):
         self.model = model
         self.B = int(B)
         assert 2 <= self.B <= GDN_BATCH_CAP, (self.B, GDN_BATCH_CAP)
+        # the buckets this driver serves (default: every mask bucket <= MAX_BATCHED_BUCKET)
+        self.buckets = tuple(sorted(buckets)) if buckets else tuple(
+            b for b in model._PREFILL_MASK_BUCKETS if b <= MAX_BATCHED_BUCKET and self.B * b <= _segment(model)
+        )
         self._scratch = (
             None  # [(dn, rec, conv_states, conv_carry, zero_conv0, zero_rec, zero_conv_carry)] per GDN layer
         )
@@ -348,7 +384,7 @@ class BatchedPrefill:
         model = self.model
         n = len(lens)
         bucket = bucket or model._mask_bucket_for(max(int(l) for l in lens))
-        assert bucket <= MAX_BATCHED_BUCKET, (bucket, MAX_BATCHED_BUCKET)
+        assert bucket in self.buckets, (bucket, self.buckets)
         pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
         bi = self.inputs(bucket, max_blocks=pt.shape[-1])
         self.stage(bi, tokens, lens, pt, bucket)
@@ -380,7 +416,7 @@ class BatchedPrefill:
         """Compile every program of the batched pass and the scratch-row slot writes (eager, before any trace is
         captured: #48536 rule) for the batched buckets."""
         B = self.B
-        buckets = [b for b in (buckets or self.model._PREFILL_MASK_BUCKETS) if b <= MAX_BATCHED_BUCKET]
+        buckets = [b for b in (buckets or self.buckets) if b in self.buckets]
         pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
         for b in sorted(buckets):
             lens = self._warm_lens(b, B)
@@ -394,7 +430,7 @@ class BatchedPrefill:
         """One trace per batched bucket on the persistent inputs (after every program is warm and every persistent
         allocation exists). Returns the captured bucket list."""
         model, B = self.model, self.B
-        buckets = [b for b in (buckets or model._PREFILL_MASK_BUCKETS) if b <= MAX_BATCHED_BUCKET]
+        buckets = [b for b in (buckets or self.buckets) if b in self.buckets]
         pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
         for b in sorted(buckets):
             if b in self.traces:
