@@ -39,6 +39,9 @@ HYB_KEYS = (
     "t_exec",
     "t_cb",
     "t_fetch_w",
+    "t_up_cp",
+    "t_up_w",
+    "t_up_conv",
 )
 
 

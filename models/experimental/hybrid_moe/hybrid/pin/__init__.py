@@ -5,6 +5,7 @@
 import ctypes
 import mmap
 import os
+import time
 
 import numpy as np
 
@@ -104,6 +105,7 @@ class PinnedRows:
         self.next = 0
         self.slices = {}  # (key, destination address) -> host offset
         self.dsts = {}  # destination address -> (pinx destination, bytes)
+        self.t_copy = self.t_write = 0.0  # cumulative seconds: staging copies, pinned write calls
 
     def put(self, key, dst, t):
         """t: a torch bf16 tensor with the destination's per-device element count (replicated to every device)."""
@@ -122,5 +124,9 @@ class PinnedRows:
                 raise RuntimeError(f"PinnedRows: region of {len(self.buf)} bytes is full ({len(self.slices)} slices)")
         import torch
 
+        t0 = time.perf_counter()
         torch.from_numpy(self.buf[off : off + n]).view(torch.bfloat16).copy_(t.reshape(-1))
+        t1 = time.perf_counter()
         self.px.write(d[0], self.rid, [off] * self.px.tp)
+        self.t_copy += t1 - t0
+        self.t_write += time.perf_counter() - t1

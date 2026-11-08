@@ -33,6 +33,10 @@
 #ifndef HOSTK_PF
 #define HOSTK_PF 0  // software prefetch distance in bytes ahead of the weight stream (0: off)
 #endif
+#ifndef HOSTK_PF_HINT
+#define HOSTK_PF_HINT \
+    _MM_HINT_T0  // _MM_HINT_NTA: the streamed weights bypass L2 / L3 (no eviction of the host step's data)
+#endif
 #define SPIN 2000  // ~50 us of pause before futex sleep: a longer spin starves the host step's other threads
 
 typedef struct {
@@ -105,9 +109,9 @@ static void gemv_block(
             for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
 #if HOSTK_PF > 0
                 if (!(k & 1)) {  // one 64-byte line every two k (32 bytes per k in the torch pack)
-                    _mm_prefetch((const char*)(p + HOSTK_PF), _MM_HINT_T0);
+                    _mm_prefetch((const char*)(p + HOSTK_PF), HOSTK_PF_HINT);
                     if (layout == 1) {
-                        _mm_prefetch((const char*)(pl + HOSTK_PF), _MM_HINT_T0);
+                        _mm_prefetch((const char*)(pl + HOSTK_PF), HOSTK_PF_HINT);
                     }
                 }
 #endif

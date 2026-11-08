@@ -284,6 +284,11 @@ class Qwen35MoeGenerator(ReadinessGenerator):
     def _warm_all_logits(self):
         """Compile the all-positions logits programs (readiness prefill check) before any trace is parked: a program
         compiled after a trace capture can have its binaries overwritten by a later replay (README section 4)."""
+        # QWEN35_WARM_ALL_LOGITS=0: skipped (its vocab all-gather is the startup DRAM peak, ~0.4-0.8 GB per die; a
+        # tight memory profile such as the hybrid 128K one has no room for it), and all-logits prefill then raises
+        if os.environ.get("QWEN35_WARM_ALL_LOGITS", "1") == "0":
+            self._all_logits_off = True
+            return
         if getattr(self.model, "_kv_scratch_block", None) is not None and hasattr(
             self.model, "warmup_all_logits_programs"
         ):
@@ -606,6 +611,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         B, T = tokens.shape
         lens = [int(prompt_lens[u]) for u in range(B)] if prompt_lens is not None else [T] * B
         if return_all_logits:
+            if getattr(self, "_all_logits_off", False):
+                raise RuntimeError("all-position logits need their warm-up (QWEN35_WARM_ALL_LOGITS=0 skipped it)")
             assert B == 1, "all-position logits are a single-sequence path"
             out = self.model.prefill_all_logits(tokens[:1, : lens[0]].to(torch.int32), page_table[:1])
             self.positions[0] = lens[0]
