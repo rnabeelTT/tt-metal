@@ -64,6 +64,15 @@ def main():
             warm_prefill_trace=False,
         )
         srv = DFlashServing(gen, K, drafter=dr)
+        if os.environ.get("POC_PROF_DRAIN") == "1":  # device profiler: drain its buffers after every pass
+            step = srv.step
+
+            def drained(*a, **kw):
+                out = step(*a, **kw)
+                ttnn.ReadDeviceProfiler(mesh)
+                return out
+
+            srv.step = drained
         srv.warm()
         if os.environ.get("DFLASH_MEMONLY") == "1":
             print("MEMONLY " + json.dumps(gen._memory_report()), flush=True)
@@ -92,7 +101,24 @@ def main():
         if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F, _ in runs)):
             raise ValueError(f"POC_FETCH_SWEEP {runs} needs direct fetch and F <= HYB_LRU ({HYB.fetch.D})")
         jobs = [(cfg, p) for cfg in runs for p in prompts]
-        for cfg, p_text in jobs:
+        # POC_AB_ROWS_OPS=1: every job twice, rows-mode attention through the chain, then the prep / post ops (the traces
+        # are captured per prompt, so the switch takes effect at the next prompt)
+        ab = os.environ.get("POC_AB_ROWS_OPS") == "1"
+        rows_ops = {li: layer.attention._rows_ops for li, layer in enumerate(gen.model.layers)}
+        if ab:
+            jobs = [(cfg, p, on) for cfg, p in jobs for on in (False, True)]
+        else:
+            jobs = [(cfg, p, None) for cfg, p in jobs]
+        warmed = {True}  # the startup warm-up ran with the ops
+        for cfg, p_text, on in jobs:
+            if on is not None:
+                for li, layer in enumerate(gen.model.layers):
+                    layer.attention._rows_ops = rows_ops[li] if on else None
+                if on not in warmed:  # the chain's programs are not in the program cache yet (the capture needs them)
+                    srv.ver.release()
+                    srv.ver.stage([0] * srv.R, list(range(8, 8 + srv.R)), gen.page_table[0])
+                    srv.ver.run()
+                    warmed.add(on)
             if cfg is not None:
                 HYB.fetch.commit(HYB.slot_of)  # writes of an async setting land before the mode changes
                 HYB.fetch.f, HYB.fetch.F, HYB.fetch.async_on = cfg
@@ -101,6 +127,8 @@ def main():
             r = srv.generate(p_text, NEW, gen.page_table[:1])
             if cfg is not None:
                 r["fetch"] = list(cfg)
+            if on is not None:
+                r["rows_ops"] = on
             n = max(1, r["passes"])
             r["hyb_per_pass_ms_or_n"] = {
                 k: round(HYB.st.get(k, 0.0) / n * (1e3 if k.startswith("t_") else 1), 2) for k in HYB_KEYS

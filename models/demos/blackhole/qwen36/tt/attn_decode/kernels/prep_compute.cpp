@@ -3,9 +3,12 @@
 //
 // Attention decode prep, compute. Item u = 3 b + part; the heads of the item are the rows of Ht bf16 tiles (cb_x):
 //   part 0 / 1 (q / k): r = 1 / sqrt(mean_d x^2 + eps) per row, in every column (squares, then a matmul with the
-//     all-ones tile summing each row over the Ht tiles), x (1 + w) (FPU row broadcast) r (FPU, DST reuse), then the HF rotate-half RoPE on tiles 0 / 1 (the first rope_dim = 64 dims): y0 = x0 cos0 - x1 sin0,
-//     y1 = x1 cos1 + x0 sin1 (FPU row broadcasts, SFPU add / sub);
+//     all-ones tile summing each row over the Ht tiles), x (1 + w) (FPU row broadcast) r (FPU, DST reuse), then the HF
+//     rotate-half RoPE on tiles 0 / 1 (the first rope_dim = 64 dims): y0 = x0 cos0 - x1 sin0, y1 = x1 cos1 + x0 sin1
+//     (FPU row broadcasts, SFPU add / sub);
 //   part 2 (gate): sigmoid on rows 0..15 (the heads; NH <= 16).
+// NORM = 0 (compile arg 4): no per-head RMSNorm (the caller normalized q / k already, e.g. MiniMax-M2's full-width QK
+// norm): RoPE only. PARTS (compile arg 3): 3, or 2 without the gate item.
 // Only the head rows carry data; the other rows hold whatever the CB had and are never read downstream.
 // Results bf16 to cb_out in tile order.
 
@@ -139,6 +142,59 @@ void norm_rope(uint32_t wofs, uint32_t eps_bits, uint32_t inv_d_bits) {
     ccs.pop_front(4);
 }
 
+// NORM = 0: the item's tiles copied (tiles 0 / 1 FP32 to cb_xn for the RoPE, the rest bf16 to cb_out), then the RoPE
+template <uint32_t Ht>
+void rope_only() {
+    CircularBuffer cx(cb_x), cxn(cb_xn), co(cb_out), ccs(cb_cs);
+    cx.wait_front(Ht);
+    DeviceZoneScopedN("rope");
+    co.reserve_back(Ht);
+    cxn.reserve_back(2);
+    copy_from(cb_x);
+    for (uint32_t j = 0; j < Ht; j++) {
+        if (j == 0) {
+            pack_reconfig_data_format(cb_xn);
+        } else if (j == 2) {
+            pack_reconfig_data_format(cb_out);
+        }
+        tile_regs_acquire();
+        copy_tile(cb_x, j, 0);
+        tile_regs_commit();
+        tile_regs_wait();
+        if (j < 2) {
+            pack_tile<true>(0, cb_xn, j);
+        } else {
+            pack_tile<true>(0, cb_out, j);
+        }
+        tile_regs_release();
+    }
+    cxn.push_back(2);
+    cx.pop_front(Ht);
+    cxn.wait_front(2);
+    ccs.wait_front(4);  // cos0 cos1 sin0 sin1
+    reconfig_data_format(cb_xn, cb_cs);
+    for (uint32_t t = 0; t < 2; t++) {
+        tile_regs_acquire();
+        mul_bcast_rows_init(cb_xn, cb_cs);
+        mul_tiles_bcast_rows(cb_xn, cb_cs, t, t, 0);          // x_t cos_t
+        mul_tiles_bcast_rows(cb_xn, cb_cs, 1 - t, 2 + t, 1);  // x_{1-t} sin_t
+        if (t == 0) {
+            sub_binary_tile_init();
+            sub_binary_tile(0, 1, 0);
+        } else {
+            add_binary_tile_init();
+            add_binary_tile(0, 1, 0);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile<true>(0, cb_out, t);
+        tile_regs_release();
+    }
+    co.push_back(Ht);
+    cxn.pop_front(2);
+    ccs.pop_front(4);
+}
+
 template <uint32_t Ht>
 void gate() {
     CircularBuffer cx(cb_x), co(cb_out);
@@ -170,6 +226,8 @@ void kernel_main() {
     constexpr uint32_t Ht = get_compile_time_arg_val(0);
     constexpr uint32_t eps_bits = get_compile_time_arg_val(1);
     constexpr uint32_t inv_d_bits = get_compile_time_arg_val(2);
+    constexpr uint32_t PARTS = get_compile_time_arg_val(3);
+    constexpr uint32_t NORM = get_compile_time_arg_val(4);
     const uint32_t start = get_arg_val<uint32_t>(0);
     const uint32_t count = get_arg_val<uint32_t>(1);
     if (count == 0) {
@@ -181,11 +239,13 @@ void kernel_main() {
     ones.wait_front(1);
     for (uint32_t i = 0; i < count; i++) {
         const uint32_t u = start + i;
-        const uint32_t part = u % 3;
+        const uint32_t part = u % PARTS;
         if (part == 2) {
             gate<Ht>();
-        } else {
+        } else if (NORM) {
             norm_rope<Ht>(part * Ht, eps_bits, inv_d_bits);
+        } else {
+            rope_only<Ht>();
         }
     }
     w.pop_front(2 * Ht);

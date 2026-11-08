@@ -44,7 +44,9 @@ UNPACK_FP32 = ()  # every FP32 CB is an FPU operand (Default unpack)
 
 def _dm(source, cores, ct, rt, riscv, noc):
     return ttnn.KernelDescriptor(
-        kernel_source=str(KERNEL_DIR / source), core_ranges=_range_set(cores), compile_time_args=ct,
+        kernel_source=str(KERNEL_DIR / source),
+        core_ranges=_range_set(cores),
+        compile_time_args=ct,
         runtime_args=_rt(cores, rt),
         config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc),
     )
@@ -53,7 +55,13 @@ def _dm(source, cores, ct, rt, riscv, noc):
 class AttnDecodePrep:
     """One instance per model (shape set)."""
 
-    def __init__(self, mesh_device, num_heads, num_kv_heads, head_dim, rope_dim, max_batch=32, eps=1e-6):
+    def __init__(
+        self, mesh_device, num_heads, num_kv_heads, head_dim, rope_dim, max_batch=32, eps=1e-6, norm=True, gate=True
+    ):
+        """norm=False: RoPE only (q / k normalized by the caller, e.g. MiniMax-M2's full-width QK norm); gate=False: no
+        gate item (ungated attention; the call returns gate None)."""
+        self.norm, self.gate = bool(norm), bool(gate)
+        self.parts = 3 if self.gate else 2
         self.mesh = mesh_device
         self.NH, self.NKV, self.HD, self.rd = num_heads, num_kv_heads, head_dim, rope_dim
         assert head_dim % TILE == 0 and rope_dim == 2 * TILE, "rotate-half over the first two tiles of a head"
@@ -64,35 +72,56 @@ class AttnDecodePrep:
         self._rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if _ndev(mesh_device) > 1 else {}
         # matmul operand for the per-row sum of squares: all ones (every column of the product = the row's sum)
         ones = torch.ones(1, 1, TILE, TILE)
-        self.ones = ttnn.from_torch(ones, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh_device,
-                                    memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
+        self.ones = ttnn.from_torch(
+            ones,
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **self._rep,
+        )
 
     def prepare(self, q_norm_w, k_norm_w):
         """(1 + w) norm weights as ttnn tensors or torch vectors of HD -> the [2, 1, 32, HD] FP32 constant."""
+
         def vec(t):
             if isinstance(t, torch.Tensor):
                 return t.reshape(-1).float()
             return _per_device(t)[0].reshape(-1).float()
+
         w = torch.zeros(2, 1, TILE, self.HD)
         w[0, 0, 0] = vec(q_norm_w)[: self.HD]
         w[1, 0, 0] = vec(k_norm_w)[: self.HD]
-        return ttnn.from_torch(w, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                               memory_config=ttnn.DRAM_MEMORY_CONFIG, **self._rep)
+        return ttnn.from_torch(
+            w,
+            dtype=ttnn.float32,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **self._rep,
+        )
 
-    def outputs(self, B, kv_memcfg=None):
+    def outputs(self, B, kv_memcfg=None, v_memcfg=None):
         """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, freshly allocated (the caller frees them; persistent
         per-width buffers pinned enough L1, the k / v shards most, to clash with the 122B prefill matmul CBs). q DRAM
         interleaved (SDPA decode takes an interleaved Q from DRAM only), gate L1 interleaved, k / v ``kv_memcfg`` (the
         paged_update_cache height shard, one user's tile row per core) or L1 interleaved."""
-        mk = lambda h, mc: ttnn.allocate_tensor_on_device(ttnn.Shape([1, B, h, self.HD]), ttnn.bfloat16,
-                                                          ttnn.TILE_LAYOUT, self.mesh, mc)
+        mk = lambda h, mc: ttnn.allocate_tensor_on_device(
+            ttnn.Shape([1, B, h, self.HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, mc
+        )
         kv = kv_memcfg or ttnn.L1_MEMORY_CONFIG
-        return (mk(self.NH, ttnn.DRAM_MEMORY_CONFIG), mk(self.NKV, kv), mk(self.NKV, kv),
-                mk(self.NH, ttnn.L1_MEMORY_CONFIG))
+        return (
+            mk(self.NH, ttnn.DRAM_MEMORY_CONFIG),
+            mk(self.NKV, kv),
+            mk(self.NKV, v_memcfg or kv),
+            mk(self.NH, ttnn.L1_MEMORY_CONFIG) if self.gate else None,
+        )
 
-    def __call__(self, qkv, cos, sin, const, B, kv_memcfg=None):
-        q, k, v, g = self.outputs(B, kv_memcfg)
-        units = 3 * B
+    def __call__(self, qkv, cos, sin, const, B, kv_memcfg=None, v_memcfg=None):
+        """v_memcfg: v's memory config when it differs from k's (e.g. a paged_fused_update_cache pair on disjoint cores)."""
+        q, k, v, g = self.outputs(B, kv_memcfg, v_memcfg)
+        g_io = g if g is not None else q  # the writer's gate accessor (never written without a gate item)
+        units = self.parts * B
         grid = self.mesh.compute_with_storage_grid_size()
         ncores = min(units, grid.x * grid.y)
         cores = _cores(self.mesh, ncores)
@@ -100,37 +129,64 @@ class AttnDecodePrep:
         cr = _range_set(cores)
         Ht = self.Ht
         f32, bf = (ttnn.float32, 4096), (ttnn.bfloat16, 2048)
-        sizes = dict(x=(bf, 2 * Ht), w=(f32, 2 * Ht), cs=(bf, 8), ones=(bf, 1), sq=(f32, Ht), r=(f32, 1), xn=(f32, 2),
-                     out=(bf, 2 * Ht), v=(bf, 2 * Ht), scr=(bf, -(-self.NH * Ht * 640 // 2048)))  # 640-byte slot per (head, tile): prep_reader SLOT
+        sizes = dict(
+            x=(bf, 2 * Ht),
+            w=(f32, 2 * Ht),
+            cs=(bf, 8),
+            ones=(bf, 1),
+            sq=(f32, Ht),
+            r=(f32, 1),
+            xn=(f32, 2),
+            out=(bf, 2 * Ht),
+            v=(bf, 2 * Ht),
+            scr=(bf, -(-self.NH * Ht * 640 // 2048)),
+        )  # 640-byte slot per (head, tile): prep_reader SLOT
         cbs = [_cb(cr, CB[n], dt, tb, c) for n, ((dt, tb), c) in sizes.items()]
         wq = qkv.shape[-1] // TILE  # tiles per qkv row
         rd_ct = [Ht, self.NH, self.NKV, wq, CB["x"], CB["w"], CB["cs"], CB["ones"], CB["v"], CB["scr"]]
         for t in (qkv, cos, sin, const, self.ones):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        rd_ct.append(self.parts)
         wr_ct = [Ht, CB["out"], CB["v"]]
-        for t in (q, k, v, g):
+        for t in (q, k, v, g_io):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        rd_rt = [[qkv.buffer_address(), cos.buffer_address(), sin.buffer_address(), const.buffer_address(),
-                  self.ones.buffer_address(), s, c] for s, c in work]
-        wr_rt = [[q.buffer_address(), k.buffer_address(), v.buffer_address(), g.buffer_address(), s, c]
-                 for s, c in work]
-        cp_ct = [Ht, _bits(self.eps), _bits(1.0 / self.HD)]
+        wr_ct.append(self.parts)
+        rd_rt = [
+            [
+                qkv.buffer_address(),
+                cos.buffer_address(),
+                sin.buffer_address(),
+                const.buffer_address(),
+                self.ones.buffer_address(),
+                s,
+                c,
+            ]
+            for s, c in work
+        ]
+        wr_rt = [
+            [q.buffer_address(), k.buffer_address(), v.buffer_address(), g_io.buffer_address(), s, c] for s, c in work
+        ]
+        cp_ct = [Ht, _bits(self.eps), _bits(1.0 / self.HD), self.parts, int(self.norm)]
         utd = [ttnn.UnpackToDestMode.Default] * NUM_CBS
         for n in UNPACK_FP32:
             utd[CB[n]] = ttnn.UnpackToDestMode.UnpackToDestFp32
-        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                           math_approx_mode=False)
+        cfg = ttnn.ComputeConfigDescriptor(
+            math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+        )
         cfg.unpack_to_dest_mode = utd
         kernels = [
             _dm("prep_reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             _dm("prep_writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "prep_compute.cpp"), core_ranges=cr, compile_time_args=cp_ct,
-                runtime_args=_rt(cores, [[s, c] for s, c in work]), config=cfg,
+                kernel_source=str(KERNEL_DIR / "prep_compute.cpp"),
+                core_ranges=cr,
+                compile_time_args=cp_ct,
+                runtime_args=_rt(cores, [[s, c] for s, c in work]),
+                config=cfg,
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        ttnn.generic_op([qkv, cos, sin, const, self.ones, q, k, v, g], program)
+        ttnn.generic_op([qkv, cos, sin, const, self.ones, q, k, v, g_io], program)
         return q, k, v, g
 
 
@@ -145,8 +201,9 @@ class AttnDecodePost:
         self._rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if _ndev(mesh_device) > 1 else {}
 
     def output(self, B):
-        return ttnn.allocate_tensor_on_device(ttnn.Shape([1, B, self.NH * self.HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
-                                              self.mesh, ttnn.L1_MEMORY_CONFIG)
+        return ttnn.allocate_tensor_on_device(
+            ttnn.Shape([1, B, self.NH * self.HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, ttnn.L1_MEMORY_CONFIG
+        )
 
     def __call__(self, attn_out, gate, B):
         y = self.output(B)
@@ -163,16 +220,32 @@ class AttnDecodePost:
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [Ht, self.NH, 2]
         wr_ct += ttnn.TensorAccessorArgs(y).get_compile_time_args()
-        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                           math_approx_mode=False)
+        cfg = ttnn.ComputeConfigDescriptor(
+            math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+        )
         kernels = [
-            _dm("post_reader.cpp", cores, rd_ct, [[attn_out.buffer_address(), gate.buffer_address(), s, c]
-                                                  for s, c in work], ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
-            _dm("post_writer.cpp", cores, wr_ct, [[y.buffer_address(), s, c] for s, c in work],
-                ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
+            _dm(
+                "post_reader.cpp",
+                cores,
+                rd_ct,
+                [[attn_out.buffer_address(), gate.buffer_address(), s, c] for s, c in work],
+                ttnn.DataMovementProcessor.RISCV_1,
+                ttnn.NOC.NOC_0,
+            ),
+            _dm(
+                "post_writer.cpp",
+                cores,
+                wr_ct,
+                [[y.buffer_address(), s, c] for s, c in work],
+                ttnn.DataMovementProcessor.RISCV_0,
+                ttnn.NOC.NOC_1,
+            ),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "post_compute.cpp"), core_ranges=cr, compile_time_args=[Ht],
-                runtime_args=_rt(cores, [[c] for _, c in work]), config=cfg,
+                kernel_source=str(KERNEL_DIR / "post_compute.cpp"),
+                core_ranges=cr,
+                compile_time_args=[Ht],
+                runtime_args=_rt(cores, [[c] for _, c in work]),
+                config=cfg,
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)

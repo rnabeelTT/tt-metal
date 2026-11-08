@@ -314,6 +314,102 @@ class TPAttention:
             and self.B <= tpc.TILE_SIZE
         ):
             self._attn_ops_setup()
+        # MTP / DFlash verify "rows" mode on ungated, full-width-QK-norm attention (MiniMax-M2): the RoPE + head split +
+        # k / v shards in one prep generic_op (norm off: q / k come normalized from _full_qk_norm) and the head concat in
+        # one post op (an all-ones gate), instead of ~30 slice / reshape / RoPE / pad / reshard ops (QWEN35_ROWS_ATTN_OPS)
+        self._rows_ops = None
+        if (
+            os.environ.get("QWEN35_ROWS_ATTN_OPS", "1") == "1"
+            and self._qk_norm_full
+            and self._fused_qkv
+            and not self._gated
+            and self.rope_dim == 64
+            and self.HD % tpc.TILE_SIZE == 0
+        ):
+            self._rows_ops_setup()
+
+    def _rows_ops_setup(self):
+        """The model-wide rows-mode prep / post ops and their constants (cached on args), built before any trace."""
+        from models.demos.blackhole.qwen36.tt.attn_decode.ops import AttnDecodePost, AttnDecodePrep
+
+        cache = self.args.__dict__.setdefault("_qwen36_rows_attn_ops", {})
+        key = (id(self.mesh), self.NH, self.NKV, self.HD)
+        if key not in cache:
+            prep = AttnDecodePrep(
+                self.mesh, self.NH, self.NKV, self.HD, self.rope_dim, max_batch=8, norm=False, gate=False
+            )
+            post = AttnDecodePost(self.mesh, self.NH, self.HD)
+            const = prep.prepare(torch.zeros(self.HD), torch.zeros(self.HD))  # read, unused without the norm
+            rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(self.mesh)} if self.args.num_devices > 1 else {}
+            ones = {
+                B: ttnn.from_torch(
+                    torch.ones(1, B, self.NH, self.HD),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=self.mesh,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                    **rep,
+                )
+                for B in (2, 4, 8)
+            }
+            cache[key] = (prep, post, const, ones)
+        self._rows_ops = cache[key]
+
+    def _forward_rows_ops(self, x, cur_pos_tt, cos_tt, sin_tt, page_table, partial):
+        """Rows-mode decode (B consecutive positions of one user) through the prep / post ops; K / V of each row written
+        by one paged_fused_update_cache (rows in one cache tile would race in a single multi-user update)."""
+        prep, post, const, ones = self._rows_ops
+        B = x.shape[-2]
+        if len(x.shape) == 3:
+            x = ttnn.reshape(x, (1, 1, x.shape[-2], x.shape[-1]))
+        qkv, _, _ = self._qkv(x)  # [q | k | v] per device, q / k normalized over the full width
+        q, k, v, _ = prep(qkv, cos_tt, sin_tt, const, B, self._kv_shard_cfg(B), self._kv_shard_cfg_v(B))
+        ttnn.deallocate(qkv)
+        rows = getattr(self, "rows_pos_rows", None)
+        masks = self.rows_pos_masks
+        for b in range(B):
+            pos_b = rows[b] if rows is not None else ttnn.reshape(ttnn.slice(masks, (b, 0), (b + 1, B)), (B,))
+            ttnn.experimental.paged_fused_update_cache(
+                self.paged_k, k, self.paged_v, v, update_idxs_tensor=pos_b, page_table=page_table
+            )
+            if rows is None:
+                ttnn.deallocate(pos_b)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
+        grid = self.mesh.compute_with_storage_grid_size()
+        cfg = ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=(grid.x, grid.y),
+            exp_approx_mode=False,
+            q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
+            k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),
+        )
+        attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
+            q,
+            self.paged_k,
+            self.paged_v,
+            page_table_tensor=page_table,
+            cur_pos_tensor=cur_pos_tt,
+            scale=self.scale,
+            program_config=cfg,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        ttnn.deallocate(q)
+        y = post(attn_out, ones[B], B)  # [1, B, NH * HD]: the head concat (x 1)
+        ttnn.deallocate(attn_out)
+        wo_partial = self._wo_proj(y, self.tw["wo"])
+        ttnn.deallocate(y)
+        wo_partial = ttnn.reshape(wo_partial, (1, 1, B, wo_partial.shape[-1]))
+        if partial:
+            return wo_partial
+        return tt_all_reduce(
+            wo_partial,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
 
     def _attn_ops_setup(self):
         """The model-wide prep / post ops (cached on args) and this layer's (1 + w) norm constant, built here, before any
@@ -965,6 +1061,14 @@ class TPAttention:
             if len(x.shape) == 3:
                 x = ttnn.reshape(x, (1, 1, x.shape[-2], x.shape[-1]))
             return self._forward_decode_ops(x, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
+        if (
+            self._rows_ops is not None
+            and use_paged
+            and getattr(self, "rows_kv_write", False)
+            and getattr(self, "rows_pos_masks", None) is not None
+            and B in self._rows_ops[3]
+        ):
+            return self._forward_rows_ops(x, cur_pos_tt, cos_tt, sin_tt, page_table, partial)
         if not use_paged and self.k_caches is None:
             self.reset_state()
 

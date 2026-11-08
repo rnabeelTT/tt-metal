@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Attention decode prep, reader. Work item u = 3 b + part (part 0: q, 1: k (+ v for the writer), 2: gate):
+// Attention decode prep, reader. Work item u = PARTS b + part (part 0: q, 1: k (+ v for the writer), 2: gate; PARTS =
+// 2: no gate item, for ungated attention):
 //   * the part's heads of row b of the fused [q | k | v | gate] projection ([1, 1, B, W] TILE bf16), head h -> row h of
 //     Ht tiles (two 32-byte face-row reads per head and tile), into tiles that are zero elsewhere;
 //   * q / k: cos and sin of user b (tiles b * 2 + t of [1, B, 1, 2 * 32] TILE: row 0 is the user's row);
@@ -77,6 +78,7 @@ void kernel_main() {
     constexpr auto sin_args = TensorAccessorArgs<cos_args.next_compile_time_args_offset()>();
     constexpr auto w_args = TensorAccessorArgs<sin_args.next_compile_time_args_offset()>();
     constexpr auto ones_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
+    constexpr uint32_t PARTS = get_compile_time_arg_val(ones_args.next_compile_time_args_offset());
     if (count == 0) {
         return;
     }
@@ -100,8 +102,8 @@ void kernel_main() {
     const uint32_t scr = get_write_ptr(cb_scr);  // scratch, never pushed
     for (uint32_t i = 0; i < count; ++i) {
         const uint32_t u = start + i;
-        const uint32_t b = u / 3;
-        const uint32_t part = u - 3 * b;
+        const uint32_t b = u / PARTS;
+        const uint32_t part = u - PARTS * b;
         DeviceZoneScopedN("rd_item");
         if (part < 2) {
             cb_reserve_back(cb_cs, 4);

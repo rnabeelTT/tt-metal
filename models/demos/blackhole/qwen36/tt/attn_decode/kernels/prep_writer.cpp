@@ -24,6 +24,7 @@ void kernel_main() {
     constexpr auto k_args = TensorAccessorArgs<q_args.next_compile_time_args_offset()>();
     constexpr auto v_args = TensorAccessorArgs<k_args.next_compile_time_args_offset()>();
     constexpr auto g_args = TensorAccessorArgs<v_args.next_compile_time_args_offset()>();
+    constexpr uint32_t PARTS = get_compile_time_arg_val(g_args.next_compile_time_args_offset());  // 2: no gate item
     constexpr uint32_t BF_TILE = 2048;
     const auto s_q = TensorAccessor(q_args, q_addr, BF_TILE);
     const auto s_k = TensorAccessor(k_args, k_addr, BF_TILE);
@@ -32,8 +33,8 @@ void kernel_main() {
 
     for (uint32_t i = 0; i < count; ++i) {
         const uint32_t u = start + i;
-        const uint32_t b = u / 3;
-        const uint32_t part = u - 3 * b;
+        const uint32_t b = u / PARTS;
+        const uint32_t part = u - PARTS * b;
         cb_wait_front(cb_out, Ht);
         DeviceZoneScopedN("wr_item");
         const uint32_t o = get_read_ptr(cb_out);

@@ -10,7 +10,7 @@ Goal: no skipping, a >=100K-context profile (128K target), max tok/s; shorter-co
 Port: `models/autoports/minimaxai_minimax_m2_7` (from GLM-4.5-Air; full-width QK-norm in qwen36 `tp.py`, sharded
 multi-core for decode rows). Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, FULL, LIB, PROMPTS, NEW).
 Best config (128K): `FULL=20 LIB=/hyblib/minimax_m27_int4_s152 run_m27_dflash.sh <out> -e HYB_LRU=32
--e HYB_FETCH_FRAC=0.5 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 -e HYB_STREAM_SLOTS=64`.
+-e HYB_FETCH_FRAC=0.3 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 -e HYB_STREAM_SLOTS=64`.
 
 Steady-state tok/s (no skipping; plain hybrid decode 17.2), 128 tokens, held-out prompts zh / fr / es / Rust:
 | profile | full layers | verify ms/pass | zh | fr | es | Rust | 8K-token code prompt |
@@ -46,6 +46,11 @@ Pieces (all traced, per-prompt re-capture):
   now the serving default); async CQ1 fetch (HYB_FETCH_ASYNC, experts resident from the next pass, the CPU computes all
   this pass's misses) is SLOWER (verify 53-67 ms): device hits do not rise with more warming (~1300 of 1344 picks per
   pass either way) and the CPU work doubles; CPU and PCIe share the same ~40 GB/s of host DRAM.
+- Rows-mode attention through fused generic ops (2026-11-07, `QWEN35_ROWS_ATTN_OPS`, default 1): the qwen36
+  attn_decode prep (RoPE only: NORM=0, PARTS=2, no gate) / post kernels replace ~35 small ops per layer; one
+  `paged_fused_update_cache` per row (V on core row 1). Layer PCC 0.99999; in-process A/B at 128K
+  (runs/m27/r128k_ab, POC_AB_ROWS_OPS): device t_read 30.1 -> 26.7 ms/pass, verify ~52 -> ~44.5 ms, es/Rust 38 -> 42
+  tok/s. Greedy text diverges after a few tokens (near-ties), outputs coherent.
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the
