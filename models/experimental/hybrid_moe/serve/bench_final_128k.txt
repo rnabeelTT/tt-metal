@@ -1,0 +1,9 @@
+{"prompt": "用中文写一段关于春节传统习俗的介绍。", "ttft_s": 1.25, "tok_s": 33.64, "tokens": 128}
+{"prompt": "Écris en français une lettre de motivati", "ttft_s": 1.14, "tok_s": 35.01, "tokens": 128}
+{"prompt": "Escribe en español una receta de paella ", "ttft_s": 1.07, "tok_s": 33.25, "tokens": 128}
+{"prompt": "Write a Rust function that parses a CSV ", "ttft_s": 1.09, "tok_s": 30.82, "tokens": 128}
+{"prompt": "Write a Python script that downloads a w", "ttft_s": 1.07, "tok_s": 37.0, "tokens": 128}
+{"prompt": "Prove that there are infinitely many pri", "ttft_s": 1.06, "tok_s": 44.69, "tokens": 128}
+{"prompt": "Explain how vaccines train the immune sy", "ttft_s": 1.09, "tok_s": 38.5, "tokens": 128}
+{"prompt": "Write a short mystery story set on a nig", "ttft_s": 1.09, "tok_s": 31.18, "tokens": 128}
+BENCH final_128k mean decode 35.51 tok/s, mean TTFT 1.11 s

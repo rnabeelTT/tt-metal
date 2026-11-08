@@ -5,21 +5,24 @@ Read this first when resuming. Code: `~/FORK-tt-metal/models/experimental/hybrid
 Run data (`runs/`, `logs/`, `cache/`, `ref397/`) is gitignored. Formal plan: `docs/PLAN.md`; deviations under **Deviations**.
 The plugin fork `~/FORK-vllm-tt-plugin` has the same branch (no changes yet; the demo uses the image's plugin).
 
-## Current focus: MiniMax-M2.7 hybrid + DFlash (updated 2026-11-07)
+## Current focus: MiniMax-M2.7 hybrid + DFlash (updated 2026-11-08)
 Goal: no skipping, a >=100K-context profile (128K target), max tok/s; shorter-context faster profiles allowed.
 Port: `models/autoports/minimaxai_minimax_m2_7` (from GLM-4.5-Air; full-width QK-norm in qwen36 `tp.py`, sharded
 multi-core for decode rows). Run: `run_m27_dflash.sh <out> [-e ...]` (env CTX, FULL, LIB, PROMPTS, NEW).
 Best config (128K): `FULL=20 LIB=/hyblib/minimax_m27_int4_s152 run_m27_dflash.sh <out> -e HYB_LRU=32
 -e HYB_FETCH_FRAC=0.3 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 -e HYB_STREAM_SLOTS=64`.
 
-Steady-state tok/s (no skipping; plain hybrid decode 17.2), 128 tokens, held-out prompts zh / fr / es / Rust:
-| profile | full layers | verify ms/pass | zh | fr | es | Rust | 8K-token code prompt |
-|---|---|---|---|---|---|---|---|
-| 128K | 20 | ~56 | 30.2 | 38.6 | 36.3 | - | 27.1 |
-| 64K  | 36 | ~49.5 | 26.7 | 42.3 | 38.8 | 34.9 | 27.9 (older code) |
-| 32K  | 44 | ~45 | 38.6 | 49.2 | 48.2 | 39.7 | 30.2 (older code) |
-(64K / 32K: `runs/m27/r64k_v2`, `r32k_v2`, 2026-11-07; profile = `CTX=65536 FULL=36` / `CTX=32768 FULL=44`,
-HYB_STREAM_SLOTS=128.) Verify cost ~= 36.5 ms of device + ~0.46 ms of serial host work per hybrid layer.
+Final benchmark (2026-11-08, `runs/m27/final_131072|65536|32768`, current code: rows-ops attention, fused
+drafter, FETCH_FRAC 0.3, DK=3). Steady-state tok/s, no skipping (plain hybrid decode 17.2), 128 tokens, held-out
+prompts zh / fr / es / Rust, plus an 8K-token code prompt:
+| profile | full layers | verify ms/pass | zh | fr | es | Rust | short mean | 8K prompt |
+|---|---|---|---|---|---|---|---|---|
+| 128K | 20 | ~46.8-50.4 | 40.2 | 44.3 | 41.7 | 44.9 | 42.8 | 29.4 |
+| 64K  | 36 | ~41-44 | 49.4 | 50.4 | 43.6 | 45.3 | 47.2 | 35.3 |
+| 32K  | 44 | ~38-40 | 46.7 | 56.8 | 52.8 | 50.3 | 51.6 | 40.9 |
+(profile = `CTX=131072 FULL=20` stream slots 64 / `CTX=65536 FULL=36` / `CTX=32768 FULL=44` stream slots 128;
+draft ~5.1 ms, stage ~1.3 ms per pass.) vLLM serving at 128K (`serve/bench_final_128k.txt`, 8 prompts, 128 tokens):
+**35.5 tok/s mean decode, TTFT 1.11 s** (30.8-44.7 per prompt; includes the API/scheduler overhead).
 
 vLLM serving: `serve/serve_m27.sh` (env CTX 131072 / 65536 / 32768 picks FULL 20 / 36 / 44; SPEC=1 DFlash; DK drafts).
 The port's `generator_vllm` loads an external single-user speculative step through `QWEN35_EXT_SPEC=module:factory`
@@ -64,6 +67,9 @@ Pieces (all traced, per-prompt re-capture):
   decode loop (t_up_w; cause not found: not hostk cache pollution, not worker spin).
 - DK=4 (5 verify rows in the 8-row kernels: HROWS=8 DK=4 run_m27_dflash.sh; the pad rows repeat the last row, KV
   write masked): 2.3-2.5 tokens/pass vs 2.1-2.4 at DK=3 but verify +6 ms -> 37.9 / 40.0 / 42.9 tok/s, no gain; DK=3.
+- Quality (2026-11-08, runs/m27/tf_final, 128K profile settings: FULL=20, s152 library, prefill streaming; teacher
+  forced over the 8 held-out 1000-token texts vs the CPU reference, compare_m27.py): top-1 0.848 / confident 0.933 /
+  KL 0.196 (before the slot-0 fix and the session's changes, runs/m27dev/tf_c192: 0.850 / 0.933 / 0.183).
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the
