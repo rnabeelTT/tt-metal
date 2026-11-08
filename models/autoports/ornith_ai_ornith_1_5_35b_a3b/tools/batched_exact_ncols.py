@@ -37,19 +37,20 @@ def main():
     ap.add_argument("--quiet", action="store_true", help="one line per layer unless a user differs")
     a = ap.parse_args()
     os.environ.setdefault("MESH_DEVICE", "P300x2")
-    ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    if int(os.environ.get("MESH_COLS", 4)) > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, int(os.environ.get("MESH_COLS", 4))), l1_small_size=24576, trace_region_size=256 << 20)
     try:
-        B = 4
-        gen = build_generator(MODEL_DIR, mesh, max_batch_size=B, max_seq_len=4096,
+        B = int(os.environ.get("BP_B", 4))  # 2 = the wide driver (1024 bucket)
+        gen = build_generator(MODEL_DIR, mesh, max_batch_size=4 if B == 3 else B, max_seq_len=4096,
                               layer_indices=[int(x) for x in a.layers.split(",")] if a.layers not in ("", "all") else None,
                               warm_decode_trace=False, warm_prefill_trace=False)
         model = gen.model
-        bp = BatchedPrefill(model, B=B)
         lens = [int(x) for x in a.lens.split(",")]
         n = len(lens)
         T = max(lens)
         bucket = model._mask_bucket_for(T)
+        bp = BatchedPrefill(model, B=B, buckets=(bucket,))
         toks = torch.zeros(B, T, dtype=torch.int64)
         g = torch.Generator().manual_seed(7)
         for u in range(n):

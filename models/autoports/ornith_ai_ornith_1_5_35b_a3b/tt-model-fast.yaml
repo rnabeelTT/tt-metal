@@ -121,8 +121,10 @@ serve_profiles:
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
-    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there
-    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
+    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there;
+    # batched prefill (groups of 3 up to 256 tokens) + multi-core dispatch: served A/B 2026-11-08 greedy identical,
+    # conformance 74/74, real-text MTP decode unchanged, TTFT 128 x 32 users 4719 -> 3282 ms, 8 users 1323 -> 1033 ms
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
     args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
     description: '`p150` on one p100.'
