@@ -223,7 +223,7 @@ card:
     #### Prefill update (2026-11-07)
 
     This revision prefills short prompts (up to 512 tokens) four at a time in one batched pass and spreads the MoE
-    expert dispatch over more cores (p300x2, p150x4, p300 and p150x2 profiles; the one-die profiles are unchanged). Output is unchanged: greedy output matched token for token, one request
+    expert dispatch over more cores (p300x2, p150x4, p300 and p150x2 profiles; since 2026-11-08 also p150, three prompts per pass up to 256 tokens; p100 is unchanged). Output is unchanged: greedy output matched token for token, one request
     at a time and with eight concurrent requests, and the vLLM sampling conformance suite (74 tests) gives the same
     results. Decode speed is unchanged. Measured 2026-11-07 on the published image, served as shipped; before = the same
     build with both changes off. Random-token prompts, 128 output tokens, median TTFT over N requests. The tables below
@@ -239,6 +239,13 @@ card:
     | p300 | 2,048 | 1 | 4 | 386 -> 338 | **-12 %** |
     | p300 | 128 | 8 | 32 | 1,012 -> 737 | **-27 %** |
     | p300 | 128 | 32 | 64 | 3,506 -> 2,152 | **-39 %** |
+    | p150 | 128 | 1 | 8 | 215 -> 210 | -2 % |
+    | p150 | 2,048 | 1 | 4 | 728 -> 686 | -6 % |
+    | p150 | 128 | 8 | 32 | 1,323 -> 1,033 | **-22 %** |
+    | p150 | 128 | 32 | 64 | 4,719 -> 3,282 | **-30 %** |
+
+    p150 rows measured 2026-11-08 the same way (greedy identical one at a time and concurrent, conformance 74 passed /
+    4 skipped in both arms, real-text MTP decode 56.6 -> 56.5 tok/s).
 
     #### p300x2
 
