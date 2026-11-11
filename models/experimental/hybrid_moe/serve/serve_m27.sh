@@ -14,11 +14,15 @@ NS=${NS:-212}  # prefill streaming slots: two banks of 106 (a hybrid layer has 1
 # to 3 staging rounds per layer step from 1 token on (no CPU experts in prefill), copies on the second command queue;
 # from PF_PREFETCH tokens on, the next hybrid layer's experts are copied during the current one (0 = off)
 PF_ENV="-e QWEN35_PREFILL_SEGMENT=4096 -e QWEN35_PREFILL_GROUP=${PF_GROUP:-8} -e HYB_STREAM_ROUNDS=3 -e HYB_STREAM_MIN=${PF_MIN:-4}"
+# prompts of 1024+ tokens stream every missed expert (runs/m27/pf_min: 16K 8.5 -> 6.5 s, 4K 2.34 -> 2.0 s)
+PF_ENV="$PF_ENV -e HYB_STREAM_MIN_LONG=1 -e HYB_STREAM_LONG_FROM=1024"
 PF_ENV="$PF_ENV -e HYB_STREAM_CQ1=1 -e HYB_PF_PREFETCH_MIN=${PF_PREFETCH:-1024}"
 # vLLM automatic prefix caching (PC=0 turns it off): a resent prefix resumes at its last 4096-token boundary
 PF_ENV="$PF_ENV -e QWEN35_PREFIX_CACHING=${PC:-1}"
 # rows-mode MoE down op: 4 readers per bank, 4-slot chunks (bench_moe_rows.py: 137 vs 157 us per call)
 PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=4 -e QWEN35_MOE_DN_CHUNK=4"
+# DFlash drafter context window 256 (8K prompt: 1.79 -> 1.91-2.08 tokens per pass vs 1024; runs/m27/fb_win, fb_win2)
+PF_ENV="$PF_ENV -e DFLASH_WINDOW=${DWIN:-256}"
 IMG=${HYB_IMAGE:-tt-model/qwen3-5-122b-a10b:8a750811ffec}
 TR_MIB=${TRACE_MIB:-96}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'

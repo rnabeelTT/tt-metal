@@ -62,6 +62,16 @@ def _port(mod):
 
 
 class HybridState:
+    @property
+    def hostk_threads(self):
+        """Host-kernel threads in use (0 = the whole pool); settable at run time (hostk.set_active)."""
+        return getattr(self, "_hostk_threads", 0)
+
+    @hostk_threads.setter
+    def hostk_threads(self, n):
+        hostk.set_active(int(n))
+        self._hostk_threads = int(n)
+
     def __init__(self):
         self.E = None
         self.C = int(os.environ.get("HYB_SLOTS", "0") or 0)
@@ -104,10 +114,11 @@ class HybridState:
         self.sel_bias = {}  # layer -> [E] selection bias (sigmoid_bias routers)
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
-        # Prefill chunks of at most this many rows run the host kernel in tiles of hostk.MAXR (a short prompt). A longer
-        # chunk stays on the torch GEMMs: those read each expert's weights once, while tiling would re-read them every
-        # MAXR rows. 0 keeps every prefill chunk on torch.
-        self.prefill_hostk_rows = int(os.environ.get("HYB_PREFILL_HOSTK_ROWS", "128"))
+        # Prefill chunks of at most this many rows run the host kernel in tiles of hostk.MAXR; longer ones go through
+        # _hostk_packed (pairs sorted by expert, each expert's weights read about once). Default 16: a 64-token prompt's
+        # 128-row bucket packed instead of tiled, 0.79 -> 0.72 s prefill (runs/m27/pf_pad).
+        self.prefill_hostk_rows = int(os.environ.get("HYB_PREFILL_HOSTK_ROWS", "16"))
+        self.pf_mask_pad = os.environ.get("HYB_PF_MASK_PAD", "1") == "1"  # _decide_core: skip the padding rows' misses
         # sorted prefill MoE calls: picks outside the call get a sentinel id (no dispatched row) instead of a
         # zero-weight row of a real slot
         self.prefill_sentinel = os.environ.get("HYB_PREFILL_SENTINEL", "1") == "1"
@@ -148,6 +159,9 @@ class HybridState:
         self.cpu_pool = ThreadPoolExecutor(max_workers=1)  # HYB_LRU: the CPU experts run while the fetches copy
         from .stream import PrefillStream
 
+        # HYB_EARLY_CPU (default 1): a decode host step starts the CPU experts before it builds and uploads the routing
+        # row (fixed-text A/B, runs/m27/fb_early: CPU wait 6-11 -> 0.2-2.6 ms per pass, +4-5% tok/s)
+        self.early_cpu = os.environ.get("HYB_EARLY_CPU", "1") == "1"
         self.pf_mass = {}  # HYB_REPLAN: layer -> [E] routed weight per expert over the latest prefill's real rows
         self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
         self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
@@ -946,6 +960,32 @@ def _fused_step1(self, x, logits, B):
         slot = HYB.slot_of[self.layer_num][ids]
         res = slot >= 0
         miss = miss & ~res
+    if not HYB.early_cpu:
+        _upload_row(self, B, lg, ids, sc, slot, res, m)
+    if miss.any():
+        t0 = time.perf_counter()
+        xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
+        HYB.st["t_read"] += time.perf_counter() - t0
+        B["job"] = _job(self, xh, ids, sc, miss)
+    else:
+        B["job"] = None
+    if fetch is not None:
+        # the fetch writes are enqueued BEFORE the CPU experts start: with the int4 kernel streaming host DRAM, each
+        # pinned write's enqueue took ~390 us instead of ~15 us (bench_pinx.py)
+        HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
+        if B["job"] is not None:  # the CPU experts run while the fetched ones copy (the worker only makes the C call)
+            run = HYB.host_prepare(*B["job"])
+            if run is not None and HYB.hostk_async:
+                B["job"] = run.start()
+            else:
+                B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
+    if HYB.early_cpu:  # HYB_EARLY_CPU: the routing row after the CPU experts started (the CPU job is the long pole)
+        _upload_row(self, B, lg, ids, sc, slot, res, m)
+
+
+def _upload_row(self, B, lg, ids, sc, slot, res, m):
+    """The crafted logits rows of a routed step into the fused kernels' input (see _fused_step1)."""
+    E, C = HYB.E, HYB.C
     t0 = time.perf_counter()
     row = np.empty((1, 1, m, C + TILE_W), dtype=np.float32)
     if HYB.croute and HYB.skip == 0:
@@ -975,23 +1015,6 @@ def _fused_step1(self, x, logits, B):
             row = np.repeat(row, mk, axis=2)
         _put(self, HYB.crafted_rm[mk], torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
     HYB.st["t_up"] += time.perf_counter() - t0
-    if miss.any():
-        t0 = time.perf_counter()
-        xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
-        HYB.st["t_read"] += time.perf_counter() - t0
-        B["job"] = _job(self, xh, ids, sc, miss)
-    else:
-        B["job"] = None
-    if fetch is not None:
-        # the fetch writes are enqueued BEFORE the CPU experts start: with the int4 kernel streaming host DRAM, each
-        # pinned write's enqueue took ~390 us instead of ~15 us (bench_pinx.py)
-        HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
-        if B["job"] is not None:  # the CPU experts run while the fetched ones copy (the worker only makes the C call)
-            run = HYB.host_prepare(*B["job"])
-            if run is not None and HYB.hostk_async:
-                B["job"] = run.start()
-            else:
-                B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
 
 
 def _begin_replan(tokens):
@@ -1876,6 +1899,11 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     in_s, in_d = s_slot >= 0, (s_slot < 0) & (d_slot >= 0)
     miss = ~(in_s | in_d)
     v_miss = miss[:valid]
+    if mode == "prefill" and HYB.pf_mask_pad and HYB.pf_valid is not None and HYB.pf_valid < valid:
+        # the bucket's padding rows (after the segment's real rows; no real row attends to them): their missed
+        # experts are neither computed on the CPU nor streamed (their picks take the sink / sentinel)
+        v_miss = v_miss.clone()
+        v_miss[HYB.pf_valid :] = False
     HYB.st["picks"] += int(valid * k)
     HYB.st["hits"] += int(valid * k - v_miss.sum())
     if mode != "prefill":

@@ -60,6 +60,7 @@ typedef struct {
 
 static job_t J;
 static int g_nt = 0;
+static _Atomic int g_active = 0;  // workers with an index >= this skip the phases (hostk_set_active); 0 = all
 static pthread_t g_th[MAXT];
 static _Atomic int g_gen = 0, g_next = 0, g_done = 0;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -247,7 +248,7 @@ static void run_units(void) {
 }
 
 static void* worker(void* arg) {
-    (void)arg;
+    const int tid = (int)(intptr_t)arg;
     int seen = atomic_load(&g_gen);
     for (;;) {
         int spins = 0;
@@ -259,7 +260,10 @@ static void* worker(void* arg) {
             }
         }
         seen = atomic_load(&g_gen);
-        run_units();
+        const int active = atomic_load(&g_active);
+        if (!active || tid < active) {
+            run_units();
+        }
         atomic_fetch_add_explicit(&g_done, 1, memory_order_release);
     }
     return NULL;
@@ -278,6 +282,10 @@ static void run_phase(int phase, int units) {
     }
 }
 
+// Threads that run the kernel's phases from now on (1..nthreads of hostk_init; 0 = all): the others still wake and
+// report done, so a phase never waits on them. Returns the previous setting.
+int hostk_set_active(int n) { return atomic_exchange(&g_active, n < 0 ? 0 : n); }
+
 int hostk_init(int nthreads) {
     if (g_nt) {
         return g_nt;
@@ -290,7 +298,7 @@ int hostk_init(int nthreads) {
     }
     g_nt = nthreads;
     for (int t = 1; t < nthreads; t++) {
-        pthread_create(&g_th[t], NULL, worker, NULL);
+        pthread_create(&g_th[t], NULL, worker, (void*)(intptr_t)t);
     }
     return g_nt;
 }

@@ -118,6 +118,21 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 2 (2026-11-11), fixed text unless noted:
+  - `HYB_EARLY_CPU` (default 1): the CPU experts start before the routing row is built and uploaded. ABBA A/B
+    (`runs/m27/fb_early`): CPU wait 6-11 -> 0.2-2.6 ms/pass; short 42.4 -> 44.1 tok/s, 8K 30.9 -> 32.6. The row upload
+    now contends with the kernel's DRAM streaming (t_up 4 -> 7-9.6 ms); `HYB.hostk_threads` (hostk_set_active) A/Bs the
+    kernel's thread count at run time.
+  - Full-layer router: explicit 1D decode program config (moe._router_logits): device profile `runs/m27/prof2`, the
+    13-whole-layer segment 7962 -> 6676 us; device per verify pass (profiler on) 33.2 -> 30.7 ms with the MoE down
+    tuning.
+  - Prefill: stream threshold by length (`HYB_STREAM_MIN=4`, `HYB_STREAM_MIN_LONG=1` from `HYB_STREAM_LONG_FROM=1024`;
+    `runs/m27/pf_min`: 16K 8.5 -> 6.5 s, 4K 2.34 -> 2.0 s); the bucket's padding rows no longer route misses to the CPU
+    or the staging (`HYB_PF_MASK_PAD`, default 1); prefill chunks over 16 rows use the packed host kernel
+    (`HYB_PREFILL_HOSTK_ROWS=16`): 64 tokens 0.98 -> 0.72 s, 256 1.10 -> 0.94 s (`runs/m27/pf_pad`).
+  - Runner: `POC_ATTR_SWEEP=attr:v,..` (in-process A/B of a HYB attribute; use ABBA order: a prompt's second run sees
+    LRU slots warmed by the first), `POC_WINDOW_SWEEP`.
+  - Drafter window 256 confirmed on all prompts (`fb_win2`); serve default.
 - Per-request re-plan (2026-11-10, `HYB_REPLAN`, off by default; `sim_replan_m27.py`, `runs/m27/rp0` vs `rp32`):
   after prefill, up to N static experts per hybrid layer the prompt did not route to are swapped for the cold experts
   it routed most to; victims' device bytes go to a pinned store (`pinx_read_at`), and a victim with no int4 row is

@@ -10,7 +10,8 @@ The device-format copies come from HYB_DEV_EXPERTS (build_dev_experts.py; hybrid
 env: HYB_STREAM (1 = on when HYB_DEV_EXPERTS is set), HYB_STREAM_MIN (tokens, default 4), HYB_STREAM_SLOTS (NS, 128),
 HYB_STREAM_ROUNDS (staging rounds per prefill layer step, default 1: the experts past rounds x (NS - 1) stay on the CPU),
 HYB_STREAM_CQ1 (1: the copies go on a second command queue, so the first round's copy runs during the resident experts),
-HYB_STREAM_MERGE (1: the first round shares one routed call with the resident experts, patch._merged_round).
+HYB_STREAM_MERGE (1: the first round shares one routed call with the resident experts, patch._merged_round),
+HYB_STREAM_MIN_LONG / HYB_STREAM_LONG_FROM (the threshold for prompts of at least that many tokens; begin_prefill).
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ class PrefillStream:
     def __init__(self, fetch):
         self.fetch = fetch  # the device-format host copies (FetchCache.host)
         self.on = bool(fetch.dir) and os.environ.get("HYB_STREAM", "1") == "1"
-        self.min_tokens = int(os.environ.get("HYB_STREAM_MIN", "4"))
+        self.min_tokens = self.min_short = int(os.environ.get("HYB_STREAM_MIN", "4"))
+        self.min_long = int(os.environ.get("HYB_STREAM_MIN_LONG", str(self.min_short)))
+        self.long_from = int(os.environ.get("HYB_STREAM_LONG_FROM", "0"))  # 0: HYB_STREAM_MIN at every length
         self.NS = int(os.environ.get("HYB_STREAM_SLOTS", "128"))
         self.rounds = int(os.environ.get("HYB_STREAM_ROUNDS", "1"))
         self.cq1 = os.environ.get("HYB_STREAM_CQ1", "0") == "1"
@@ -139,7 +142,11 @@ class PrefillStream:
         return range(b * half, min((b + 1) * half, self.NS - 1))
 
     def begin_prefill(self, tokens):
-        """A prefill of `tokens` positions starts: bank the staging and prefetch when it is long enough."""
+        """A prefill of `tokens` positions starts: bank the staging and prefetch when it is long enough; from
+        HYB_STREAM_LONG_FROM tokens on, stream experts from HYB_STREAM_MIN_LONG tokens (long prompts: every miss on
+        the device is faster, runs/m27/pf_min; short ones keep HYB_STREAM_MIN, whose CPU path keeps the drafter's
+        prompt features closer)."""
+        self.min_tokens = self.min_long if (self.long_from and tokens >= self.long_from) else self.min_short
         self.banked = bool(self.prefetch_min) and tokens >= self.prefetch_min and self.can_prefetch()
         self.cur = None
         self.last_read = {}

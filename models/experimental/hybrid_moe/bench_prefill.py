@@ -63,13 +63,16 @@ VARIANT_KEYS = {
     "seg": lambda gen, v: setattr(gen.model, "PREFILL_SEGMENT", int(v)),
     "sent": lambda gen, v: setattr(HYB, "prefill_sentinel", v == "1"),
     "rounds": lambda gen, v: setattr(HYB.stream, "rounds", int(v)),
-    "min": lambda gen, v: setattr(HYB.stream, "min_tokens", int(v)),
+    "min": lambda gen, v: (setattr(HYB.stream, "min_short", int(v)), setattr(HYB.stream, "min_long", int(v))),
     "cq1": lambda gen, v: setattr(HYB.stream, "cq1", v == "1"),  # needs HYB_STREAM_CQ1=1 (the mesh's second queue)
     "group": lambda gen, v: setattr(gen, "prefill_group_size", int(v)),
     "merge": lambda gen, v: setattr(HYB.stream, "merge", v == "1"),
     "split": lambda gen, v: setattr(HYB, "pf_split", v == "1"),
     "pfmin": lambda gen, v: setattr(HYB.stream, "prefetch_min", int(v)),
     "cpufix": lambda gen, v: setattr(HYB, "pf_cpu_fixed_ms", [float(x) for x in v.split("/")]),
+    "maskpad": lambda gen, v: setattr(HYB, "pf_mask_pad", v == "1"),
+    "hkrows": lambda gen, v: setattr(HYB, "prefill_hostk_rows", int(v)),
+    "minlong": lambda gen, v: (setattr(HYB.stream, "min_long", int(v)), setattr(HYB.stream, "long_from", 1024)),
 }
 
 

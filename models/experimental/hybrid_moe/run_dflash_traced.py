@@ -111,11 +111,22 @@ def main():
         jobs = [(cfg, p) for cfg in runs for p in prompts]
         # POC_WINDOW_SWEEP="1024,512": the prompts once per drafter context window (DFlashServing.window, read when a
         # prompt's drafter context is filled and at every refill)
+        # POC_ATTR_SWEEP="early_cpu:0,1": each prompt once per value of that HYB attribute, back to back (an in-process A/B
+        # of a runtime switch: warm-up and host jitter fall on both settings alike)
+        attr, _, vals = os.environ.get("POC_ATTR_SWEEP", "").partition(":")
+        attr_vals = [int(v) for v in vals.split(",") if v] if attr else []
+        if attr and not hasattr(HYB, attr):
+            raise ValueError(f"POC_ATTR_SWEEP: HYB has no attribute {attr!r}")
+        if attr_vals:
+            jobs = [((cfg, av), p) for cfg, p in jobs for av in attr_vals]
+        else:
+            jobs = [((cfg, None), p) for cfg, p in jobs]
         windows = [int(w) for w in os.environ.get("POC_WINDOW_SWEEP", "").split(",") if w]
         if windows:
             jobs = [((cfg, w), p) for cfg, p in jobs for w in windows]
         else:
             jobs = [((cfg, None), p) for cfg, p in jobs]
+        # jobs: (((fetch cfg, attr value), window), prompt)
         # POC_AB_ROWS_OPS=1: every job twice, rows-mode attention through the chain, then the prep / post ops (the traces
         # are captured per prompt, so the switch takes effect at the next prompt)
         ab = os.environ.get("POC_AB_ROWS_OPS") == "1"
@@ -126,8 +137,10 @@ def main():
             jobs = [(cfg, p, None) for cfg, p in jobs]
         warmed = {True}  # the startup warm-up ran with the ops
         default_window = srv.window
-        for (cfg, window), p_text, on in jobs:
+        for ((cfg, av), window), p_text, on in jobs:
             srv.window = window or default_window
+            if av is not None:
+                setattr(HYB, attr, type(getattr(HYB, attr))(av))
             if on is not None:
                 for li, layer in enumerate(gen.model.layers):
                     layer.attention._rows_ops = rows_ops[li] if on else None
@@ -146,6 +159,8 @@ def main():
                 r["fetch"] = list(cfg)
             if window:
                 r["window"] = window
+            if av is not None:
+                r[attr] = av
             if on is not None:
                 r["rows_ops"] = on
             n = max(1, r["passes"])

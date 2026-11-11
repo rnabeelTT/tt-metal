@@ -42,9 +42,16 @@ def load(nthreads, so=_SO):
         vp, ci = ctypes.c_void_p, ctypes.c_int
         lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
+        lib.hostk_set_active.argtypes = [ctypes.c_int]
         lib.hostk_init(int(nthreads))
         _lib = lib
     return _lib
+
+
+def set_active(n):
+    """Threads that run the kernel from now on (1..the pool size; 0 = all), e.g. to leave host DRAM bandwidth for the
+    pinned uploads. Returns the previous setting."""
+    return _lib.hostk_set_active(int(n))
 
 
 def planarize(p, inverse=False):
