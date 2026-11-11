@@ -23,6 +23,15 @@ PF_ENV="$PF_ENV -e QWEN35_PREFIX_CACHING=${PC:-1}"
 PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=4 -e QWEN35_MOE_DN_CHUNK=4"
 # DFlash drafter context window 256 (8K prompt: 1.79 -> 1.91-2.08 tokens per pass vs 1024; runs/m27/fb_win, fb_win2)
 PF_ENV="$PF_ENV -e DFLASH_WINDOW=${DWIN:-256}"
+# startup warm-up generation: 384 tokens (64 left the first 3 requests' verify at 50-61 ms against ~40 steady)
+PF_ENV="$PF_ENV -e DFLASH_WARMUP=${DWARM:-384}"
+# single-trace decode with host <-> device sockets (HYB_SOCKET; SOCK=0: per-layer segments); in socket mode 4 host-kernel
+# threads and fetch fraction 0.15 (runs/m27/fb_sock, fb_sock2: short 44.7 -> 48.4 tok/s, 8K 31.9 -> 37.0, fixed text)
+if [ "${SOCK:-1}" = 1 ]; then
+  PF_ENV="$PF_ENV -e HYB_SOCKET=1 -e HYB_HOSTK_THREADS=${HK_THREADS:-4}"; FFRAC=${FFRAC:-0.15}
+else
+  FFRAC=${FFRAC:-0.3}
+fi
 IMG=${HYB_IMAGE:-tt-model/qwen3-5-122b-a10b:8a750811ffec}
 TR_MIB=${TRACE_MIB:-96}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'
@@ -48,7 +57,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_ENABLE=1 -e HYB_PORT=minimaxai_minimax_m2_7 -e HYB_SLOTS=192 -e HYB_DYN_SLOTS=0 -e HYB_SKIP=0 -e HYB_MTP=0 \
   -e HYB_ROWS=$((${DK:-3} + 1)) -e HYB_THREADS=12 -e HYB_LIB=/hyblib/minimax_m27_int4_s152 \
   -e HYB_PLAN=/poc/runs/m27/plan_m27_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
-  -e HYB_LRU=32 -e HYB_FETCH_FRAC=0.3 -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
+  -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
   -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 $SPEC_ENV $PF_ENV \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve MiniMaxAI/MiniMax-M2.7 --max-model-len $CTX \

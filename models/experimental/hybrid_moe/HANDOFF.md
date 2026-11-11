@@ -118,6 +118,18 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 3 (2026-11-11): single-trace socket decode (`HYB_SOCKET=1`, serve default): a captured verify pass is ONE
+  trace; each hybrid layer sends its routing logits / activation rows to the host (send_async_d2h, chip 0), receives the
+  crafted rows on every chip and the CPU partial on chip 0 (recv_async_h2d, host-push L1 FIFOs of 8 pages: 64-page
+  FIFOs starved the prefill matmuls' L1). Host handlers run in layer order after the replay is enqueued (`SEG.post`);
+  fetch is asynchronous (CQ1, committed before the next replay). Socket programs are warmed eagerly (`_sock_warm`).
+  Microbench `bench_sock.py`: 19 us per layer round trip. Fixed text: short 44.7 -> 48.4 tok/s, 8K 31.9 -> 37.0
+  (`fb_sock`, `fb_sock2`: socket mode wants 4 host-kernel threads and fetch fraction 0.15). Serving (`serve/bench.py`,
+  128K, steady state): 41.5 tok/s, TTFT 0.84 s (was 37.4-39.7, ~1.0 s); verify 39-43 ms/pass.
+  Also: NumPy CPU-job prep (`HYB_NP_PREPARE`, +5%), 3 kernel threads in segment mode (+2-3%), `bench_kvupd.py` (the
+  4 per-row KV writes 21 us/layer vs 4 us for one call: a merged writer is worth ~1 ms/pass).
+  Quality: `runs/m27/tf_min4` 0.8467 / 0.9353 / 0.194 and `tf_min1` 0.8492 / 0.9348 / 0.196 (baseline 0.8475 / 0.9349
+  / 0.192).
 - Round 2 (2026-11-11), fixed text unless noted:
   - `HYB_EARLY_CPU` (default 1): the CPU experts start before the routing row is built and uploaded. ABBA A/B
     (`runs/m27/fb_early`): CPU wait 6-11 -> 0.2-2.6 ms/pass; short 42.4 -> 44.1 tok/s, 8K 30.9 -> 32.6. The row upload

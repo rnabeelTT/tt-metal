@@ -953,15 +953,20 @@ class _HybSockets:
     def __init__(self, mesh, H):
         ndev = mesh.get_num_devices()
         mcc = lambda d, x: ttnn.MeshCoreCoord(ttnn.MeshCoordinate(0, d), ttnn.CoreCoord(x, 0))  # noqa: E731
-        depth = 64  # pages per FIFO (a pass sends m rows per layer and the host reads them right away)
+        # FIFO depths in pages: device -> host FIFOs live in pinned host memory (deep: the device never waits on the
+        # host's reads); host -> device FIFOs in device L1 (the only buffer type they support), whose range the L1
+        # allocator reserves on every core: 64-page FIFOs (~420 KB) left too little L1 for the prefill matmuls'
+        # circular buffers (~400 KB free above them), 8 pages take ~52 KB
+        d2h_depth, h2d_depth = 64, int(os.environ.get("HYB_SOCKET_H2D_DEPTH", "8"))
+        h2d_buf = ttnn.BufferType.L1
 
         def d2h(core, page):
-            s = ttnn.D2HSocket(mesh, mcc(0, core), depth * page)
+            s = ttnn.D2HSocket(mesh, mcc(0, core), d2h_depth * page)
             s.set_page_size(page)
             return s
 
         def h2d(dev, core, page):
-            s = ttnn.H2DSocket(mesh, mcc(dev, core), ttnn.BufferType.L1, depth * page, ttnn.H2DMode.HOST_PUSH)
+            s = ttnn.H2DSocket(mesh, mcc(dev, core), h2d_buf, h2d_depth * page, ttnn.H2DMode.HOST_PUSH)
             s.set_page_size(page)
             return s
 
@@ -971,6 +976,7 @@ class _HybSockets:
         self.rows = [h2d(d, 2, (C + TILE_W) * 2) for d in range(ndev)]
         self.part = h2d(0, 3, H * 2)
         self.lg_buf, self.x_buf = {}, {}
+        self.warmed = set()  # row counts whose socket programs ran eagerly (_sock_warm)
 
     def read_lg(self, m):
         b = self.lg_buf.get(m)
@@ -987,10 +993,27 @@ class _HybSockets:
         return b
 
 
+def _sock_warm(self, logits, h_x, B, m, mk):
+    """One eager round of the socket ops for an m-row step (their programs compiled before any capture: a capture
+    cannot load new binaries), paired with the host side; the received rows are zeros and the buffers are reset."""
+    S, H = HYB.socks, B["shapes"]["H"]
+    ttnn.experimental.send_async_d2h(logits, S.lg)
+    ttnn.experimental.send_async_d2h(h_x, S.x)
+    S.read_lg(m)
+    S.read_x(m, H)
+    for r in S.rows:
+        ttnn.experimental.recv_async_h2d(HYB.crafted_rm[mk], r)
+        r.write_tensor(torch.zeros(mk, HYB.C + TILE_W, dtype=torch.bfloat16))
+    ttnn.experimental.recv_async_h2d(B["host_sock"], S.part)
+    S.part.write_tensor(torch.zeros(m, H, dtype=torch.bfloat16))
+    ttnn.synchronize_device(self.device)
+    S.warmed.add(m)
+
+
 def _sock_step1(self, B, m):
     """HYB_SOCKET host step 1 of a layer (the device waits in recv_async_h2d for its crafted rows): the routing logits
     and activations from the sockets, routing and the fetch choice, the CPU experts started, the crafted rows to every
-    chip."""
+    chip, then the fetch writes."""
     t0 = time.perf_counter()
     S, L, H = HYB.socks, self.layer_num, B["shapes"]["H"]
     lg = S.read_lg(m)
@@ -1004,8 +1027,6 @@ def _sock_step1(self, B, m):
         res = slot >= 0
         miss = miss & ~res
     job = None
-    if fetch is not None:
-        HYB.fetch.stage(L, *fetch, HYB.st)  # CQ1 writes, resident from the next replay (FetchCache.commit)
     if miss.any():
         start = HYB.host_prepare_np(L, xh, ids, sc, miss)
         if start is not None:
@@ -1026,6 +1047,10 @@ def _sock_step1(self, B, m):
     for s_ in S.rows:
         s_.write_tensor(r)
     HYB.st["t_up"] += time.perf_counter() - t1
+    if fetch is not None:
+        # after the rows (the device waits only for them): CQ1 writes, resident from the next replay (FetchCache.commit),
+        # enqueued while the device runs this layer's experts and the next layer's attention
+        HYB.fetch.stage(L, *fetch, HYB.st)
     HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
 
 
@@ -1496,6 +1521,8 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     else:  # one host step per layer: routing + host experts, then a single device segment
         step1 = lambda: (_fused_step1(self, h_x, logits, B), _host_step2(self, B))  # noqa: E731
         step2 = None
+    if HYB._sock_env and not SEG.capturing and m not in HYB.socks.warmed:
+        _sock_warm(self, logits, h_x, B, m, mk)
     sock = SEG.capturing and HYB.sock
     if sock:
         if HYB.devcraft or not HYB.overlap or not HYB.fetch.direct:
