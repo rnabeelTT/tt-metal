@@ -25,10 +25,10 @@ PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=4 -e QWEN35_MOE_DN_CHUNK=4"
 PF_ENV="$PF_ENV -e DFLASH_WINDOW=${DWIN:-256}"
 # startup warm-up generation: 384 tokens (64 left the first 3 requests' verify at 50-61 ms against ~40 steady)
 PF_ENV="$PF_ENV -e DFLASH_WARMUP=${DWARM:-384}"
-# single-trace decode with host <-> device sockets (HYB_SOCKET; SOCK=0: per-layer segments); in socket mode 4 host-kernel
+# single-trace decode with host <-> device sockets (HYB_SOCKET; SOCK=0: per-layer segments); in socket mode 6 host-kernel
 # threads and fetch fraction 0.15 (runs/m27/fb_sock, fb_sock2: short 44.7 -> 48.4 tok/s, 8K 31.9 -> 37.0, fixed text)
 if [ "${SOCK:-1}" = 1 ]; then
-  PF_ENV="$PF_ENV -e HYB_SOCKET=1 -e HYB_HOSTK_THREADS=${HK_THREADS:-4}"; FFRAC=${FFRAC:-0.15}
+  PF_ENV="$PF_ENV -e HYB_SOCKET=1 -e HYB_HOSTK_THREADS=${HK_THREADS:-6}"; FFRAC=${FFRAC:-0.15}
 else
   FFRAC=${FFRAC:-0.3}
 fi

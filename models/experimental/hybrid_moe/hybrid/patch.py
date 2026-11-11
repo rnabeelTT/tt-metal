@@ -186,6 +186,9 @@ class HybridState:
         # host <-> device sockets inside it (_HybSockets) instead of being cut into segments with readbacks and pinned
         # uploads; fetched experts are written on CQ1 and resident from the next replay (FetchCache async)
         self.socks = None
+        # HYB_SOCK_ROWS_FIRST (default 1): crafted rows sent before the activations are read and the CPU experts start
+        # (runs/m27/fb_rows: short 48.5 -> 50.2 tok/s, 8K 35.9 -> 38.2)
+        self.sock_rows_first = os.environ.get("HYB_SOCK_ROWS_FIRST", "1") == "1"
         self.pf_mass = {}  # HYB_REPLAN: layer -> [E] routed weight per expert over the latest prefill's real rows
         self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
         self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
@@ -1012,12 +1015,11 @@ def _sock_warm(self, logits, h_x, B, m, mk):
 
 def _sock_step1(self, B, m):
     """HYB_SOCKET host step 1 of a layer (the device waits in recv_async_h2d for its crafted rows): the routing logits
-    and activations from the sockets, routing and the fetch choice, the CPU experts started, the crafted rows to every
-    chip, then the fetch writes."""
+    from the socket, routing and the fetch choice, then (HYB.sock_rows_first) the crafted rows to every chip before the
+    activations are read and the CPU experts started (the device resumes sooner), or after; the fetch writes last."""
     t0 = time.perf_counter()
     S, L, H = HYB.socks, self.layer_num, B["shapes"]["H"]
     lg = S.read_lg(m)
-    xh = S.read_x(m, H)  # always consumed: the device sends every step
     HYB.st["t_read"] += time.perf_counter() - t0
     ids, sc, slot, res, miss = _route_host(self, lg, m)
     fetch = None
@@ -1026,6 +1028,11 @@ def _sock_step1(self, B, m):
         slot = HYB.slot_of[L][ids]
         res = slot >= 0
         miss = miss & ~res
+    if HYB.sock_rows_first:
+        _sock_rows(self, S, L, lg, ids, sc, m)
+    t1 = time.perf_counter()
+    xh = S.read_x(m, H)  # always consumed: the device sends every step
+    HYB.st["t_read"] += time.perf_counter() - t1
     job = None
     if miss.any():
         start = HYB.host_prepare_np(L, xh, ids, sc, miss)
@@ -1035,6 +1042,17 @@ def _sock_step1(self, B, m):
             j = _job(self, xh.clone(), ids, sc, miss)
             job = HYB.cpu_pool.submit(lambda j=j: HYB.host_compute(*j))
     B["job"] = job
+    if not HYB.sock_rows_first:
+        _sock_rows(self, S, L, lg, ids, sc, m)
+    if fetch is not None:
+        # after the rows (the device waits only for them): CQ1 writes, resident from the next replay (FetchCache.commit),
+        # enqueued while the device runs this layer's experts and the next layer's attention
+        HYB.fetch.stage(L, *fetch, HYB.st)
+    HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
+
+
+def _sock_rows(self, S, L, lg, ids, sc, m):
+    """The crafted logits rows of a routed socket-mode step to every chip."""
     t1 = time.perf_counter()
     E, C = HYB.E, HYB.C
     mk = _kernel_rows(m)
@@ -1047,11 +1065,6 @@ def _sock_step1(self, B, m):
     for s_ in S.rows:
         s_.write_tensor(r)
     HYB.st["t_up"] += time.perf_counter() - t1
-    if fetch is not None:
-        # after the rows (the device waits only for them): CQ1 writes, resident from the next replay (FetchCache.commit),
-        # enqueued while the device runs this layer's experts and the next layer's attention
-        HYB.fetch.stage(L, *fetch, HYB.st)
-    HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
 
 
 def _sock_step2(self, B, m):
