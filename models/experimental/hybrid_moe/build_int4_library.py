@@ -8,7 +8,7 @@ group GS along K) in torch's CPU tinygemm layout (_convert_weight_to_int4pack_fo
     y = _weight_int4pack_mm_for_cpu(a, dn_p, GS, dn_sz)   # a @ down^T        -> [r, H]
 One file per layer: <out>/layer_<L>.pt with gu_p, gu_sz, dn_p, dn_sz stacked over experts.
 
-usage: build_int4_library.py <hf snapshot dir> <out dir> [layers e.g. 0-59]
+usage: build_int4_library.py <hf snapshot dir> <out dir> [layers: a range e.g. 0-59, or a list e.g. 0,1,3]
 env: HYB_LIB_KEYS qwen35 (default) | minimax_m2 (block_sparse_moe.experts.E.w1/w3/w2 = gate/up/down);
      HYB_LIB_COLD=<plan.npz>:<C> builds only the experts outside each layer's top C of the plan's `order` and
      stores their ids as "experts" (row i = expert experts[i]); otherwise every expert, row = expert id.
@@ -76,7 +76,10 @@ def main():
         if m:
             experts.setdefault(int(m.group(1)), set()).add(int(m.group(2)))
     layers = sorted(experts)
-    if len(sys.argv) > 3:
+    if len(sys.argv) > 3 and "," in sys.argv[3]:  # an explicit list, e.g. the hybrid layers of a profile
+        keep = {int(v) for v in sys.argv[3].split(",")}
+        layers = [l for l in layers if l in keep]
+    elif len(sys.argv) > 3:
         a, b = sys.argv[3].split("-")
         layers = [l for l in layers if int(a) <= l <= int(b)]
     handles = {}

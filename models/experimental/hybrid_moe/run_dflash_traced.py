@@ -3,7 +3,7 @@
 """DFlash speculative decoding on the hybrid MiniMax-M2.7, traced (the step itself: dflash_serve.DFlashServing, shared
 with vLLM serving). The drafter is built BEFORE the target.
 
-env: POC_PROMPTS, POC_PROMPT_START, POC_NEW_TOKENS, POC_MAX_SEQ, POC_LONG (a ~N-token code prompt from this repo's
+env: POC_PROMPTS, POC_PROMPT_START, POC_NEW_TOKENS, POC_FORCE (fixed-text decode, see below), POC_MAX_SEQ, POC_LONG (a ~N-token code prompt from this repo's
 sources), POC_WARMUP (warm-up generation tokens, default 64, 0 = off), DFLASH_K (drafts per pass, default 3), DFLASH_MEMONLY (print the footprint and stop),
 plus dflash_serve's DFLASH_*. usage (in the image): python run_dflash_traced.py <out dir>
 """
@@ -23,6 +23,10 @@ from hybrid.patch import PORT, _port  # noqa: E402
 
 K = int(os.environ.get("DFLASH_K", "3"))  # drafts per pass (verify rows K + 1 = HYB_ROWS)
 NEW = int(os.environ.get("POC_NEW_TOKENS", "128"))
+# POC_FORCE: a result.json with recorded ids (a run with POC_NEW_TOKENS >= NEW + 8): the fixed-text benchmark decodes
+# each prompt's recorded text (dflash_serve.generate(force=...))
+_fz = os.environ.get("POC_FORCE")
+forced = {r["prompt"]: r["ids"] for r in json.load(open(_fz))["runs"] if "ids" in r} if _fz else {}
 HYB_KEYS = (
     "dec_picks",
     "dec_hits",
@@ -49,7 +53,8 @@ def main():
     out_dir = sys.argv[1]
     os.makedirs(out_dir, exist_ok=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
-    ncq = 2 if os.environ.get("HYB_FETCH_ASYNC") == "1" else 1  # CQ1: the async fetch writes
+    # CQ1: the async fetch writes / the prefill staging copies
+    ncq = 2 if "1" in (os.environ.get("HYB_FETCH_ASYNC"), os.environ.get("HYB_STREAM_CQ1")) else 1
     mesh = ttnn.open_mesh_device(
         ttnn.MeshShape(1, 4),
         l1_small_size=24576,
@@ -104,6 +109,13 @@ def main():
         if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F, _ in runs)):
             raise ValueError(f"POC_FETCH_SWEEP {runs} needs direct fetch and F <= HYB_LRU ({HYB.fetch.D})")
         jobs = [(cfg, p) for cfg in runs for p in prompts]
+        # POC_WINDOW_SWEEP="1024,512": the prompts once per drafter context window (DFlashServing.window, read when a
+        # prompt's drafter context is filled and at every refill)
+        windows = [int(w) for w in os.environ.get("POC_WINDOW_SWEEP", "").split(",") if w]
+        if windows:
+            jobs = [((cfg, w), p) for cfg, p in jobs for w in windows]
+        else:
+            jobs = [((cfg, None), p) for cfg, p in jobs]
         # POC_AB_ROWS_OPS=1: every job twice, rows-mode attention through the chain, then the prep / post ops (the traces
         # are captured per prompt, so the switch takes effect at the next prompt)
         ab = os.environ.get("POC_AB_ROWS_OPS") == "1"
@@ -113,7 +125,9 @@ def main():
         else:
             jobs = [(cfg, p, None) for cfg, p in jobs]
         warmed = {True}  # the startup warm-up ran with the ops
-        for cfg, p_text, on in jobs:
+        default_window = srv.window
+        for (cfg, window), p_text, on in jobs:
+            srv.window = window or default_window
             if on is not None:
                 for li, layer in enumerate(gen.model.layers):
                     layer.attention._rows_ops = rows_ops[li] if on else None
@@ -127,22 +141,25 @@ def main():
                 HYB.fetch.f, HYB.fetch.F, HYB.fetch.async_on = cfg
                 if cfg[2] and ncq < 2:
                     raise ValueError("an async fetch setting needs HYB_FETCH_ASYNC=1 (two command queues)")
-            r = srv.generate(p_text, NEW, gen.page_table[:1])
+            r = srv.generate(p_text, NEW, gen.page_table[:1], force=forced.get(p_text[:80]))
             if cfg is not None:
                 r["fetch"] = list(cfg)
+            if window:
+                r["window"] = window
             if on is not None:
                 r["rows_ops"] = on
             n = max(1, r["passes"])
             r["hyb_per_pass_ms_or_n"] = {
                 k: round(HYB.st.get(k, 0.0) / n * (1e3 if k.startswith("t_") else 1), 2) for k in HYB_KEYS
             }
-            text = gen.tokenizer.decode(r.pop("ids"))
+            ids = r.pop("ids")
+            text = gen.tokenizer.decode(ids)
             r = {"prompt": p_text[:80], **r}
             print("DFLASHT " + json.dumps(r), flush=True)
             print("TEXT " + json.dumps(text[:300]), flush=True)
             if not res["runs"]:
                 print("MEMONLY " + json.dumps(gen._memory_report()), flush=True)
-            res["runs"].append({**r, "text": text})
+            res["runs"].append({**r, "text": text, "ids": ids})
             json.dump(res, open(os.path.join(out_dir, "result.json"), "w"), indent=1)
     finally:
         HYB.fetch.release()  # pinned regions / views before the mesh closes

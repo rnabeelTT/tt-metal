@@ -232,7 +232,32 @@ class DFlashServing:
             ttnn.release_trace(self.mesh, self.dr.traces.pop(name))
         self.dr.outs = {}
 
-    def begin_prefill(self, prompt_ids, page_table_row, slot: int = 0):
+    # a prefix-cache hit may resume the prefill at `start` (begin_prefill), as long as the feature window's rows before
+    # it are still held from the previous request (feature_start)
+    prefix_start_ok = True
+
+    def _held(self, prompt_ids, upto):
+        """The previous request's context features for prompt rows [P - window, upto), or None if any is not held (the
+        rows' ids must match the context they were computed in, from position 0)."""
+        lo = max(0, len(prompt_ids) - self.window)
+        if upto <= lo:
+            return torch.zeros(0, 0)
+        ids = getattr(self, "_ctx_ids", None)
+        if ids is None:
+            return None
+        first = len(ids) - self.n_hist
+        if first > lo or len(ids) < upto or ids[:upto] != list(prompt_ids[:upto]):
+            return None
+        return torch.cat(self.hist)[lo - first : upto - first]
+
+    def feature_start(self, prompt_ids, cached: int) -> int:
+        """The prefill start for a prompt whose first `cached` rows hold KV: `cached` when the window's features before
+        it are held, otherwise the window's first row (or `cached`, if earlier)."""
+        lo = max(0, len(prompt_ids) - self.window)
+        cached = int(cached)
+        return cached if cached <= lo or self._held(prompt_ids, cached) is not None else lo
+
+    def begin_prefill(self, prompt_ids, page_table_row, slot: int = 0, start: int = 0):
         if int(slot) != 0:
             raise ValueError(f"DFlash serving is single-user (--max-num-seqs 1); prefill into slot {slot}")
         self._log_stats("previous request")
@@ -240,7 +265,21 @@ class DFlashServing:
         self.dr.reset()
         self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32).clone()
         self._P = len(prompt_ids)
-        captured = {li: [] for li in self.dr.taps}
+        # per tap: [first row, host rows]; only the rows from P - window on are kept (end_prefill reads no more), and a
+        # segment that ends before them is not read back. The mesh concat's first H columns are the layer output (prefill
+        # outputs are width-sharded over the dies; a replicated output holds tp copies side by side).
+        keep_from = max(0, self._P - self.window)
+        self._ids = list(prompt_ids)
+        self._reuse = None
+        if int(start) > keep_from:
+            self._reuse = self._held(prompt_ids, int(start))
+            if self._reuse is None:
+                raise ValueError(
+                    f"prefill start {start} skips features of the last {self.window} rows of a {self._P}-token prompt "
+                    f"that the previous request's context does not hold"
+                )
+        captured = {li: [0, []] for li in self.dr.taps}
+        seen = {li: int(start) for li in self.dr.taps}
         orig = {}
         for li in self.dr.taps:
             layer = self.model.layers[li]
@@ -248,7 +287,14 @@ class DFlashServing:
 
             def hook(*a, _f=orig[li], _li=li, **kw):
                 y = _f(*a, **kw)
-                captured[_li].append(ttnn.to_torch(y, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1)).float())
+                off, rows = seen[_li], int(y.shape[-2])
+                seen[_li] = off + rows
+                if off + rows > keep_from:
+                    if not captured[_li][1]:
+                        captured[_li][0] = off
+                    captured[_li][1].append(
+                        ttnn.to_torch(y, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1)).float()
+                    )
                 return y
 
             layer.forward = hook
@@ -273,16 +319,21 @@ class DFlashServing:
         P = int(P)
         if P != self._P:
             raise ValueError(f"end_prefill P={P} but begin_prefill saw {self._P} prompt tokens")
-        # the prefill layer outputs are REPLICATED ([.., H] per die): the mesh concat holds tp copies side by side
-        feats = torch.cat(
-            [torch.cat([c.reshape(-1, c.shape[-1])[:, : self.H] for c in captured[li]])[:P] for li in self.dr.taps],
-            dim=-1,
-        )
-        if feats.shape[0] != P:
-            raise RuntimeError(f"tap hooks captured {feats.shape[0]} rows for a {P}-token prompt")
         W = self.window
-        self.hist = [feats[-W:].clone()]  # host copies of the context features (refills)
+        tails = []
+        for li in self.dr.taps:
+            off, pieces = captured[li]
+            rows = torch.cat([c.reshape(-1, c.shape[-1])[:, : self.H] for c in pieces])[: P - off]
+            if off + rows.shape[0] != P:
+                raise RuntimeError(f"tap {li}: hooks captured rows {off}..{off + rows.shape[0]} for a {P}-token prompt")
+            tails.append(rows[-W:])
+        feats = torch.cat(tails, dim=-1)
+        if self._reuse is not None and self._reuse.shape[0]:
+            feats = torch.cat([self._reuse.to(feats.dtype), feats])[-W:]
+        self._reuse = None
+        self.hist = [feats.clone()]  # host copies of the context features (refills; the next request's prefix)
         self.n_hist = self.hist[0].shape[0]
+        self._ctx_ids = self._ids  # the context's ids; the last n_hist have their features in hist
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
         self._capture()
         self._pos, self._tok, self._prev_acc = P, int(tok0), []
@@ -334,12 +385,20 @@ class DFlashServing:
         s2 = time.perf_counter()
         top = ver.run()[:R]
         a2 = time.perf_counter()
+        if self._force is not None:  # fixed-text benchmark: the recorded continuation replaces the verify's argmax
+            i = self._force_i
+            top = self._force[i + 1 : i + 1 + R]
+            if len(top) < R:
+                raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
         a = 0
         while a < K and drafts[a] == top[a]:
             a += 1
+        if self._force is not None:
+            self._force_i += a + 1
         rows_h = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)[: a + 1]
         self.hist.append(rows_h)
         self.n_hist += rows_h.shape[0]
+        self._ctx_ids += [t] + drafts[:a]
         if self.n_hist > 2 * W:  # bound the host copy
             self.hist = [torch.cat(self.hist)[-W:]]
             self.n_hist = W
@@ -369,9 +428,13 @@ class DFlashServing:
             )
 
     # ------------------------------------------------------------------ standalone generation
-    def generate(self, text, n_new, page_table, chat=True):
+    _force = None  # generate(force=...): the recorded token sequence a fixed-text run decodes
+
+    def generate(self, text, n_new, page_table, chat=True, force=None):
         """Eager prefill + traced DFlash decode of one prompt on `page_table` [1, W] (the runner; the serving warm-up).
-        Returns the generated ids and timings; the traces are released at the end."""
+        Returns the generated ids and timings; the traces are released at the end. ``force`` = a recorded output
+        (ids, first token first): every pass accepts the drafts that match it and continues with it, so runs of
+        different configurations decode the same text (same verify inputs, comparable cost per pass)."""
         tok = self.gen.tokenizer
         if chat:
             text = tok.apply_chat_template(
@@ -388,6 +451,10 @@ class DFlashServing:
             self.abort_prefill()
             raise
         t0 = int(torch.as_tensor(logits0).reshape(-1, logits0.shape[-1])[-1, : self.V].argmax())
+        if force is not None:
+            t0 = int(force[0])
+            n_new = min(n_new, len(force) - R_MAX_PAD)
+        self._force, self._force_i = (list(force), 0) if force is not None else (None, 0)
         self.end_prefill(t0, P)
         t_pf = time.time() - t_pf
         HYB.reset_stats()
@@ -398,6 +465,7 @@ class DFlashServing:
             out += new
             pos += len(new)
         dt = time.time() - t1
+        self._force = None
         self.release()
         st, n = self.stats, max(1, self.stats["passes"])
         return {
@@ -417,6 +485,9 @@ class DFlashServing:
             "prefill_s": round(t_pf, 2),
             "drafter_refills": st["refills"],
         }
+
+
+R_MAX_PAD = 8  # a forced run stops this many tokens before the end of its recording (a pass reads R ahead)
 
 
 def build(gen, k):

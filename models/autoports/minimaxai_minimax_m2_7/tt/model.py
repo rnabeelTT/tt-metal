@@ -152,6 +152,7 @@ class Qwen35MoeModel(Qwen36Model):
     _PREFILL_MASK_BUCKETS = tuple(
         b for b in (128, 256, 512, 1024, 2048, 4096, 8192) if b <= max(1024, _PREFILL_SEGMENT)
     )
+    _ALL_LOGITS_ROWS = 1024  # 1024 x vocab bf16 = 410 MB per die (the startup peak: prefill_all_logits warm-up)
 
     DECODER_LAYER_CLS = Qwen35MoeOptimizedDecoderLayer
 
@@ -406,13 +407,16 @@ class Qwen35MoeModel(Qwen36Model):
     # can be captured once and replayed for any real length / chunk start (capture_prefill_bucket_traces).
     _BUCKET_INPUTS_ATTR = "_bucket_inputs_store"
 
-    def _bucket_inputs(self, bucket, max_blocks=None):
+    def _bucket_inputs(self, bucket, max_blocks=None, slot=0):
         """Persistent device inputs of one bucket (allocated on first use; call before any trace capture).
-        ``max_blocks`` = width of the page-table rows this model is driven with (fixed after the first call)."""
+        ``max_blocks`` = width of the page-table rows this model is driven with (fixed after the first call).
+        ``slot`` > 0: another input set of the same bucket (the layer-major prefill stages one per segment of a group).
+        """
         from models.autoports.minimaxai_minimax_m2_7.tt.prefill_len import PrefillLen
 
         store = self.__dict__.setdefault(self._BUCKET_INPUTS_ATTR, {})
-        bi = store.get(bucket)
+        key = bucket if slot == 0 else (bucket, slot)
+        bi = store.get(key)
         if bi is not None:
             return bi
         dev = self.device
@@ -495,7 +499,7 @@ class Qwen35MoeModel(Qwen36Model):
             "len": PrefillLen(dev, bucket, conv_k),
             "staged": None,  # (tokens tuple, actual_len, chunk_start, page-table row tuple) last staged
         }
-        store[bucket] = bi
+        store[key] = bi
         return bi
 
     def _prefill_block_size(self):
@@ -572,10 +576,14 @@ class Qwen35MoeModel(Qwen36Model):
         the zero rows of the 32-row selector) — the exact spec of the decode sampler's input, so the serving adapter can
         sample the prefill token on device with the programs the decode warm-up compiled (stage 9)."""
         x = self._run_bucket_hidden(bi, bucket, chunk_start)
-        vlen = bi["len"]
         mtp_hook = self.__dict__.get("_mtp_bucket_hook")
         if mtp_hook is not None:
             mtp_hook(bi, bucket, chunk_start, x)  # the MTP head's prompt rows over this segment (part of the trace)
+        return self._bucket_logits(bi, x)
+
+    def _bucket_logits(self, bi, x):
+        """Next-token logits of a segment's final hidden [1, 1, bucket, dim] (freed): see :meth:`_run_bucket_dev`."""
+        vlen = bi["len"]
         x_last = ttnn.matmul(vlen.logit_sel, x)  # [1,1,32,dim]: row 0 = hidden row actual_len-1, rows 1..31 zero
         ttnn.deallocate(x)
         x_last = ttnn.to_memory_config(x_last, ttnn.DRAM_MEMORY_CONFIG)
@@ -600,29 +608,70 @@ class Qwen35MoeModel(Qwen36Model):
 
     def _run_bucket_hidden(self, bi, bucket, chunk_start):
         """Embedding -> all layers over the staged bucket inputs; returns hidden [1, 1, bucket, dim] (device)."""
+        x = self._bucket_embed(bi, bucket)
+        for layer in self.layers:
+            x = self._bucket_layer(layer, x, bi, chunk_start)
+        return x
+
+    def _bucket_embed(self, bi, bucket):
         x = self.embd(bi["tok"])
         x = ttnn.reshape(x, (1, 1, bucket, x.shape[-1]))
         x = ttnn.to_memory_config(x, ttnn.DRAM_MEMORY_CONFIG)
-        x = self._apply_vision_merge(x, length=bucket)
+        return self._apply_vision_merge(x, length=bucket)
+
+    def _bucket_layer(self, layer, x, bi, chunk_start):
+        """One decoder layer over a segment's staged inputs; frees x, returns the layer output."""
         vlen = bi["len"]
+        if layer.is_full_attention:
+            x_new = layer.forward(
+                x,
+                cos=bi["cos"],
+                sin=bi["sin"],
+                mode="prefill",
+                page_table=bi["full_pt"],
+                chunk_page_table=bi["chunk_pt"],
+                chunk_start_idx=chunk_start,  # host int: sizes nothing here (fixed-width tables), flex SDPA uses csi
+                chunk_start_idx_tensor=bi["csi"],
+                valid_len=vlen,
+            )
+        else:
+            x_new = layer.forward(x, mode="prefill", chunk_size=self.args.gdn_chunk_size, valid_len=vlen)
+        ttnn.deallocate(x)
+        return x_new
+
+    def prefill_group(self, segments, page_table, chunk_starts, return_sharded=False):
+        """Layer-major masked-bucket prefill of consecutive segments of one request: every layer runs over all the
+        segments before the next layer starts (each segment on its own staged input set and hidden buffer), so a layer's
+        per-call costs that do not depend on the rows (the hybrid overlay's expert copies into its staging) are paid
+        once per group, not once per segment. Causal attention is unchanged: segment s of layer L reads the KV that
+        segments < s wrote into layer L just before. ``segments`` [1, n_i] host token ids at ``chunk_starts``; text
+        only, eager (no bucket traces). Returns the last segment's logits as :meth:`prefill_masked_bucket` does."""
+        if getattr(self, "_kv_scratch_block", None) is None:
+            raise RuntimeError("prefill_group needs the persistent-input bucket path (KV scratch block)")
+        if self.__dict__.get("_mtp_bucket_hook") is not None or self.__dict__.get("_mtp_stage_hook") is not None:
+            raise RuntimeError("prefill_group does not run the MTP head's prompt rows; use prefill_masked_bucket")
+        pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+        if chunk_starts[0] == 0:
+            self._reset_gdn_state_for_new_sequence()
+            self._build_request_rope(segments[0], None)
+        if getattr(self, "_vis_buf", None) is not None:
+            self._set_vision_merge(segments[0], None, 0)  # text: clears the image-row mask
+        staged = []
+        for i, (toks, cs) in enumerate(zip(segments, chunk_starts)):
+            n = int(toks.shape[1])
+            bucket = self._mask_bucket_for(n)
+            bi = self._bucket_inputs(bucket, max_blocks=pt.shape[-1], slot=i)
+            self._stage_bucket_inputs(bi, toks, pt, n, cs, bucket)
+            staged.append((bi, bucket, cs))
+        xs = [self._bucket_embed(bi, bucket) for bi, bucket, _ in staged]
         for layer in self.layers:
-            if layer.is_full_attention:
-                x_new = layer.forward(
-                    x,
-                    cos=bi["cos"],
-                    sin=bi["sin"],
-                    mode="prefill",
-                    page_table=bi["full_pt"],
-                    chunk_page_table=bi["chunk_pt"],
-                    chunk_start_idx=chunk_start,  # host int: sizes nothing here (fixed-width tables), flex SDPA uses csi
-                    chunk_start_idx_tensor=bi["csi"],
-                    valid_len=vlen,
-                )
-            else:
-                x_new = layer.forward(x, mode="prefill", chunk_size=self.args.gdn_chunk_size, valid_len=vlen)
+            for i, (bi, _, cs) in enumerate(staged):
+                xs[i] = self._bucket_layer(layer, xs[i], bi, cs)
+        for x in xs[:-1]:
             ttnn.deallocate(x)
-            x = x_new
-        return x
+        out, out_sh = self._bucket_logits(staged[-1][0], xs[-1])
+        ttnn.synchronize_device(self.device)
+        return (out, out_sh) if return_sharded else out
 
     def prefill_masked_bucket(
         self,
@@ -738,11 +787,19 @@ class Qwen35MoeModel(Qwen36Model):
             self._stage_bucket_inputs(bi, token_ids[:, cs : cs + n], pt, n, cs, bucket)
             x = self._run_bucket_hidden(bi, bucket, cs)  # [1,1,bucket,dim]
             x = self.norm(x, mode=Mode.PREFILL)
-            logits = self._lm_head(x)  # replicated [1,1,bucket,vocab]
+            # the replicated [rows, vocab] all-gather is the DRAM peak: cap it at _ALL_LOGITS_ROWS whatever the segment
+            for r0 in range(0, n, self._ALL_LOGITS_ROWS):
+                r1 = min(bucket, r0 + self._ALL_LOGITS_ROWS)
+                xs = x if (r0, r1) == (0, bucket) else ttnn.slice(x, [0, 0, r0, 0], [1, 1, r1, x.shape[-1]])
+                logits = self._lm_head(xs)  # replicated [1,1,r1-r0,vocab]
+                if xs is not x:
+                    ttnn.deallocate(xs)
+                host = ttnn.to_torch(
+                    ttnn.get_device_tensors(logits)[0]
+                ).float()  # one replica (the others are identical)
+                ttnn.deallocate(logits)
+                outs.append(host.reshape(-1, r1 - r0, self.args.vocab_size)[:1, : min(n, r1) - r0])
             ttnn.deallocate(x)
-            host = ttnn.to_torch(ttnn.get_device_tensors(logits)[0]).float()  # one replica (the others are identical)
-            ttnn.deallocate(logits)
-            outs.append(host.reshape(-1, bucket, self.args.vocab_size)[:1, :n])
         return torch.cat(outs, dim=1)  # [1, vlen, vocab]
 
     def warmup_all_logits_programs(self, page_table_row):

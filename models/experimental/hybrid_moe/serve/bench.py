@@ -40,7 +40,9 @@ for p in HELDOUT:
                 continue
             ev = json.loads(line[5:])
             usage = ev.get("usage") or usage
-            if first is None and any((c.get("delta") or {}).get("content") for c in ev.get("choices", [])):
+            d = [c.get("delta") or {} for c in ev.get("choices", [])]
+            # with a reasoning parser the first tokens arrive as reasoning_content (or reasoning), not content
+            if first is None and any(x.get("content") or x.get("reasoning_content") or x.get("reasoning") for x in d):
                 first = time.time()
     t1 = time.time()
     n = (usage or {}).get("completion_tokens", 0)

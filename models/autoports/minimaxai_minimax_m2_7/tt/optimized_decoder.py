@@ -551,10 +551,28 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             return super()._routed_masked(x4, scores, ids, T, chunk)
         return self._routed_sorted(x4, scores, ids, T)
 
-    def _routed_sorted(self, x4, scores, ids, T):
+    def _routed_sorted(self, x4, scores, ids, T, second=None):
+        """Expert-sorted routed experts. ``second`` = (up_gate, down, E2, group_ids, before_second): one call over two
+        expert weight sets of the same shapes. ids E .. E + E2 - 1 pick expert id - E of the second set; the dispatch
+        sorts over all E + E2 ids and each projection runs one grouped sparse matmul per set into one output, each over
+        its own group-id list (the other set's groups carry the sentinel, which the skip-padding matmul neither
+        computes nor writes). ``group_ids(dispatch maps)`` returns the two lists (device [1, G], the dispatch's
+        group_ids dtype); ``before_second()`` runs right before the first matmul over the second set."""
         E, Nl, H, k = self.num_experts, self.inter_local, self.hidden, self.top_k
         opt, act = self.opt, self.prec.act_dtype
         gs = opt.sorted_group_rows
+        before_second = None
+        if second is not None:
+            if not (getattr(opt, "sorted_grouped", False) and self._skip_pad_groups_rule()):
+                raise ValueError("a two-set routed call needs the grouped skip-padding sparse matmul")
+            if self.tile_gu.tile_shape[1] != 32:
+                raise ValueError(
+                    f"a two-set routed call needs 32-wide gate/up output tiles, got {self.tile_gu.tile_shape}"
+                )
+            w2_gu, w2_dn, E2, group_ids, before_second = second
+            disp = self.__dict__.setdefault("_dispatch_two", {})
+            if E2 not in disp:
+                disp[E2] = SortedDispatch(self.device, E + E2, k, group=gs, pad_group_id=0xFFFF)
         if getattr(self, "_dispatch", None) is None:
             skip = self._skip_pad_groups_rule()
             self._dispatch = SortedDispatch(self.device, E, k, group=gs, pad_group_id=0xFFFF if skip else 0)
@@ -570,7 +588,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             self._cfg_sorted_dn = sparse_matmul_program_config(
                 gs, H, Nl, target_cores=opt.sorted_down_cores, in0_block_w_cap=opt.sorted_down_in0
             )
-        m = self._dispatch.build(ids, scores, T)
+        m = (self._dispatch if second is None else self._dispatch_two[E2]).build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
         grouped = bool(getattr(opt, "sorted_grouped", False))
         # the kernel gather needs the skip-aware grouped matmul (padding groups' tiles are not written)
@@ -580,8 +598,12 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             Rd,
             gs,
             group_ids=m["group_ids"] if (grouped and self._skip_pad_groups_rule()) else None,
-            num_experts=E,
+            num_experts=E if second is None else E + E2,
         )  # [1,G,gs,H]
+        if second is not None:
+            gid_a, gid_b = group_ids(m)
+            sets = [(self.up_gate, self.down, gid_a, self._pairs_mask(G, E))]
+            sets.append((w2_gu, w2_dn, gid_b, self._pairs_mask(G, E2)))
         ttnn.deallocate(m["src_tok"])
         narrow = self.tile_gu.tile_shape[1] != 32
         if grouped:
@@ -593,18 +615,27 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         else:
             sparse_kw = {"nnz": G}
             cfg_gu, cfg_dn = self._cfg_sorted_gu, self._cfg_sorted_dn
+        if second is None:
+            sets = [(self.up_gate, self.down, sparse_kw.get("indices"), m["group_mask"])]
+
+        def kw_of(gid):
+            return {"indices": gid} if gid is not None else sparse_kw
+
         out_gu = None if narrow else self._alloc_dev((1, G, gs, 2 * Nl), act)
-        fused = ttnn.sparse_matmul(
-            x_disp,
-            self.up_gate,
-            sparsity=m["group_mask"],
-            **sparse_kw,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            program_config=cfg_gu,
-            **({"output_tile": self.tile_gu} if narrow else {"optional_output_tensor": out_gu}),
-            compute_kernel_config=self.routed_ckc,
-            dtype=act,
-        )  # compact [1,G,32,2Nl]
+        for i, (w_gu, _, gid, mask) in enumerate(sets):
+            if i == 1 and before_second is not None:
+                before_second()
+            fused = ttnn.sparse_matmul(
+                x_disp,
+                w_gu,
+                sparsity=mask,
+                **kw_of(gid),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                program_config=cfg_gu,
+                **({"output_tile": self.tile_gu} if narrow else {"optional_output_tensor": out_gu}),
+                compute_kernel_config=self.routed_ckc,
+                dtype=act,
+            )  # compact [1,G,32,2Nl]
         ttnn.deallocate(x_disp)
         din = ttnn.swiglu(fused, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1,G,32,Nl]
         ttnn.deallocate(fused)
@@ -615,26 +646,33 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         out_dn = self._alloc_dev(
             (1, G, gs, H),
             act,
+            # picks with an id >= E (the hybrid overlay's experts outside this call) gather their row from the
+            # trailing padding group, which the skip-padding matmul does not write
+            zero=bool(getattr(self, "_sorted_zero_out", False)),
             layout=ttnn.ROW_MAJOR_LAYOUT
             if (grouped and getattr(self, "_cfg_grouped_down_untilize", False))
             else ttnn.TILE_LAYOUT,
         )
-        down = ttnn.sparse_matmul(
-            din,
-            self.down,
-            sparsity=m["group_mask"],
-            **sparse_kw,
-            optional_output_tensor=out_dn,
-            is_input_a_sparse=False,
-            is_input_b_sparse=True,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            program_config=cfg_dn,
-            compute_kernel_config=self.routed_ckc,
-            dtype=act,
-        )  # compact [1,G,32,H]
+        for _, w_dn, gid, mask in sets:
+            down = ttnn.sparse_matmul(
+                din,
+                w_dn,
+                sparsity=mask,
+                **kw_of(gid),
+                optional_output_tensor=out_dn,
+                is_input_a_sparse=False,
+                is_input_b_sparse=True,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                program_config=cfg_dn,
+                compute_kernel_config=self.routed_ckc,
+                dtype=act,
+            )  # compact [1,G,32,H]
         ttnn.deallocate(din)
         ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
+        if second is not None:
+            ttnn.deallocate(gid_a)
+            ttnn.deallocate(gid_b)
         y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
         ttnn.deallocate(down)
         for key in ("undispatch", "undispatch_rm"):

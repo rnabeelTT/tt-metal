@@ -72,6 +72,62 @@ Pieces (all traced, per-prompt re-capture):
   KL 0.196 (before the slot-0 fix and the session's changes, runs/m27dev/tf_c192: 0.850 / 0.933 / 0.183).
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
+- Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
+  NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
+  zero-filled skip-padding output), up to 3 staging rounds from 1 token (`HYB_STREAM_ROUNDS=3 HYB_STREAM_MIN=1`: no
+  CPU experts in prefill), copies on CQ1 (`HYB_STREAM_CQ1`), staging slots keyed by (layer, expert) and reused, and
+  layer-major groups of 8 segments (`QWEN35_PREFILL_GROUP`, `model.prefill_group`: ~85% of the copies reused).
+  Prefill s, old -> new: 512 1.54 -> 1.26, 2K 2.64 -> 1.84, 8K 10.6 -> 4.24, 32K 44.9 -> 15.8. Top-1 equal at every
+  length; the new path is run-to-run identical (the old one is not: CPU int4 vs device bfp4 per miss, 8K self-PCC
+  0.96, a 512-token top-1 flip), and its logits differ from the old by about the old path's own run-to-run spread.
+  Served (`serve_m27.sh` now sets these; DFlash taps read only the last-window segments): TTFT 6.7K 4.9 s, 26.6K
+  14.6 s, 77K 42.6 s (before: 21K 31 s, 98K 144 s); 539 tokens 1.6 s; decode 25-33 tok/s; tool calls / reasoning OK.
+  The all-logits LM head runs in row slices (the 4096 bucket's vocab all-gather OOMed at 128K; 1024 rows since
+  2026-11-10).
+  Next: the remaining hybrid cost is mostly `t_read` (the per-layer routing readback that blocks the host).
+- Prefill round 2 (2026-11-10, full model, 128K profile; `runs/m27/merge_full`, `pfetch_full`, `pfetch_lo`, `determ`):
+  - Merged routed call (`HYB_STREAM_MERGE=1`, default): the resident experts and the first staging round in one
+    sorted-dispatch call. 8K 4.24 -> 3.82 s, 32K 15.7 -> 13.6 s.
+  - Next-layer prefetch (`HYB_PF_PREFETCH_MIN`, serve default 1024; NS=212 = two banks over alternating hybrid
+    layers, hottest experts first): a layer's first step copies the next hybrid layer's non-resident experts on CQ1.
+    2K 1.80 -> 1.70, 4K 2.31 -> 2.02, 8K 3.87 -> 3.44, 32K 13.5 -> 13.1 s. Every variant is run-to-run identical;
+    logits across configs differ only by the staging layout's combine order.
+  - The all-logits LM head now runs in 1024-row slices (`_ALL_LOGITS_ROWS`): its 2048-row gather (819 MB/die)
+    OOMed the warm-up at NS=212.
+  - CPU split of the cheapest missed experts (`HYB_PF_SPLIT`): no gain on the full model (the device waits on the
+    CPU); default off.
+  - Quality: TF vs the CPU reference (`runs/m27/tf_new`, `tf_pf`) top-1 0.8475 / confident 0.935 / KL 0.192
+    (`tf_final` 0.848 / 0.933 / 0.196); prefetch on vs off is bit-identical there.
+  - Prefix caching (`QWEN35_PREFIX_CACHING`) plus DFlash feature reuse (`dflash_serve.feature_start`: the previous
+    request's host features cover the window before the cached prefix, so a hit resumes at vLLM's cached position).
+    Served (`serve/prefix_test.py`): 8.3K cold 5.1 s, resend 1.37 s, turn2 1.28 s; 35.9K cold 13.5 s, resend
+    1.15 s, turn2 1.37 s; DFlash 1.5-2.6 tokens/pass, 21-36 tok/s.
+- Decode round (2026-11-10/11), fixed-text benchmark (`POC_FORCE=<result.json>`: every config decodes the recorded
+  tokens of `runs/m27/fb_rec`, so speed is not confounded by what the model writes; noise +-1-3%):
+  - `HYB_STREAM_MIN=4` (serve default): the new prefill path's 1-token streamed experts (device bfp4) made the prompt's
+    hidden states noisier and DFlash accepted ~6% less (37.9 vs 41.0 tok/s short mean); keeping few-token experts on
+    the CPU int4 path restores it (41.8) and keeps most of the prefill gain (8K 5.1 s).
+  - Rows-mode MoE down op `QWEN35_MOE_DN_READERS=4 QWEN35_MOE_DN_CHUNK=4` (`bench_moe_rows.py`: 157 -> 137 us per
+    call at 4 rows, union 19): 41.8 -> 43.3 tok/s (`fb_g64`).
+  - Drafter window `DFLASH_WINDOW=256` on the 8K prompt: 27.2 -> 35.2 tok/s, 1.79 -> 2.08 tokens/pass (`fb_win`; 512:
+    30.6).
+  - No gain: gs64 int4 library (CPU expert time unchanged), pinned in-place uploads, explicit full-layer router config,
+    fetch fraction 0.2 / 0.5, the per-request re-plan (below). Put microbench (`bench_put.py`): a pinned put costs
+    ~13 us hot but 22-31 us after 300 us of other work (cache-cold dispatch path), whatever the CPU load.
+  - Host jitter: some passes (often the first prompt after startup) run 10-15% slower on the host; kcompactd scans
+    ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
+  - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
+    with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Per-request re-plan (2026-11-10, `HYB_REPLAN`, off by default; `sim_replan_m27.py`, `runs/m27/rp0` vs `rp32`):
+  after prefill, up to N static experts per hybrid layer the prompt did not route to are swapped for the cold experts
+  it routed most to; victims' device bytes go to a pinned store (`pinx_read_at`), and a victim with no int4 row is
+  always fetched in decode (never on the CPU). Sim (served policy, LRU 32 + fetch): CPU experts / pass -36% for a
+  256-token prompt. Measured (4 x ~50-token prompts): CPU experts 46 -> 25 ms/pass and t_wait 11.5 -> 6.8, but the
+  victims' forced fetches (+2.7 ms fetch writes, +2.1 ms readback wait) cancel it: no net gain, plus 0.1-1.6 s of
+  swaps before the second token (store reads ~1 ms each until the store is warm). Victims are routed to 12-24 times
+  per pass even after 512-token prompts, so the re-plan pays only if victims keep int4 CPU copies (an int4 library
+  of the static ranks for the 42 hybrid layers, ~56 GB). Long prompts: "unused by the prompt" leaves no victims; the
+  least-mass rule is in the sim only.
 - Device profile of one 4-row layer step (fused MoE): ~540 us = attention ~210 (generic rows-mode op chain; the
   Qwen fused attn-decode op does not fit M2.7: per-head norm + gate), MoE kernels ~250 (near DRAM bandwidth for
   up to 32 experts), QK-norm 110 -> ~20 us after the sharded fix. Profiling recipe: TT_METAL_DEVICE_PROFILER=1 with

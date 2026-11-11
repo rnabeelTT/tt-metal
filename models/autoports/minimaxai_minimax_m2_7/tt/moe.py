@@ -506,7 +506,30 @@ class Qwen35MoE:
                 ttnn.deallocate(logits)
                 logits = cast
             return logits
-        return ttnn.linear(x4, self.router_w, dtype=dtype, compute_kernel_config=self.router_ckc, memory_config=r_mc)
+        pc = None
+        if int(x4.padded_shape[-2]) == TILE:  # decode rows: an explicit 1D config (default: 72 vs ~13 us at 4 rows)
+            pc = getattr(self, "_router_pc_decode", None)
+            if pc is None:
+                from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+                n = int(self.router_w.shape[-1])
+                pc = self._router_pc_decode = tpc.create_matmul_1d_decode_progcfg(
+                    TILE,
+                    self.hidden,
+                    n,
+                    n // TILE,
+                    fp32_acc=True,
+                    grid_w=self.device.compute_with_storage_grid_size().x,
+                    in0_block_w=16 if (self.hidden // TILE) % 16 == 0 else None,
+                )
+        return ttnn.linear(
+            x4,
+            self.router_w,
+            dtype=dtype,
+            compute_kernel_config=self.router_ckc,
+            memory_config=r_mc,
+            program_config=pc,
+        )
 
     def _route_sigmoid_bias(self, x4, r_mc):
         """GLM router (module docstring): fp32 sigmoid scores, top-k of score + centered bias, normalized gathered

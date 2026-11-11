@@ -31,6 +31,7 @@ class Pinx:
         lib.pinx_write.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int]
         lib.pinx_write_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_read.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64)]
+        lib.pinx_read_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_dst_size.restype = u64
         lib.pinx_dst_size.argtypes = [ctypes.c_int]
         self.lib, self.mesh = lib, mesh
@@ -88,6 +89,15 @@ class Pinx:
         if rc != 0:
             raise RuntimeError(f"pinx_read returned {rc} (dst {dst}, region {region}, offsets {list(offsets)})")
 
+    def read_at(self, dst, region, offsets, src_offset, size, cq_id=0):
+        """Region bytes [offsets[d], + size) <- the destination's device-local bytes [src_offset, + size). Blocking."""
+        rc = self.lib.pinx_read_at(self.mp, dst, region, self._offs(offsets), cq_id, int(src_offset), int(size))
+        if rc != 0:
+            raise RuntimeError(
+                f"pinx_read_at returned {rc} (dst {dst}, region {region}, offsets {list(offsets)}, "
+                f"src_offset {src_offset}, size {size})"
+            )
+
     def release(self):
         self.lib.pinx_release()
         self.keep = []
@@ -109,13 +119,16 @@ class PinnedRows:
 
     def put(self, key, dst, t):
         """t: a torch bf16 tensor with the destination's per-device element count (replicated to every device)."""
+        self.put_fill(key, dst, lambda v: v.copy_(t.reshape(v.shape)))
+
+    def put_fill(self, key, dst, fill):
+        """fill(view): writes the upload into ``view``, a torch bf16 [rows, width] view of the pinned slice (the
+        destination's per-device shape), e.g. converting from fp32 in place; then the slice is written to ``dst``."""
         addr = dst.buffer_address()
         d = self.dsts.get(addr)
         if d is None:
             d = self.dsts[addr] = self.px.dst_rm(dst)
-        n = t.numel() * 2
-        if n != d[1]:
-            raise ValueError(f"PinnedRows: {n} bytes for a {d[1]}-byte destination {list(dst.shape)} (key {key})")
+        n = d[1]
         off = self.slices.get((key, addr))
         if off is None:
             off = self.slices[(key, addr)] = self.next
@@ -124,8 +137,9 @@ class PinnedRows:
                 raise RuntimeError(f"PinnedRows: region of {len(self.buf)} bytes is full ({len(self.slices)} slices)")
         import torch
 
+        w = int(dst.shape[-1])
         t0 = time.perf_counter()
-        torch.from_numpy(self.buf[off : off + n]).view(torch.bfloat16).copy_(t.reshape(-1))
+        fill(torch.from_numpy(self.buf[off : off + n]).view(torch.bfloat16).view(n // (2 * w), w))
         t1 = time.perf_counter()
         self.px.write(d[0], self.rid, [off] * self.px.tp)
         self.t_copy += t1 - t0

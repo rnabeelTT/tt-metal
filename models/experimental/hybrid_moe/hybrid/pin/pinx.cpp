@@ -120,6 +120,30 @@ int pinx_read(void* mesh, int dst, int region, const uint64_t* offsets) {
     return 0;
 }
 
+// Region bytes [offsets[d], + size) <- device d's destination bytes [src_offset, + size) (a multiple of its page size).
+// Blocking, on command queue cq_id.
+int pinx_read_at(
+    void* mesh, int dst, int region, const uint64_t* offsets, int cq_id, uint64_t src_offset, uint64_t size) {
+    auto& m = mesh_of(mesh);
+    const auto& r = g_regions.at(region);
+    const auto& buf = g_dsts.at(dst);
+    if (src_offset + size > buf->device_local_size() || src_offset % buf->page_size() != 0) {
+        return -3;
+    }
+    std::vector<dist::ShardDataTransfer> xfers;
+    int i = 0;
+    for (const auto& c : coords(m)) {
+        if (offsets[i] + size > r.size) {
+            return -2;
+        }
+        xfers.push_back(
+            dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(src_offset, size)));
+        ++i;
+    }
+    m.mesh_command_queue(cq_id).enqueue_read_shards(xfers, buf, /*blocking=*/true);
+    return 0;
+}
+
 uint64_t pinx_dst_size(int dst) { return g_dsts.at(dst)->device_local_size(); }
 }
 
@@ -130,3 +154,9 @@ void pinx_release() {
     g_regions.clear();
 }
 }
+
+// GCC >= 13 headers make <iostream> users call std::ios_base_library_init (GLIBCXX_3.4.32), which the serving image's
+// older libstdc++ lacks; its libstdc++ initializes the standard streams itself, so a local no-op satisfies the call.
+namespace std {
+void ios_base_library_init() {}
+}  // namespace std

@@ -104,6 +104,29 @@ class HybridState:
         self.sel_bias = {}  # layer -> [E] selection bias (sigmoid_bias routers)
         self.lib_resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
         self.hostk = os.environ.get("HYB_HOSTK", "1") == "1"
+        # Prefill chunks of at most this many rows run the host kernel in tiles of hostk.MAXR (a short prompt). A longer
+        # chunk stays on the torch GEMMs: those read each expert's weights once, while tiling would re-read them every
+        # MAXR rows. 0 keeps every prefill chunk on torch.
+        self.prefill_hostk_rows = int(os.environ.get("HYB_PREFILL_HOSTK_ROWS", "128"))
+        # sorted prefill MoE calls: picks outside the call get a sentinel id (no dispatched row) instead of a
+        # zero-weight row of a real slot
+        self.prefill_sentinel = os.environ.get("HYB_PREFILL_SENTINEL", "1") == "1"
+        self.merge_check = os.environ.get("HYB_MERGE_CHECK", "0") == "1"  # see _merged_round
+        # HYB_PF_SPLIT=1: a prefill layer step computes its fewest-token missed experts on the CPU (packed int4 kernel,
+        # concurrently with the device) while the CPU estimate stays below the remaining staging copies (_cpu_split).
+        # Costs in ms (pcie_bench.py / hostk_bench.py on the QB2 host): a staging copy per expert, the CPU per expert
+        # + per pair, and the fixed CPU-side cost of a step (activation readback, result upload and add). Off by default:
+        # on the full model it gains nothing at 512-2K (runs/m27/split_full: the device waits on the CPU).
+        self.pf_split = os.environ.get("HYB_PF_SPLIT", "0") == "1"
+        self.pf_host_async = os.environ.get("HYB_PF_HOST_ASYNC", "1") == "1"  # prefill host experts on HYB.pool
+        self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
+        self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
+        self.pf_cpu_fixed_ms = [
+            float(v) for v in os.environ.get("HYB_PF_CPU_FIXED_MS", "0.5,0.0005").split(",")
+        ]  # + per row
+        # a longer step is a full segment of a layer-major group, whose staging copies serve the group's later segments
+        # (a per-step copy cost overstates them): its misses stay on the device
+        self.pf_split_max_rows = int(os.environ.get("HYB_PF_SPLIT_MAX_ROWS", "2048"))
         # HYB_CROUTE (default 1 with hostk): the decode host step's routing and crafted rows in C (hostk_route / _craft)
         self.croute = self.hostk and os.environ.get("HYB_CROUTE", "1") == "1"
         # HYB_HOSTK_ASYNC (default 1 with hostk): the CPU experts of a decode step start on hostk's own C thread instead
@@ -125,6 +148,9 @@ class HybridState:
         self.cpu_pool = ThreadPoolExecutor(max_workers=1)  # HYB_LRU: the CPU experts run while the fetches copy
         from .stream import PrefillStream
 
+        self.pf_mass = {}  # HYB_REPLAN: layer -> [E] routed weight per expert over the latest prefill's real rows
+        self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
+        self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
         self.stream = PrefillStream(self.fetch)  # prefill: missed experts with enough tokens computed on the device
         self.record = None
         self.enabled = True
@@ -234,6 +260,8 @@ class HybridState:
         into process RAM: through the page cache the 225 GiB library is mostly evicted by the checkpoint load, and a
         miss then reads its expert from NVMe. row[e] = the expert's row in the copies (-1: static, never on the host).
         """
+        if layer in self.full_layers:  # every expert on the device: no host rows (the library may omit the layer)
+            return {"row": np.full(self.E, -1, dtype=np.int64)}
         t0 = time.perf_counter()
         d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
         # a library may hold a subset of the experts (build_int4_library.py HYB_LIB_COLD): file row of each expert id
@@ -311,6 +339,50 @@ class HybridState:
         run.start = start
         return run
 
+    def _hostk_rows(self, layer, X, ids, sc, miss_mask, out):
+        """One host-kernel call for X [R, H] with R <= hostk.MAXR, written into out. A tile with no misses is a no-op."""
+        if not miss_mask.any():
+            return
+        if X.shape[0] > hostk.MAXR:
+            raise RuntimeError(f"layer {layer}: host kernel tile has {X.shape[0]} rows, limit {hostk.MAXR}")
+        lib = self.lib_layer(layer)
+        ex = torch.unique(ids[miss_mask])
+        rows = torch.from_numpy(lib["row"][ex.numpy()])
+        if (rows < 0).any():
+            raise RuntimeError(f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static")
+        W = ((ids[None] == ex[:, None, None]) & miss_mask[None]).float().mul_(sc.float()[None]).sum(-1)  # [E, R]
+        lo = (W.amax(1) < self.lowbit).to(torch.int8) if lib.get("planar") else None
+        hostk.moe(lib, X.float().contiguous(), rows.contiguous(), W.contiguous(), out, lo=lo)
+        self.st["host_experts"] += len(ex)
+        self.st["lowbit"] += int(lo.sum()) if lo is not None else 0
+
+    def _hostk_packed(self, layer, X, ids, sc, miss_mask, out):
+        """Prefill rows through the int4 kernel: the missed (row, expert) pairs sorted by expert and packed MAXR per
+        call, each pair its own kernel row (block-diagonal weights), so an expert's weights are read about once."""
+        lib = self.lib_layer(layer)
+        r_all, j_all = miss_mask.nonzero(as_tuple=True)
+        e_all = ids[r_all, j_all]
+        order = torch.argsort(e_all, stable=True)
+        r_all, e_all, w_all = r_all[order], e_all[order], sc[r_all, j_all][order].float()
+        Xf = X.float()
+        M = hostk.MAXR
+        for c0 in range(0, len(e_all), M):
+            r, e, w = r_all[c0 : c0 + M], e_all[c0 : c0 + M], w_all[c0 : c0 + M]
+            ex, inv = torch.unique(e, return_inverse=True)
+            rows = torch.from_numpy(lib["row"][ex.numpy()])
+            if (rows < 0).any():
+                raise RuntimeError(
+                    f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static"
+                )
+            W = torch.zeros(len(ex), len(r))
+            W[inv, torch.arange(len(r))] = w
+            lo = (W.amax(1) < self.lowbit).to(torch.int8) if lib.get("planar") else None
+            oc = torch.zeros(len(r), X.shape[1], dtype=torch.float32)
+            hostk.moe(lib, Xf[r].contiguous(), rows.contiguous(), W, oc, lo=lo)
+            out.index_add_(0, r, oc)
+            self.st["lowbit"] += int(lo.sum()) if lo is not None else 0
+        self.st["host_experts"] += int(torch.unique(e_all).numel())
+
     def host_compute(self, layer, X, ids, sc, miss_mask):
         """X [R, H] bf16, ids/sc [R, k], miss_mask [R, k] -> [R, H] fp32: the missed experts' weighted sum."""
         R, H = X.shape
@@ -318,19 +390,19 @@ class HybridState:
         if not miss_mask.any():
             return out
         t0 = time.perf_counter()
-        if self.hostk and self.lib_dir and R <= hostk.MAXR:  # decode / MTP verify rows (prefill: torch GEMMs)
-            lib = self.lib_layer(layer)
-            ex = torch.unique(ids[miss_mask])
-            rows = torch.from_numpy(lib["row"][ex.numpy()])
-            if (rows < 0).any():
-                raise RuntimeError(
-                    f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static"
-                )
-            W = ((ids[None] == ex[:, None, None]) & miss_mask[None]).float().mul_(sc.float()[None]).sum(-1)  # [E, R]
-            lo = (W.amax(1) < self.lowbit).to(torch.int8) if lib.get("planar") else None
-            hostk.moe(lib, X.float().contiguous(), rows.contiguous(), W.contiguous(), out, lo=lo)
-            self.st["host_experts"] += len(ex)
-            self.st["lowbit"] += int(lo.sum()) if lo is not None else 0
+        if self.hostk and self.lib_dir and self.lib_resident and R > max(hostk.MAXR, self.prefill_hostk_rows):
+            self._hostk_packed(layer, X, ids, sc, miss_mask, out)
+            self.st["t_host"] += time.perf_counter() - t0
+            return out
+        # Decode and MTP verify are one tile. A short prefill chunk is several tiles of the same kernel (rows are
+        # independent). Longer prefill chunks use the torch GEMMs below.
+        if self.hostk and self.lib_dir and R <= max(hostk.MAXR, self.prefill_hostk_rows):
+            if R <= hostk.MAXR:
+                self._hostk_rows(layer, X, ids, sc, miss_mask, out)
+            else:
+                for s in range(0, R, hostk.MAXR):
+                    e = min(s + hostk.MAXR, R)
+                    self._hostk_rows(layer, X[s:e], ids[s:e], sc[s:e], miss_mask[s:e], out[s:e])
             self.st["t_host"] += time.perf_counter() - t0
             return out
         for e in torch.unique(ids[miss_mask]).tolist():
@@ -642,6 +714,38 @@ def install():
     gen_mod = _port("generator")
 
     gen_mod.Qwen35MoeGenerator._warm_prefill_traces = lambda self: None
+    single = gen_mod.Qwen35MoeGenerator._prefill_single
+
+    def prefill_single(self, tokens, *a, **kw):
+        HYB.stream.begin_prefill(int(tokens.shape[1]))
+        _begin_replan(int(tokens.shape[1]))
+        return single(self, tokens, *a, **kw)
+
+    gen_mod.Qwen35MoeGenerator._prefill_single = prefill_single
+    model_cls = _port("model").Qwen35MoeModel
+    all_logits = model_cls.prefill_all_logits
+
+    def prefill_all_logits(self, token_ids, *a, **kw):
+        HYB.stream.begin_prefill(int(token_ids.shape[-1]))
+        _begin_replan(int(token_ids.shape[-1]))
+        return all_logits(self, token_ids, *a, **kw)
+
+    model_cls.prefill_all_logits = prefill_all_logits
+    stage_inputs, bucket_layer = model_cls._stage_bucket_inputs, model_cls._bucket_layer
+
+    def stage_bucket_inputs(self, bi, token_ids, page_table, actual_len, *a, **kw):
+        bi["hyb_valid"] = int(actual_len)
+        return stage_inputs(self, bi, token_ids, page_table, actual_len, *a, **kw)
+
+    def bucket_layer_(self, layer, x, bi, chunk_start):
+        HYB.pf_valid = bi.get("hyb_valid")
+        try:
+            return bucket_layer(self, layer, x, bi, chunk_start)
+        finally:
+            HYB.pf_valid = None
+
+    model_cls._stage_bucket_inputs = stage_bucket_inputs
+    model_cls._bucket_layer = bucket_layer_
     if HYB.defer_lib:
         _install_mtp_head()
 
@@ -833,6 +937,8 @@ def _fused_step1(self, x, logits, B):
     t0 = time.perf_counter()
     lg = ttnn.to_torch(_die0(logits)).reshape(m, -1).float().numpy()
     HYB.st["t_read"] += time.perf_counter() - t0
+    if HYB.replan_tokens:
+        _run_replan()
     ids, sc, slot, res, miss = _route_host(self, lg, m)
     fetch = None
     if HYB.fetch.on:  # a share of the misses goes to LRU slots: resident from here on
@@ -856,9 +962,18 @@ def _fused_step1(self, x, logits, B):
     HYB.st["t_craft"] += time.perf_counter() - t0
     t0 = time.perf_counter()
     mk = _kernel_rows(m)
-    if mk > m:  # one row through the rows kernels: the extra rows repeat it (same experts, no extra weight reads)
-        row = np.repeat(row, mk, axis=2)
-    _put(self, HYB.crafted_rm[mk], torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
+    r2 = torch.from_numpy(row.reshape(m, -1))
+
+    def fill(v):  # fp32 -> bf16 straight into the pinned slice
+        if mk > m:  # one row through the rows kernels: the extra rows repeat it (same experts, no extra weight reads)
+            v.copy_(r2.repeat_interleave(mk // m, dim=0))
+        else:
+            v.copy_(r2)
+
+    if not _put_fill(self, HYB.crafted_rm[mk], fill):
+        if mk > m:
+            row = np.repeat(row, mk, axis=2)
+        _put(self, HYB.crafted_rm[mk], torch.from_numpy(row).to(torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
     HYB.st["t_up"] += time.perf_counter() - t0
     if miss.any():
         t0 = time.perf_counter()
@@ -877,6 +992,36 @@ def _fused_step1(self, x, logits, B):
                 B["job"] = run.start()
             else:
                 B["job"] = HYB.cpu_pool.submit(run if run is not None else (lambda j=B["job"]: HYB.host_compute(*j)))
+
+
+def _begin_replan(tokens):
+    """A prefill starts: its routing mass is collected for the re-plan of the decode that follows (HYB_REPLAN)."""
+    if not HYB.fetch.replan_n:
+        return
+    HYB.pf_mass = {}
+    HYB.replan_tokens = tokens if tokens >= HYB.fetch.replan_min else 0
+
+
+def _run_replan():
+    """At the first decode step after a long enough prefill: every hybrid layer's static slots re-planned from the
+    prompt's routing (FetchCache.replan). Called from the first hybrid layer's host step of that decode pass, before
+    its routing: the layers before it in the pass hold every expert (no swaps), and the slot writes queue on CQ0
+    ahead of this layer's next segment."""
+    from .seg import SEG
+
+    if SEG.capturing:
+        raise RuntimeError("HYB_REPLAN: a host step ran during a trace capture")
+    t0 = time.perf_counter()
+    n = 0
+    for L, mass in HYB.pf_mass.items():
+        n += HYB.fetch.replan(L, mass, HYB.slot_of[L], HYB._freq[L], HYB.lib_layer(L)["row"], HYB.st)
+    print(
+        f"HYB_REPLAN: {HYB.replan_tokens}-token prompt, {n} swaps over {len(HYB.pf_mass)} layers, "
+        f"{HYB.st.get('replan_reads', 0)} store reads so far ({(time.perf_counter() - t0) * 1e3:.0f} ms)",
+        flush=True,
+    )
+    HYB.replan_tokens = 0
+    HYB.pf_mass = {}
 
 
 def _job(self, xh, ids, sc, miss):
@@ -1293,44 +1438,186 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
         return _finish(self, out, orig, partial)
-    dec = _decide(self, x4, scores, ids, T, mode)
+    # the next hybrid layer's prefetch goes on CQ1 before this step's routing readback blocks on the device
+    HYB.stream.step(self.layer_num, _nonresident_hot_first, HYB.st)
+    dec = _decide(self, x4, scores, ids, T, mode, defer_host=HYB.pf_host_async)
+    # the host experts run on a worker thread (the int4 kernel releases the GIL) while the device computes below
+    host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["host"] is None else None
     t1 = time.perf_counter()
+    stream = list(dec.get("stream") or ())
+    # HYB_STREAM_MERGE: the resident experts and the first staging round in one routed call (_merged_round)
+    merged = (
+        _merged_round(self, dec, stream[0], T) if (stream and HYB.stream.merge and _prefill_sentinel(self, T)) else None
+    )
+    if merged is not None:
+        dec = dict(dec, ids=merged[0], sc=merged[1])
+        stream = stream[1:]
     n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
     n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
-    s_ids = s_sc = None
-    if dec.get("stream") is not None:
-        experts, sidx, ssc = dec["stream"]
-        s_ids = _upload_like(self, sidx, ids, torch.int32)
-        s_sc = _upload_like(self, ssc, scores, torch.bfloat16)
+    rounds = [
+        (writes, _upload_like(self, sidx, ids, torch.int32), _upload_like(self, ssc, scores, torch.bfloat16))
+        for writes, sidx, ssc in stream
+    ]
     ttnn.deallocate(ids)
     ttnn.deallocate(scores)
     HYB.st["t_up"] += time.perf_counter() - t1
-    routed = _routed(self, x4, n_sc, n_ids, T, mode)
-    ttnn.deallocate(n_sc)
-    ttnn.deallocate(n_ids)
-    if s_ids is not None:  # the streamed experts: the same routed call over the staging weights
-        HYB.stream.upload(self.layer_num, experts, HYB.st)
-        r2 = _routed_with(self, self._stream_attrs, x4, s_sc, s_ids, T, mode)
-        ttnn.deallocate(s_sc)
-        ttnn.deallocate(s_ids)
-        routed = _add(routed, r2)
+    HYB._pf_t = time.perf_counter()
+    # sentinel picks are gathered from the dispatch's trailing padding group, which the skip-padding expert matmuls
+    # never write: the sorted path zero-fills its down output for them
+    self._sorted_zero_out = _prefill_sentinel(self, T)
+    cq1 = bool(rounds or merged) and HYB.stream.can_cq1(self.layer_num) and not HYB.profile
+    first = merged[2] if merged is not None else (rounds[0][0] if rounds else None)
+    copied = _stream_copy(self, first) if cq1 else None  # runs on CQ1 during the resident experts below
+    try:
+        if merged is not None:
+            writes0, gids = merged[2], merged[3]
+            if cq1:
+                wait = lambda: ttnn.wait_for_event(0, copied)  # noqa: E731
+            else:
+                wait = lambda: HYB.stream.upload(self.layer_num, writes0, HYB.st)  # noqa: E731
+            st = self._stream_attrs
+            second = (st["up_gate"], st["down"], HYB.stream.NS, gids, wait)
+            routed = self._routed_sorted(x4, n_sc, n_ids, T, second=second)
+            HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + 1
+            if rounds and cq1:
+                copied = _stream_copy(self, rounds[0][0])  # the next round's copy, after the merged call's reads
+        else:
+            routed = _routed(self, x4, n_sc, n_ids, T, mode)
+        ttnn.deallocate(n_sc)
+        ttnn.deallocate(n_ids)
+        _pf_mark(self, "t_pf_routed")
+        for r, (writes, s_ids, s_sc) in enumerate(rounds):  # the streamed experts: the routed call over the staging
+            if cq1:
+                ttnn.wait_for_event(0, copied if r == 0 else _stream_copy(self, writes))
+            else:
+                HYB.stream.upload(self.layer_num, writes, HYB.st)
+            _pf_mark(self, "t_pf_upload")
+            r2 = _routed_with(self, self._stream_attrs, x4, s_sc, s_ids, T, mode)
+            ttnn.deallocate(s_sc)
+            ttnn.deallocate(s_ids)
+            routed = _add(routed, r2)
+            _pf_mark(self, "t_pf_sroute")
+    finally:
+        self._sorted_zero_out = False
+    HYB.stream.mark_read(self.layer_num, self.device)
+    HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + len(rounds)
     out = _plus_shared(self, routed, x4)
-    if bool(dec["host"].abs().sum() > 0):
+    if host_fut is not None:
         t0 = time.perf_counter()
-        shp = [int(s) for s in out.shape]
-        full = torch.zeros(shp, dtype=torch.float32)
-        full.view(-1, shp[-1])[: dec["host"].shape[0]] = dec["host"] / self.num_devices
-        hdev = ttnn.from_torch(
-            full,
-            dtype=out.dtype,
-            layout=out.layout,
-            device=self.device,
-            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-        )
-        out = _add(out, hdev)
+        dec["host"] = host_fut.result()
+        HYB.st["t_host_wait"] = HYB.st.get("t_host_wait", 0.0) + time.perf_counter() - t0
+    rows_nz = (dec["host"] != 0).any(1).nonzero().reshape(-1)
+    if rows_nz.numel():
+        t0 = time.perf_counter()
+        out = _add(out, _host_rows_dense(self, dec["host"], rows_nz, [int(s) for s in out.shape], out.dtype))
         HYB.st["t_up"] += time.perf_counter() - t0
-    return _finish(self, out, orig, partial)
+        _pf_mark(self, "t_pf_hostadd")
+    out = _finish(self, out, orig, partial)
+    _pf_mark(self, "t_pf_reduce")
+    return out
+
+
+def _nonresident_hot_first(layer):
+    """A layer's prefill-missed experts, most routed first (the plan's frequencies; expert order without a plan)."""
+    miss = np.flatnonzero(HYB.slot_of[layer] < 0)
+    f = HYB._freq
+    if f is not None and layer < f.shape[0]:
+        miss = miss[np.argsort(-f[layer][miss], kind="stable")]
+    return miss.tolist()
+
+
+def _host_rows_dense(self, host, rows_nz, shp, dtype):
+    """The host experts' partial [R, H] fp32 (nonzero on rows_nz only) as a replicated device tensor of shape shp
+    (tiled): the nonzero rows go up as a small bf16 table with one trailing zero row, and an embedding lookup of
+    the per-row table index (the zero row elsewhere) expands it on the device. Each die adds 1 / tp of it (the
+    caller's all-reduce sums the dies)."""
+    R, H = host.shape
+    n = int(rows_nz.numel())
+    table = torch.zeros(n + 1, H, dtype=torch.bfloat16)
+    table[:n] = (host[rows_nz] / self.num_devices).to(torch.bfloat16)
+    rows = math.prod(shp[:-1])
+    idx = torch.full((1, rows), n, dtype=torch.int32)
+    idx[0, rows_nz] = torch.arange(n, dtype=torch.int32)
+    kw = dict(
+        device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device), memory_config=ttnn.DRAM_MEMORY_CONFIG
+    )
+    t_dev = ttnn.from_torch(table, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw)
+    i_dev = ttnn.from_torch(idx, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, **kw)
+    dense = ttnn.embedding(i_dev, t_dev, layout=ttnn.TILE_LAYOUT, dtype=dtype, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    ttnn.deallocate(t_dev)
+    ttnn.deallocate(i_dev)
+    return ttnn.reshape(dense, shp) if list(dense.shape) != shp else dense
+
+
+def _merged_round(self, dec, round0, T):
+    """One routed call over the resident experts and a staging round (optimized_decoder._routed_sorted ``second``):
+    a staged pick gets id C + its staging index. Returns (ids, scores, the round's copies, group_ids) with group_ids
+    the port's callable: the two per-set group-id lists, built on the host from the dispatch layout of
+    moe_sorted_dispatch (experts ascending, ceil(count / group) groups each, the rest padding). HYB_MERGE_CHECK=1
+    compares them with the dispatch's own list on every call (by default on the first call only)."""
+    writes, sidx, ssc = round0
+    C, NS, k = HYB.C, HYB.stream.NS, self.top_k
+    staged = sidx < NS
+    ids = torch.where(staged, C + sidx, dec["ids"])
+    sc = torch.where(staged, ssc, dec["sc"])
+    gs = int(self.opt.sorted_group_rows)
+    G = _port("moe_dispatch").dispatch_rows(T, k, C + NS, gs) // gs
+    e, n = torch.unique(ids[ids < C + NS], return_counts=True)
+    gid = torch.full((G,), SENTINEL_ID, dtype=torch.int32)
+    used = torch.repeat_interleave(e, -(-n // gs)).to(torch.int32)
+    if used.numel() > G:
+        raise RuntimeError(f"layer {self.layer_num}: {used.numel()} expert groups > {G} dispatch groups (T {T})")
+    gid[: used.numel()] = used
+    sent = torch.full_like(gid, SENTINEL_ID)
+    gid_a = torch.where(gid < C, gid, sent)
+    gid_b = torch.where((gid >= C) & (gid < C + NS), gid - C, sent)
+
+    def group_ids(m):
+        ref = m["group_ids"]
+        if HYB.merge_check or not HYB.st.get("merge_checked"):
+            got = ttnn.to_torch(_die0(ref)).reshape(-1).to(torch.int32)
+            if got.shape != gid.shape or not torch.equal(got, gid):
+                bad = (got != gid).nonzero().reshape(-1)[:8].tolist() if got.shape == gid.shape else None
+                raise RuntimeError(
+                    f"layer {self.layer_num}: host group ids differ from the dispatch's (T {T}, G {G}, got "
+                    f"{tuple(got.shape)}, first differing groups {bad}: host {gid[bad].tolist() if bad else None} "
+                    f"dispatch {got[bad].tolist() if bad else None})"
+                )
+            HYB.st["merge_checked"] = 1
+
+        def up(t):
+            return ttnn.from_torch(
+                t.reshape(1, G),
+                dtype=ref.dtype,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.device,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
+
+        return up(gid_a), up(gid_b)
+
+    return ids, sc, writes, group_ids
+
+
+def _stream_copy(self, writes):
+    """A round's copies into the staging on CQ1, after every CQ0 command queued so far (the staging's last reader is
+    the previous streamed call on CQ0). Returns the CQ1 event CQ0 waits on before computing from the staging. With no
+    copies (every expert staged, e.g. prefetched) the event only orders CQ0 after the copies already on CQ1."""
+    if writes:
+        ttnn.wait_for_event(1, ttnn.record_event(self.device, cq_id=0))
+        HYB.stream.upload(self.layer_num, writes, HYB.st, cq_id=1)
+    return ttnn.record_event(self.device, cq_id=1)
+
+
+def _pf_mark(self, key):
+    """HYB_PROFILE: device time since the previous mark of this prefill layer step (synchronizes)."""
+    if not HYB.profile:
+        return
+    ttnn.synchronize_device(self.device)
+    now = time.perf_counter()
+    HYB.st[key] = HYB.st.get(key, 0.0) + now - HYB._pf_t
+    HYB._pf_t = now
 
 
 def _upload_like(self, t_host, ref, dtype_torch):
@@ -1403,6 +1690,15 @@ def _write_bufs(self, B, dec):
 
 def _put_host(self, B, host, put):
     sh = B["shapes"]
+    n, inv = host.shape[0], 1.0 / self.num_devices
+
+    def fill(v):  # the per-device partial, fp32 -> bf16 in the pinned slice; the rows past the host's are zero
+        torch.mul(host, inv, out=v[:n])
+        if v.shape[0] > n:
+            v[n:].zero_()
+
+    if "host_rm" in B and _put_fill(self, B["host_rm"], fill):
+        return
     if "host_rm" in B:  # fused: row-major rows [1, 1, T, H] (decode)
         full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
         full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
@@ -1411,6 +1707,18 @@ def _put_host(self, B, host, put):
     full = torch.zeros(1, 1, sh["T"], sh["H"], dtype=torch.float32)
     full.view(-1, sh["H"])[: host.shape[0]] = host / self.num_devices  # per-device partial
     put(B["host"], full.to(torch.bfloat16), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+
+
+def _put_fill(self, dst, fill):
+    """A pinned row-major bf16 upload written in place by fill(view) (PinnedRows.put_fill); False without pinned rows."""
+    rows = HYB.fetch.rows
+    if rows is None:
+        return False
+    c0, w0 = rows.t_copy, rows.t_write
+    rows.put_fill(self.layer_num, dst, fill)
+    HYB.st["t_up_cp"] = HYB.st.get("t_up_cp", 0.0) + rows.t_copy - c0
+    HYB.st["t_up_w"] = HYB.st.get("t_up_w", 0.0) + rows.t_write - w0
+    return True
 
 
 def _put(self, dst, t, dt, lay):
@@ -1506,6 +1814,49 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     return _decide_core(self, x4, idh, sch, mode, defer_host)
 
 
+SENTINEL_ID = 0xFFFF  # an expert id >= any slot count: moe_sorted_dispatch counts no row for it
+
+
+def _prefill_sentinel(self, rows):
+    """Whether this prefill MoE call takes the port's expert-sorted path (optimized_decoder._routed_masked), so the
+    picks of experts outside a call can carry SENTINEL_ID. The masked path scatters ids into a dense [T, E] matrix and
+    needs in-range ids."""
+    opt = getattr(self, "opt", None)
+    return (
+        HYB.prefill_sentinel
+        and opt is not None
+        and getattr(opt, "prefill_mode", None) == "sorted"
+        and opt.sorted_min_tokens <= rows <= opt.sorted_max_tokens
+    )
+
+
+def _cpu_split(L, idh, miss):
+    """The missed experts of a prefill layer step to compute on the CPU (tensor of ids) or None: fewest tokens first,
+    while the CPU estimate (a + b * pairs per expert, plus the step cost c0 + c1 * rows) stays at or below the copy
+    time of the experts left to stage. Experts already in the staging cost no copy and stay on the device."""
+    e, n = torch.unique(idh[miss], return_counts=True)
+    staged = HYB.stream.where
+    cand = [(int(c), int(x)) for x, c in zip(e.tolist(), n.tolist()) if (L, int(x)) not in staged]
+    if not cand:
+        return None
+    cand.sort()
+    a, b = HYB.pf_cpu_ms
+    copy_left = HYB.pf_copy_ms * len(cand)
+    cpu_t = HYB.pf_cpu_fixed_ms[0] + HYB.pf_cpu_fixed_ms[1] * idh.shape[0]
+    pick = []
+    for c, x in cand:
+        t = a + b * c
+        if cpu_t + t > copy_left - HYB.pf_copy_ms:
+            break
+        cpu_t += t
+        copy_left -= HYB.pf_copy_ms
+        pick.append(x)
+    if not pick:
+        return None
+    HYB.st["pf_cpu_experts"] = HYB.st.get("pf_cpu_experts", 0) + len(pick)
+    return torch.tensor(pick, dtype=idh.dtype)
+
+
 def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     """Routing on the host (ids/scores [rows, k]) -> static / dynamic / host split and the host part (see _decide)."""
     L = self.layer_num
@@ -1534,6 +1885,10 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     if mode == "prefill":
         HYB.st["prefill_rows"] += valid
         HYB.st["prefill_miss_pairs"] += int(v_miss.sum())
+        if HYB.replan_tokens and L in HYB.fetch.store:
+            n = valid if HYB.pf_valid is None else min(valid, HYB.pf_valid)
+            m = HYB.pf_mass.setdefault(L, np.zeros(HYB.E))
+            np.add.at(m, idh[:n].numpy().ravel(), sch[:n].numpy().ravel())
     else:
         HYB.st["steps"] += 1
         if HYB.record is not None:
@@ -1550,13 +1905,20 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         HYB.st["skipped"] += int(drop.sum())
         HYB.st["skipped_mass"] += float(sch[:valid][drop].sum())
         v_miss = v_miss & ~drop
+    sentinel = mode == "prefill" and _prefill_sentinel(self, rows)
     stream = None
     if mode == "prefill" and HYB.stream.on and bool(v_miss.any()):
-        stream = HYB.stream.plan(L, idh[:valid], v_miss)
-        if stream is not None:  # these picks run on the device from the staging (hybrid/stream.py)
-            smask, sidx, experts = stream
-            v_miss = v_miss & ~smask
-            stream = (experts, sidx, torch.where(smask, sch[:valid], torch.zeros_like(sch[:valid])))
+        to_stage = v_miss
+        if HYB.pf_split and HYB.hostk and HYB.lib_dir and HYB.lib_resident and rows <= HYB.pf_split_max_rows:
+            cpu = _cpu_split(L, idh[:valid], v_miss)
+            if cpu is not None:
+                to_stage = v_miss & ~torch.isin(idh[:valid], cpu)
+        rounds = HYB.stream.plan(L, idh[:valid], to_stage, other=SENTINEL_ID if sentinel else None)
+        if rounds is not None:  # these picks run on the device from the staging (hybrid/stream.py)
+            stream = []
+            for rmask, sidx, writes in rounds:
+                v_miss = v_miss & ~rmask
+                stream.append((writes, sidx, torch.where(rmask, sch[:valid], torch.zeros_like(sch[:valid]))))
     if bool(v_miss.any()):
         t1 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
@@ -1568,8 +1930,9 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         host = torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
     # non-resident picks need SOME index: the all-zero sink slot when there is one (fused: C - 1), never a real
     # expert's slot. The prefill routing matrix is a scatter of (index, score) per pick, and a zero-score pick aimed at
-    # slot 0 could overwrite a real pick of the slot-0 expert in the same row.
-    z = torch.full_like(s_slot, HYB.C - 1 if HYB.fused else 0)
+    # slot 0 could overwrite a real pick of the slot-0 expert in the same row. The sorted prefill dispatch takes the
+    # sentinel instead: it gives the pick no row, where a slot index would compute a zero-weight row of that slot.
+    z = torch.full_like(s_slot, SENTINEL_ID if sentinel else (HYB.C - 1 if HYB.fused else 0))
     zf = torch.zeros_like(sch)
     return {
         "ids": torch.where(in_s, s_slot, z),

@@ -24,6 +24,13 @@ HYB_DEV_EXPERTS (dir of <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin), HYB_FETCH_
 HYB_FETCH_ASYNC (direct only, needs a second command queue): the fetch writes go on CQ1 and the fetched experts become
 resident from the NEXT pass (commit(): CQ0 waits for CQ1's writes before the pass's replay); this pass the CPU
 computes them with the other misses. The device never waits for a transfer, which overlaps the next segments.
+
+Per-request re-plan (HYB_REPLAN = swaps per layer, 0 = off; needs the direct fetch): after a prefill of at least
+HYB_REPLAN_MIN tokens, each hybrid layer swaps up to HYB_REPLAN static experts the prompt never routed to (least train
+mass first) for the non-static experts the prompt routed the most mass to. A victim's device bytes are read back into
+a pinned victim store (HYB_REPLAN_STORE experts per layer) unless the cold library already holds them; a victim with
+no host int4 row (``nohost``) is never computed on the CPU: every decode miss of one is fetched into an LRU slot, and
+prefill streams it to the device whatever its token count.
 """
 
 from __future__ import annotations
@@ -67,6 +74,13 @@ class FetchCache:
         self.wdst = {}  # layer -> pinx destinations of its (up_gate, down) weights (direct)
         self.raw = {}  # layer -> (region id, {expert: index}, gate|up bytes per die, down bytes per die)
         self.shapes = None  # per-device ([1, 1, H, 2 Nl], [1, 1, Nl, H]) and dtypes of one expert (note_shapes)
+        self.replan_n = int(os.environ.get("HYB_REPLAN", "0") or 0)
+        self.replan_min = int(os.environ.get("HYB_REPLAN_MIN", "256"))
+        self.store_n = int(os.environ.get("HYB_REPLAN_STORE", str(self.replan_n + self.replan_n // 2)))
+        if self.replan_n and (not self.direct or self.async_on):
+            raise ValueError("HYB_REPLAN needs the synchronous direct fetch (HYB_FETCH_DIRECT=1, HYB_FETCH_ASYNC=0)")
+        self.store = {}  # layer -> (region id, {expert: store index}) victims' device bytes (pinned)
+        self.nohost = {}  # layer -> experts off the device with no host int4 row (always fetched, never on the CPU)
 
     @property
     def on(self):
@@ -76,6 +90,7 @@ class FetchCache:
     def plan_layer(self, layer, E, C, static_ids):
         """The slot list of a layer: static experts, D empty LRU slots (zero experts), the sink."""
         S = C - 1 - self.D
+        self.__dict__.setdefault("_static_n", {})[layer] = S
         self.lru[layer] = OrderedDict()
         self.free[layer] = list(range(S, S + self.D))
         self.stamp[layer] = np.full(E, -1, dtype=np.int64)
@@ -136,6 +151,12 @@ class FetchCache:
             self.raw[L] = (rid, {e: i for i, e in enumerate(experts)}, ng, nd)
         ttnn.deallocate(conv_gu)
         ttnn.deallocate(conv_dn)
+        if self.replan_n:
+            t1 = time.perf_counter()
+            for L in layers:
+                self.store[L] = (px.region(self.store_n * tp * (ng + nd))[0], {})
+                self.nohost[L] = set()
+            print(f"HYB_REPLAN: {self.store_n} store slots x {len(layers)} layers ({time.perf_counter() - t1:.1f} s)")
         if os.environ.get("HYB_PIN_UPLOADS", "1") == "1":
             from .pin import PinnedRows
 
@@ -148,6 +169,8 @@ class FetchCache:
         if stream is not None and stream.dev is not None:
             sg, sd = stream.dev["stage"]
             stream.dev["pdst"] = (px.dst(sg)[0], px.dst(sd)[0])
+            # the whole staging cache, so a prefill upload can write slot j at byte offset j * one expert
+            stream.dev["gdst"] = (px.dst(stream.dev["gu"])[0], px.dst(stream.dev["dn"])[0])
         print(
             f"HYB_PINX: {sum(len(v[1]) for v in self.raw.values())} experts of {len(layers)} layers pinned "
             f"({time.perf_counter() - t0:.1f} s)",
@@ -155,14 +178,69 @@ class FetchCache:
         )
 
     def has_expert(self, layer, e):
-        return (layer, e) in self.host or (layer in self.raw and e in self.raw[layer][1])
+        return (
+            (layer, e) in self.host
+            or (layer in self.raw and e in self.raw[layer][1])
+            or (layer in self.store and e in self.store[layer][1])
+        )
 
     def raw_offsets(self, layer, e):
-        """(region, gate|up offsets per die, down offsets per die) of a pinned expert."""
+        """(region, gate|up offsets per die, down offsets per die) of a pinned expert (cold library or victim store)."""
         rid, idx, ng, nd = self.raw[layer]
+        if e not in idx:
+            rid, idx = self.store[layer]
         tp = self.px.tp
         base = idx[e] * tp * (ng + nd)
         return rid, [base + d * ng for d in range(tp)], [base + tp * ng + d * nd for d in range(tp)]
+
+    def replan(self, layer, mass, slot_of, train_mass, host_row, st):
+        """The per-request re-plan of one hybrid layer (see the module doc); ``mass`` [E] = the prefill's routed weight
+        per expert, ``host_row`` [E] = the int4 library row (-1: none). Slot writes on CQ0, ahead of the next segments.
+        Returns the number of swaps."""
+        S = self._static_n[layer]
+        rid_s, sidx = self.store[layer]
+        nohost = self.nohost[layer]
+        static = np.flatnonzero((slot_of >= 0) & (slot_of < S))
+        lru = self.lru[layer]
+        cand = [
+            int(e)
+            for e in np.argsort(-mass, kind="stable")
+            if mass[e] > 0 and not (0 <= slot_of[e] < S) and self.has_expert(layer, int(e))
+        ][: self.replan_n]
+        vict = [int(e) for e in static[np.argsort(train_mass[static], kind="stable")] if mass[e] == 0]
+        cold = self.raw[layer][1]
+        n = 0
+        dg, dd = self.wdst[layer]
+        ng, nd = self.raw[layer][2], self.raw[layer][3]
+        tp = self.px.tp
+        t0 = time.perf_counter()
+        for c in cand:
+            v = next((x for x in vict if x in cold or x in sidx or len(sidx) < self.store_n), None)
+            if v is None:
+                break
+            vict.remove(v)
+            s = int(slot_of[v])
+            if v not in cold and v not in sidx:  # its device bytes into the store before the slot is overwritten
+                i = len(sidx)
+                base = i * tp * (ng + nd)
+                self.px.read_at(dg, rid_s, [base + d * ng for d in range(tp)], s * ng, ng)
+                self.px.read_at(dd, rid_s, [base + tp * ng + d * nd for d in range(tp)], s * nd, nd)
+                sidx[v] = i
+                st["replan_reads"] = st.get("replan_reads", 0) + 1
+            slot_of[v] = -1
+            if host_row[v] < 0:
+                nohost.add(v)
+            rid, og, od = self.raw_offsets(layer, c)
+            self.px.write_at(dg, rid, og, s * ng, ng)
+            self.px.write_at(dd, rid, od, s * nd, nd)
+            if c in lru:  # it leaves its LRU slot for the static one
+                self.free[layer].append(lru.pop(c))
+            slot_of[c] = s
+            nohost.discard(c)
+            n += 1
+        st["replan_swaps"] = st.get("replan_swaps", 0) + n
+        st["t_replan"] = st.get("t_replan", 0.0) + time.perf_counter() - t0
+        return n
 
     def write_expert(self, layer, e, dst_pair, host_pair):
         """One expert into a staging pair: zero-copy from the pinned region, else the regular host -> device copy."""
@@ -262,11 +340,17 @@ class FetchCache:
             if e in lru:
                 lru.move_to_end(e)
         miss = [int(e) for e in picked if slot_of[e] < 0]
+        nh = self.nohost.get(layer)
+        must = [e for e in miss if e in nh] if nh else []  # no host int4 row: always fetched
+        if must:
+            miss = [e for e in miss if e not in nh]
         x = self.f * len(miss)
         nf = min(int(x) + int(self.rng.random() < x - int(x)), self.F, len(miss))
         fetched, slots = [], []
-        if nf:
+        if nf or must:
             miss.sort(key=lambda e: (-stamp[e], e))  # most recently active first
+            miss = must + miss
+            nf += len(must)
             protect = set(int(e) for e in picked)
             for e in miss[:nf]:
                 if free:
@@ -274,6 +358,11 @@ class FetchCache:
                 else:
                     victim = next((v for v in lru if v not in protect), None)
                     if victim is None:
+                        if e in must:
+                            raise RuntimeError(
+                                f"layer {layer}: expert {e} has no host copy and every LRU slot holds a pick of this "
+                                f"step ({len(lru)} slots, picks {sorted(protect)})"
+                            )
                         break
                     s = lru.pop(victim)
                     slot_of[victim] = -1

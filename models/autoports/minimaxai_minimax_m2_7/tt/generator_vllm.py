@@ -160,6 +160,8 @@ def _ext_spec_env():
 _MTP_K = _mtp_k_env()
 _EXT_SPEC, _EXT_SPEC_K = _ext_spec_env()
 _SPEC_K = _MTP_K or _EXT_SPEC_K
+# QWEN35_PREFIX_CACHING=1: vLLM automatic prefix caching (whole prompts start at the cached length; generator.py)
+_PREFIX_CACHING = os.environ.get("QWEN35_PREFIX_CACHING", "0") == "1"
 # One source of truth for every consumer that reads the raw env (the model allocates the MTP bucket inputs behind
 # `QWEN35_MTP`): a server started WITHOUT the env (the bundle) crashed at the MTP warm-up with KeyError 'mtp_sel'
 # (2026-10-01 readiness relaunch) because the default-on decision lived only here.
@@ -191,7 +193,7 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
     # is implemented (Qwen35MoeGenerator.decode_forward(read_from_device=False) -> read_decode_output -> process_...).
     # Overlap stays off until the page-growth refresh of the plugin revision is proven (doc/vllm_integration/README.md).
     model_capabilities = {
-        "supports_prefix_caching": False,
+        "supports_prefix_caching": _PREFIX_CACHING,
         "supports_async_decode": True,
         # Not read by this plugin revision (5961e48): overlap = vLLM's async scheduling (on by default, "Asynchronous
         # scheduling is enabled" in every served log) + supports_async_decode; the plugin's steady-decode fast path then
@@ -501,14 +503,16 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
 
     # ------------------------------------------------------------------ prefill
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
-        """vLLM prefill of N requests into their decode slots. ``start_pos`` must be 0 (chunked prefill / prefix caching
-        are not supported: full prompts, any length <= max_model_len). Returns ``tokens [N,1] int64``
-        when the plugin asked for on-device sampling (``sampling_params``), else ``logits [N,1,vocab]``.
+        """vLLM prefill of N requests into their decode slots. ``start_pos`` > 0 is a chunked-prefill continuation
+        (QWEN35_CHUNKED_PREFILL=1) or a prefix-cache hit (QWEN35_PREFIX_CACHING=1); otherwise it must be 0. Returns
+        ``tokens [N,1] int64`` when the plugin asked for on-device sampling (``sampling_params``), else
+        ``logits [N,1,vocab]``.
         """
         N = tokens.shape[0]
         start_pos = kwargs.get("start_pos")
         starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
-        if any(starts) and not self.model_capabilities["supports_chunked_prefill"]:
+        caps = self.model_capabilities
+        if any(starts) and not (caps["supports_chunked_prefill"] or caps["supports_prefix_caching"]):
             raise NotImplementedError("chunked / cached-prefix prefill is not supported (model_capabilities)")
         # which rows end their prompt in this chunk: the plugin's intermediate mask (added to the kwargs by the chunked
         # prefill shim when QWEN35_CHUNKED_PREFILL=1); without it every row is final - the plugin never chunks a prompt
@@ -562,7 +566,18 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
         )
         chunked = dict(start_pos=starts, final=finals) if (any(starts) or not all(finals)) else {}
         if self._mtp is not None:
-            if chunked:
+            prefix_hit = (
+                _PREFIX_CACHING and bool(chunked) and all(finals) and getattr(self._mtp, "prefix_start_ok", False)
+            )
+            if prefix_hit:
+                # resume early enough to cover the speculator's feature window (less any features it still holds from
+                # the previous request); begin_prefill needs the exact start
+                starts = [
+                    self._gen.resume_start(self._mtp.feature_start(tokens[u, : plens[u]].tolist(), s), plens[u])
+                    for u, s in enumerate(starts)
+                ]
+                chunked = dict(start_pos=starts, final=finals)
+            elif chunked:
                 raise NotImplementedError(
                     f"MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL); starts {starts} "
                     f"finals {finals} prompt_lens {plens} slots {slots} live {sorted(self._live_slots)} "
@@ -572,9 +587,12 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
             if self._mtp.adaptive and self._mtp.in_phase:
                 self._mtp.suspend()  # unbind for the prefill; the next decode resumes / drops / leaves the phase
             for u in range(N):
-                self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
+                at = dict(start=starts[u]) if prefix_hit else {}
+                self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u], **at)
             try:
-                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp)
+                out = self._gen.prefill_serving(
+                    tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp, **chunked
+                )
             except Exception:
                 self._mtp.abort_prefill()
                 raise

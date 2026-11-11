@@ -24,8 +24,21 @@ import torch
 import ttnn
 
 from .experts import (
-    KERNEL_DIR, RING_BYTES, ROUTERS, TILE, TILE_BYTES, _cb, _ep_defines, _kernels, _page_bytes, _range_set, bank_workers,
-    gu_layout, gu_ring, logits_row_bytes, place_along_rows,
+    KERNEL_DIR,
+    RING_BYTES,
+    ROUTERS,
+    TILE,
+    TILE_BYTES,
+    _cb,
+    _ep_defines,
+    _kernels,
+    _page_bytes,
+    _range_set,
+    bank_workers,
+    gu_layout,
+    gu_ring,
+    logits_row_bytes,
+    place_along_rows,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -51,7 +64,10 @@ def act_buffer(mesh_device, inter, num_experts, k, rows):
     model's other programs' circular buffers. Every page the down op reads is written by the gate|up op first."""
     slots = min(num_experts, rows * k) + 1
     return ttnn.empty(
-        [slots * inter // TILE * row_groups(rows), ACT_PAGE // 2], ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, mesh_device,
+        [slots * inter // TILE * row_groups(rows), ACT_PAGE // 2],
+        ttnn.bfloat16,
+        ttnn.ROW_MAJOR_LAYOUT,
+        mesh_device,
         ttnn.L1_MEMORY_CONFIG,
     )
 
@@ -67,15 +83,25 @@ class RowsBuffers:
         rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}
         l1 = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
         self.max_slots = min(num_experts, rows * k) + 1
-        self.table = ttnn.from_torch(torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1)
+        self.table = ttnn.from_torch(
+            torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1
+        )
         self.act = act
         self.out = ttnn.from_torch(
-            torch.zeros(1, 1, rows, hidden, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-            device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,
+            torch.zeros(1, 1, rows, hidden, dtype=torch.bfloat16),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **rep,
         )
         self.identity = ttnn.from_torch(
-            torch.eye(TILE)[None, None], dtype=weight_dtype, layout=ttnn.TILE_LAYOUT, device=mesh_device,
-            memory_config=ttnn.DRAM_MEMORY_CONFIG, **rep,
+            torch.eye(TILE)[None, None],
+            dtype=weight_dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **rep,
         )
 
 
@@ -113,14 +139,20 @@ class RouteRows:
         defines = [("ROUTER_SIGB", "1")] if self.router == "sigb" else []
         kernels = [
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"), core_ranges=self.cores,
-                compile_time_args=rd_ct, runtime_args=rd_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0), defines=defines,
+                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),
+                core_ranges=self.cores,
+                compile_time_args=rd_ct,
+                runtime_args=rd_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
+                defines=defines,
             ),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"), core_ranges=self.cores,
-                compile_time_args=wr_ct, runtime_args=wr_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1), defines=defines,
+                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"),
+                core_ranges=self.cores,
+                compile_time_args=wr_ct,
+                runtime_args=wr_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1),
+                defines=defines,
             ),
         ]
         io = [logits, table] + ([bias] if bias is not None else [])
@@ -168,20 +200,29 @@ class RouteScores(RouteRows):
             wr_rt[c.x][c.y] = [logits.buffer_address(), r] + bias_arg
         lg_ct = ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct
-        rd_ct += ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(scores).get_compile_time_args()
+        rd_ct += (
+            ttnn.TensorAccessorArgs(ids).get_compile_time_args()
+            + ttnn.TensorAccessorArgs(scores).get_compile_time_args()
+        )
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
         defines = [("ROUTE_TILES", "1")] + ([("ROUTER_SIGB", "1")] if self.router == "sigb" else [])
         kernels = [
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"), core_ranges=cores,
-                compile_time_args=rd_ct, runtime_args=rd_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0), defines=defines,
+                kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),
+                core_ranges=cores,
+                compile_time_args=rd_ct,
+                runtime_args=rd_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
+                defines=defines,
             ),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"), core_ranges=cores,
-                compile_time_args=wr_ct, runtime_args=wr_rt,
-                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1), defines=defines,
+                kernel_source=str(KERNEL_DIR / "route_rows_writer.cpp"),
+                core_ranges=cores,
+                compile_time_args=wr_ct,
+                runtime_args=wr_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1),
+                defines=defines,
             ),
         ]
         io = [logits, ids, scores] + ([bias] if bias is not None else [])
@@ -200,8 +241,11 @@ def upload_selection_bias(mesh_device, bias):
     """The Q23 bias as one DRAM page ([1, 1, 1, E] INT32 row-major: page 0 in bank 0, where the kernels read it)."""
     multi = getattr(mesh_device, "get_num_devices", lambda: 1)() > 1
     return ttnn.from_torch(
-        selection_bias_q23(bias).reshape(1, 1, 1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
-        device=mesh_device, memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        selection_bias_q23(bias).reshape(1, 1, 1, -1),
+        dtype=ttnn.int32,
+        layout=ttnn.ROW_MAJOR_LAYOUT,
+        device=mesh_device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
         **({"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if multi else {}),
     )
 
@@ -210,8 +254,21 @@ class ExpertGateUpRows:
     """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column group (experts.gu_layout);
     union slot s goes to core s % readers."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, buffers=5,
-                 shared=True, ep_experts=None, gate_first=False):
+    def __init__(
+        self,
+        mesh_device,
+        hidden,
+        inter,
+        num_experts,
+        k,
+        weight_dtype,
+        rows,
+        readers=None,
+        buffers=5,
+        shared=True,
+        ep_experts=None,
+        gate_first=False,
+    ):
         """shared False: routed experts only (no union slot 0). ep_experts / gate_first: as ExpertGateUp. readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
         SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
         their reads collapse (8 rows, 4-chip shapes: 51 us median at 4 per pair, 89 at 22, 217 max at 8)."""
@@ -227,8 +284,12 @@ class ExpertGateUpRows:
         self.max_slots = min(num_experts, rows * k) + 1
         # split-pair (QWEN35_MOE_SPLIT_PAIR=1, m = 1: a pair's up / gate columns in banks q / q + banks / 2): one bank per
         # core, `readers` cores per bank on its row; the gate cores send w * silu(g) to their up partners (gur_writer.cpp)
-        self.split = (os.environ.get("QWEN35_MOE_SPLIT_PAIR", "0") == "1" and self.m == 1
-                      and gu_layout(self.n_tiles, self.banks)[1] == 2 and not gate_first)
+        self.split = (
+            os.environ.get("QWEN35_MOE_SPLIT_PAIR", "0") == "1"
+            and self.m == 1
+            and gu_layout(self.n_tiles, self.banks)[1] == 2
+            and not gate_first
+        )
         self.ring = int(os.environ.get("QWEN35_MOE_SPLIT_RING", "8"))
         if readers is None:
             readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else 4
@@ -267,11 +328,16 @@ class ExpertGateUpRows:
                             used.add((x, yy))
                             cores.append(ttnn.CoreCoord(x, yy))
                     placed[b] = cores
-            placed.update(place_along_rows(mesh_device, {b: readers for b in range(self.banks) if b not in self.noc1_banks},
-                                           used=used))
+            placed.update(
+                place_along_rows(
+                    mesh_device, {b: readers for b in range(self.banks) if b not in self.noc1_banks}, used=used
+                )
+            )
             self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
             half = self.banks // 2
-            self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)}
+            self.partner = {
+                (b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)
+            }
             self.mesh = mesh_device
         else:
             placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
@@ -291,7 +357,15 @@ class ExpertGateUpRows:
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),  # + the EP offset (64-byte aligned)
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             # two slots' weight tiles (split-pair: SPLIT_RING slots, the up cores' ring for their partners' g')
-            _cb(self.cores, cb_sc, ttnn.bfloat16, tb, 2 * g * (self.ring if self.split else 2), tiny=True, rows=self.trows),
+            _cb(
+                self.cores,
+                cb_sc,
+                ttnn.bfloat16,
+                tb,
+                2 * g * (self.ring if self.split else 2),
+                tiny=True,
+                rows=self.trows,
+            ),
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
@@ -301,13 +375,37 @@ class ExpertGateUpRows:
         rd_rt, wr_rt = {}, {}
         for c, j, r in self.assign:
             s0 = r if self.shared else r + 1  # first union slot (no shared expert: slot 0 is never streamed)
-            rd_rt[(c.x, c.y)] = [table.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(),
-                                 identity.buffer_address(), j, s0, (j + r) & 0x3] + ep_arg
+            rd_rt[(c.x, c.y)] = [
+                table.buffer_address(),
+                up_gate.buffer_address(),
+                shared_up_gate.buffer_address(),
+                identity.buffer_address(),
+                j,
+                s0,
+                (j + r) & 0x3,
+            ] + ep_arg
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0] + ep_arg
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, buffers]
-        rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
-        wr_ct = [cb_x, cb_act, cb_sc, cb_tab, self.kt, self.k, self.rows, self.readers, self.pairs, self.trows, g, cb_wt, ACT_PAGE]
+        rd_ct += (
+            ttnn.TensorAccessorArgs(table).get_compile_time_args()
+            + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
+        )
+        wr_ct = [
+            cb_x,
+            cb_act,
+            cb_sc,
+            cb_tab,
+            self.kt,
+            self.k,
+            self.rows,
+            self.readers,
+            self.pairs,
+            self.trows,
+            g,
+            cb_wt,
+            ACT_PAGE,
+        ]
         wr_ct += [self.m, self.banks]
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
@@ -332,12 +430,26 @@ class ExpertGateUpRows:
                 for c, b, r in sel:
                     rd_g[(c.x, c.y)][4] = b  # the reader's bank
                 cores = _range_set([c for c, _, _ in sel])
-                d = defines + [("SPLIT_PAIR", "1"), ("SPLIT_RING", str(self.ring))] + ([("ROLE_GATE", "1")] if gate else [])
-                kernels += _kernels(cores, "gur", (rd_ct, rd_g), (wr_ct, wr_g), (cp_ct, None), d, dst_full=self.dst_full,
-                                    reader_noc=ttnn.NOC.NOC_1 if noc1 else None)
+                d = (
+                    defines
+                    + [("SPLIT_PAIR", "1"), ("SPLIT_RING", str(self.ring))]
+                    + ([("ROLE_GATE", "1")] if gate else [])
+                )
+                kernels += _kernels(
+                    cores,
+                    "gur",
+                    (rd_ct, rd_g),
+                    (wr_ct, wr_g),
+                    (cp_ct, None),
+                    d,
+                    dst_full=self.dst_full,
+                    reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
+                )
             semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
         else:
-            kernels = _kernels(self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
+            kernels = _kernels(
+                self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
+            )
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
         return ttnn.generic_op(io, program)
@@ -347,8 +459,20 @@ class ExpertDownRows:
     """(act, table, down, shared_down, out) -> out. readers: cores per DRAM bank; chunk: union slots per weight
     block (the cb holds two)."""
 
-    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, readers=None, chunk=8,
-                 shared=True, ep_experts=None):
+    def __init__(
+        self,
+        mesh_device,
+        hidden,
+        inter,
+        num_experts,
+        k,
+        weight_dtype,
+        rows,
+        readers=None,
+        chunk=8,
+        shared=True,
+        ep_experts=None,
+    ):
         """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
         assert not ep_experts or not shared
         self.shared, self.ep_experts = shared, ep_experts
@@ -359,6 +483,12 @@ class ExpertDownRows:
         # > 1 row group: full-sync DST (8 FP32 tiles; the kernel packs once, at the end): groups x cols <= 8, so fewer
         # cores each read the whole activation block
         self.dst_full = self.groups > 1
+        # QWEN35_MOE_DN_READERS / QWEN35_MOE_DN_CHUNK: per-model overrides (MiniMax-M2.7, 4 rows, H 3072, 384 per die:
+        # 4 readers per bank with 4-slot chunks 137 vs 157 us per MoE call, hybrid_moe/bench_moe_rows.py)
+        if readers is None and os.environ.get("QWEN35_MOE_DN_READERS"):
+            readers = int(os.environ["QWEN35_MOE_DN_READERS"])
+        if os.environ.get("QWEN35_MOE_DN_CHUNK"):
+            chunk = int(os.environ["QWEN35_MOE_DN_CHUNK"])
         if readers is None:  # 2 per bank (4 / 8 measured slower at 8 rows: 33 vs 24 us)
             readers = max(2 if self.m % 2 == 0 else 1, self.m // max(1, (8 if self.dst_full else 4) // self.groups))
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
@@ -380,7 +510,15 @@ class ExpertDownRows:
         cb_in0, cb_w, cb_scr, cb_tab, cb_out = 0, 1, 3, 5, 16
         tb = 64 * self.trows
         cbs = [
-            _cb(self.cores, cb_in0, ttnn.bfloat16, tb, 2 * self.groups * self.chunk * self.kt, tiny=True, rows=self.trows),
+            _cb(
+                self.cores,
+                cb_in0,
+                ttnn.bfloat16,
+                tb,
+                2 * self.groups * self.chunk * self.kt,
+                tiny=True,
+                rows=self.trows,
+            ),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
             _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
@@ -389,11 +527,31 @@ class ExpertDownRows:
         rd_rt, wr_rt = {}, {}
         for c, b, r in self.assign:
             c0 = r * self.cols
-            rd_rt[(c.x, c.y)] = [down.buffer_address(), shared_down.buffer_address(), table.buffer_address(), b, c0, (b + r) & 0x3] + ep_arg
+            rd_rt[(c.x, c.y)] = [
+                down.buffer_address(),
+                shared_down.buffer_address(),
+                table.buffer_address(),
+                b,
+                c0,
+                (b + r) & 0x3,
+            ] + ep_arg
             wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0] + ep_arg
         rd_ct = [cb_w, cb_scr, self.kt, self.m, self.cols, self.k, self.tile_bytes, self.rows, self.chunk]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args()
-        wr_ct = [cb_in0, cb_out, cb_tab, self.kt, self.cols, self.banks, self.k, self.rows, self.trows, self.groups, self.chunk, ACT_PAGE]
+        wr_ct = [
+            cb_in0,
+            cb_out,
+            cb_tab,
+            self.kt,
+            self.cols,
+            self.banks,
+            self.k,
+            self.rows,
+            self.trows,
+            self.groups,
+            self.chunk,
+            ACT_PAGE,
+        ]
         for t in (act, out, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
@@ -401,7 +559,9 @@ class ExpertDownRows:
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)
-        kernels = _kernels(self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full)
+        kernels = _kernels(
+            self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
+        )
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         io = [down, shared_down, act, table, out] + ([ep_offset] if ep_offset is not None else [])
         return ttnn.generic_op(io, program)

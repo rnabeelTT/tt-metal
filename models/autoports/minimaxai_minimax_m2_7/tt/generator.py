@@ -99,6 +99,21 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             assert self._tt.model[0] is self.model, "tt_generator must wrap this generator's model"
         self.external_kv = bool(external_kv)
         self.batched_prefill = None  # tt/prefill_batched.py driver, built by _init_batched_prefill once the KV is bound
+        # QWEN35_PREFILL_GROUP: segments per layer-major prefill group (model.prefill_group; 1 = segment by segment)
+        self.prefill_group_size = int(os.environ.get("QWEN35_PREFILL_GROUP", "1"))
+        # QWEN35_PREFIX_CACHING=1: a prefill may start at any cached prefix length (vLLM automatic prefix caching). Only a
+        # model without GDN layers: the KV cache is then the whole sequence state. A cached prefix resumes at a multiple
+        # of prefix_align: the flexible chunked SDPA needs chunk_start % q/k chunk == 0, the KV fill whole blocks.
+        self.prefix_resume = os.environ.get("QWEN35_PREFIX_CACHING", "0") == "1"
+        self.prefix_align = 0
+        if self.prefix_resume:
+            gdn = [i for i, l in enumerate(self.model.layers) if not l.is_full_attention]
+            if gdn:
+                raise ValueError(
+                    f"QWEN35_PREFIX_CACHING=1 needs a full-attention model; layers {gdn[:8]} hold GDN state"
+                )
+            att = self.model.layers[0].attention
+            self.prefix_align = max(self.block_size, 128, att._sdpa_pf_q or 0, att._sdpa_pf_k or 0)
         # Split-sampling token feedback: the sampler writes the sampled token straight into the persistent decode token
         # input. The force-argmax path (ttnn.argmax) accepts the [B,1] token input as its output tensor; the top-k
         # candidate path (ttnn.sampling) requires a rank-4 [1,1,1,B] output -> hand it a zero-copy view of the same buffer.
@@ -677,7 +692,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         T = tokens.shape[1]
         # `start` (chunked prefill continuation): ``tokens`` are positions start .. start+T-1 of the request; the GDN
         # state is reset by the bucket only at chunk_start 0, so a continuation runs on the state restored by the caller
-        assert start % segment == 0, f"chunk start {start} must be a multiple of the {segment}-token segment"
+        align = self.prefix_align or segment  # a prefix-cache resume (prefill_serving) or a chunk continuation
+        if start % align:
+            raise ValueError(f"chunk start {start} must be a multiple of {align}")
         # multimodal request: ``vision`` = (packed image rows on device [n, H/TP], image_grid_thw). The M-RoPE table is
         # staged once over the WHOLE prompt (the segments slice it by position) and every segment splices its own
         # image rows (row offset = placeholders before the segment). Chunked continuations of image prompts are not
@@ -691,7 +708,22 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.model._build_request_rope(tokens, vision_tokens)
             vkw = {"rope_staged": True}
         logits, sh = None, None
-        for cs in range(start, start + T, segment):
+        starts = list(range(start, start + T, segment))
+        G = int(getattr(self, "prefill_group_size", 1))
+        if G > 1 and len(starts) > 1 and vision_tokens is None and hasattr(self.model, "prefill_group"):
+            # layer-major over groups of G segments (model.prefill_group); only the last group's logits are read
+            for g0 in range(0, len(starts), G):
+                grp = starts[g0 : g0 + G]
+                segs = [tokens[:, cs - start : min(cs - start + segment, T)] for cs in grp]
+                if g0 + G < len(starts):
+                    self.model.prefill_group(segs, page_table, grp)
+                elif want_sharded:
+                    lg, sh = self.model.prefill_group(segs, page_table, grp, return_sharded=True)
+                else:
+                    lg = self.model.prefill_group(segs, page_table, grp)
+            logits = self._host_logits(lg)
+            return (logits, sh) if want_sharded else logits
+        for cs in starts:
             seg = tokens[:, cs - start : min(cs - start + segment, T)]
             last = cs + segment >= start + T
             if vision_tokens is not None:
@@ -705,6 +737,20 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 lg = self.model.prefill_masked_bucket(seg, page_table, actual_len=seg.shape[1], chunk_start=cs, **vkw)
             logits = self._host_logits(lg)
         return (logits, sh) if want_sharded else logits
+
+    def resume_start(self, start, end):
+        """Where a prefix-cache hit with ``start`` cached tokens of an ``end``-token prompt resumes its prefill: the
+        prefix_align boundary at or below ``start`` (the cached KV of [s0, start) is recomputed and rewritten, the same
+        values up to rounding as the segments may fall on other boundaries), or the segment boundary when the padded
+        tail bucket would run past the RoPE table / page-table width. Idempotent."""
+        A = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
+        s0 = int(start) // self.prefix_align * self.prefix_align
+        n = int(end) - s0
+        if s0 % A and n > 0:
+            full = (n - 1) // A * A
+            if s0 + full + self.model._mask_bucket_for(n - full) > self.max_seq_len:
+                s0 = s0 // A * A
+        return s0
 
     # ------------------------------------------------------------------ chunked prefill (turn 7)
     def _pending_key(self, pt_row):
@@ -829,10 +875,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 pending = None
             s0 = pending[0] if pending is not None else 0
             if pending is None:
-                assert (
-                    starts[u] == 0 or starts[u] % A == 0
-                ), f"request {u}: chunk start {starts[u]} without carried state"
-                s0 = 0 if starts[u] == 0 else starts[u]
+                if starts[u] % A and not self.prefix_resume:
+                    raise ValueError(f"request {u}: chunk start {starts[u]} without carried state (segment {A})")
+                s0 = self.resume_start(starts[u], lens[u]) if self.prefix_resume else starts[u]
             E = lens[u] if finals[u] else (lens[u] // A) * A
             batched = self.max_batch_size > 1
             prev = self.model._bind_gdn_prefill_scratch() if batched else None
