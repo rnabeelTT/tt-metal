@@ -46,6 +46,10 @@ HYB_KEYS = (
     "t_up_cp",
     "t_up_w",
     "t_up_conv",
+    "t_s1",
+    "t_s2",
+    "t_choose",
+    "t_prep",
 )
 
 

@@ -7,6 +7,10 @@ inside it may call ``SEG.split(fn)``: the current real trace is ended, a new one
 run between the two at replay. ``execute_trace`` on the id returned by ``begin_trace_capture`` replays the segments in
 order, calling each callback after its segment (callbacks may read back device tensors, which blocks until the
 segment finished, and write into buffers allocated BEFORE the capture; they must not allocate device memory).
+``SEG.post(fn)`` registers a host handler WITHOUT cutting the trace: at replay it runs after its segment has been
+enqueued, before that segment's split callback (the socket-mode host steps: the device blocks on socket receives
+inside the segment until the handler has written the data). A capture with post handlers is kept as a segmented trace
+even when it has a single segment; ``pre_replay`` (when set) runs before such a replay is enqueued.
 """
 
 import os
@@ -40,6 +44,7 @@ class SegTrace:
         )  # serving diagnostics: host-step stats every N replays
         self.on_log = None
         self.host_st = None
+        self.pre_replay = None  # called before a replay of a trace with post handlers (HYB_SOCKET: fetch commit)
 
     @property
     def capturing(self):
@@ -47,15 +52,22 @@ class SegTrace:
 
     def begin(self, mesh, cq_id=0):
         real = _orig["begin"](mesh, cq_id=cq_id)
-        self.active = {"mesh": mesh, "cq": cq_id, "segs": [], "cur": real, "vid": real}
+        self.active = {"mesh": mesh, "cq": cq_id, "segs": [], "cur": real, "vid": real, "posts": []}
         return real
+
+    def post(self, fn):
+        a = self.active
+        if a is None:
+            raise RuntimeError("SEG.post outside a trace capture")
+        a["posts"].append(fn)
 
     def split(self, fn):
         a = self.active
         if a is None:
             raise RuntimeError("SEG.split outside a trace capture")
         _orig["end"](a["mesh"], a["cur"], cq_id=a["cq"])
-        a["segs"].append((a["cur"], fn))
+        a["segs"].append((a["cur"], fn, a["posts"]))
+        a["posts"] = []
         a["cur"] = _orig["begin"](a["mesh"], cq_id=a["cq"])
 
     def end(self, mesh, tid, cq_id=0):
@@ -63,8 +75,8 @@ class SegTrace:
         if a is None or _key(tid) != _key(a["vid"]):
             return _orig["end"](mesh, tid, cq_id=cq_id)
         _orig["end"](mesh, a["cur"], cq_id=cq_id)
-        a["segs"].append((a["cur"], None))
-        if len(a["segs"]) > 1:
+        a["segs"].append((a["cur"], None, a["posts"]))
+        if len(a["segs"]) > 1 or any(p for _, _, p in a["segs"]):
             self.traces[_key(a["vid"])] = a["segs"]
         self.active = None
 
@@ -75,10 +87,14 @@ class SegTrace:
         if self.stats.get("t_first") is None:
             self.stats["t_first"] = time.time()  # first traced decode step: everything before it is prefill (TTFT)
         st = self.host_st  # optional timing sink (patch.HYB.st): enqueue vs callback wall time
-        for real, fn in segs:
+        if self.pre_replay is not None and any(p for _, _, p in segs):
+            self.pre_replay()
+        for real, fn, posts in segs:
             t0 = time.perf_counter()
             _orig["exec"](mesh, real, cq_id=cq_id, blocking=False)
             t1 = time.perf_counter()
+            for p in posts:
+                p()
             if fn is not None:
                 fn()
             if st is not None:
@@ -95,7 +111,7 @@ class SegTrace:
         segs = self.traces.pop(_key(tid), None)
         if not segs:
             return _orig["release"](mesh, tid)
-        for real, _ in segs:
+        for real, _, _ in segs:
             _orig["release"](mesh, real)
 
 

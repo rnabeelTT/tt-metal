@@ -25,7 +25,7 @@ Env (read at install):
   HYB_THREADS      host torch threads (default 8)
   HYB_HOSTK        1 (default): one layer's missed experts in one call of the fused C kernel (hybrid/hostk; build it
                    on the host with `python -m hybrid.hostk`); 0: per-expert torch int4 matmuls
-  HYB_HOSTK_THREADS threads of that kernel's pool (default 4: 2-4 saturate DRAM)
+  HYB_HOSTK_THREADS threads of that kernel's pool (default 3: leaves DRAM bandwidth for the pinned uploads)
   HYB_PLAN_WEIGHT  count (default) | mass: rank the plan's experts by picks or by summed routing weight
   HYB_PORT         the patched autoport (default qwen_qwen3_5_122b_a10b; minimaxai_minimax_m2_7)
   HYB_LOWBIT       missed experts whose largest routing weight in the step is below this (and not skipped) read only
@@ -62,6 +62,21 @@ def _port(mod):
 
 
 class HybridState:
+    @property
+    def sock(self):
+        """Socket mode for the decode captures from now on (HYB_SOCKET; switchable at run time between captures). The
+        fetch follows: asynchronous (CQ1 writes, resident at the next replay's commit) while it is on."""
+        return self._sock
+
+    @sock.setter
+    def sock(self, on):
+        if on and not self._sock_env:
+            raise ValueError("HYB.sock needs HYB_SOCKET=1 at startup (the sockets are created in the eager warm-up)")
+        self._sock = bool(on)
+        if self.fetch.on:
+            self.fetch.commit(self.slot_of)  # writes of the previous mode land first
+            self.fetch.async_on = self._sock
+
     @property
     def hostk_threads(self):
         """Host-kernel threads in use (0 = the whole pool); settable at run time (hostk.set_active)."""
@@ -144,7 +159,7 @@ class HybridState:
         # of a Python thread-pool worker, whose GIL hand-offs stalled the main thread's device calls (bench_pinx.py)
         self.hostk_async = self.hostk and os.environ.get("HYB_HOSTK_ASYNC", "1") == "1"
         if self.hostk:
-            hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "4")))
+            hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "3")))  # 3: fixed-text A/B runs/m27/fb_thr, +2-3% over 4
         if self.lowbit > 0 and not self.hostk:
             raise ValueError(f"HYB_LOWBIT={self.lowbit} needs the fused host kernel (HYB_HOSTK=1)")
         # with an MTP head, the RAM copies of the library start only once the head is built (_install_mtp_head): the
@@ -155,13 +170,22 @@ class HybridState:
         self.pool = ThreadPoolExecutor(max_workers=int(os.environ.get("HYB_PREP_WORKERS", "2")))
         from .fetch import FetchCache
 
+        self._sock_env = os.environ.get("HYB_SOCKET", "0") == "1"  # sockets created (the eager warm-up) when set
+        self._sock = False
         self.fetch = FetchCache()  # HYB_LRU: fetched experts in LRU slots (hybrid/fetch.py)
+        if self._sock_env:
+            self.sock = True
         self.cpu_pool = ThreadPoolExecutor(max_workers=1)  # HYB_LRU: the CPU experts run while the fetches copy
         from .stream import PrefillStream
 
         # HYB_EARLY_CPU (default 1): a decode host step starts the CPU experts before it builds and uploads the routing
         # row (fixed-text A/B, runs/m27/fb_early: CPU wait 6-11 -> 0.2-2.6 ms per pass, +4-5% tok/s)
         self.early_cpu = os.environ.get("HYB_EARLY_CPU", "1") == "1"
+        self.np_prepare = os.environ.get("HYB_NP_PREPARE", "1") == "1"  # decode CPU-job arguments built with NumPy
+        # HYB_SOCKET=1: a captured decode step stays ONE trace; each hybrid layer exchanges its host step's data through
+        # host <-> device sockets inside it (_HybSockets) instead of being cut into segments with readbacks and pinned
+        # uploads; fetched experts are written on CQ1 and resident from the next replay (FetchCache async)
+        self.socks = None
         self.pf_mass = {}  # HYB_REPLAN: layer -> [E] routed weight per expert over the latest prefill's real rows
         self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
         self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
@@ -205,6 +229,9 @@ class HybridState:
         from .seg import SEG
 
         SEG.host_st = self.st
+        # a replay of a socket-mode trace: the fetched experts written on CQ1 during the previous replay become
+        # resident (CQ0 waits for them) before it is enqueued
+        SEG.pre_replay = lambda: self.fetch.commit(self.slot_of) if self.fetch.on else None
 
     # -- static plan ----------------------------------------------------------------------------------------------
     def plan(self, layer):
@@ -352,6 +379,44 @@ class HybridState:
 
         run.start = start
         return run
+
+    def host_prepare_np(self, layer, X, ids, sc, miss):
+        """host_prepare for the decode step's NumPy routing (ids [R, k] int, sc [R, k] float, miss [R, k] bool; X [R, H]
+        torch bf16): the same kernel arguments built with NumPy (the torch version's ~10 small ops per layer cost more
+        than the arrays they touch). None when the int4 kernel does not apply."""
+        R, H = X.shape
+        if not (self.hostk and self.lib_dir and R <= hostk.MAXR) or not miss.any():
+            return None
+        lib = self.lib_layer(layer)
+        if lib.get("planar"):
+            return self.host_prepare(
+                layer,
+                X,
+                torch.from_numpy(ids.astype(np.int64)),
+                torch.from_numpy(sc.astype(np.float32)),
+                torch.from_numpy(miss),
+            )
+        ex = np.unique(ids[miss])
+        rows_np = lib["row"][ex]
+        if (rows_np < 0).any():
+            raise RuntimeError(f"layer {layer}: experts {ex[rows_np < 0].tolist()} missed on the device but are static")
+        r_i, k_i = np.nonzero(miss)
+        W = np.zeros((len(ex), R), dtype=np.float32)
+        np.add.at(W, (np.searchsorted(ex, ids[r_i, k_i]), r_i), sc[r_i, k_i].astype(np.float32))
+        out = torch.zeros(R, H, dtype=torch.float32)
+        Xf = X.float().contiguous()
+        rows, Wt = torch.from_numpy(np.ascontiguousarray(rows_np, dtype=np.int64)), torch.from_numpy(W)
+        call = hostk.moe_prepared(lib, Xf, rows, Wt, out)
+        self.st["host_experts"] += len(ex)
+        keep = (Xf, rows, Wt, lib)
+
+        def start():
+            def done(dt):
+                self.st["t_host"] += dt
+
+            return hostk.AsyncMoe(call, out, keep, on_done=done)
+
+        return start
 
     def _hostk_rows(self, layer, X, ids, sc, miss_mask, out):
         """One host-kernel call for X [R, H] with R <= hostk.MAXR, written into out. A tile with no misses is a no-op."""
@@ -868,11 +933,117 @@ def _fused_bufs(self, m):
             raise RuntimeError(f"layer {self.layer_num}: no fused hybrid buffers for {m} rows; run an eager step first")
         H = int(self.hidden)
         B = {"host_rm": _rm_buffer(self.device, m, H), "shapes": {"T": m, "H": H}}
+        if HYB._sock_env:  # the socket partial: chip 0 receives the full host partial, the other chips keep zeros
+            B["host_sock"] = _rm_buffer(self.device, m, H)
+            if HYB.socks is None:
+                HYB.socks = _HybSockets(self.device, H)
         self._hyb_bufs[("fused", m)] = B
     mk = _kernel_rows(m)
     if mk not in HYB.crafted_rm:
         HYB.crafted_rm[mk] = _rm_buffer(self.device, mk, HYB.C + TILE_W)
     return B
+
+
+class _HybSockets:
+    """HYB_SOCKET: the host <-> device sockets of the fused hybrid's decode steps, shared by every hybrid layer (pages
+    flow in layer order): from chip 0 the routing logits rows (fp32, E + 32 wide) and the activation rows (bf16, H);
+    to every chip the crafted logits rows (bf16, C + 32); to chip 0 the host partial rows (bf16, H, undivided: the
+    other chips' partial buffers stay zero and the layer's reduce sums the chips). One worker core each."""
+
+    def __init__(self, mesh, H):
+        ndev = mesh.get_num_devices()
+        mcc = lambda d, x: ttnn.MeshCoreCoord(ttnn.MeshCoordinate(0, d), ttnn.CoreCoord(x, 0))  # noqa: E731
+        depth = 64  # pages per FIFO (a pass sends m rows per layer and the host reads them right away)
+
+        def d2h(core, page):
+            s = ttnn.D2HSocket(mesh, mcc(0, core), depth * page)
+            s.set_page_size(page)
+            return s
+
+        def h2d(dev, core, page):
+            s = ttnn.H2DSocket(mesh, mcc(dev, core), ttnn.BufferType.L1, depth * page, ttnn.H2DMode.HOST_PUSH)
+            s.set_page_size(page)
+            return s
+
+        E, C = HYB.E, HYB.C
+        self.lg = d2h(0, (E + TILE_W) * 4)
+        self.x = d2h(1, H * 2)
+        self.rows = [h2d(d, 2, (C + TILE_W) * 2) for d in range(ndev)]
+        self.part = h2d(0, 3, H * 2)
+        self.lg_buf, self.x_buf = {}, {}
+
+    def read_lg(self, m):
+        b = self.lg_buf.get(m)
+        if b is None:
+            b = self.lg_buf[m] = torch.empty(m, HYB.E + TILE_W, dtype=torch.float32)
+        self.lg.read_tensor(b)
+        return b.numpy()
+
+    def read_x(self, m, H):
+        b = self.x_buf.get(m)
+        if b is None:
+            b = self.x_buf[m] = torch.empty(m, H, dtype=torch.bfloat16)
+        self.x.read_tensor(b)
+        return b
+
+
+def _sock_step1(self, B, m):
+    """HYB_SOCKET host step 1 of a layer (the device waits in recv_async_h2d for its crafted rows): the routing logits
+    and activations from the sockets, routing and the fetch choice, the CPU experts started, the crafted rows to every
+    chip."""
+    t0 = time.perf_counter()
+    S, L, H = HYB.socks, self.layer_num, B["shapes"]["H"]
+    lg = S.read_lg(m)
+    xh = S.read_x(m, H)  # always consumed: the device sends every step
+    HYB.st["t_read"] += time.perf_counter() - t0
+    ids, sc, slot, res, miss = _route_host(self, lg, m)
+    fetch = None
+    if HYB.fetch.on:
+        fetch = HYB.fetch.choose(L, ids, HYB.slot_of[L])
+        slot = HYB.slot_of[L][ids]
+        res = slot >= 0
+        miss = miss & ~res
+    job = None
+    if fetch is not None:
+        HYB.fetch.stage(L, *fetch, HYB.st)  # CQ1 writes, resident from the next replay (FetchCache.commit)
+    if miss.any():
+        start = HYB.host_prepare_np(L, xh, ids, sc, miss)
+        if start is not None:
+            job = start()
+        else:
+            j = _job(self, xh.clone(), ids, sc, miss)
+            job = HYB.cpu_pool.submit(lambda j=j: HYB.host_compute(*j))
+    B["job"] = job
+    t1 = time.perf_counter()
+    E, C = HYB.E, HYB.C
+    mk = _kernel_rows(m)
+    row = np.empty((1, 1, m, C + TILE_W), dtype=np.float32)
+    hostk.craft(ids, sc.astype(np.float32, copy=False), HYB.slot_of[L], C, HYB.filler, lg, E, row)
+    r = torch.from_numpy(row.reshape(m, -1))
+    if mk > m:
+        r = r.repeat_interleave(mk // m, dim=0)
+    r = r.to(torch.bfloat16).contiguous()
+    for s_ in S.rows:
+        s_.write_tensor(r)
+    HYB.st["t_up"] += time.perf_counter() - t1
+    HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
+
+
+def _sock_step2(self, B, m):
+    """HYB_SOCKET host step 2 of a layer: the CPU experts' partial (zeros without misses) to chip 0."""
+    t0 = time.perf_counter()
+    job = B["job"]
+    B["job"] = None
+    if job is None:
+        host = torch.zeros(m, B["shapes"]["H"], dtype=torch.float32)
+    else:
+        t1 = time.perf_counter()
+        host = job.result()
+        HYB.st["t_wait"] += time.perf_counter() - t1
+    t1 = time.perf_counter()
+    HYB.socks.part.write_tensor(host.to(torch.bfloat16).contiguous())
+    HYB.st["t_up"] += time.perf_counter() - t1
+    HYB.st["t_s2"] = HYB.st.get("t_s2", 0.0) + time.perf_counter() - t0
 
 
 def _kernel_rows(m):
@@ -937,6 +1108,12 @@ def _route_host(self, lg, m, ids=None):
 
 
 def _fused_step1(self, x, logits, B):
+    t0 = time.perf_counter()
+    _fused_step1_body(self, x, logits, B)
+    HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
+
+
+def _fused_step1_body(self, x, logits, B):
     """Host step after the router (m decode rows): true routing from the E-wide logits rows, then the crafted logits
     rows the fused kernels rank over the C slots: ln(score) at each routed resident expert's slot, ln(missed mass) at
     the all-zero sink slot C-1, -1000 elsewhere, and the shared-expert gate logit at column C. The kernels' top-k +
@@ -956,7 +1133,9 @@ def _fused_step1(self, x, logits, B):
     ids, sc, slot, res, miss = _route_host(self, lg, m)
     fetch = None
     if HYB.fetch.on:  # a share of the misses goes to LRU slots: resident from here on
+        t1 = time.perf_counter()
         fetch = HYB.fetch.choose(self.layer_num, ids, HYB.slot_of[self.layer_num])
+        HYB.st["t_choose"] = HYB.st.get("t_choose", 0.0) + time.perf_counter() - t1
         slot = HYB.slot_of[self.layer_num][ids]
         res = slot >= 0
         miss = miss & ~res
@@ -966,10 +1145,22 @@ def _fused_step1(self, x, logits, B):
         t0 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x)).reshape(m, -1).to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t0
-        B["job"] = _job(self, xh, ids, sc, miss)
+        fast = fetch is not None and HYB.hostk_async and HYB.np_prepare
+        B["job"] = (xh, ids, sc, miss) if fast else _job(self, xh, ids, sc, miss)
     else:
         B["job"] = None
-    if fetch is not None:
+    if fetch is not None and HYB.hostk_async and HYB.np_prepare and B["job"] is not None:  # NumPy fast path
+        HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
+        xh, ids_np, sc_np, miss_np = B["job"]
+        t1 = time.perf_counter()
+        start = HYB.host_prepare_np(self.layer_num, xh, ids_np, sc_np, miss_np)
+        if start is not None:
+            B["job"] = start()
+        else:
+            j = _job(self, xh, ids_np, sc_np, miss_np)
+            B["job"] = HYB.cpu_pool.submit(lambda j=j: HYB.host_compute(*j))
+        HYB.st["t_prep"] = HYB.st.get("t_prep", 0.0) + time.perf_counter() - t1
+    elif fetch is not None:
         # the fetch writes are enqueued BEFORE the CPU experts start: with the int4 kernel streaming host DRAM, each
         # pinned write's enqueue took ~390 us instead of ~15 us (bench_pinx.py)
         HYB.fetch.stage(self.layer_num, *fetch, HYB.st)
@@ -1305,7 +1496,18 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     else:  # one host step per layer: routing + host experts, then a single device segment
         step1 = lambda: (_fused_step1(self, h_x, logits, B), _host_step2(self, B))  # noqa: E731
         step2 = None
-    step1() if not SEG.capturing else SEG.split(step1)
+    sock = SEG.capturing and HYB.sock
+    if sock:
+        if HYB.devcraft or not HYB.overlap or not HYB.fetch.direct:
+            raise ValueError("HYB_SOCKET needs the two-step host path with the direct fetch (HYB_DEVCRAFT=0)")
+        S = HYB.socks
+        ttnn.experimental.send_async_d2h(logits, S.lg)
+        ttnn.experimental.send_async_d2h(h_x, S.x)
+        for r in S.rows:
+            ttnn.experimental.recv_async_h2d(HYB.crafted_rm[mk], r)
+        SEG.post(lambda: _sock_step1(self, B, m))
+    else:
+        step1() if not SEG.capturing else SEG.split(step1)
     if HYB.fetch.on:  # the experts staged by step 1 into their LRU slots (and the sink back to zero)
         HYB.fetch.device_writes(self)
     sug, sdn = f._shared_tensors(self.up_gate, self.down)
@@ -1329,14 +1531,17 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         ttnn.deallocate(act)
         part = bb.out if mk == m else ttnn.slice(bb.out, [0, 0, 0, 0], [1, 1, m, int(bb.out.shape[-1])])
     ttnn.deallocate(crafted)
-    if step2 is not None:
+    if sock:
+        ttnn.experimental.recv_async_h2d(B["host_sock"], HYB.socks.part)
+        SEG.post(lambda: _sock_step2(self, B, m))
+    elif step2 is not None:
         step2() if not SEG.capturing else SEG.split(step2)
     if not SEG.capturing:  # in a trace these stay allocated: the host steps read them at replay
         ttnn.deallocate(logits)
         ttnn.deallocate(h_x)
         if dc_ids is not None:
             ttnn.deallocate(dc_ids)
-    host = ttnn.to_layout(B["host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
+    host = ttnn.to_layout(B["host_sock" if sock else "host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
         if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
             raise NotImplementedError(
@@ -1767,6 +1972,12 @@ def _host_step(self, x4, scores, ids, T, mode, B):
 
 
 def _host_step2(self, B):
+    t0 = time.perf_counter()
+    _host_step2_body(self, B)
+    HYB.st["t_s2"] = HYB.st.get("t_s2", 0.0) + time.perf_counter() - t0
+
+
+def _host_step2_body(self, B):
     job, B["job"] = B["job"], None
     if job is False:  # computed (and written) in _host_step
         return
