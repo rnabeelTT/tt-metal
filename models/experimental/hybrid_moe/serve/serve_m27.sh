@@ -60,6 +60,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_ROWS=$((${DK:-3} + 1)) -e HYB_THREADS=12 -e HYB_LIB=/hyblib/minimax_m27_int4_s152 \
   -e HYB_PLAN=/poc/runs/m27/plan_m27_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
   -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
+  -e HYB_WCACHE=${WCACHE:-/hyblib/wcache_m27} \
   -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 $SPEC_ENV $PF_ENV \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve MiniMaxAI/MiniMax-M2.7 --max-model-len $CTX \

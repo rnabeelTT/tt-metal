@@ -38,7 +38,7 @@ from models.demos.blackhole.qwen36.tt.gdn_decode.ops import (
 KERNEL_DIR = Path(__file__).parent / "kernels"
 NUM_CBS = 64
 # prep program CB ids (kernels/prep_compute.cpp)
-CB = dict(x=0, w=1, cs=2, ones=3, sq=4, r=5, xn=6, out=7, v=8, scr=9)
+CB = dict(x=0, w=1, cs=2, ones=3, sq=4, r=5, xn=6, out=7, v=8, scr=9, st=10)
 UNPACK_FP32 = ()  # every FP32 CB is an FPU operand (Default unpack)
 
 
@@ -58,9 +58,13 @@ class AttnDecodePrep:
     def __init__(
         self, mesh_device, num_heads, num_kv_heads, head_dim, rope_dim, max_batch=32, eps=1e-6, norm=True, gate=True
     ):
-        """norm=False: RoPE only (q / k normalized by the caller, e.g. MiniMax-M2's full-width QK norm); gate=False: no
-        gate item (ungated attention; the call returns gate None)."""
+        """norm=False: RoPE only (q / k normalized by the caller, e.g. MiniMax-M2's full-width QK norm); norm="full": the
+        full-width QK norm over all dies here, from the gathered partial sums of squares (QKStats + all_gather) and the
+        die's gamma slices (``prepare_full``); gate=False: no gate item (ungated attention; the call returns gate None).
+        """
+        self.full = norm == "full"
         self.norm, self.gate = bool(norm), bool(gate)
+        self.mode = 2 if self.full else int(self.norm)
         self.parts = 3 if self.gate else 2
         self.mesh = mesh_device
         self.NH, self.NKV, self.HD, self.rd = num_heads, num_kv_heads, head_dim, rope_dim
@@ -101,6 +105,26 @@ class AttnDecodePrep:
             **self._rep,
         )
 
+    def prepare_full(self, q_gamma, k_gamma):
+        """The full-width gammas [NH_total * HD] / [NKV_total * HD] (torch) -> each die's [2, 1, 32, HD] FP32 constant:
+        slice 0 row h = the die's q head h's gamma, slice 1 the same for k."""
+        nd = _ndev(self.mesh)
+        q = q_gamma.reshape(nd, self.NH, self.HD).float()
+        k = k_gamma.reshape(nd, self.NKV, self.HD).float()
+        w = torch.zeros(nd * 2, 1, TILE, self.HD)
+        for d in range(nd):
+            w[2 * d, 0, : self.NH] = q[d]
+            w[2 * d + 1, 0, : self.NKV] = k[d]
+        mapper = {"mesh_mapper": ttnn.ShardTensorToMesh(self.mesh, dim=0)} if nd > 1 else {}
+        return ttnn.from_torch(
+            w,
+            dtype=ttnn.float32,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            **mapper,
+        )
+
     def outputs(self, B, kv_memcfg=None, v_memcfg=None):
         """(q, k, v, gate) for width B: [1, B, heads, HD] bf16 TILE, freshly allocated (the caller frees them; persistent
         per-width buffers pinned enough L1, the k / v shards most, to clash with the 122B prefill matmul CBs). q DRAM
@@ -117,8 +141,12 @@ class AttnDecodePrep:
             mk(self.NH, ttnn.L1_MEMORY_CONFIG) if self.gate else None,
         )
 
-    def __call__(self, qkv, cos, sin, const, B, kv_memcfg=None, v_memcfg=None):
-        """v_memcfg: v's memory config when it differs from k's (e.g. a paged_fused_update_cache pair on disjoint cores)."""
+    def __call__(self, qkv, cos, sin, const, B, kv_memcfg=None, v_memcfg=None, stats=None, stats_parts=(0, 0)):
+        """v_memcfg: v's memory config when it differs from k's (e.g. a paged_fused_update_cache pair on disjoint cores).
+        norm="full": stats = the gathered [1, 1, 32, ND * P * 32] FP32 partial sums of squares, stats_parts = (Pq, P).
+        """
+        if self.full and stats is None:
+            raise ValueError("AttnDecodePrep(norm='full') needs the gathered statistics")
         q, k, v, g = self.outputs(B, kv_memcfg, v_memcfg)
         g_io = g if g is not None else q  # the writer's gate accessor (never written without a gate item)
         units = self.parts * B
@@ -140,6 +168,7 @@ class AttnDecodePrep:
             out=(bf, 2 * Ht),
             v=(bf, 2 * Ht),
             scr=(bf, -(-self.NH * Ht * 640 // 2048)),
+            st=(f32, 1),
         )  # 640-byte slot per (head, tile): prep_reader SLOT
         cbs = [_cb(cr, CB[n], dt, tb, c) for n, ((dt, tb), c) in sizes.items()]
         wq = qkv.shape[-1] // TILE  # tiles per qkv row
@@ -147,6 +176,10 @@ class AttnDecodePrep:
         for t in (qkv, cos, sin, const, self.ones):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         rd_ct.append(self.parts)
+        Pq, P = stats_parts
+        st_t = stats if stats is not None else qkv  # an unused accessor without the full norm
+        rd_ct += [self.mode, Pq, P, _ndev(self.mesh), CB["st"]]
+        rd_ct += ttnn.TensorAccessorArgs(st_t).get_compile_time_args()
         wr_ct = [Ht, CB["out"], CB["v"]]
         for t in (q, k, v, g_io):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
@@ -160,13 +193,17 @@ class AttnDecodePrep:
                 self.ones.buffer_address(),
                 s,
                 c,
+                st_t.buffer_address(),
             ]
             for s, c in work
         ]
         wr_rt = [
             [q.buffer_address(), k.buffer_address(), v.buffer_address(), g_io.buffer_address(), s, c] for s, c in work
         ]
-        cp_ct = [Ht, _bits(self.eps), _bits(1.0 / self.HD), self.parts, int(self.norm)]
+        nd = _ndev(self.mesh)
+        inv_q = 1.0 / (nd * self.NH * self.HD) if self.full else 1.0 / self.HD
+        inv_k = 1.0 / (nd * self.NKV * self.HD) if self.full else 0.0
+        cp_ct = [Ht, _bits(self.eps), _bits(inv_q), self.parts, self.mode, _bits(inv_k)]
         utd = [ttnn.UnpackToDestMode.Default] * NUM_CBS
         for n in UNPACK_FP32:
             utd[CB[n]] = ttnn.UnpackToDestMode.UnpackToDestFp32
@@ -186,7 +223,8 @@ class AttnDecodePrep:
             ),
         ]
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        ttnn.generic_op([qkv, cos, sin, const, self.ones, q, k, v, g_io], program)
+        io = [qkv, cos, sin, const, self.ones] + ([stats] if stats is not None else []) + [q, k, v, g_io]
+        ttnn.generic_op(io, program)
         return q, k, v, g
 
 

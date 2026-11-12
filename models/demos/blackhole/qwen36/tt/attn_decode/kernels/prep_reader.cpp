@@ -79,6 +79,17 @@ void kernel_main() {
     constexpr auto w_args = TensorAccessorArgs<sin_args.next_compile_time_args_offset()>();
     constexpr auto ones_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
     constexpr uint32_t PARTS = get_compile_time_arg_val(ones_args.next_compile_time_args_offset());
+    // NORM = 2 (full-width QK norm, MiniMax-M2): q / k items also get the user's partial sums of squares (row b, column
+    // 0 of the gathered [1, 1, 32, ND * P * 32] FP32 statistics: tiles d * P + i, i < Pq for q, i = Pq for k) in row 0
+    // of a stats tile (cb_st, zero elsewhere in that row); the (gamma) constant is read whole (rows = heads)
+    constexpr uint32_t A0 = ones_args.next_compile_time_args_offset() + 1;
+    constexpr uint32_t NORM = get_compile_time_arg_val(A0);
+    constexpr uint32_t Pq = get_compile_time_arg_val(A0 + 1);
+    constexpr uint32_t P = get_compile_time_arg_val(A0 + 2);
+    constexpr uint32_t ND = get_compile_time_arg_val(A0 + 3);
+    constexpr uint32_t cb_st = get_compile_time_arg_val(A0 + 4);
+    constexpr auto st_args = TensorAccessorArgs<A0 + 5>();
+    const uint32_t st_addr = get_arg_val<uint32_t>(7);
     if (count == 0) {
         return;
     }
@@ -91,11 +102,16 @@ void kernel_main() {
     // constants: issued now, pushed with the first item (its gather waits for every outstanding read)
     cb_reserve_back(cb_w, 2 * Ht);
     const uint32_t w = get_write_ptr(cb_w);
-    for (uint32_t t = 0; t < 2 * Ht; ++t) {  // row 0 only (the compute broadcasts row 0)
+    for (uint32_t t = 0; t < 2 * Ht; ++t) {  // row 0 only (the compute broadcasts row 0); NORM 2: whole tiles
+        if constexpr (NORM == 2) {
+            noc_async_read(s_w.get_noc_addr(t), w + t * F32_TILE, F32_TILE);
+            continue;
+        }
         for (uint32_t c = 0; c < 2; ++c) {
             noc_async_read(s_w.get_noc_addr(t, c * F32_FACE), w + t * F32_TILE + c * F32_FACE, F32_ROW);
         }
     }
+    const auto s_st = TensorAccessor(st_args, st_addr, F32_TILE);
     cb_reserve_back(cb_ones, 1);
     noc_async_read(s_ones.get_noc_addr(0), get_write_ptr(cb_ones), BF_TILE);
 
@@ -111,6 +127,28 @@ void kernel_main() {
             for (uint32_t t = 0; t < 2; ++t) {
                 noc_async_read(s_cos.get_noc_addr(b * 2 + t), cs + t * BF_TILE, BF_TILE);
                 noc_async_read(s_sin.get_noc_addr(b * 2 + t), cs + (2 + t) * BF_TILE, BF_TILE);
+            }
+        }
+        if constexpr (NORM == 2) {
+            if (part < 2) {
+                // 64-byte aligned reads of (row b, column 0) of each partial tile into scr, then the values (bit
+                // copies)
+                const uint32_t off = row_off(b & 31, 0, F32_FACE, F32_ROW), al = off & ~63u;
+                const uint32_t n = part == 0 ? ND * Pq : ND;
+                for (uint32_t i = 0; i < n; ++i) {
+                    constexpr uint32_t PQ = Pq ? Pq : 1;
+                    const uint32_t t = part == 0 ? (i / PQ) * P + i % PQ : i * P + Pq;
+                    noc_async_read(s_st.get_noc_addr(t, al), scr + i * 64, 64);
+                }
+                noc_async_read_barrier();
+                invalidate_l1_cache();
+                cb_reserve_back(cb_st, 1);
+                volatile tt_l1_ptr uint32_t* st = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_st));
+                for (uint32_t c = 0; c < 32; ++c) {  // row 0: face 0 columns 0..15, face 1 columns 16..31
+                    const uint32_t idx = (c >> 4) * (F32_FACE / 4) + (c & 15);
+                    st[idx] = c < n ? reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scr + c * 64 + off - al)[0] : 0u;
+                }
+                cb_push_back(cb_st, 1);
             }
         }
         cb_reserve_back(cb_x, Ht);

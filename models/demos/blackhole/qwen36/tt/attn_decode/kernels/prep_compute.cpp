@@ -30,7 +30,7 @@
 #include "tools/profiler/kernel_profiler.hpp"
 
 namespace {
-constexpr uint32_t cb_x = 0, cb_w = 1, cb_cs = 2, cb_ones = 3, cb_sq = 4, cb_r = 5, cb_xn = 6, cb_out = 7;
+constexpr uint32_t cb_x = 0, cb_w = 1, cb_cs = 2, cb_ones = 3, cb_sq = 4, cb_r = 5, cb_xn = 6, cb_out = 7, cb_st = 10;
 
 ALWI void copy_from(uint32_t cb) {
     reconfig_data_format_srca(cb);
@@ -142,6 +142,84 @@ void norm_rope(uint32_t wofs, uint32_t eps_bits, uint32_t inv_d_bits) {
     ccs.pop_front(4);
 }
 
+// NORM = 2 (full-width QK norm across the dies, MiniMax-M2): r = rsqrt(sum / D + eps) from the user's partial sums of
+// squares (row 0 of cb_st, summed by a matmul with the all-ones tile), then y = (x r (row broadcast of row 0)) gamma
+// (whole tiles, rows = heads: the die's slice of the full-width weight), then the RoPE as above.
+template <uint32_t Ht>
+void full_norm_rope(uint32_t wofs, uint32_t eps_bits, uint32_t inv_d_bits) {
+    CircularBuffer cx(cb_x), cst(cb_st), cr(cb_r), cxn(cb_xn), co(cb_out), ccs(cb_cs);
+    cst.wait_front(1);
+    cr.reserve_back(1);
+    tile_regs_acquire();
+    reconfig_data_format(cb_ones, cb_st);  // matmul: in1 -> srcA, in0 -> srcB
+    matmul_init(cb_st, cb_ones, 0);
+    matmul_tiles(cb_st, cb_ones, 0, 0, 0);
+    binop_with_scalar_tile_init();
+    mul_unary_tile(0, inv_d_bits);
+    add_unary_tile(0, eps_bits);
+    rsqrt_tile_init<false>();
+    rsqrt_tile<false, false>(0);
+    tile_regs_commit();
+    tile_regs_wait();
+    pack_reconfig_data_format(cb_r);
+    pack_tile(0, cb_r);
+    tile_regs_release();
+    cr.push_back(1);
+    cst.pop_front(1);
+    cr.wait_front(1);
+    cx.wait_front(Ht);
+    co.reserve_back(Ht);
+    cxn.reserve_back(2);
+    for (uint32_t j = 0; j < Ht; j++) {
+        if (j == 0) {
+            pack_reconfig_data_format(cb_xn);
+        } else if (j == 2) {
+            pack_reconfig_data_format(cb_out);
+        }
+        tile_regs_acquire();
+        reconfig_data_format(cb_x, cb_r);
+        mul_bcast_rows_init(cb_x, cb_r);
+        mul_tiles_bcast_rows(cb_x, cb_r, j, 0, 0);
+        reconfig_data_format_srcb(cb_w);
+        mul_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_w);
+        mul_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(cb_w, wofs + j, 0);
+        tile_regs_commit();
+        tile_regs_wait();
+        if (j < 2) {
+            pack_tile<true>(0, cb_xn, j);
+        } else {
+            pack_tile<true>(0, cb_out, j);
+        }
+        tile_regs_release();
+    }
+    cxn.push_back(2);
+    cr.pop_front(1);
+    cx.pop_front(Ht);
+    cxn.wait_front(2);
+    ccs.wait_front(4);  // cos0 cos1 sin0 sin1
+    reconfig_data_format(cb_xn, cb_cs);
+    for (uint32_t t = 0; t < 2; t++) {
+        tile_regs_acquire();
+        mul_bcast_rows_init(cb_xn, cb_cs);
+        mul_tiles_bcast_rows(cb_xn, cb_cs, t, t, 0);          // x_t cos_t
+        mul_tiles_bcast_rows(cb_xn, cb_cs, 1 - t, 2 + t, 1);  // x_{1-t} sin_t
+        if (t == 0) {
+            sub_binary_tile_init();
+            sub_binary_tile(0, 1, 0);
+        } else {
+            add_binary_tile_init();
+            add_binary_tile(0, 1, 0);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile<true>(0, cb_out, t);
+        tile_regs_release();
+    }
+    co.push_back(Ht);
+    cxn.pop_front(2);
+    ccs.pop_front(4);
+}
+
 // NORM = 0: the item's tiles copied (tiles 0 / 1 FP32 to cb_xn for the RoPE, the rest bf16 to cb_out), then the RoPE
 template <uint32_t Ht>
 void rope_only() {
@@ -228,6 +306,7 @@ void kernel_main() {
     constexpr uint32_t inv_d_bits = get_compile_time_arg_val(2);
     constexpr uint32_t PARTS = get_compile_time_arg_val(3);
     constexpr uint32_t NORM = get_compile_time_arg_val(4);
+    constexpr uint32_t inv_dk_bits = get_compile_time_arg_val(5);  // NORM 2: 1 / full k width (inv_d_bits: q's)
     const uint32_t start = get_arg_val<uint32_t>(0);
     const uint32_t count = get_arg_val<uint32_t>(1);
     if (count == 0) {
@@ -242,6 +321,8 @@ void kernel_main() {
         const uint32_t part = u % PARTS;
         if (part == 2) {
             gate<Ht>();
+        } else if (NORM == 2) {
+            full_norm_rope<Ht>(part * Ht, eps_bits, part == 0 ? inv_d_bits : inv_dk_bits);
         } else if (NORM) {
             norm_rope<Ht>(part * Ht, eps_bits, inv_d_bits);
         } else {

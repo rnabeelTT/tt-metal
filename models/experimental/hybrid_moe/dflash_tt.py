@@ -23,8 +23,11 @@ from transformers import Qwen3Config
 from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 import ttnn
+from models.demos.blackhole.qwen36.tt.attn_decode.kvrows import kv_rows_update
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
+# DFLASH_KVROWS (default 1): the drafter's context / block rows written in one multi-row program each
+_KVROWS = os.environ.get("DFLASH_KVROWS", "1") == "1"
 
 
 class DFlashDrafterTT:
@@ -535,14 +538,19 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
     def _rope_u(self, x, cos, sin):  # x [1, n, NH, HD], cos / sin [1, n, 1, HD]
         return self._rope(x, cos, sin)
 
-    def _write_rows(self, L, k, v, n, idx_rows):
+    def _write_rows(self, L, k, v, n, idx_rows, idx=None):
         if self.nh < ttnn.TILE_SIZE:  # the update kernel takes one tile of heads per user
             k = ttnn.pad(k, [1, n, ttnn.TILE_SIZE, self.HD], [0, 0, 0, 0], 0.0)
             v = ttnn.pad(v, [1, n, ttnn.TILE_SIZE, self.HD], [0, 0, 0, 0], 0.0)
         ks = ttnn.to_memory_config(k, self.shard[n])
         # K and V of a row in one paged_fused_update_cache (its inputs on disjoint cores: V on the next core row)
         vs = ttnn.to_memory_config(v, self.shard_v[n])
-        for j in range(n):
+        if idx is not None and _KVROWS:  # all n rows in one program (attn_decode/kvrows.py), the same cache bytes
+            kv_rows_update(L["K"], ks, L["V"], vs, idx, self.pt[n])
+            n_calls = 0
+        else:
+            n_calls = n
+        for j in range(n_calls):
             ttnn.experimental.paged_fused_update_cache(
                 L["K"], ks, L["V"], vs, update_idxs_tensor=idx_rows[j], page_table=self.pt[n]
             )
@@ -556,20 +564,20 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
     def pass_body(self):
         n, bs, scale = self.rows, self.bs, self.HD**-0.5
         c = self._ctx(self.c_taps[n])
-        c_rows, b_rows = self._idx_rows(self.c_idx, n), self._idx_rows(self.b_idx, bs)
+        c_rows, b_rows = (None, None) if _KVROWS else (self._idx_rows(self.c_idx, n), self._idx_rows(self.b_idx, bs))
         x = self.d_x
         for L in self.layers:
             self.L_cur = L
             kc, vc = self._proj(c, L, n, "kv")
             kc = self._rope_u(self._rms(self._users(kc, n), L["k_norm"]), self.c_cos, self.c_sin)
             vc = self._users(vc, n)
-            self._write_rows(L, kc, vc, n, c_rows)
+            self._write_rows(L, kc, vc, n, c_rows, self.c_idx)
             h = self._rms(x, L["in_norm"])
             q, kb, vb = self._proj(h, L, bs, "qkv")
             q = self._rope_u(self._rms(self._users(q, bs), L["q_norm"]), self.d_cos, self.d_sin)
             kb = self._rope_u(self._rms(self._users(kb, bs), L["k_norm"]), self.d_cos, self.d_sin)
             vb = self._users(vb, bs)
-            self._write_rows(L, kb, vb, bs, b_rows)
+            self._write_rows(L, kb, vb, bs, b_rows, self.b_idx)
             o = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
                 L["K"],

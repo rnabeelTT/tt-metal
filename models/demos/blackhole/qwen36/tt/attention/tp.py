@@ -35,6 +35,8 @@ from models.tt_transformers.tt.ccl import tt_all_reduce
 #     0 selects the op's streaming compute kernel (sdpa_program_factory: use_streaming_compute = !fp32_dest_acc_en; the
 #     ttnn default when no compute config is passed) with bf16 intermediates and 8-tile dest subblocks.
 _SDPA_PF_LOGGED = False
+# QWEN35_KVROWS (default 1): a rows-mode step writes all its rows' K / V in one multi-row program (attn_decode/kvrows.py)
+_KVROWS = os.environ.get("QWEN35_KVROWS", "1") == "1"
 _SDPA_FIDELITIES = {
     "lofi": ttnn.MathFidelity.LoFi,
     "hifi2": ttnn.MathFidelity.HiFi2,
@@ -223,6 +225,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
         # gamma is the matching slice, plain (no +1), in the distributed norm's ROW_MAJOR [1, 1, W/32, 32] layout
         for name in ("q_norm", "k_norm"):
             g = state_dict[name + ".weight"].to(torch.bfloat16)
+            tw[name + "_host"] = g  # host copy: the fused rows-mode norm's per-die constant (QWEN35_QKNORM_FUSED)
             tw[name + "_full"] = ttnn.as_tensor(
                 g.reshape(1, 1, -1, tpc.TILE_SIZE),
                 dtype=ttnn.bfloat16,
@@ -318,6 +321,7 @@ class TPAttention:
         # k / v shards in one prep generic_op (norm off: q / k come normalized from _full_qk_norm) and the head concat in
         # one post op (an all-ones gate), instead of ~30 slice / reshape / RoPE / pad / reshard ops (QWEN35_ROWS_ATTN_OPS)
         self._rows_ops = None
+        self._qk_fused = None
         if (
             os.environ.get("QWEN35_ROWS_ATTN_OPS", "1") == "1"
             and self._qk_norm_full
@@ -334,6 +338,26 @@ class TPAttention:
 
         cache = self.args.__dict__.setdefault("_qwen36_rows_attn_ops", {})
         key = (id(self.mesh), self.NH, self.NKV, self.HD)
+        # QWEN35_QKNORM_FUSED=1 (EXPERIMENTAL, default off: fails the decode quality A/B): the full-width QK norm
+        # inside the prep op (partial sums of squares by QKStats, one all_gather, rsqrt / gamma in the prep) instead of
+        # the ~13-program distributed RMSNorm chain (_full_qk_norm). One eager layer matches the stock path (q / k PCC
+        # 0.99999, dbg_qkfused.py), but the full traced model's forced-decode log-probs move by mean KL 0.15 (NLL 0.456
+        # -> 0.546, runs/m27/lp_off vs lp_fuse; the stock path is bit-deterministic run to run). Cause not found.
+        self._qk_fused = None
+        if os.environ.get("QWEN35_QKNORM_FUSED", "0") == "1" and "q_norm_host" in self.tw:
+            from models.demos.blackhole.qwen36.tt.attn_decode.ops import AttnDecodePrep
+            from models.demos.blackhole.qwen36.tt.attn_decode.qkstats import QKStats
+
+            fkey = ("full",) + key
+            if fkey not in cache:
+                cache[fkey] = (
+                    AttnDecodePrep(
+                        self.mesh, self.NH, self.NKV, self.HD, self.rope_dim, max_batch=8, norm="full", gate=False
+                    ),
+                    QKStats(self.mesh, self.NH * self.HD, self.NKV * self.HD),
+                )
+            fprep, stats = cache[fkey]
+            self._qk_fused = (fprep, stats, fprep.prepare_full(self.tw["q_norm_host"], self.tw["k_norm_host"]))
         if key not in cache:
             prep = AttnDecodePrep(
                 self.mesh, self.NH, self.NKV, self.HD, self.rope_dim, max_batch=8, norm=False, gate=False
@@ -362,12 +386,38 @@ class TPAttention:
         B = x.shape[-2]
         if len(x.shape) == 3:
             x = ttnn.reshape(x, (1, 1, x.shape[-2], x.shape[-1]))
-        qkv, _, _ = self._qkv(x)  # [q | k | v] per device, q / k normalized over the full width
-        q, k, v, _ = prep(qkv, cos_tt, sin_tt, const, B, self._kv_shard_cfg(B), self._kv_shard_cfg_v(B))
+        if self._qk_fused is not None:  # raw [q | k | v]; the norm happens in the prep (QWEN35_QKNORM_FUSED)
+            fprep, qkstats, fconst = self._qk_fused
+            qkv, _, _ = self._qkv(x, qk_norm=False)
+            st = qkstats(qkv)
+            gst = ttnn.all_gather(
+                st, dim=-1, num_links=1, topology=self.args.ccl_topology(), memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
+            ttnn.deallocate(st)
+            q, k, v, _ = fprep(
+                qkv,
+                cos_tt,
+                sin_tt,
+                fconst,
+                B,
+                self._kv_shard_cfg(B),
+                self._kv_shard_cfg_v(B),
+                stats=gst,
+                stats_parts=qkstats.parts,
+            )
+            ttnn.deallocate(gst)
+        else:
+            qkv, _, _ = self._qkv(x)  # [q | k | v] per device, q / k normalized over the full width
+            q, k, v, _ = prep(qkv, cos_tt, sin_tt, const, B, self._kv_shard_cfg(B), self._kv_shard_cfg_v(B))
         ttnn.deallocate(qkv)
         rows = getattr(self, "rows_pos_rows", None)
         masks = self.rows_pos_masks
-        for b in range(B):
+        one = rows is None and masks is not None and _KVROWS
+        if one:  # every row's K / V in one program (attn_decode/kvrows.py): the same cache bytes, ~5 vs ~21 us
+            from models.demos.blackhole.qwen36.tt.attn_decode.kvrows import kv_rows_update
+
+            kv_rows_update(self.paged_k, k, self.paged_v, v, masks, page_table)
+        for b in range(0 if one else B):
             pos_b = rows[b] if rows is not None else ttnn.reshape(ttnn.slice(masks, (b, 0), (b + 1, B)), (B,))
             ttnn.experimental.paged_fused_update_cache(
                 self.paged_k, k, self.paged_v, v, update_idxs_tensor=pos_b, page_table=page_table
@@ -538,8 +588,9 @@ class TPAttention:
         self.paged_v = v_cache
         self.use_paged = True
 
-    def _qkv(self, x):
-        """Q+gate/K/V projections → (qg, kp, vp). Fused path: one matmul, then slice."""
+    def _qkv(self, x, qk_norm=True):
+        """Q+gate/K/V projections → (qg, kp, vp). Fused path: one matmul, then slice. qk_norm=False: the full-width
+        QK norm is left to the caller (QWEN35_QKNORM_FUSED)."""
         tw = self.tw
         if not self._fused_qkv:
             return (
@@ -578,7 +629,7 @@ class TPAttention:
             qkv_b = ttnn.add(qkv, self._qkv_bias, memory_config=qkv.memory_config())
             ttnn.deallocate(qkv)
             qkv = qkv_b
-        if self._qk_norm_full:
+        if self._qk_norm_full and qk_norm:
             qkv = self._full_qk_norm(qkv)
         if not self._gated:
             # [q|k|v] per device, no gate block: the whole output is the contiguous q|k|v block (_make_heads*: vp=None
