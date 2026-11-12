@@ -196,8 +196,16 @@ class StreamingStateDict(Mapping):
         return list(self._layer_keys[layer_idx])
 
     def layer(self, layer_idx: int) -> dict[str, torch.Tensor]:
-        """Materialize one decoder layer's tensors (internal keys, ``layers.N.`` prefix kept)."""
-        return {key: self[key] for key in self._layer_keys[layer_idx]}
+        """One decoder layer's tensors (internal keys, ``layers.N.`` prefix kept), each loaded on first access
+        (LazyState): a tensor the build never reads - routed experts supplied from a device-image cache - is never
+        read from the checkpoint."""
+        import os
+
+        if os.environ.get("QWEN35_LAZY_STATE", "1") != "1":
+            return {key: self[key] for key in self._layer_keys[layer_idx]}
+        from models.demos.blackhole.qwen36.utils.substate import LazyState
+
+        return LazyState(self.__getitem__, self._layer_keys[layer_idx])
 
     def shard_names(self) -> set[str]:
         return set(self._weight_map.values())
