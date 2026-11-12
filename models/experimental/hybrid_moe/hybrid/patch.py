@@ -100,6 +100,10 @@ class HybridState:
         self.devcraft = os.environ.get("HYB_DEVCRAFT", "0") == "1"
         self.single_via_rows = os.environ.get("HYB_SINGLE_ROWS", "1") == "1"
         self.filler = float(os.environ.get("HYB_FILLER", "-1000"))  # crafted logit of unselected slots
+        # HYB_CRAFT_SHIFT=1: each crafted row's slot logits (log routing weights) shifted so the row's largest is 0
+        # before the bf16 upload: the kernels' top-k softmax is shift-invariant, and bf16 keeps ~8 bits of relative
+        # precision, so log weights near 0 lose far less absolute precision than ln(0.1) = -2.3 (+-0.016: ~1.6% weight)
+        self.craft_shift = os.environ.get("HYB_CRAFT_SHIFT", "0") == "1"
         self.rows_max = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "1") or 1)  # fused multi-row decode width
         self.fused = os.environ.get("HYB_FUSED", "1") == "1"
         self.skip = float(os.environ.get("HYB_SKIP", "0"))  # missed experts below this routing weight are not computed
@@ -115,6 +119,7 @@ class HybridState:
             raise ValueError(f"HYB_PLAN_WEIGHT={self.plan_weight}: expected count or mass")
         self.plan_path = os.environ.get("HYB_PLAN", "")
         self.lib_dir = os.environ.get("HYB_LIB", "")
+        self._bf16_cache = OrderedDict()  # (layer, expert) -> bf16 (gate|up, down), without an int4 library
         self.sd = None
         self.slot_of = {}  # layer -> np.int32[E] static slot (-1 = none)
         self.dyn_of = {}  # layer -> np.int32[E] dynamic slot (-1 = none)
@@ -203,6 +208,11 @@ class HybridState:
         self.pf_topk = int(os.environ.get("HYB_PF_TOPK", "8"))
         self.pf_maxmb = float(os.environ.get("HYB_PF_MAXMB", "24"))
         self.gate_wT = {}  # layer -> [E, H] bf16 (uint16) router weight (HYB_PREFETCH)
+        # HYB_ELASTIC_DEMOTE (hybrid/elastic.py): layers whose feed-forward can be rebuilt at runtime as full or hybrid;
+        # their decoder-layer builder arguments are kept (ff_build), the switcher is set by DFlashServing.warm
+        self.elastic_demote = {int(v) for v in os.environ.get("HYB_ELASTIC_DEMOTE", "").split(",") if v.strip()}
+        self.ff_build = {}  # layer -> (decoder layer, mesh, args, cache path, tt_ccl)
+        self.elastic = None
         self.pf_pred = {}  # layer -> [E] int32: 1 = predicted host expert (written by the prefetch threads)
         self.pf_next = None  # (next layer, MoE input [m, H] fp32) to predict + touch after this layer's partial
         self.pf_keep = None  # the arrays the running prefetch job reads
@@ -335,8 +345,8 @@ class HybridState:
         into process RAM: through the page cache the 225 GiB library is mostly evicted by the checkpoint load, and a
         miss then reads its expert from NVMe. row[e] = the expert's row in the copies (-1: static, never on the host).
         """
-        if layer in self.full_layers:  # every expert on the device: no host rows (the library may omit the layer)
-            return {"row": np.full(self.E, -1, dtype=np.int64)}
+        if layer in self.full_layers or not self.lib_dir:  # every expert on the device, or no int4 library (HYB_LIB
+            return {"row": np.full(self.E, -1, dtype=np.int64)}  # unset: misses in bf16 from the checkpoint): no rows
         t0 = time.perf_counter()
         d = torch.load(os.path.join(self.lib_dir, f"layer_{layer}.pt"), mmap=True, weights_only=True)
         # a library may hold a subset of the experts (build_int4_library.py HYB_LIB_COLD): file row of each expert id
@@ -539,8 +549,16 @@ class HybridState:
                 else:
                     y = _int4_expert(xr, lib["gu_p"][r], lib["gu_sz"][r], lib["dn_p"][r], lib["dn_sz"][r], gs)
             else:
-                with self.lock:
-                    gu, dn = self.sd.expert(layer, e)
+                gu_dn = self._bf16_cache.get((layer, e))
+                if gu_dn is None:  # no int4 library: bf16 from the checkpoint (FP8 dequant), recent experts kept
+                    with self.lock:
+                        gu_dn = self.sd.expert(layer, e)
+                    self._bf16_cache[(layer, e)] = gu_dn
+                    while len(self._bf16_cache) > 512:
+                        self._bf16_cache.popitem(last=False)
+                else:
+                    self._bf16_cache.move_to_end((layer, e))
+                gu, dn = gu_dn
                 n = dn.shape[1]
                 h = xr @ gu.T
                 a = (torch.nn.functional.silu(h[:, :n].float()) * h[:, n:].float()).to(torch.bfloat16)
@@ -762,6 +780,15 @@ def install():
             self._meta = (tp, Nl, mesh_device)
 
     od.Qwen35MoEOptimized.__init__ = init
+    if HYB.elastic_demote:
+        orig_bff = od.Qwen35MoeOptimizedDecoderLayer._build_feed_forward
+
+        def build_ff(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
+            if layer_num in HYB.elastic_demote:  # not the layer's state dict: it holds the loaded weights
+                HYB.ff_build[layer_num] = (self, mesh_device, args, tensor_cache_path, tt_ccl)
+            return orig_bff(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl)
+
+        od.Qwen35MoeOptimizedDecoderLayer._build_feed_forward = build_ff
 
     from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
 
@@ -1148,6 +1175,8 @@ def _sock_rows(self, S, L, lg, ids, sc, m):
     mk = _kernel_rows(m)
     row = np.empty((1, 1, m, C + TILE_W), dtype=np.float32)
     hostk.craft(ids, sc.astype(np.float32, copy=False), HYB.slot_of[L], C, HYB.filler, lg, E, row)
+    if HYB.craft_shift:
+        _shift_rows(row, C)
     r = torch.from_numpy(row.reshape(m, -1))
     if mk > m:
         r = r.repeat_interleave(mk // m, dim=0)
@@ -1178,6 +1207,13 @@ def _sock_step2(self, B, m):
     if late is not None:
         HYB.fetch.stage(late[0], *late[1], HYB.st)
     HYB.st["t_s2"] = HYB.st.get("t_s2", 0.0) + time.perf_counter() - t0
+
+
+def _shift_rows(row, C):
+    """HYB_CRAFT_SHIFT: the slot columns [0, C) of crafted rows [1, 1, m, C + 32] shifted so each row's largest is 0
+    (in place; column C, the shared-expert gate logit, is not part of the slot softmax and stays)."""
+    sl = row[..., :C]
+    sl -= sl.max(axis=-1, keepdims=True)
 
 
 def _kernel_rows(m):
@@ -1324,6 +1360,8 @@ def _upload_row(self, B, lg, ids, sc, slot, res, m):
         miss_mass = (sc * ~res).sum(1)  # computed and skipped misses: their routing mass goes to the zero sink
         has = miss_mass > 1e-6
         row[0, 0, has, C - 1] = np.log(miss_mass[has])
+    if HYB.craft_shift:
+        _shift_rows(row, C)
     HYB.st["t_craft"] += time.perf_counter() - t0
     t0 = time.perf_counter()
     mk = _kernel_rows(m)

@@ -137,16 +137,9 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 f"{self.kv_dtype} layers={len(self.model.layers)} - waiting for bind_kv_cache / warm_programs / capture_traces"
             )
             return
-        num_blocks = math.ceil((self.blocks_per_seq * self.max_batch_size + 1) / 32) * 32
-        self.kv_scratch_block = self.blocks_per_seq * self.max_batch_size
-        self.model._kv_scratch_block = self.kv_scratch_block
-        self.kv_cache_shape = (num_blocks, int(self.args.n_local_kv_heads), self.block_size, int(self.args.head_dim))
-        self.kv_cache = self.model.allocate_kv_caches(
-            self.kv_cache_shape, self.kv_dtype, batch_size=self.max_batch_size
-        )
-        self.page_table = torch.arange(self.blocks_per_seq * self.max_batch_size, dtype=torch.int32).reshape(
-            self.max_batch_size, self.blocks_per_seq
-        )
+        # QWEN35_KV_TOKENS (single user): a KV pool for fewer tokens than max_seq_len (an elastic profile grows it at
+        # runtime with resize_kv: hybrid_moe/hybrid/elastic.py); the page table is the pool's width
+        self.resize_kv(int(os.environ.get("QWEN35_KV_TOKENS", "0") or 0) or self.max_seq_len)
         logger.info(
             f"Qwen35MoeGenerator: B={self.max_batch_size} max_seq_len={self.max_seq_len} kv {self.kv_cache_shape} {self.kv_dtype} "
             f"({len(self.kv_cache)} attention layers), layers={len(self.model.layers)}"
@@ -387,6 +380,71 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             ttnn.deallocate(scratch_tok)
         except Exception:
             pass
+
+    def resize_kv(self, kv_tokens, keep=False):
+        """(Re)allocate the generator-owned paged KV pool for ``kv_tokens`` tokens per user (rounded up to blocks, at most
+        max_seq_len). The page table has the max_seq_len width: user u owns pool blocks [u * n, (u + 1) * n) in order,
+        and its columns past the pool point at the reserved scratch block (positions past the pool are never written or
+        read: the caller grows the pool before a request needs them); a single-user pool smaller than max_seq_len gets
+        a table of the pool's width (a new tensor: re-read gen.page_table after a resize). keep=True (growing a single-user pool only): every
+        block of the old pool keeps its id and contents (each layer's K / V concatenated with zero blocks, one layer at
+        a time); otherwise the old contents are dropped. No trace may hold the old buffers (release them first). Returns
+        the pool's token capacity per user."""
+        B, W = self.max_batch_size, self.blocks_per_seq
+        n = min(W, math.ceil(int(kv_tokens) / self.block_size))
+        if n < W and B != 1:
+            raise ValueError(
+                f"a KV pool smaller than max_seq_len ({kv_tokens} < {self.max_seq_len}) is single-user, B={B}"
+            )
+        pool = n * B
+        num_blocks = math.ceil((pool + 1) / 32) * 32
+        shape = (num_blocks, int(self.args.n_local_kv_heads), self.block_size, int(self.args.head_dim))
+        old = getattr(self, "kv_cache", None)
+        if keep and old is not None:
+            if B != 1 or num_blocks < int(self.kv_cache_shape[0]):
+                raise ValueError(
+                    f"resize_kv(keep=True) grows a single-user pool: {self.kv_cache_shape} -> {shape}, B={B}"
+                )
+            extra = num_blocks - int(self.kv_cache_shape[0])
+            new = []
+            for k_old, v_old in old:
+                pair = []
+                for t in (k_old, v_old):
+                    if extra:
+                        z = ttnn.zeros(
+                            (extra,) + shape[1:], dtype=t.dtype, layout=ttnn.TILE_LAYOUT, device=self.model.mesh_device
+                        )
+                        g = ttnn.concat([t, z], dim=0, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                        ttnn.deallocate(z)
+                        ttnn.deallocate(t)
+                        t = g
+                    pair.append(t)
+                new.append(pair)
+            self.model.set_paged_kv_caches(new)
+            self.kv_cache = new
+        else:
+            if old is not None:
+                self.model.free_kv_caches()
+                self.kv_cache = None
+            self.kv_cache = self.model.allocate_kv_caches(shape, self.kv_dtype, batch_size=self.max_batch_size)
+        self.kv_cache_shape = shape
+        self.kv_scratch_block = pool
+        self.model._kv_scratch_block = self.kv_scratch_block
+        # a pool smaller than max_seq_len narrows the table to the pool (the paged K / V update requires the table no
+        # wider than the cache's blocks); a width change drops the prefill bucket inputs sized for the old one
+        Wp = W if n >= W else n
+        pt = torch.full((B, Wp), self.kv_scratch_block, dtype=torch.int32)
+        for u in range(B):
+            pt[u, :n] = torch.arange(u * n, (u + 1) * n, dtype=torch.int32)
+        if getattr(self, "page_table", None) is not None and tuple(self.page_table.shape) == (B, Wp):
+            self.page_table.copy_(pt)  # in place: callers may hold the table (rows sliced from it are views)
+        else:
+            if getattr(self, "page_table", None) is not None:
+                self.model._bucket_max_blocks = None
+                self.model.__dict__.pop(getattr(self.model, "_BUCKET_INPUTS_ATTR", "_bucket_inputs_store"), None)
+            self.page_table = pt
+        self.kv_tokens = n * self.block_size
+        return self.kv_tokens
 
     # --- vLLM serving mode (external KV): the adapter drives these from the plugin's warm-up hooks -------------------
     def bind_kv_cache(self, kv_cache, num_blocks, page_table_width):

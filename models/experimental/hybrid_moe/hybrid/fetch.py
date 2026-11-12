@@ -80,6 +80,12 @@ class FetchCache:
         if self.replan_n and (not self.direct or self.async_on):
             raise ValueError("HYB_REPLAN needs the synchronous direct fetch (HYB_FETCH_DIRECT=1, HYB_FETCH_ASYNC=0)")
         self.store = {}  # layer -> (region id, {expert: store index}) victims' device bytes (pinned)
+        # HYB_WCACHE: a layer's pinned region (raw device bytes of its missable experts) cached as one file, read
+        # straight into the region on later builds / elastic demotions instead of loading and converting the copies
+        self.pin_cache = os.environ.get("HYB_WCACHE", "")
+        self.raw_files = {}  # layer -> (cached region file, experts) found by load_host, pinned by finalize
+        v = os.environ.get("HYB_FETCH_VERIFY", "")
+        self.verify_layer = int(v) if v else None  # debug: read back one layer's LRU slots at commits (_verify)
         self.nohost = {}  # layer -> experts off the device with no host int4 row (always fetched, never on the CPU)
 
     @property
@@ -97,10 +103,80 @@ class FetchCache:
         return [int(i) for i in static_ids[:S]] + [-1] * self.D + [-1]
 
     def load_host(self, layer, experts):
-        """The device-format copies of a layer's missable experts (host RAM; read once at build)."""
+        """The device-format copies of a layer's missable experts (host RAM; read once at build). A layer whose copies
+        are already pinned (an earlier elastic demotion) is not read again."""
+        if layer in self.raw:
+            return
+        path = self._pin_path(layer, experts)
+        if path is not None and os.path.exists(path):  # their pinned bytes are cached: read straight into the region
+            self.raw_files[layer] = (path, sorted(int(e) for e in experts))
+            return
         for e in experts:
             p = os.path.join(self.dir, f"{layer}_{e}")
             self.host[(layer, e)] = (ttnn.load_tensor(p + "_gu.tensorbin"), ttnn.load_tensor(p + "_dn.tensorbin"))
+
+    def _pin_path(self, layer, experts):
+        if not (self.pin_cache and self.pinx_on and self.shapes is not None):
+            return None
+        import hashlib
+        import json
+
+        gsh, dsh, gdt, ddt, mesh = self.shapes
+        key = json.dumps(
+            [
+                1,
+                int(layer),
+                sorted(int(e) for e in experts),
+                gsh,
+                dsh,
+                str(gdt),
+                str(ddt),
+                len(mesh.get_device_ids()),
+                os.path.abspath(self.dir),
+            ]
+        )
+        return os.path.join(self.pin_cache, f"pin_L{int(layer):02d}_{hashlib.sha1(key.encode()).hexdigest()[:16]}.raw")
+
+    def _pin_layers(self, layers, conv):
+        """Pinned regions of the given layers' device-format experts (finalize / finalize_more): from the region cache
+        file when load_host found one, else each copy written to the staging tensors and read back raw (then cached)."""
+        px, tp = self.px, self.px.tp
+        (dg, ng), (dd, nd) = px.dst(conv[0]), px.dst(conv[1])
+        n_cached = 0
+        for L in sorted(layers):
+            if L in self.raw:
+                continue
+            cached = self.raw_files.pop(L, None)
+            if cached is not None:
+                path, experts = cached
+                size = len(experts) * tp * (ng + nd)
+                if os.path.getsize(path) != size:
+                    raise RuntimeError(f"pinned-region cache {path}: {os.path.getsize(path)} bytes, expected {size}")
+                rid, buf = px.region(size)
+                with open(path, "rb", buffering=0) as f:
+                    got = f.readinto(memoryview(buf)[:size])
+                if got != size:
+                    raise RuntimeError(f"pinned-region cache {path}: short read {got} of {size}")
+                n_cached += 1
+            else:
+                experts = sorted(e for (l2, e) in self.host if l2 == L)
+                size = len(experts) * tp * (ng + nd)
+                rid, buf = px.region(size)
+                for i, e in enumerate(experts):
+                    gu, dn = self.host.pop((L, e))
+                    base = i * tp * (ng + nd)
+                    ttnn.copy_host_to_device_tensor(gu, conv[0])
+                    px.read(dg, rid, [base + d * ng for d in range(tp)])
+                    ttnn.copy_host_to_device_tensor(dn, conv[1])
+                    px.read(dd, rid, [base + tp * ng + d * nd for d in range(tp)])
+                path = self._pin_path(L, experts)
+                if path is not None and experts:
+                    tmp = path + ".tmp"
+                    with open(tmp, "wb", buffering=0) as f:
+                        f.write(memoryview(buf)[:size])
+                    os.replace(tmp, path)
+            self.raw[L] = (rid, {e: i for i, e in enumerate(experts)}, ng, nd)
+        return n_cached
 
     def note_shapes(self, mod):
         if self.shapes is None:
@@ -137,18 +213,8 @@ class FetchCache:
         )
         (dg, ng), (dd, nd) = px.dst(conv_gu), px.dst(conv_dn)
         t0 = time.perf_counter()
-        layers = sorted({L for L, _ in self.host})
-        for L in layers:
-            experts = sorted(e for (l2, e) in self.host if l2 == L)
-            rid, _ = px.region(len(experts) * tp * (ng + nd))
-            for i, e in enumerate(experts):
-                gu, dn = self.host.pop((L, e))
-                base = i * tp * (ng + nd)
-                ttnn.copy_host_to_device_tensor(gu, conv_gu)
-                px.read(dg, rid, [base + d * ng for d in range(tp)])
-                ttnn.copy_host_to_device_tensor(dn, conv_dn)
-                px.read(dd, rid, [base + tp * ng + d * nd for d in range(tp)])
-            self.raw[L] = (rid, {e: i for i, e in enumerate(experts)}, ng, nd)
+        layers = sorted({L for L, _ in self.host} | set(self.raw_files))
+        n_cached = self._pin_layers(layers, (conv_gu, conv_dn))
         ttnn.deallocate(conv_gu)
         ttnn.deallocate(conv_dn)
         if self.replan_n:
@@ -176,6 +242,57 @@ class FetchCache:
             f"({time.perf_counter() - t0:.1f} s)",
             flush=True,
         )
+
+    def finalize_more(self, layers, loader=None):
+        """finalize() for layers that became hybrid after it ran (elastic demotion, hybrid/elastic.py): their
+        device-format experts pinned as finalize() does (a layer pinned by an earlier demotion keeps its region) and the
+        direct-fetch destinations of their new weights."""
+        if not self.pinx_on:
+            return
+        if self.px is None:
+            raise RuntimeError("fetch.finalize_more before finalize()")
+        if loader is not None:
+            loader.submit(lambda: None).result()  # the queued load_host calls are done
+        todo = [L for L in layers if L not in self.raw]
+        if todo:
+            gsh, dsh, gdt, ddt, mesh = self.shapes
+            tp = self.px.tp
+            kw = dict(layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            conv = (
+                ttnn.from_torch(
+                    torch.zeros(gsh[0], gsh[1], gsh[2], tp * gsh[3]),
+                    dtype=gdt,
+                    mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+                    **kw,
+                ),
+                ttnn.from_torch(
+                    torch.zeros(dsh[0], dsh[1], tp * dsh[2], dsh[3]),
+                    dtype=ddt,
+                    mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2),
+                    **kw,
+                ),
+            )
+            self._pin_layers(todo, conv)
+            ttnn.deallocate(conv[0])
+            ttnn.deallocate(conv[1])
+            if self.replan_n:
+                ng, nd = self.raw[todo[0]][2], self.raw[todo[0]][3]
+                for L in todo:
+                    if L not in self.store:
+                        self.store[L] = (self.px.region(self.store_n * tp * (ng + nd))[0], {})
+                        self.nohost[L] = set()
+        if self.direct:
+            for L in layers:
+                mod = self.mods[L]
+                self.wdst[L] = (self.px.dst(mod.up_gate)[0], self.px.dst(mod.down)[0])
+
+    def drop_layer(self, layer):
+        """A hybrid layer that becomes full again (elastic promotion): its weights' fetch destinations and LRU state go
+        (its pinned library region is kept for a later demotion). Call with no fetch in flight."""
+        if any(p[0] == layer for p in self.pending):
+            raise RuntimeError(f"fetch.drop_layer({layer}) with fetches in flight")
+        for d in (self.wdst, self.mods, self.lru, self.free, self.stamp, self.__dict__.get("_static_n", {})):
+            d.pop(layer, None)
 
     def has_expert(self, layer, e):
         return (
@@ -307,6 +424,8 @@ class FetchCache:
     def commit(self, slot_of):
         """Async fetch, before a pass's replay (outside any capture): CQ0 waits for every write CQ1 has queued, then the
         experts written since the last commit become resident (slot_of: HYB.slot_of, layer -> [E] slots)."""
+        if self.verify_layer is not None:
+            self._verify(slot_of)
         if not self.pending:
             return
         ev = ttnn.record_event(self.mesh, cq_id=1)
@@ -315,6 +434,103 @@ class FetchCache:
             if self.lru[layer].get(e) == s:  # not evicted again before the commit
                 slot_of[layer][e] = s
         self.pending = []
+
+    def _verify(self, slot_of):
+        """HYB_FETCH_VERIFY=<layer> (debug): every resident LRU expert of that layer read back from its device slot and
+        compared with its pinned bytes (gate|up and down, every die); mismatches are counted and printed."""
+        L = self.verify_layer
+        if L not in self.wdst or L not in self.raw:
+            return
+        self._vn = getattr(self, "_vn", 0) + 1
+        if self._vn % 8:
+            return
+        import numpy as np
+
+        ttnn.synchronize_device(self.mesh)
+        px, tp = self.px, self.px.tp
+        rid, idx, ng, nd = self.raw[L]
+        if not hasattr(self, "_vreg"):
+            self._vreg = px.region(tp * (ng + nd))
+        vrid, vbuf = self._vreg
+        dg, dd = self.wdst[L]
+        bad = checked = 0
+        for e, s in list(self.lru[L].items()):
+            if slot_of[L][e] != s:
+                continue  # pending (not yet resident)
+            px.read_at(dg, vrid, [d * ng for d in range(tp)], s * ng, ng)
+            px.read_at(dd, vrid, [tp * ng + d * nd for d in range(tp)], s * nd, nd)
+            got = np.frombuffer(vbuf, dtype=np.uint8, count=tp * (ng + nd))
+            r2, og, od = self.raw_offsets(L, e)
+            want = self._region_bytes(r2)
+            ok = all(np.array_equal(got[d * ng : (d + 1) * ng], want[og[d] : og[d] + ng]) for d in range(tp)) and all(
+                np.array_equal(got[tp * ng + d * nd : tp * ng + (d + 1) * nd], want[od[d] : od[d] + nd])
+                for d in range(tp)
+            )
+            checked += 1
+            bad += 0 if ok else 1
+            if not ok and bad <= 3:  # what the slot holds instead
+                parts = []
+                for name, base_got, off_want, n in (("gu", 0, og, ng), ("dn", tp * ng, od, nd)):
+                    for d in range(tp):
+                        g = got[base_got + d * n : base_got + (d + 1) * n]
+                        if np.array_equal(g, want[off_want[d] : off_want[d] + n]):
+                            continue
+                        who = [
+                            e2
+                            for e2, i2 in idx.items()
+                            if np.array_equal(
+                                g,
+                                want[
+                                    i2 * tp * (ng + nd)
+                                    + (0 if name == "gu" else tp * ng)
+                                    + d * n : i2 * tp * (ng + nd)
+                                    + (0 if name == "gu" else tp * ng)
+                                    + (d + 1) * n
+                                ],
+                            )
+                        ]
+                        nz = int(np.count_nonzero(g))
+                        parts.append(
+                            f"{name}{d}:{'zero' if nz == 0 else ('expert ' + str(who) if who else f'other ({int((g != want[off_want[d]:off_want[d] + n]).sum())} bytes differ)')}"
+                        )
+                pend = [p for p in self.pending if p[0] == L]
+                print(f"  slot {s} expert {e}: {' '.join(parts)}; pending {pend[:4]}", flush=True)
+        print(
+            f"HYB_FETCH_VERIFY layer {L} commit {self._vn}: {checked} resident LRU experts checked, {bad} mismatched",
+            flush=True,
+        )
+
+    def _verify_now(self, L, e, s, cq):
+        import numpy as np
+
+        ttnn.synchronize_device(self.mesh)  # both queues drained: the write has executed
+        px, tp = self.px, self.px.tp
+        rid, idx, ng, nd = self.raw[L]
+        if not hasattr(self, "_vreg"):
+            self._vreg = px.region(tp * (ng + nd))
+        vrid, vbuf = self._vreg
+        dg, dd = self.wdst[L]
+        px.read_at(dg, vrid, [d * ng for d in range(tp)], s * ng, ng)
+        px.read_at(dd, vrid, [tp * ng + d * nd for d in range(tp)], s * nd, nd)
+        got = np.frombuffer(vbuf, dtype=np.uint8, count=tp * (ng + nd))
+        r2, og, od = self.raw_offsets(L, e)
+        want = self._region_bytes(r2)
+        gu_ok = [bool(np.array_equal(got[d * ng : (d + 1) * ng], want[og[d] : og[d] + ng])) for d in range(tp)]
+        dn_ok = [
+            bool(np.array_equal(got[tp * ng + d * nd : tp * ng + (d + 1) * nd], want[od[d] : od[d] + nd]))
+            for d in range(tp)
+        ]
+        self._wn = getattr(self, "_wn", 0) + 1
+        if self._wn <= 12 or not (all(gu_ok) and all(dn_ok)):
+            print(
+                f"HYB_FETCH_VERIFY write: layer {L} expert {e} -> slot {s} on CQ{cq}: gate|up ok {gu_ok} down ok {dn_ok}",
+                flush=True,
+            )
+
+    def _region_bytes(self, rid):
+        pass
+
+        return self.px.by_rid[rid]
 
     # -- device side (traced) -----------------------------------------------------------------------------------------
     def device_writes(self, mod):
@@ -392,6 +608,8 @@ class FetchCache:
                 self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
                 self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
                 st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
+                if layer == self.verify_layer:  # debug: read the slot straight back once the write has run
+                    self._verify_now(layer, e, s, cq)
             st["fetched"] += len(fetched)
             st["t_fetch"] += time.perf_counter() - t0
             return

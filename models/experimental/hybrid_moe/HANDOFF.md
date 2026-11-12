@@ -118,6 +118,26 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 5 (2026-11-12):
+  - Weight-image cache (`HYB_WCACHE`, `hybrid/wcache.py`, the port's `moe.EXPERT_WEIGHT_HOOK`; serve default
+    `/hyblib/wcache_m27`): load 21:57 -> 5:21, warm-run tokens identical to the cold run (`fb_ctl_off` vs
+    `fb_ctl_off_w`). Images are keyed per layer (slot ids, shapes, dtypes, TP, port): a config change converts once.
+  - `kv_rows_update` (one-program multi-row K / V write; QWEN35_KVROWS / DFLASH_KVROWS default 1): exact (greedy tokens
+    equal, `fb_ctl_kv`), drafter -0.3-0.4 ms/pass. Clean 128K baseline `fb_base`: short 55.8, 8K 41.6 tok/s.
+  - Decode-path quality A/B: `DFLASH_LP_DIR` saves a forced run's per-token verify log-probs, `cache/cmp_lp.py`
+    compares two runs. The stock decode is bit-deterministic run to run (`lp_off` vs `lp_off2`: KL 0, top-1 100%).
+  - QWEN35_QKNORM_FUSED: PARKED (off). One eager layer matches (`dbg_qkfused.py`, PCC 0.99999) but the traced model
+    moves log-probs by KL 0.15 (NLL 0.456 -> 0.546, `lp_fuse`); worth ~1%, cause not found.
+  - Old greedy reference `fb_rec` differs from today's outputs from the first tokens: settings changed since (fetch
+    fraction 0.3 -> 0.15 moves experts between the device bfp4 and the CPU int4 path), not a regression.
+  - 32K profile with today's code (`fb_32k`): short 66.1, 8K 49.4 tok/s (+18% over 128K). -> ELASTIC profile
+    (`hybrid/elastic.py`, HYB_ELASTIC_DEMOTE = the 24 layers full at 32K but hybrid at 128K, QWEN35_KV_TOKENS=32768,
+    max_seq_len 131072): per request (begin_prefill) the layers are rebuilt full or hybrid through the decoder layer's
+    own _build_feed_forward (weights from the image cache) and the KV pool resized (generator.resize_kv; the page
+    table keeps the 128K width, columns past the pool -> scratch block); fetch.finalize_more pins the demoted layers'
+    host library. Exactness tests: `lp_el_s` vs `lp_32`, `lp_el_l` (HYB_ELASTIC_FORCE=long) vs `lp_base`.
+  - Queue scripts: wait on the previous queue's PID (`kill -0`), never `pgrep -f` a path (a launcher shell whose
+    command line contains the pattern blocks it forever; races started prof4 and the debug run together).
 - Round 4 (2026-11-12): socket-mode device profile (`runs/m27/prof3`, profiler on, one verify pass 52.7 ms): the
   device waits 23.0 ms in the CPU-partial recv and 3.7 ms in the crafted-rows recv (42 hybrid layers); a full layer is
   ~450 us (attention ~220 us in ~36 programs of 5-20 us, MoE ~230 us). The CPU kernel is DRAM-bound: hostk 42 GB/s at

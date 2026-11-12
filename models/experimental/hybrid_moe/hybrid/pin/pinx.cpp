@@ -97,6 +97,41 @@ int pinx_write_at(
     return 0;
 }
 
+// pinx_write_at with a choice of path: use_pinned 1 = the zero-copy read of the pinned region (as pinx_write_at),
+// 0 = the bytes copied into the command queue's host buffer (the regular write path; the region need not stay put).
+int pinx_write_at2(
+    void* mesh,
+    int dst,
+    int region,
+    const uint64_t* offsets,
+    int cq_id,
+    uint64_t dst_offset,
+    uint64_t size,
+    int use_pinned) {
+    auto& m = mesh_of(mesh);
+    const auto& r = g_regions.at(region);
+    const auto& buf = g_dsts.at(dst);
+    const uint64_t n = size ? size : buf->device_local_size();
+    if (dst_offset + n > buf->device_local_size() || dst_offset % buf->page_size() != 0) {
+        return -3;
+    }
+    std::vector<dist::ShardDataTransfer> xfers;
+    int i = 0;
+    for (const auto& c : coords(m)) {
+        if (offsets[i] + n > r.size) {
+            return -2;
+        }
+        auto x = dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(dst_offset, n));
+        if (use_pinned) {
+            ttm::experimental::ShardDataTransferSetPinnedMemory(x, r.pinned);
+        }
+        xfers.push_back(std::move(x));
+        ++i;
+    }
+    m.mesh_command_queue(cq_id).enqueue_write_shards(buf, xfers, /*blocking=*/false);
+    return 0;
+}
+
 int pinx_write(void* mesh, int dst, int region, const uint64_t* offsets, int cq_id) {
     return pinx_write_at(mesh, dst, region, offsets, cq_id, 0, 0);
 }

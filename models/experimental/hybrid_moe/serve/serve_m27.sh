@@ -3,7 +3,7 @@
 # usage: serve/serve_m27.sh ; logs -> serve/server_m27.log. env: CTX (max model len, default 131072), FULL (layers with
 # every expert on the device: 20 at 128K, 36 at 64K, 44 at 32K; default by CTX), SPEC (1 = DFlash, 0 = plain decode),
 # PORT (8000), DK (drafts per pass, default 3), PC (prefix caching, default 1), PF_PREFETCH (prompt tokens from which
-# prefill prefetches the next layer's experts, default 1024; 0 = off), NS (staging slots, default 212). Profiles: CTX=131072 (FULL 20), CTX=65536 (FULL 36), CTX=32768 (FULL 44).
+# prefill prefetches the next layer's experts, default 1024; 0 = off), NS (staging slots, default 212), ELASTIC (1: elastic 128K, below). Profiles: CTX=131072 (FULL 20), CTX=65536 (FULL 36), CTX=32768 (FULL 44).
 # Tool calls: minimax_m2 tool parser. Reasoning: minimax_m2 splits it into reasoning_content (the chat template opens the
 # turn with <think>, so the output has only </think>); minimax_m2_append_think instead leaves <think>...</think> in content.
 CTX=${CTX:-131072}
@@ -40,6 +40,15 @@ TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_regi
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 cd "$P" || exit 1
 FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz "$FULL" | tail -1)
+# ELASTIC=1 (CTX 131072): built as the 32K profile (44 full layers, a 32K-token KV pool); a request that needs more
+# context first demotes the 24 layers the 128K profile keeps hybrid and grows the pool (hybrid/elastic.py)
+if [ "${ELASTIC:-0}" = 1 ]; then
+  FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 44 | tail -1)
+  FL20=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 20 | tail -1)
+  DEM=$(python3 -c "a=set('$FL'.split(','));b=set('$FL20'.split(','));print(','.join(sorted(a-b,key=int)))")
+  PF_ENV="$PF_ENV -e QWEN35_KV_TOKENS=${KV_TOKENS:-32768} -e HYB_ELASTIC_DEMOTE=$DEM"
+  FULL=44
+fi
 SPEC_ENV=""
 [ "${SPEC:-1}" = 1 ] && SPEC_ENV="-e QWEN35_EXT_SPEC=dflash_serve:build -e QWEN35_EXT_SPEC_K=${DK:-3}"
 python3 -m hybrid.hostk >/dev/null && mkdir -p logs cache

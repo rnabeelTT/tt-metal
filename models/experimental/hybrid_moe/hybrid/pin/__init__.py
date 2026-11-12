@@ -31,6 +31,16 @@ class Pinx:
         lib.pinx_write.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int]
         lib.pinx_write_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_read.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64)]
+        lib.pinx_write_at2.argtypes = [
+            vp,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(u64),
+            ctypes.c_int,
+            u64,
+            u64,
+            ctypes.c_int,
+        ]
         lib.pinx_read_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_dst_size.restype = u64
         lib.pinx_dst_size.argtypes = [ctypes.c_int]
@@ -38,6 +48,11 @@ class Pinx:
         self.mp = ctypes.c_void_p(cpp_ptr(mesh))
         self.tp = len(mesh.get_device_ids())
         self.keep = []  # the mmaps backing pinned regions
+        # HYB_PINX_ZEROCOPY=1: writes read the pinned region straight over the NOC. Off by default: measured on the
+        # QB2 (P300x2, cache/test_pinx_write2.py), 5-15% of zero-copy slot writes never landed on 3 of the 4 dies
+        # (CQ0 and CQ1 alike) while the copy path (bytes through the command queue) never failed in the same test
+        self.zerocopy = os.environ.get("HYB_PINX_ZEROCOPY", "0") == "1"
+        self.by_rid = {}  # region id -> its uint8 view
 
     def region(self, size):
         """A page-aligned host region of `size` bytes, pinned for the mesh: (region id, uint8 numpy view)."""
@@ -47,6 +62,7 @@ class Pinx:
         if rid < 0:
             raise RuntimeError(f"pinx: the {size}-byte region could not be mapped to the NOC")
         self.keep.append(mm)
+        self.by_rid[rid] = buf  # region ids are process-wide (every Pinx shares pinx.so's table)
         return rid, buf
 
     def dst(self, tensor):
@@ -71,18 +87,30 @@ class Pinx:
         return (ctypes.c_uint64 * self.tp)(*[int(o) for o in offsets])
 
     def write(self, dst, region, offsets, cq_id=0):
+        if not self.zerocopy:
+            return self.write_at2(dst, region, offsets, 0, 0, cq_id=cq_id, pinned=False)
         rc = self.lib.pinx_write(self.mp, dst, region, self._offs(offsets), cq_id)
         if rc != 0:
             raise RuntimeError(f"pinx_write returned {rc} (dst {dst}, region {region}, offsets {list(offsets)})")
 
     def write_at(self, dst, region, offsets, dst_offset, size, cq_id=0):
         """Region bytes [offsets[d], + size) into the destination's device-local bytes [dst_offset, + size)."""
+        if not self.zerocopy:
+            return self.write_at2(dst, region, offsets, dst_offset, size, cq_id=cq_id, pinned=False)
         rc = self.lib.pinx_write_at(self.mp, dst, region, self._offs(offsets), cq_id, int(dst_offset), int(size))
         if rc != 0:
             raise RuntimeError(
                 f"pinx_write_at returned {rc} (dst {dst}, region {region}, offsets {list(offsets)}, "
                 f"dst_offset {dst_offset}, size {size})"
             )
+
+    def write_at2(self, dst, region, offsets, dst_offset, size, cq_id=0, pinned=True):
+        """write_at through either path: pinned=False copies the bytes through the command queue (at enqueue)."""
+        rc = self.lib.pinx_write_at2(
+            self.mp, dst, region, self._offs(offsets), cq_id, int(dst_offset), int(size), 1 if pinned else 0
+        )
+        if rc != 0:
+            raise RuntimeError(f"pinx_write_at2 returned {rc} (dst {dst}, region {region}, dst_offset {dst_offset})")
 
     def read(self, dst, region, offsets):
         rc = self.lib.pinx_read(self.mp, dst, region, self._offs(offsets))

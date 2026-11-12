@@ -212,6 +212,10 @@ class DFlashServing:
 
         logger.info(f"DFlash: python threads {[t.name for t in threading.enumerate()]}")
         self.ver = Verify(self.gen, self.dr, self.R)
+        if HYB.elastic_demote:  # HYB_ELASTIC_DEMOTE: full layers <-> KV pool per request (hybrid/elastic.py)
+            from hybrid.elastic import Elastic
+
+            HYB.elastic = Elastic(HYB, self.gen, self, HYB.elastic_demote)
         # positions far from any real prompt's rows, on the warm-up page table (blocks the warm-up owns)
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), self.gen.page_table[0])
         self.ver.run()
@@ -219,6 +223,28 @@ class DFlashServing:
         self.dr.reset()
         self.dr.stage_pass([], 0)
         self.dr.run("pass", self.dr.pass_body)
+        ttnn.synchronize_device(self.mesh)
+
+    def map_prefill(self, prompt_ids, page_table_row, start=0):
+        """Serving with an elastic pool (hybrid/elastic.py): before begin_prefill, the profile this prompt needs, then
+        vLLM's block ids -> pool blocks (a prefix-cache hit whose blocks are gone restarts at 0). Returns the pool row
+        and the start; without an elastic pool, both unchanged."""
+        if HYB.elastic is None:
+            return page_table_row, start
+        self.release()
+        HYB.elastic.prepare(len(prompt_ids))
+        self._vrow = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32).clone()
+        return HYB.elastic.map_row(self._vrow, len(prompt_ids), start)
+
+    def warm_after_switch(self):
+        """After an elastic profile switch (no trace live): one eager verify pass compiles the programs of the new KV
+        pool / layer kinds and allocates the new hybrid layers' host-step buffers (before any capture). Its K / V rows
+        go to the scratch block (every page-table column points there), never to a block a request owns."""
+        self.ver = Verify(self.gen, self.dr, self.R)  # the page table's width follows the pool
+        row = torch.full_like(self.gen.page_table[0], int(self.gen.kv_scratch_block))
+        self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), row)
+        self.ver.run()
+        self.ver.run()
         ttnn.synchronize_device(self.mesh)
 
     def warm_prefill_path(self):
@@ -273,6 +299,8 @@ class DFlashServing:
             raise ValueError(f"DFlash serving is single-user (--max-num-seqs 1); prefill into slot {slot}")
         self._log_stats("previous request")
         self.release()
+        if HYB.elastic is not None:  # before the page-table row is read: a switch rewrites the generator's table
+            HYB.elastic.prepare(len(prompt_ids))
         self.dr.reset()
         self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32).clone()
         self._P = len(prompt_ids)
@@ -377,6 +405,14 @@ class DFlashServing:
         if page_table_row is not None:
             self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
         a0 = time.perf_counter()
+        if HYB.elastic is not None and self._pos + self.R + 1 > HYB.elastic.capacity:
+            # the context reached the elastic short pool: long profile now, keeping the pool's blocks (hybrid/elastic.py)
+            HYB.elastic.grow_now()
+            if page_table_row is None:  # the runner's row is the generator's table (the plugin passes it every step)
+                self._row = self.gen.page_table[0].clone()
+            self._capture()
+        if page_table_row is not None and HYB.elastic is not None and HYB.elastic.bmap is not None:
+            self._row, _ = HYB.elastic.map_row(self._row, self._pos + self.R + 1)  # serving: vLLM ids -> pool blocks
         dr, ver, K, R, W = self.dr, self.ver, self.k, self.R, self.window
         t, p = self._tok, self._pos
         if dr.need_refill():  # the window is full: refill from the last W features (traces re-captured)
@@ -458,6 +494,10 @@ class DFlashServing:
             )
         ids = tok.encode(text, add_special_tokens=False)
         P = len(ids)
+        if HYB.elastic is not None:  # the profile first: a switch replaces the generator's page table (runner)
+            self.release()
+            HYB.elastic.prepare(P)
+            page_table = self.gen.page_table[: page_table.shape[0]]
         self.gen.reset()
         t_pf = time.time()
         self.begin_prefill(ids, page_table[0])

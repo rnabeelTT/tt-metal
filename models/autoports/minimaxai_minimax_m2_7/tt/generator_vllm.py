@@ -426,11 +426,22 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
             logger.warning(
                 f"vLLM asked for {num_layers} KV layers, the built model has {n_model} attention layers (reduced target)"
             )
-        alloc_blocks = math.ceil((num_blocks + 1) / 32) * 32
+        width = min(math.ceil(self._context / block), num_blocks)  # == the plugin's max_num_blocks_per_req
+        pool = num_blocks
+        kv_tokens = int(os.environ.get("QWEN35_KV_TOKENS", "0") or 0)
+        if kv_tokens:
+            # an elastic pool (single user, hybrid_moe/hybrid/elastic.py): fewer physical blocks than vLLM's table
+            # addresses; the external speculative step maps vLLM's block ids onto them (map_prefill / step)
+            if self._gen.max_batch_size != 1:
+                raise ValueError(f"QWEN35_KV_TOKENS={kv_tokens}: an elastic KV pool is single-user")
+            pool = min(num_blocks, math.ceil(kv_tokens / block))
+        alloc_blocks = math.ceil((pool + 1) / 32) * 32
         shape = (alloc_blocks, int(self._gen.args.n_local_kv_heads), block, int(self._gen.args.head_dim))
         kv = self._gen.model.allocate_kv_caches(shape, self._gen.kv_dtype, batch_size=self._gen.max_batch_size)
-        width = min(math.ceil(self._context / block), num_blocks)  # == the plugin's max_num_blocks_per_req
-        self._gen.bind_kv_cache(kv, num_blocks, width)
+        # the bound table is never wider than the pool (the paged K / V update requires it); an elastic pool's table
+        # grows with the pool (generator.resize_kv)
+        self._gen.bind_kv_cache(kv, pool, min(width, pool))
+        self._gen.kv_tokens = pool * block
         if self._mtp is not None:
             self._mtp.allocate_kv(shape, self._gen.kv_dtype)
             if hasattr(self._mtp, "head"):
@@ -564,6 +575,14 @@ class MiniMaxM2ForCausalLM(Qwen36ForCausalLM):
         logger.info(
             f"Prefilling {N} request(s) into slots {slots} (chunk ends {plens}, starts {starts}, final {finals})"
         )
+        if self._mtp is not None and hasattr(self._mtp, "map_prefill"):
+            # an external speculative step may own the KV pool's block mapping (hybrid_moe's elastic pool: vLLM's
+            # block ids -> pool blocks; a prefix hit whose blocks lost their contents restarts at 0)
+            rows = []
+            for u in range(N):
+                r, starts[u] = self._mtp.map_prefill(tokens[u, : plens[u]].tolist(), pt[u], starts[u])
+                rows.append(torch.as_tensor(r).reshape(-1).to(torch.int32))
+            pt = torch.stack(rows)  # the pool's width (may be narrower than vLLM's table)
         chunked = dict(start_pos=starts, final=finals) if (any(starts) or not all(finals)) else {}
         if self._mtp is not None:
             prefix_hit = (
