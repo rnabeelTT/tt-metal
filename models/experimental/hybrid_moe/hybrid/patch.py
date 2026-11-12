@@ -193,6 +193,7 @@ class HybridState:
         self.sock_rows_first = os.environ.get("HYB_SOCK_ROWS_FIRST", "1") == "1"
         # HYB_SOCK_LATE_CHOOSE (default 1): socket mode picks the layer's fetches after its rows are sent
         self.sock_late_choose = os.environ.get("HYB_SOCK_LATE_CHOOSE", "1") == "1"
+        self.sock_late_stage = os.environ.get("HYB_SOCK_LATE_STAGE", "1") == "1"
         # HYB_PREFETCH (socket mode): at each hybrid layer the host predicts the NEXT hybrid layer's missed experts
         # (that layer's router on this layer's MoE input: sigmoid + bias top-HYB_PF_TOPK per row) and, once this
         # layer's partial is sent, reads their int4 weights on HYB_PF_THREADS threads (hostk_touch) while the device
@@ -1088,8 +1089,12 @@ def _sock_step1(self, B, m):
         fetch = HYB.fetch.choose(L, ids, HYB.slot_of[L])
     if fetch is not None:
         # after the rows (the device waits only for them): CQ1 writes, resident from the next replay (FetchCache.commit),
-        # enqueued while the device runs this layer's experts and the next layer's attention
-        HYB.fetch.stage(L, *fetch, HYB.st)
+        # enqueued while the device runs this layer's experts and the next layer's attention; HYB_SOCK_LATE_STAGE: after
+        # the partial instead (_sock_step2), so the copies' host-DRAM reads do not overlap the CPU experts' streaming
+        if HYB.sock_late_stage and HYB.fetch.async_on:
+            B["fetch_late"] = (L, fetch)
+        else:
+            HYB.fetch.stage(L, *fetch, HYB.st)
     HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
 
 
@@ -1164,6 +1169,9 @@ def _sock_step2(self, B, m):
     if HYB.pf_next is not None:
         _pf_touch(*HYB.pf_next)
         HYB.pf_next = None
+    late = B.pop("fetch_late", None)
+    if late is not None:
+        HYB.fetch.stage(late[0], *late[1], HYB.st)
     HYB.st["t_s2"] = HYB.st.get("t_s2", 0.0) + time.perf_counter() - t0
 
 

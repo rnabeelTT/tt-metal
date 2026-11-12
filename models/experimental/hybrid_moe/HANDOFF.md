@@ -125,12 +125,18 @@ Pieces (all traced, per-prompt re-capture):
   leaves host DRAM idle. `HYB_PREFETCH=1` (serve default): at each hybrid layer the two prefetch threads score the next
   hybrid layer's router on this layer's MoE input (C, `hostk_touch_predict`, ~120 us) and, after the partial is sent,
   read the predicted host experts' int4 rows so the next CPU experts read L2/L3 (`cache/bench_touch.py`: 3 experts
-  0.64 -> 0.33-0.44 ms). Cache contents only, no numerics change. Fixed text ABBA (`fb_pf2`): short 48.6 -> 52.5 tok/s,
-  8K 36.5 -> 37.7; CPU wait 6.7 -> 3.3 ms/pass. Recall 68% / precision 48% at top-8. Dropped (within noise): top-12 /
+  0.64 -> 0.33-0.44 ms). Cache contents only, no numerics change. Fixed text (`fb_pf2`, warm runs only): short 51.1 ->
+  52.5 tok/s, CPU wait 5.7 -> 3.3 ms/pass; served 43.2 -> 44.9 tok/s steady, first pass 39.7 -> 42.6, TTFT 0.84 s. Recall 68% / precision 48% at top-8. Dropped (within noise): top-12 /
   16 (`fb_pfk`, recall 82 / 88%), rescaling by the two layers' norm weights (`fb_pfg`, recall unchanged), adding the
   layer's last-pass misses (`fb_pfp`, 72%); a bf16 dot-product (vdpbf16ps) CPU kernel: 2.5e-6 rel. error but no
   faster even L3-resident (the kernel is not compute-bound). A numpy predictor on the main thread cost 18 ms/pass
   (BLAS threads vs the kernel): keep it in C.
+  `HYB_SOCK_LATE_CHOOSE=1`: the fetch choice after the rows (async fetch: no effect on this step), lg -> rows 3.6 ->
+  1.8 ms/pass, short 52.8 -> 54.5 (`fb_late`). `HYB_SOCK_LATE_STAGE=1`: the fetch copies issued after the partial (the
+  idle window) instead of during the CPU experts, short 50.8 -> 52.1 (`fb_lstage`).
+  A/B METHOD: a prompt's first run starts with a cold LRU (45-70 vs ~34 CPU experts/pass), so `cache/agg_sweep.py`
+  drops it; earlier "ABBA" sweeps credited the cold run to the first value (fixed-text gains above are warm-only).
+  Use sweeps like `attr:0,1,0,0,1` (first discarded -> 1,0,0,1).
 - Round 3 (2026-11-11): single-trace socket decode (`HYB_SOCKET=1`, serve default): a captured verify pass is ONE
   trace; each hybrid layer sends its routing logits / activation rows to the host (send_async_d2h, chip 0), receives the
   crafted rows on every chip and the CPU partial on chip 0 (recv_async_h2d, host-push L1 FIFOs of 8 pages: 64-page
