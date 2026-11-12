@@ -2777,6 +2777,14 @@ class Qwen36Model:
         """TP paged KV allocation (B=1). Replicated per device; GDN self-manages state."""
 
         def _mk():
+            if os.environ.get("QWEN35_KV_DEVICE_ZEROS", "0") == "1":  # zeros made on the device (no host conversion)
+                return ttnn.zeros(
+                    kv_cache_shape,
+                    dtype=dtype,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=self.device,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                )
             return ttnn.as_tensor(
                 torch.zeros(kv_cache_shape, dtype=torch.bfloat16),
                 device=self.device,

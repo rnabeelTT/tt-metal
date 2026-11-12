@@ -118,6 +118,24 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 5b (2026-11-12, late) - QUALITY FIX + ELASTIC SERVING:
+  - LOST WRITES: hybrid/pin zero-copy writes (pinned host region read over the NOC) silently drop some writes on this
+    QB2 (cache/test_pinx_write2.py: 5-15% of slot writes per die on 3 of 4 dies, deterministic; the copy path never
+    failed). Every LRU expert fetch, the prefill stream uploads and the image-cache loads used them; refilled LRU slots
+    held stale weights (HYB_FETCH_VERIFY=<layer>: 20 of 24 wrong). Pinx now writes through the copy path
+    (pinx_write_at2; HYB_PINX_ZEROCOPY=1 restores zero-copy; rebuild pinx.so with hybrid/pin/build.sh).
+  - Decode-path quality vs the BF16 CPU reference (ref_m27.py on the forced texts, cache/cmp_ref.py): 128K profile
+    top-1 0.814 / KL 0.256 before -> 0.902 / 0.045 after (= fetch off: 0.903 / 0.040), speed unchanged (+1-3 ms/pass).
+    Not the CPU int4 experts: per-expert output error int4 0.119 vs device bfp4 0.177 (cache/expert_err.py).
+  - METHOD: judge numerics changes against the reference model, not against the baseline run (the baseline-relative
+    KL of the 32K vs 128K profiles was 0.22: different, equally valid rounding). The decode path is bit-deterministic
+    run to run, so a nonzero baseline-relative KL only says "different".
+  - Elastic serving (default in serve_m27.sh at CTX 131072; ELASTIC=0 = static 128K): runs/m27/serve_elastic2.out:
+    short 55.8 tok/s TTFT 0.65 s; 45K-token prompt switches to long (37 s: layer builds 15, pin 10, KV 9) then 28.6
+    tok/s; resent = prefix hit TTFT 2.5 s; back to short 15.9 s; 8-prompt bench 55.3 tok/s mean, TTFT 0.69 s.
+  - Host RAM: ~143 GB is lost to pages leaked by today's OOM-killed runs (not freed by a driver reload; a reboot
+    would). Normal exits do not leak (unaccounted memory flat across a run). Never run two big jobs at once.
+  - Lazy layer state dicts (QWEN35_LAZY_STATE, default 1): warm load 1:05.
 - Round 5 (2026-11-12):
   - Weight-image cache (`HYB_WCACHE`, `hybrid/wcache.py`, the port's `moe.EXPERT_WEIGHT_HOOK`; serve default
     `/hyblib/wcache_m27`): load 21:57 -> 5:21, warm-run tokens identical to the cold run (`fb_ctl_off` vs
