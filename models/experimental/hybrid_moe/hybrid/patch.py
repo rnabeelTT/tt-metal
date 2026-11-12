@@ -160,6 +160,8 @@ class HybridState:
         self.hostk_async = self.hostk and os.environ.get("HYB_HOSTK_ASYNC", "1") == "1"
         if self.hostk:
             hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "3")))  # 3: fixed-text A/B runs/m27/fb_thr, +2-3% over 4
+            if os.environ.get("HYB_PREFETCH", "0") == "1":
+                hostk.touch_init(int(os.environ.get("HYB_PF_THREADS", "2")))
         if self.lowbit > 0 and not self.hostk:
             raise ValueError(f"HYB_LOWBIT={self.lowbit} needs the fused host kernel (HYB_HOSTK=1)")
         # with an MTP head, the RAM copies of the library start only once the head is built (_install_mtp_head): the
@@ -189,6 +191,18 @@ class HybridState:
         # HYB_SOCK_ROWS_FIRST (default 1): crafted rows sent before the activations are read and the CPU experts start
         # (runs/m27/fb_rows: short 48.5 -> 50.2 tok/s, 8K 35.9 -> 38.2)
         self.sock_rows_first = os.environ.get("HYB_SOCK_ROWS_FIRST", "1") == "1"
+        # HYB_PREFETCH (socket mode): at each hybrid layer the host predicts the NEXT hybrid layer's missed experts
+        # (that layer's router on this layer's MoE input: sigmoid + bias top-HYB_PF_TOPK per row) and, once this
+        # layer's partial is sent, reads their int4 weights on HYB_PF_THREADS threads (hostk_touch) while the device
+        # runs the next attention: the next CPU experts then read L2 / L3 instead of DRAM. Cache contents only, no
+        # numerics change. HYB_PF_MAXMB caps the bytes (L3 is 32 MiB).
+        self.prefetch = os.environ.get("HYB_PREFETCH", "0") == "1"
+        self.pf_topk = int(os.environ.get("HYB_PF_TOPK", "8"))
+        self.pf_maxmb = float(os.environ.get("HYB_PF_MAXMB", "24"))
+        self.gate_wT = {}  # layer -> [E, H] bf16 (uint16) router weight (HYB_PREFETCH)
+        self.pf_pred = {}  # layer -> [E] int32: 1 = predicted host expert (written by the prefetch threads)
+        self.pf_next = None  # (next layer, MoE input [m, H] fp32) to predict + touch after this layer's partial
+        self.pf_keep = None  # the arrays the running prefetch job reads
         self.pf_mass = {}  # HYB_REPLAN: layer -> [E] routed weight per expert over the latest prefill's real rows
         self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
         self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
@@ -215,6 +229,11 @@ class HybridState:
             "t_lib_load": 0.0,
             "dec_picks": 0,
             "dec_hits": 0,
+            "pf_act": 0,
+            "pf_pred": 0,
+            "pf_hit": 0,
+            "pf_mb": 0.0,
+            "t_pf": 0.0,
             "skipped": 0,
             "skipped_mass": 0.0,
             "lowbit": 0,
@@ -289,6 +308,14 @@ class HybridState:
         return ids
 
     # -- host experts ---------------------------------------------------------------------------------------------
+    @property
+    def pf_order(self):
+        """The hybrid layers in forward order (HYB_PREFETCH predicts each one's successor)."""
+        o = getattr(self, "_pf_order", None)
+        if o is None or len(o) != len(self.gate_wT):
+            o = self._pf_order = sorted(self.gate_wT)
+        return o
+
     def lib_layer(self, layer):
         f = self.lib.get(layer)
         if f is None:
@@ -662,6 +689,9 @@ def install():
         HYB.router_kind = getattr(args, "router_kind", "softmax")
         if HYB.router_kind == "sigmoid_bias":  # the host's sigmoid + bias selection (_route_host) needs the bias
             HYB.sel_bias[layer_num] = state_dict["gate.e_score_correction_bias"].float().numpy()
+            if HYB.prefetch:
+                w = state_dict["gate.weight"].to(torch.bfloat16).contiguous()
+                HYB.gate_wT[layer_num] = w.view(torch.int16).numpy().view(np.uint16)
         elif HYB.router_kind != "softmax":
             raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax or sigmoid_bias")
         if int(self.router_w.shape[-1]) != E:
@@ -1042,6 +1072,8 @@ def _sock_step1(self, B, m):
             j = _job(self, xh.clone(), ids, sc, miss)
             job = HYB.cpu_pool.submit(lambda j=j: HYB.host_compute(*j))
     B["job"] = job
+    if HYB.prefetch:
+        _pf_predict(L, xh, miss, ids, m)
     if not HYB.sock_rows_first:
         _sock_rows(self, S, L, lg, ids, sc, m)
     if fetch is not None:
@@ -1049,6 +1081,44 @@ def _sock_step1(self, B, m):
         # enqueued while the device runs this layer's experts and the next layer's attention
         HYB.fetch.stage(L, *fetch, HYB.st)
     HYB.st["t_s1"] = HYB.st.get("t_s1", 0.0) + time.perf_counter() - t0
+
+
+def _pf_predict(L, xh, miss, ids, m):
+    """HYB_PREFETCH: score this layer's prediction (made by the prefetch threads at the previous hybrid layer) against
+    its actual misses, then queue the next hybrid layer's prediction from this layer's MoE input xh [m, H]
+    (_pf_touch starts it once this layer's partial is sent)."""
+    st = HYB.st
+    pred = HYB.pf_pred.pop(L, None)
+    if pred is not None:
+        act = np.unique(ids[miss]) if miss.any() else np.zeros(0, dtype=np.int64)
+        st["pf_act"] += len(act)
+        st["pf_pred"] += int(pred.sum())
+        st["pf_hit"] += int(pred[act].sum())
+    order = HYB.pf_order
+    i = order.index(L) if L in order else -1
+    if 0 <= i < len(order) - 1:
+        HYB.pf_next = (order[i + 1], np.ascontiguousarray(xh[:m].float().numpy()))
+
+
+def _pf_touch(Ln, x):
+    """Start the prefetch threads on layer Ln: its router on x, top-HYB_PF_TOPK per row, read the predicted host
+    experts' int4 rows (the RAM library copies) up to HYB_PF_MAXMB."""
+    t0 = time.perf_counter()
+    lib = HYB.lib_layer(Ln)
+    E = HYB.E
+    rows = lib["row"]
+    host = (rows >= 0) & (HYB.slot_of[Ln] < 0)
+    eptr = np.zeros((E, 4), dtype=np.uint64)
+    elen = np.zeros(4, dtype=np.int64)
+    for q, key in enumerate(("gu_p", "gu_sz", "dn_p", "dn_sz")):
+        t = lib[key]
+        elen[q] = t[0].numel() * t.element_size()
+        eptr[host, q] = np.uint64(t.data_ptr()) + rows[host].astype(np.uint64) * np.uint64(elen[q])
+    pred = np.zeros(E, dtype=np.int32)
+    hostk.touch_predict(x, HYB.gate_wT[Ln], HYB.sel_bias[Ln], HYB.pf_topk, eptr, elen, HYB.pf_maxmb * 1e6, pred)
+    HYB.pf_keep = (x, eptr, elen, pred)
+    HYB.pf_pred[Ln] = pred
+    HYB.st["t_pf"] += time.perf_counter() - t0
 
 
 def _sock_rows(self, S, L, lg, ids, sc, m):
@@ -1081,6 +1151,9 @@ def _sock_step2(self, B, m):
     t1 = time.perf_counter()
     HYB.socks.part.write_tensor(host.to(torch.bfloat16).contiguous())
     HYB.st["t_up"] += time.perf_counter() - t1
+    if HYB.pf_next is not None:
+        _pf_touch(*HYB.pf_next)
+        HYB.pf_next = None
     HYB.st["t_s2"] = HYB.st.get("t_s2", 0.0) + time.perf_counter() - t0
 
 

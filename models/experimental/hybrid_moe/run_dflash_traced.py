@@ -28,6 +28,11 @@ NEW = int(os.environ.get("POC_NEW_TOKENS", "128"))
 _fz = os.environ.get("POC_FORCE")
 forced = {r["prompt"]: r["ids"] for r in json.load(open(_fz))["runs"] if "ids" in r} if _fz else {}
 HYB_KEYS = (
+    "pf_act",
+    "pf_pred",
+    "pf_hit",
+    "pf_mb",
+    "t_pf",
     "dec_picks",
     "dec_hits",
     "host_experts",

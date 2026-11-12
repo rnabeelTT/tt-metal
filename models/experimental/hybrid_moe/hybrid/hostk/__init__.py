@@ -43,6 +43,9 @@ def load(nthreads, so=_SO):
         lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
         lib.hostk_set_active.argtypes = [ctypes.c_int]
+        lib.hostk_touch_init.argtypes = [ctypes.c_int]
+        lib.hostk_touch.argtypes = [ci, vp, vp]
+        lib.hostk_touch_predict.argtypes = [vp, ci, ci, ci, ci, vp, vp, vp, vp, ctypes.c_int64, vp]
         lib.hostk_init(int(nthreads))
         _lib = lib
     return _lib
@@ -52,6 +55,47 @@ def set_active(n):
     """Threads that run the kernel from now on (1..the pool size; 0 = all), e.g. to leave host DRAM bandwidth for the
     pinned uploads. Returns the previous setting."""
     return _lib.hostk_set_active(int(n))
+
+
+def touch_init(n):
+    """Start n prefetch threads (hostk_touch); idempotent."""
+    return _lib.hostk_touch_init(int(n))
+
+
+def touch(ptrs, lens):
+    """Read the byte ranges (uint64 addresses / int64 lengths, numpy) on the prefetch threads; returns at once. The next
+    hostk_moe stops a touch still running. The memory must stay mapped (the library copies are)."""
+    import numpy as np
+
+    ptrs = np.ascontiguousarray(ptrs, dtype=np.uint64)
+    lens = np.ascontiguousarray(lens, dtype=np.int64)
+    rc = _lib.hostk_touch(len(ptrs), ptrs.ctypes.data, lens.ctypes.data)
+    if rc != 0:
+        raise RuntimeError(f"hostk_touch returned {rc} ({len(ptrs)} ranges)")
+
+
+def touch_predict(x, W, bias, k, eptr, elen, cap, pred):
+    """The prefetch threads score the router W [E, H] (bf16 as uint16) on x [m, H] (fp32), pick each row's top k of
+    sigmoid + bias, and read those experts' ranges eptr [E, 4] (uint64 addresses, 0 = resident) / elen [4] (bytes),
+    more rows first, up to cap bytes; pred [E] (int32) gets 1 for every predicted host expert. Returns at once: every
+    array must stay alive until the next touch / moe call."""
+    m, H = x.shape
+    E = W.shape[0]
+    rc = _lib.hostk_touch_predict(
+        x.ctypes.data,
+        m,
+        H,
+        E,
+        int(k),
+        W.ctypes.data,
+        bias.ctypes.data,
+        eptr.ctypes.data,
+        elen.ctypes.data,
+        int(cap),
+        pred.ctypes.data,
+    )
+    if rc != 0:
+        raise RuntimeError(f"hostk_touch_predict returned {rc} (m {m}, H {H}, E {E}, k {k})")
 
 
 def planarize(p, inverse=False):

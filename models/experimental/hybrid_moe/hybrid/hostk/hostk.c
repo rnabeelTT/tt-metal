@@ -303,6 +303,256 @@ int hostk_init(int nthreads) {
     return g_nt;
 }
 
+// Prefetch (HYB_PREFETCH): a few dedicated threads read given byte ranges (the next layer's predicted missed experts)
+// while the host would otherwise idle, so hostk_moe later reads them from L2 / L3 (a victim cache on Zen: lines a
+// toucher loads spill there from its L2) instead of DRAM. hostk_moe sets g_tabort: the touchers stop at the next 64
+// KiB chunk. Only the cache contents change, never a result.
+#define TMAXR 256
+#define TCHUNK 65536
+static pthread_t g_tth[MAXT];
+static int g_tn = 0;
+static _Atomic int g_tgen = 0, g_tnext = 0, g_tdone = 0, g_tabort = 0;
+static int g_tcnt = 0, g_tchunks = 0;
+static const uint8_t* g_tptr[TMAXR];
+static int64_t g_tlen[TMAXR], g_tfirst[TMAXR + 1];
+static volatile uint64_t g_tsink;
+
+static void touch_units(void) {
+    __m512i acc = _mm512_setzero_si512();
+    for (;;) {
+        if (atomic_load_explicit(&g_tabort, memory_order_relaxed)) {
+            break;
+        }
+        int c = atomic_fetch_add(&g_tnext, 1);
+        if (c >= g_tchunks) {
+            break;
+        }
+        int r = 0;
+        while (g_tfirst[r + 1] <= c) {
+            r++;
+        }
+        int64_t off = (int64_t)(c - g_tfirst[r]) * TCHUNK, end = off + TCHUNK;
+        if (end > g_tlen[r]) {
+            end = g_tlen[r];
+        }
+        const uint8_t* p = g_tptr[r];
+        for (int64_t o = off; o + 256 <= end; o += 256) {
+            acc = _mm512_xor_si512(acc, _mm512_loadu_si512((const void*)(p + o)));
+            acc = _mm512_xor_si512(acc, _mm512_loadu_si512((const void*)(p + o + 64)));
+            acc = _mm512_xor_si512(acc, _mm512_loadu_si512((const void*)(p + o + 128)));
+            acc = _mm512_xor_si512(acc, _mm512_loadu_si512((const void*)(p + o + 192)));
+        }
+    }
+    g_tsink += (uint64_t)_mm512_reduce_add_epi64(acc);
+}
+
+// hostk_touch_predict: the touchers first score the next layer's router on this layer's MoE input (units of 8
+// experts), the last one to finish selects (sigmoid + bias top-k per row, experts with a host pointer, more rows
+// first, up to the byte cap) and publishes the ranges; then all of them touch.
+typedef struct {
+    const float* x;  // [m, H]
+    int m, H, E, k;
+    const uint16_t* W;     // [E, H] bf16 router weight
+    const float* bias;     // [E]
+    const uint64_t* eptr;  // [E, 4] addresses of gu_p / gu_sz / dn_p / dn_sz rows (0: resident, never touched)
+    const int64_t* elen;   // [4] bytes of each
+    int64_t cap;           // byte cap
+    int32_t* pred;         // [E] out: 1 = predicted host expert (touched or over the cap)
+} pred_t;
+static pred_t g_p;
+static int g_tmode = 0;  // 0: ranges, 1: predict then touch
+static _Atomic int g_tunit = 0, g_tgated = 0, g_tready = 0;
+static float g_z[MAXR * 1024];
+
+static void gate_units(void) {
+    const int H = g_p.H, m = g_p.m, nu = (g_p.E + 7) / 8;
+    for (;;) {
+        if (atomic_load_explicit(&g_tabort, memory_order_relaxed)) {
+            return;
+        }
+        int u = atomic_fetch_add(&g_tunit, 1);
+        if (u >= nu) {
+            return;
+        }
+        for (int e = u * 8; e < u * 8 + 8 && e < g_p.E; e++) {
+            const uint16_t* w = g_p.W + (size_t)e * H;
+            __m512 acc[MAXR];
+            for (int r = 0; r < m; r++) {
+                acc[r] = _mm512_setzero_ps();
+            }
+            for (int h = 0; h < H; h += 16) {
+                __m512 wf = _mm512_castsi512_ps(
+                    _mm512_slli_epi32(_mm512_cvtepu16_epi32(_mm256_loadu_si256((const __m256i*)(w + h))), 16));
+                for (int r = 0; r < m; r++) {
+                    acc[r] = _mm512_fmadd_ps(wf, _mm512_loadu_ps(g_p.x + (size_t)r * H + h), acc[r]);
+                }
+            }
+            for (int r = 0; r < m; r++) {
+                g_z[r * g_p.E + e] = _mm512_reduce_add_ps(acc[r]);
+            }
+        }
+    }
+}
+
+static void select_ranges(void) {
+    const int E = g_p.E, k = g_p.k;
+    int cnt[1024] = {0};
+    for (int r = 0; r < g_p.m; r++) {
+        float sc[1024];
+        for (int e = 0; e < E; e++) {
+            sc[e] = 1.0f / (1.0f + expf(-g_z[r * E + e])) + g_p.bias[e];
+        }
+        for (int j = 0; j < k; j++) {
+            int b = -1;
+            for (int e = 0; e < E; e++) {
+                if (sc[e] > -1e30f && (b < 0 || sc[e] > sc[b])) {
+                    b = e;
+                }
+            }
+            if (b < 0) {
+                break;
+            }
+            sc[b] = -1e31f;
+            cnt[b]++;
+        }
+    }
+    int n = 0;
+    int64_t tot = 0, per = g_p.elen[0] + g_p.elen[1] + g_p.elen[2] + g_p.elen[3];
+    for (int c = g_p.m; c >= 1 && n + 4 <= TMAXR; c--) {
+        for (int e = 0; e < E && n + 4 <= TMAXR; e++) {
+            if (cnt[e] != c || !g_p.eptr[(size_t)e * 4]) {
+                continue;
+            }
+            g_p.pred[e] = 1;
+            if (tot + per > g_p.cap) {
+                continue;
+            }
+            tot += per;
+            for (int q = 0; q < 4; q++) {
+                g_tptr[n] = (const uint8_t*)(uintptr_t)g_p.eptr[(size_t)e * 4 + q];
+                g_tlen[n] = g_p.elen[q];
+                g_tfirst[n + 1] = g_tfirst[n] + (g_tlen[n] + TCHUNK - 1) / TCHUNK;
+                n++;
+            }
+        }
+    }
+    g_tcnt = n;
+    g_tchunks = (int)g_tfirst[n];
+}
+
+static void* toucher(void* arg) {
+    (void)arg;
+    int seen = atomic_load(&g_tgen);
+    for (;;) {
+        while (atomic_load_explicit(&g_tgen, memory_order_acquire) == seen) {
+            syscall(SYS_futex, &g_tgen, FUTEX_WAIT_PRIVATE, seen, NULL, NULL, 0);
+        }
+        seen = atomic_load(&g_tgen);
+        if (g_tmode == 1) {
+            gate_units();
+            if (atomic_fetch_add(&g_tgated, 1) == g_tn - 1) {
+                if (!atomic_load(&g_tabort)) {
+                    select_ranges();
+                }
+                atomic_store_explicit(&g_tready, 1, memory_order_release);
+            } else {
+                while (!atomic_load_explicit(&g_tready, memory_order_acquire)) {
+                    _mm_pause();
+                }
+            }
+        }
+        touch_units();
+        atomic_fetch_add_explicit(&g_tdone, 1, memory_order_release);
+    }
+    return NULL;
+}
+
+int hostk_touch_init(int n) {
+    if (g_tn) {
+        return g_tn;
+    }
+    if (n > MAXT) {
+        n = MAXT;
+    }
+    for (int t = 0; t < n; t++) {
+        pthread_create(&g_tth[t], NULL, toucher, NULL);
+    }
+    g_tn = n;
+    atomic_store(&g_tdone, n);  // idle: hostk_touch waits for every toucher to report done
+    return g_tn;
+}
+
+// Starts reading n byte ranges (returns at once): -1 too many ranges, -4 not initialized. A touch still running is
+// stopped first (its ranges are the stale prediction).
+int hostk_touch(int n, const uint64_t* ptrs, const int64_t* lens) {
+    if (!g_tn) {
+        return -4;
+    }
+    if (n > TMAXR) {
+        return -1;
+    }
+    atomic_store(&g_tabort, 1);
+    while (atomic_load_explicit(&g_tdone, memory_order_acquire) < g_tn) {
+        _mm_pause();
+    }
+    g_tmode = 0;
+    g_tcnt = n;
+    g_tfirst[0] = 0;
+    for (int i = 0; i < n; i++) {
+        g_tptr[i] = (const uint8_t*)(uintptr_t)ptrs[i];
+        g_tlen[i] = lens[i];
+        g_tfirst[i + 1] = g_tfirst[i] + (lens[i] + TCHUNK - 1) / TCHUNK;
+    }
+    g_tchunks = (int)g_tfirst[n];
+    atomic_store(&g_tnext, 0);
+    atomic_store(&g_tdone, 0);
+    atomic_store(&g_tabort, 0);
+    atomic_fetch_add_explicit(&g_tgen, 1, memory_order_release);
+    syscall(SYS_futex, &g_tgen, FUTEX_WAKE_PRIVATE, 1 << 30, NULL, NULL, 0);
+    return 0;
+}
+
+// Starts the predict-then-touch job (returns at once): -1 bad sizes, -4 not initialized. x, W, bias, eptr, elen and
+// pred must stay alive until the next hostk_touch* / hostk_moe call; pred is zeroed here.
+int hostk_touch_predict(
+    const float* x,
+    int m,
+    int H,
+    int E,
+    int k,
+    const uint16_t* W,
+    const float* bias,
+    const uint64_t* eptr,
+    const int64_t* elen,
+    int64_t cap,
+    int32_t* pred) {
+    if (!g_tn) {
+        return -4;
+    }
+    if (m > MAXR || E > 1024 || H % 16 || k > E) {
+        return -1;
+    }
+    atomic_store(&g_tabort, 1);
+    while (atomic_load_explicit(&g_tdone, memory_order_acquire) < g_tn) {
+        _mm_pause();
+    }
+    memset(pred, 0, sizeof(int32_t) * (size_t)E);
+    g_p = (pred_t){x, m, H, E, k, W, bias, eptr, elen, cap, pred};
+    g_tmode = 1;
+    g_tcnt = 0;
+    g_tchunks = 0;
+    g_tfirst[0] = 0;
+    atomic_store(&g_tunit, 0);
+    atomic_store(&g_tgated, 0);
+    atomic_store(&g_tready, 0);
+    atomic_store(&g_tnext, 0);
+    atomic_store(&g_tdone, 0);
+    atomic_store(&g_tabort, 0);
+    atomic_fetch_add_explicit(&g_tgen, 1, memory_order_release);
+    syscall(SYS_futex, &g_tgen, FUTEX_WAKE_PRIVATE, 1 << 30, NULL, NULL, 0);
+    return 0;
+}
+
 // Returns 0, or a negative code: -1 bad shapes, -2 too many rows/experts, -3 out of memory, -4 not initialized.
 int hostk_moe(
     int R,
@@ -332,6 +582,7 @@ int hostk_moe(
     if (E == 0) {
         return 0;
     }
+    atomic_store(&g_tabort, 1);  // a running prefetch (hostk_touch) yields the DRAM to the experts
     pthread_mutex_lock(&g_mu);
     size_t need = (size_t)E * MAXR * ((size_t)H / gs + I + (size_t)I / gs);
     if (need > g_scratch_sz) {
