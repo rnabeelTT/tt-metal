@@ -40,6 +40,7 @@ from hybrid.patch import HYB, _port
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 WARMUP_PROMPT = "Write a haiku about the sea."
+LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
 
 def load_drafter(mesh, rows):
@@ -141,8 +142,16 @@ class Verify:
         for t in (h, x):
             ttnn.deallocate(t)
         out = argmax_max(logits)
-        ttnn.deallocate(logits)
+        if LP_DIR:  # quality capture: keep the logits (a trace output) for read_logits
+            self.logits = logits
+        else:
+            ttnn.deallocate(logits)
         return out
+
+    def read_logits(self, rows, vocab):
+        """Host FP32 log-probs [rows, vocab] of the last run (DFLASH_LP_DIR only)."""
+        lg = ttnn.to_torch(self.logits, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1)).float()
+        return torch.log_softmax(lg.reshape(-1, lg.shape[-1])[:rows, :vocab], dim=-1)
 
     def run(self):
         HYB.fetch.commit(HYB.slot_of)  # async fetch: last pass's CQ1 writes land before this pass reads the slots
@@ -197,6 +206,8 @@ class DFlashServing:
             HYB.lib_layer(li)
         logger.info(f"DFlash: host library resident ({time.time() - t0:.1f} s wait)")
         HYB.fetch.finalize(HYB.loader, HYB.stream)  # HYB_PINX: pinned zero-copy expert library (before any capture)
+        if getattr(HYB, "wcache", None) is not None:
+            print(HYB.wcache.summary(), flush=True)
         import threading
 
         logger.info(f"DFlash: python threads {[t.name for t in threading.enumerate()]}")
@@ -394,6 +405,11 @@ class DFlashServing:
         while a < K and drafts[a] == top[a]:
             a += 1
         if self._force is not None:
+            if LP_DIR:  # rows 0..a predict the tokens this pass commits (the recorded text)
+                lp = ver.read_logits(a + 1, self.V)
+                tgt = torch.tensor(top[: a + 1])
+                tl, ti = lp.topk(32, dim=-1)
+                self._lp.append((lp.gather(1, tgt[:, None])[:, 0], ti.int(), tl.half()))
             self._force_i += a + 1
         rows_h = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)[: a + 1]
         self.hist.append(rows_h)
@@ -455,6 +471,7 @@ class DFlashServing:
             t0 = int(force[0])
             n_new = min(n_new, len(force) - R_MAX_PAD)
         self._force, self._force_i = (list(force), 0) if force is not None else (None, 0)
+        self._lp = []
         self.end_prefill(t0, P)
         t_pf = time.time() - t_pf
         HYB.reset_stats()
@@ -465,6 +482,19 @@ class DFlashServing:
             out += new
             pos += len(new)
         dt = time.time() - t1
+        if LP_DIR and self._force is not None and self._lp:
+            os.makedirs(LP_DIR, exist_ok=True)
+            tag = str(len(os.listdir(LP_DIR)))
+            torch.save(
+                {
+                    "prompt": text[:80],
+                    "ids": out[:n_new],
+                    "tgt_lp": torch.cat([x[0] for x in self._lp]),
+                    "top_ids": torch.cat([x[1] for x in self._lp]),
+                    "top_lp": torch.cat([x[2] for x in self._lp]),
+                },
+                os.path.join(LP_DIR, f"lp_{tag}.pt"),
+            )
         self._force = None
         self.release()
         st, n = self.stats, max(1, self.stats["passes"])

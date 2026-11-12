@@ -661,6 +661,11 @@ def install():
         return sd
 
     mc.Qwen35MoeModelArgs.load_state_dict = load_state_dict
+    if os.environ.get("HYB_WCACHE"):  # raw device images of the routed experts (hybrid/wcache.py)
+        from .wcache import ExpertImageCache
+
+        HYB.wcache = ExpertImageCache(os.environ["HYB_WCACHE"], resident_fn=lambda L: HYB.resident[L], tag=PORT)
+        _port("moe").EXPERT_WEIGHT_HOOK = HYB.wcache
 
     orig_init = od.Qwen35MoEOptimized.__init__
 

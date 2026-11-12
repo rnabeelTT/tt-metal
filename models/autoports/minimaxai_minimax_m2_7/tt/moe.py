@@ -71,6 +71,9 @@ ROUTER_FUSED_SIGB = os.environ.get("QWEN35_ROUTER_FUSED_SIGB", "0") == "1"
 MOE_FUSED_DECODE = os.environ.get("QWEN35_MOE_FUSED_DECODE", "0") == "1"
 MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "32") or 0)
 MOE_PAD_INTER = int(os.environ.get("QWEN35_MOE_PAD_INTER", "0") or 0)
+# optional routed-expert weight source: an object with load(mesh, layer, spec) -> (up_gate, down) | None and
+# store(mesh, layer, spec, up_gate, down) (set by models/experimental/hybrid_moe; None = convert from the checkpoint)
+EXPERT_WEIGHT_HOOK = None
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -257,12 +260,7 @@ class Qwen35MoE:
             )
 
         # ---- routed experts (HF fused: gate_up [E, 2N, H] = [gate; up] rows, down [E, H, N]) -------
-        gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
-        down = state_dict["experts.down_proj"]  # [E, H, N]
         E, N, H = self.num_experts, self.inter, self.hidden
-        assert tuple(gate_up.shape) == (E, 2 * N, H) and tuple(down.shape) == (E, H, N)
-        gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
-        up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
         Nl = self.inter_local
         Nlp = max(Nl, MOE_PAD_INTER)  # padded local intermediate (MOE_PAD_INTER)
         from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
@@ -283,47 +281,76 @@ class Qwen35MoE:
         rnd = moe_fused.round_sig if self._fused_ok else (lambda t: t)
         sfx = (f".p{Nlp}" if Nlp != Nl else "") + (moe_fused.CACHE_SUFFIX if self._fused_ok else "")
         self.inter_local = Nlp
-
-        def pad_cols(t):  # [E, H, Nl] -> [E, H, Nlp] (zero columns)
-            return t if Nlp == Nl else torch.nn.functional.pad(t, (0, Nlp - Nl))
-
-        # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
-        packed = torch.cat(
-            [
-                torch.cat(
-                    [pad_cols(up_t[:, :, d * Nl : (d + 1) * Nl]), pad_cols(gate_t[:, :, d * Nl : (d + 1) * Nl])], dim=-1
-                )
-                for d in range(tp)
-            ],
-            dim=-1,
-        )  # [E, H, tp*2*Nlp]
-        # stage-5 probe: a 16-wide output tile on the gather-mode gate/up needs the weight stored with 16-wide tiles
-        # (matmul: out_tile_shape[1] % in1_tile_w == 0).
-        _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
-        self.up_gate = upload(
-            rnd(packed).unsqueeze(0).contiguous(),
-            self.prec.routed_gate_up,
-            "experts.up_gate" + sfx,
-            dim=-1,
-            tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
+        # EXPERT_WEIGHT_HOOK (hybrid_moe's raw device-image cache): a layer's routed-expert device tensors without
+        # reading or converting the checkpoint, or None; after a conversion the hook may keep the uploaded bytes
+        hook = EXPERT_WEIGHT_HOOK
+        spec = dict(
+            E=E,
+            H=H,
+            Nlp=Nlp,
+            tp=tp,
+            gate_up_dtype=str(self.prec.routed_gate_up),
+            down_dtype=str(self.prec.routed_down),
+            sfx=sfx,
+            gate_up_tile=str(getattr(args, "gather_gate_up_output_tile", None)),
         )
-        down_t = down.transpose(1, 2)  # [E, N, H]
-        if Nlp != Nl:  # per shard: Nl rows + (Nlp - Nl) zero rows
-            down_t = torch.cat(
-                [torch.nn.functional.pad(down_t[:, d * Nl : (d + 1) * Nl, :], (0, 0, 0, Nlp - Nl)) for d in range(tp)],
-                dim=1,
+        cached = hook.load(mesh_device, layer_num, spec) if hook is not None else None
+        if cached is not None:
+            self.up_gate, self.down = cached
+            Nl = Nlp  # the stored width from here on (as the conversion path below)
+        else:
+            gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
+            down = state_dict["experts.down_proj"]  # [E, H, N]
+            assert tuple(gate_up.shape) == (E, 2 * N, H) and tuple(down.shape) == (E, H, N)
+            gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
+            up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
+
+            def pad_cols(t):  # [E, H, Nl] -> [E, H, Nlp] (zero columns)
+                return t if Nlp == Nl else torch.nn.functional.pad(t, (0, Nlp - Nl))
+
+            # Pack per TP shard as [up_d | gate_d] so ttnn.swiglu (first * silu(second)) is exact per device.
+            packed = torch.cat(
+                [
+                    torch.cat(
+                        [pad_cols(up_t[:, :, d * Nl : (d + 1) * Nl]), pad_cols(gate_t[:, :, d * Nl : (d + 1) * Nl])],
+                        dim=-1,
+                    )
+                    for d in range(tp)
+                ],
+                dim=-1,
+            )  # [E, H, tp*2*Nlp]
+            # stage-5 probe: a 16-wide output tile on the gather-mode gate/up needs the weight stored with 16-wide tiles
+            # (matmul: out_tile_shape[1] % in1_tile_w == 0).
+            _gu_tile = getattr(args, "gather_gate_up_output_tile", None)
+            self.up_gate = upload(
+                rnd(packed).unsqueeze(0).contiguous(),
+                self.prec.routed_gate_up,
+                "experts.up_gate" + sfx,
+                dim=-1,
+                tile=ttnn.Tile([32, _gu_tile[1]]) if _gu_tile else None,
             )
-        down_t = rnd(down_t).unsqueeze(0).contiguous()  # [1, E, tp * Nlp, H]
-        Nl = Nlp  # the stored width from here on (program configs, the decode / prefill paths via self.inter_local)
-        # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
-        self.down = upload(
-            down_t,
-            self.prec.routed_down,
-            "experts.down" + sfx,
-            dim=-2,
-            tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
-        )
-        del gate_t, up_t, packed, down_t
+            down_t = down.transpose(1, 2)  # [E, N, H]
+            if Nlp != Nl:  # per shard: Nl rows + (Nlp - Nl) zero rows
+                down_t = torch.cat(
+                    [
+                        torch.nn.functional.pad(down_t[:, d * Nl : (d + 1) * Nl, :], (0, 0, 0, Nlp - Nl))
+                        for d in range(tp)
+                    ],
+                    dim=1,
+                )
+            down_t = rnd(down_t).unsqueeze(0).contiguous()  # [1, E, tp * Nlp, H]
+            Nl = Nlp  # the stored width from here on (program configs, the decode / prefill paths via self.inter_local)
+            # a 16-wide gate/up output feeds the down matmul as in0 with 16-wide K tiles -> the down weight needs 16-high tiles
+            self.down = upload(
+                down_t,
+                self.prec.routed_down,
+                "experts.down" + sfx,
+                dim=-2,
+                tile=ttnn.Tile([_gu_tile[1], 32]) if _gu_tile else None,
+            )
+            del gate_t, up_t, packed, down_t
+            if hook is not None:
+                hook.store(mesh_device, layer_num, spec, self.up_gate, self.down)
 
         # ---- shared expert (dense SwiGLU, TP column/row parallel) + sigmoid gate (MiniMax-M2 has none) --------
         self.has_shared = bool(getattr(args, "has_shared_expert", True))
