@@ -15,7 +15,7 @@ SIZE=${1:?usage: build.sh 122b|35b|qwen38}
 HERE=$(cd "$(dirname "$0")" && pwd)
 case $SIZE in
   122b) BASE=${BASE:-tt-model/ornith-1.5-122b:b98336b9ce62} ;;
-  35b)  BASE=${BASE:-tt-model/ornith-1.5-35b-a3b:4ce68d7f2568} ;;
+  35b)  BASE=${BASE:-tt-model/ornith-1.5-35b-a3b:5b4af07ab13a} ;;   # 2026-11-10: batched short-prompt prefill, wider MoE dispatch
   qwen38) BASE=${BASE:-tt-model/ornith-1.5-122b:b98336b9ce62}   # system libraries and the tt user only
           Q38_REPO=mando2222/qwen3.8-27b-dflash2-vision-p300x2-q4kv-v6-thin-cp4
           Q38_REV=${Q38_REV:-67af7db5a391635a798c493907ec1515291b4016}

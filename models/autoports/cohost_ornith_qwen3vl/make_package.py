@@ -46,9 +46,10 @@ ORNITH = {
         src="raahemnabeel/ornith-1.5-35b-a3b", base_profile="p300x2",
         env={"QWEN35_MOE_FUSED_DECODE": "1", "QWEN35_DECODE_REPLICATED": "1", "QWEN35_GDN_DECODE_OPS": "1",
              "QWEN35_ATTN_DECODE_OPS": "1", "QWEN35_MTP": "0", "QWEN35_ROWS_TOPK": "1", "QWEN35_VISION": "1",
-             "QWEN35_VISION_MAX_IMAGES": "4", "QWEN35_VISION_MAX_PIXELS": "4194304", "QWEN35_BATCHED_PREFILL": "0",
+             "QWEN35_VISION_MAX_IMAGES": "4", "QWEN35_VISION_MAX_PIXELS": "4194304", "QWEN35_BATCHED_PREFILL": "1",
              "QWEN35_PROGRAM_GUARD": "1", "QWEN35_FABRIC_BOUNDARY": "1", "QWEN35_FB_MAX_ROWS": "4",
-             "QWEN35_FB_CONSUMER": "1", "QWEN35_FB_ROUTER": "1", "QWEN35_MOE_SPLIT_PAIR": "1"},
+             "QWEN35_FB_CONSUMER": "1", "QWEN35_FB_ROUTER": "1", "QWEN35_MOE_SPLIT_PAIR": "1",
+             "QWEN35_DISPATCH_MC": "1"},
         # 12.0 GiB non-KV on four dies (context contract serving_tp4) + 31 x 0.036 + 32 prefix snapshots: room to spare
         max_num_seqs=32, kv_tokens=1048576, kv_bytes_per_token=5440, nonkv_gib=12.0 + 31 * 0.0356 + 32 * 0.047,
     ),
@@ -104,6 +105,20 @@ MEASURED["35b"] = {
         "| Reranker, 30 documents | 0.47 s | 0.50 s |\n"
         "| Reranker, 8 page images | 1.60 s | 1.93 s |\n\n"
         "When the embedder or reranker runs, the models take turns: Ornith's decode pauses for each 8B pass.\n\n"
+        "**Prefill update (2026-11-12).** Built on the Ornith package image of 2026-11-10 (`5b4af07ab13a`) with its "
+        "four-die prefill settings: short prompts (up to 512 tokens) prefilled four at a time in one pass "
+        "(`QWEN35_BATCHED_PREFILL=1`) and the MoE expert dispatch spread over more cores (`QWEN35_DISPATCH_MC=1`). "
+        "Same box, all three members loaded, 128 output tokens, greedy, median of 6 / 24 / 64 requests:\n\n"
+        "| Ornith-1.5-35B-A3B | before (2026-11-06) | after |\n| --- | ---: | ---: |\n"
+        "| 1 user, short prompt: TTFT | 0.12 s | 0.086 s |\n"
+        "| 8 users, short prompts: TTFT | 1.13 s | 0.66 s |\n"
+        "| 8 users: decode per user | 107 tok/s | 115 tok/s |\n"
+        "| 32 users, short prompts: TTFT | | 1.80 s |\n"
+        "| 1 user, ~2k-token prompt: TTFT | | 0.24 s |\n"
+        "| 1 user: decode | 212.5 tok/s | 211.9 tok/s |\n\n"
+        "The Ornith package checked that output is unchanged (greedy identical, one request and eight concurrent); "
+        "here the 8B models' outputs and Ornith's image answers were rechecked, 0 programs compiled after capture, "
+        "DRAM per chip after boot 25.06 GiB.\n\n"
         "| | value |\n| --- | ---: |\n"
         "| DRAM per chip after boot | 24.87 GiB (Qwen3-VL pair with both vision towers 8.55, Ornith weights 9.18, "
         "Ornith KV 6.32, warm-up and traces 0.82) |\n"
