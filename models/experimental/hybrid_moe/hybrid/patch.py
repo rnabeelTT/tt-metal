@@ -191,6 +191,8 @@ class HybridState:
         # HYB_SOCK_ROWS_FIRST (default 1): crafted rows sent before the activations are read and the CPU experts start
         # (runs/m27/fb_rows: short 48.5 -> 50.2 tok/s, 8K 35.9 -> 38.2)
         self.sock_rows_first = os.environ.get("HYB_SOCK_ROWS_FIRST", "1") == "1"
+        # HYB_SOCK_LATE_CHOOSE (default 1): socket mode picks the layer's fetches after its rows are sent
+        self.sock_late_choose = os.environ.get("HYB_SOCK_LATE_CHOOSE", "1") == "1"
         # HYB_PREFETCH (socket mode): at each hybrid layer the host predicts the NEXT hybrid layer's missed experts
         # (that layer's router on this layer's MoE input: sigmoid + bias top-HYB_PF_TOPK per row) and, once this
         # layer's partial is sent, reads their int4 weights on HYB_PF_THREADS threads (hostk_touch) while the device
@@ -233,6 +235,7 @@ class HybridState:
             "pf_pred": 0,
             "pf_hit": 0,
             "pf_mb": 0.0,
+            "t_lg2rows": 0.0,
             "t_pf": 0.0,
             "skipped": 0,
             "skipped_mass": 0.0,
@@ -1049,11 +1052,15 @@ def _sock_step1(self, B, m):
     activations are read and the CPU experts started (the device resumes sooner), or after; the fetch writes last."""
     t0 = time.perf_counter()
     S, L, H = HYB.socks, self.layer_num, B["shapes"]["H"]
+    read0 = HYB.st["t_read"]
     lg = S.read_lg(m)
     HYB.st["t_read"] += time.perf_counter() - t0
     ids, sc, slot, res, miss = _route_host(self, lg, m)
     fetch = None
-    if HYB.fetch.on:
+    # the fetch choice waits until the rows are out: the fetch is asynchronous here (resident from the next replay), so
+    # it changes neither this step's slots nor its misses (victims are never this step's picks)
+    late = HYB.fetch.on and HYB.fetch.async_on and HYB.sock_late_choose
+    if HYB.fetch.on and not late:
         fetch = HYB.fetch.choose(L, ids, HYB.slot_of[L])
         slot = HYB.slot_of[L][ids]
         res = slot >= 0
@@ -1061,6 +1068,7 @@ def _sock_step1(self, B, m):
     if HYB.sock_rows_first:
         _sock_rows(self, S, L, lg, ids, sc, m)
     t1 = time.perf_counter()
+    HYB.st["t_lg2rows"] += t1 - t0 - HYB.st["t_read"] + read0  # logits in hand -> rows sent (the device waits)
     xh = S.read_x(m, H)  # always consumed: the device sends every step
     HYB.st["t_read"] += time.perf_counter() - t1
     job = None
@@ -1076,6 +1084,8 @@ def _sock_step1(self, B, m):
         _pf_predict(L, xh, miss, ids, m)
     if not HYB.sock_rows_first:
         _sock_rows(self, S, L, lg, ids, sc, m)
+    if late:
+        fetch = HYB.fetch.choose(L, ids, HYB.slot_of[L])
     if fetch is not None:
         # after the rows (the device waits only for them): CQ1 writes, resident from the next replay (FetchCache.commit),
         # enqueued while the device runs this layer's experts and the next layer's attention

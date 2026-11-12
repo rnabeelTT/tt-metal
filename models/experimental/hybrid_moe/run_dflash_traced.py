@@ -33,6 +33,7 @@ HYB_KEYS = (
     "pf_hit",
     "pf_mb",
     "t_pf",
+    "t_lg2rows",
     "dec_picks",
     "dec_hits",
     "host_experts",
