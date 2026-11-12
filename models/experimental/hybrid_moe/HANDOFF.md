@@ -118,6 +118,19 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 4 (2026-11-12): socket-mode device profile (`runs/m27/prof3`, profiler on, one verify pass 52.7 ms): the
+  device waits 23.0 ms in the CPU-partial recv and 3.7 ms in the crafted-rows recv (42 hybrid layers); a full layer is
+  ~450 us (attention ~220 us in ~36 programs of 5-20 us, MoE ~230 us). The CPU kernel is DRAM-bound: hostk 42 GB/s at
+  6-8 threads vs 47.6 GB/s peak read (`cache/bench_hostk.py`; DDR5 at 3600 MT/s), and the device's attention time
+  leaves host DRAM idle. `HYB_PREFETCH=1` (serve default): at each hybrid layer the two prefetch threads score the next
+  hybrid layer's router on this layer's MoE input (C, `hostk_touch_predict`, ~120 us) and, after the partial is sent,
+  read the predicted host experts' int4 rows so the next CPU experts read L2/L3 (`cache/bench_touch.py`: 3 experts
+  0.64 -> 0.33-0.44 ms). Cache contents only, no numerics change. Fixed text ABBA (`fb_pf2`): short 48.6 -> 52.5 tok/s,
+  8K 36.5 -> 37.7; CPU wait 6.7 -> 3.3 ms/pass. Recall 68% / precision 48% at top-8. Dropped (within noise): top-12 /
+  16 (`fb_pfk`, recall 82 / 88%), rescaling by the two layers' norm weights (`fb_pfg`, recall unchanged), adding the
+  layer's last-pass misses (`fb_pfp`, 72%); a bf16 dot-product (vdpbf16ps) CPU kernel: 2.5e-6 rel. error but no
+  faster even L3-resident (the kernel is not compute-bound). A numpy predictor on the main thread cost 18 ms/pass
+  (BLAS threads vs the kernel): keep it in C.
 - Round 3 (2026-11-11): single-trace socket decode (`HYB_SOCKET=1`, serve default): a captured verify pass is ONE
   trace; each hybrid layer sends its routing logits / activation rows to the host (send_async_d2h, chip 0), receives the
   crafted rows on every chip and the CPU partial on chip 0 (recv_async_h2d, host-push L1 FIFOs of 8 pages: 64-page
