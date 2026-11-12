@@ -29,6 +29,8 @@ PF_ENV="$PF_ENV -e DFLASH_WARMUP=${DWARM:-384}"
 # threads and fetch fraction 0.15 (runs/m27/fb_sock, fb_sock2: short 44.7 -> 48.4 tok/s, 8K 31.9 -> 37.0, fixed text)
 if [ "${SOCK:-1}" = 1 ]; then
   PF_ENV="$PF_ENV -e HYB_SOCKET=1 -e HYB_HOSTK_THREADS=${HK_THREADS:-6}"; FFRAC=${FFRAC:-0.15}
+  # predictive L3 prefetch of the next layer's CPU experts (runs/m27/fb_pf2: short 48.6 -> 52.5 tok/s, 8K 36.5 -> 37.7)
+  PF_ENV="$PF_ENV -e HYB_PREFETCH=${PREFETCH:-1} -e HYB_PF_TOPK=${PF_TOPK:-8}"
 else
   FFRAC=${FFRAC:-0.3}
 fi
