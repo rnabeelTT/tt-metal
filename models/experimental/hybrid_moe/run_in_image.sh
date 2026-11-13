@@ -1,6 +1,11 @@
 #!/bin/bash
 # usage: run_in_image.sh <script.py> <out_dir> [extra docker -e args...]
 S=$1; O=$2; shift 2
+# one device job at a time (shared with every other user of these scripts): the lock file, and no served model running
+if [ -z "${TT_LOCK_HELD:-}" ]; then
+  exec 9>"$HOME/.cache/hybrid-moe/ttdev.lock"; flock 9
+  while docker ps --format '{{.Names}}' | grep -q '^hybrid-moe-serve$'; do sleep 10; done
+fi
 P=$(cd "$(dirname "$(readlink -f "$0")")" && pwd); cd "$P" && mkdir -p "$O" logs cache && docker run --rm --name hybrid-moe-poc \
   --device /dev/tenstorrent --ipc host --ulimit memlock=-1:-1 \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \

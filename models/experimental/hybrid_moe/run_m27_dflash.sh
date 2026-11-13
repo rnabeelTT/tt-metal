@@ -7,6 +7,10 @@ FL=""
 if [ "${FULL:-0}" != 0 ]; then
   FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz "$FULL" | tail -1)
 fi
+# the device lock (run_in_image.sh) covers the reset too: taken here, inherited by run_in_image.sh
+exec 9>"$HOME/.cache/hybrid-moe/ttdev.lock"; flock 9
+while docker ps --format '{{.Names}}' | grep -q '^hybrid-moe-serve$'; do sleep 10; done
+export TT_LOCK_HELD=1
 docker run --rm --device /dev/tenstorrent --entrypoint tt-smi tt-model/qwen3-5-122b-a10b:8a750811ffec -r >/dev/null 2>&1
 FORK=1 HF_MODEL=MiniMaxAI/MiniMax-M2.7 timeout 4000 ./run_in_image.sh run_dflash_traced.py "$O" \
   -e HF_HUB=/hf/hub -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e HYB_PORT=minimaxai_minimax_m2_7 -e HYB_ENABLE=1 \
