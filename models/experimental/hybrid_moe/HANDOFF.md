@@ -118,6 +118,21 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- Round 6 (2026-11-13) - DEMO BUILD v1.1 (tag m27-poc-v1.1, worktree ~/m27-poc-v1: `cd ~/m27-poc-v1/models/
+  experimental/hybrid_moe && serve/serve_m27.sh`; the dev tree ~/FORK-tt-metal is separate; copy hybrid/pin/pinx.so
+  into a new worktree - it is git-ignored):
+  - Gradual elastic demotion (HYB_ELASTIC_GRADUAL=1 default): a request demotes ceil((need - 32K) / 4096) of the 24
+    layers, least valuable first. 45K-token prompt served: switch 7.4 s (4 layers; was 37.2 s with all 24), TTFT 30.5
+    s (61.6), decode 32.8 tok/s (28.6); back to short 5.7 s (15.9). runs/m27/el_grad1 vs el_grad0 (40K): 31.8 vs 27.6.
+  - HYB_PINX_BGWRITE=1 default (fetch copies on pinx's worker thread): +3-4% (fb_bg1 vs fb_bg0), identical log-probs.
+  - QWEN35_KV_DEVICE_ZEROS=1 default: bit-identical (lp_kvz), faster startup / pool growth.
+  - Served 8-prompt bench: 58.6 tok/s mean, TTFT 0.63 s (runs/m27/... worktree serve/server_m27.log).
+  - Tried, no gain (kept opt-in): HYB_FETCH_POLICY=dyn (budget + value-aware admission) and larger fixed fractions,
+    with and without the background writer (fb_dsweep, fb_fsweep, fb_fsweep2): every setting that fetches more is
+    flat or slower - the fetch's device-side / host-DRAM cost cancels the CPU work it saves; 0.15 / 2 stays.
+  - QWEN35_QKNORM_FUSED=1 did not take effect in this build (lp_qk identical to stock); worth <= 1%, not pursued.
+  - Device profile op names: the profiler's runtime ids do not map through mesh_workloads_log.yaml (cache/
+    prof_names2.py); kernel fusion needs that mapping first.
 - Round 5b (2026-11-12, late) - QUALITY FIX + ELASTIC SERVING:
   - LOST WRITES: hybrid/pin zero-copy writes (pinned host region read over the NOC) silently drop some writes on this
     QB2 (cache/test_pinx_write2.py: 5-15% of slot writes per die on 3 of 4 dies, deterministic; the copy path never
