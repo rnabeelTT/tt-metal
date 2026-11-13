@@ -38,6 +38,7 @@ IMG=${HYB_IMAGE:-tt-model/qwen3-5-122b-a10b:8a750811ffec}
 TR_MIB=${TRACE_MIB:-96}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+REPO=$(cd "$P/../../.." && pwd)  # the checkout this script belongs to (a pinned demo worktree serves its own code)
 cd "$P" || exit 1
 FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz "$FULL" | tail -1)
 # ELASTIC (default 1 at CTX 131072; ELASTIC=0: the static 128K profile): built as the 32K profile (44 full layers, a 32K-token KV pool); a request that needs more
@@ -58,8 +59,8 @@ docker run -d --name hybrid-moe-serve \
   --device /dev/tenstorrent --ipc host --ulimit memlock=-1:-1 \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   -v $HOME/.cache/huggingface:/hf -v $P:/poc -v $P/cache:/cache -v $HOME/.cache/hybrid-moe:/hyblib \
-  -v $HOME/FORK-tt-metal/models:/opt/tt-metal/models \
-  -v $HOME/FORK-tt-metal/models/autoports/minimaxai_minimax_m2_7:/extra_models/minimaxai_minimax_m2_7:ro \
+  -v $REPO/models:/opt/tt-metal/models \
+  -v $REPO/models/autoports/minimaxai_minimax_m2_7:/extra_models/minimaxai_minimax_m2_7:ro \
   --user "$(id -u):$(id -g)" -p ${PORT:-8000}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=MiniMaxAI/MiniMax-M2.7 -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e HOME=/tmp -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e HF_HUB=/hf/hub -e EXTRA_MODELS_DIR=/extra_models \
