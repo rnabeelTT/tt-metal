@@ -383,6 +383,14 @@ class DFlashServing:
 
     def _capture(self):
         ttnn.synchronize_device(self.mesh)
+        # QWEN35_ROWS_SDPA_SHARED_FROM (default 4096; 0 = off): requests whose context reaches it run the verify's SDPA
+        # through the shared-KV rows op (attn_decode/rows_sdpa.py: each K / V chunk read once for all rows; 40K
+        # context ~20% faster per token); shorter ones keep the stock decode (cheaper below ~2K positions)
+        thr = int(os.environ.get("QWEN35_ROWS_SDPA_SHARED_FROM", "4096") or 0)
+        shared = bool(thr) and int(self._pos or 0) >= thr
+        for layer in self.model.layers:
+            if hasattr(layer.attention, "paged_k"):
+                layer.attention.rows_sdpa_shared = shared
         self.dr.capture("pass", self.dr.pass_body)
         self.ver.capture()
         ttnn.synchronize_device(self.mesh)
