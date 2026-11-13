@@ -41,6 +41,9 @@ P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 REPO=$(cd "$P/../../.." && pwd)  # the checkout this script belongs to (a pinned demo worktree serves its own code)
 cd "$P" || exit 1
 FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz "$FULL" | tail -1)
+# expert fetch: the slack controller (HYB_FETCH_POLICY=auto: budget moved by measured pass time; runs/m27/fb_auto:
+# short / 8K same as the fixed 15% / 2; el_long_auto: 40K-token context 3% faster per pass, more fetched as the device
+# slows). FETCH_POLICY=fixed FETCH_MAX=2 restores the fixed fraction.
 # ELASTIC (default 1 at CTX 131072; ELASTIC=0: the static 128K profile): built as the 32K profile (44 full layers, a 32K-token KV pool); a request that needs more
 # context first demotes as many of the 24 layers the 128K profile keeps hybrid as it needs (4K tokens of pool each, least
 # valuable first; HYB_ELASTIC_GRADUAL=0: all of them) and grows the pool (hybrid/elastic.py)
@@ -70,7 +73,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_ENABLE=1 -e HYB_PORT=minimaxai_minimax_m2_7 -e HYB_SLOTS=192 -e HYB_DYN_SLOTS=0 -e HYB_SKIP=0 -e HYB_MTP=0 \
   -e HYB_ROWS=$((${DK:-3} + 1)) -e HYB_THREADS=12 -e HYB_LIB=/hyblib/minimax_m27_int4_s152 \
   -e HYB_PLAN=/poc/runs/m27/plan_m27_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
-  -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_MAX=2 -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
+  -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_POLICY=${FETCH_POLICY:-auto} -e HYB_FETCH_BUDGET=8 -e HYB_FETCH_MAX=${FETCH_MAX:-8} -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
   -e HYB_WCACHE=${WCACHE:-/hyblib/wcache_m27} \
   -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 $SPEC_ENV $PF_ENV \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
