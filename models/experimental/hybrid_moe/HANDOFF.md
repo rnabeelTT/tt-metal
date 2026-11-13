@@ -118,6 +118,13 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- DEMO BUILD v1.2 (tag m27-poc-v1.2, same worktree): + QK-norm fusion on by default (QWEN35_QKNORM_FUSED; vs the
+  BF16 reference KL 0.043 / top-1 0.898 = stock; fixed text short +2.2%, 8K +2.8%). Served: elastic switches 8.1 / 5.2
+  s, 8-prompt bench 56.5 tok/s, TTFT 0.61 s (unforced serving numbers move +-5% with the generated text).
+  - Long context: bench_sdpa_rows.py - the 4 verify rows each read the whole KV (paged SDPA decode 1 vs 4 users: 34 vs
+    75 us at 8K, 85 vs 267 us at 40K: ~11 ms / pass at 40K); the chunked prefill SDPA is no substitute (0.9-4.5 ms).
+    Next: a shared-KV multi-row decode (patched sdpa_decode kernels: rows stacked as GQA heads, per-row causal limits,
+    including the chunk-straddle case).
 - Round 6 (2026-11-13) - DEMO BUILD v1.1 (tag m27-poc-v1.1, worktree ~/m27-poc-v1: `cd ~/m27-poc-v1/models/
   experimental/hybrid_moe && serve/serve_m27.sh`; the dev tree ~/FORK-tt-metal is separate; copy hybrid/pin/pinx.so
   into a new worktree - it is git-ignored):
