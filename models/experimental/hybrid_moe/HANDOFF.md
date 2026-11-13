@@ -118,6 +118,14 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- DEMO BUILD v1.3 (tag m27-poc-v1.3): + fetch slack controller by default in serving (HYB_FETCH_POLICY=auto: the
+  per-pass fetch budget moved by measured pass time; fb_auto: short / 8K = fixed 15% / 2; el_long_auto: 40K context 3%
+  faster per pass with ~27 vs 39 host experts / pass). Served: 8-prompt bench 60.1 tok/s, TTFT 0.63 s; 45K prompt
+  switch 6.2 s, TTFT 25.2 s, 32.5 tok/s; prefix hit 2.0 s; back to short 6.9 s.
+  - Device jobs take ~/.cache/hybrid-moe/ttdev.lock (run_in_image.sh / run_m27_dflash.sh) and wait while the server
+    runs; a validation that starts the server holds the lock itself. A shared-KV multi-row decode attention is being
+    built separately (branch raahem/m27-rows-sdpa, worktree ~/m27-rows-sdpa), gated on op PCC, reference-model KL and
+    40K-context speed.
 - DEMO BUILD v1.2 (tag m27-poc-v1.2, same worktree): + QK-norm fusion on by default (QWEN35_QKNORM_FUSED; vs the
   BF16 reference KL 0.043 / top-1 0.898 = stock; fixed text short +2.2%, 8K +2.8%). Served: elastic switches 8.1 / 5.2
   s, 8-prompt bench 56.5 tok/s, TTFT 0.61 s (unforced serving numbers move +-5% with the generated text).
