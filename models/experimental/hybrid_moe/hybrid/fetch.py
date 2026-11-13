@@ -88,9 +88,10 @@ class FetchCache:
         # spread over the layers by their share of recent misses) and value-aware admission: per layer a decaying use
         # score per expert (HYB_FETCH_DECAY per step); a miss is fetched only if it outscores the weakest evictable LRU
         # resident by HYB_FETCH_MARGIN. "fixed" (default): a fraction f of the misses, at most F per layer, recency order.
-        # HYB_PINX_BGWRITE=1: the async (CQ1) fetch copies are issued from pinx's background thread (pinx_write_async;
-        # the copy path's host memcpy then overlaps this thread's work); commit() flushes them before its CQ1 event
-        self.bgwrite = os.environ.get("HYB_PINX_BGWRITE", "0") == "1"
+        # HYB_PINX_BGWRITE (default 1): the async (CQ1) fetch copies are issued from pinx's background thread
+        # (pinx_write_async: the copy path's host memcpy leaves this thread); commit() flushes them before its CQ1 event.
+        # runs/m27/fb_bg1 vs fb_bg0: short 55.0 -> 57.2, 8K 41.2 -> 42.6 tok/s; log-probs identical (lp_bg)
+        self.bgwrite = os.environ.get("HYB_PINX_BGWRITE", "1") == "1"
         self.policy = os.environ.get("HYB_FETCH_POLICY", "fixed")
         self.budget = float(os.environ.get("HYB_FETCH_BUDGET", "8"))
         self.decay = float(os.environ.get("HYB_FETCH_DECAY", "0.9"))
