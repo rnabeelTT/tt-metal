@@ -37,6 +37,10 @@ from models.tt_transformers.tt.ccl import tt_all_reduce
 _SDPA_PF_LOGGED = False
 # QWEN35_KVROWS (default 1): a rows-mode step writes all its rows' K / V in one multi-row program (attn_decode/kvrows.py)
 _KVROWS = os.environ.get("QWEN35_KVROWS", "1") == "1"
+# QWEN35_ROWS_SDPA_SHARED (default 0): a rows-mode step's SDPA reads each K / V chunk once for all its rows
+# (attn_decode/rows_sdpa.py) instead of the stock decode with the rows as users (every row re-reading the cache). The rows
+# must be ONE sequence (an MTP / DFlash verify): the op reads page-table row 0 for every row.
+_ROWS_SDPA_SHARED = os.environ.get("QWEN35_ROWS_SDPA_SHARED", "0") == "1"
 _SDPA_FIDELITIES = {
     "lofi": ttnn.MathFidelity.LoFi,
     "hifi2": ttnn.MathFidelity.HiFi2,
@@ -426,23 +430,29 @@ class TPAttention:
                 ttnn.deallocate(pos_b)
         ttnn.deallocate(k)
         ttnn.deallocate(v)
-        grid = self.mesh.compute_with_storage_grid_size()
-        cfg = ttnn.SDPAProgramConfig(
-            compute_with_storage_grid_size=(grid.x, grid.y),
-            exp_approx_mode=False,
-            q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
-            k_chunk_size=int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0),
-        )
-        attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
-            q,
-            self.paged_k,
-            self.paged_v,
-            page_table_tensor=page_table,
-            cur_pos_tensor=cur_pos_tt,
-            scale=self.scale,
-            program_config=cfg,
-            memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        k_chunk = int(getattr(self.args, "sdpa_decode_k_chunk", None) or 0)
+        if _ROWS_SDPA_SHARED:
+            from models.demos.blackhole.qwen36.tt.attn_decode.rows_sdpa import rows_sdpa_decode
+
+            attn_out = rows_sdpa_decode(q, self.paged_k, self.paged_v, cur_pos_tt, page_table, self.scale, k_chunk)
+        else:
+            grid = self.mesh.compute_with_storage_grid_size()
+            cfg = ttnn.SDPAProgramConfig(
+                compute_with_storage_grid_size=(grid.x, grid.y),
+                exp_approx_mode=False,
+                q_chunk_size=int(getattr(self.args, "sdpa_decode_q_chunk", None) or 0),
+                k_chunk_size=k_chunk,
+            )
+            attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
+                q,
+                self.paged_k,
+                self.paged_v,
+                page_table_tensor=page_table,
+                cur_pos_tensor=cur_pos_tt,
+                scale=self.scale,
+                program_config=cfg,
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
         ttnn.deallocate(q)
         y = post(attn_out, ones[B], B)  # [1, B, NH * HD]: the head concat (x 1)
         ttnn.deallocate(attn_out)
