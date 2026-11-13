@@ -97,6 +97,18 @@ class FetchCache:
         self.decay = float(os.environ.get("HYB_FETCH_DECAY", "0.9"))
         self.margin = float(os.environ.get("HYB_FETCH_MARGIN", "0.25"))
         self.score = {}  # layer -> [E] decaying use score (dyn)
+        # HYB_FETCH_POLICY=auto: choose_dyn with a budget a slack controller moves (FreeToken-style): every
+        # HYB_FETCH_WINDOW passes the mean wall time per pass (commit to commit) is compared with the previous window's,
+        # and the budget keeps moving (x / / HYB_FETCH_STEP) while the pass time improves, else turns around
+        self.auto = self.policy == "auto"
+        self.win = int(os.environ.get("HYB_FETCH_WINDOW", "16"))
+        self.fstep = float(os.environ.get("HYB_FETCH_STEP", "1.25"))
+        self.bmin, self.bmax = 2.0, float(os.environ.get("HYB_FETCH_BUDGET_MAX", "48"))
+        self._t_last = None
+        self._win_t = []
+        self._prev_mean = None
+        self._dir = 1.0
+        self.budget_log = []  # (pass index, budget, window mean ms) - the controller's trajectory
         self.miss_ema = {}  # layer -> EMA of misses per step (dyn: the budget split)
         v = os.environ.get("HYB_FETCH_VERIFY", "")
         self.verify_layer = int(v) if v else None  # debug: read back one layer's LRU slots at commits (_verify)
@@ -438,6 +450,8 @@ class FetchCache:
     def commit(self, slot_of):
         """Async fetch, before a pass's replay (outside any capture): CQ0 waits for every write CQ1 has queued, then the
         experts written since the last commit become resident (slot_of: HYB.slot_of, layer -> [E] slots)."""
+        if self.auto:
+            self._control()
         if self.verify_layer is not None:
             self._verify(slot_of)
         if not self.pending:
@@ -565,7 +579,7 @@ class FetchCache:
     def choose(self, layer, ids, slot_of):
         """After routing a layer's step (ids [m, k]): LRU hits refreshed, the fetch set chosen, slot_of updated in place
         (fetched experts now resident at their LRU slots). Returns (fetched ids, their slots) for stage()."""
-        if self.policy == "dyn":
+        if self.policy in ("dyn", "auto"):
             return self.choose_dyn(layer, ids, slot_of)
         self.step += 1
         lru, free, stamp = self.lru[layer], self.free[layer], self.stamp[layer]
@@ -609,6 +623,26 @@ class FetchCache:
                 slots.append(s)
         stamp[picked] = self.step
         return fetched, slots
+
+    def _control(self):
+        """HYB_FETCH_POLICY=auto: one pass ended (commit to commit); every `win` passes, move the budget."""
+        now = time.perf_counter()
+        last, self._t_last = self._t_last, now
+        if last is None:
+            return
+        dt = now - last
+        if dt > 1.0:  # a prefill / capture / idle gap between requests, not a pass
+            return
+        self._win_t.append(dt)
+        if len(self._win_t) < self.win:
+            return
+        mean = sum(sorted(self._win_t)[: max(1, self.win - 2)]) / max(1, self.win - 2)  # drop the 2 slowest (jitter)
+        self._win_t = []
+        if self._prev_mean is not None and mean > self._prev_mean:
+            self._dir = -self._dir  # got slower: turn around
+        self._prev_mean = mean
+        self.budget = min(self.bmax, max(self.bmin, self.budget * (self.fstep if self._dir > 0 else 1.0 / self.fstep)))
+        self.budget_log.append((self.step, round(self.budget, 2), round(mean * 1e3, 2)))
 
     def choose_dyn(self, layer, ids, slot_of):
         """choose() under HYB_FETCH_POLICY=dyn: the layer's share of the per-pass budget, candidates by use score, each
