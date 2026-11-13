@@ -338,13 +338,13 @@ class TPAttention:
 
         cache = self.args.__dict__.setdefault("_qwen36_rows_attn_ops", {})
         key = (id(self.mesh), self.NH, self.NKV, self.HD)
-        # QWEN35_QKNORM_FUSED=1 (EXPERIMENTAL, default off: fails the decode quality A/B): the full-width QK norm
-        # inside the prep op (partial sums of squares by QKStats, one all_gather, rsqrt / gamma in the prep) instead of
-        # the ~13-program distributed RMSNorm chain (_full_qk_norm). One eager layer matches the stock path (q / k PCC
-        # 0.99999, dbg_qkfused.py), but the full traced model's forced-decode log-probs move by mean KL 0.15 (NLL 0.456
-        # -> 0.546, runs/m27/lp_off vs lp_fuse; the stock path is bit-deterministic run to run). Cause not found.
-        self._qk_fused = None
-        if os.environ.get("QWEN35_QKNORM_FUSED", "0") == "1" and "q_norm_host" in self.tw:
+        # QWEN35_QKNORM_FUSED (default 1): the full-width QK norm inside the prep op (partial sums of squares by
+        # QKStats, one all_gather, rsqrt / gamma in the prep) instead of the ~13-program distributed RMSNorm chain
+        # (_full_qk_norm). Against the BF16 reference (forced-decode log-probs, runs/m27/lp_qk2 vs lp_fixed): KL 0.043
+        # vs 0.045, top-1 0.898 vs 0.902; fixed text (fb_qk vs fb_bg1) short 57.2 -> 58.4, 8K 42.6 -> 43.8 tok/s.
+        # (An earlier "fails the A/B" verdict compared against the stock run instead of the reference: any rounding
+        # change moves a bit-deterministic decode.)
+        if os.environ.get("QWEN35_QKNORM_FUSED", "1") == "1" and "q_norm_host" in self.tw:
             from models.demos.blackhole.qwen36.tt.attn_decode.ops import AttnDecodePrep
             from models.demos.blackhole.qwen36.tt.attn_decode.qkstats import QKStats
 
