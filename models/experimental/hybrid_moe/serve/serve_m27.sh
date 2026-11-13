@@ -42,11 +42,12 @@ REPO=$(cd "$P/../../.." && pwd)  # the checkout this script belongs to (a pinned
 cd "$P" || exit 1
 FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz "$FULL" | tail -1)
 # ELASTIC (default 1 at CTX 131072; ELASTIC=0: the static 128K profile): built as the 32K profile (44 full layers, a 32K-token KV pool); a request that needs more
-# context first demotes the 24 layers the 128K profile keeps hybrid and grows the pool (hybrid/elastic.py)
+# context first demotes as many of the 24 layers the 128K profile keeps hybrid as it needs (4K tokens of pool each, least
+# valuable first; HYB_ELASTIC_GRADUAL=0: all of them) and grows the pool (hybrid/elastic.py)
 if [ "${ELASTIC:-1}" = 1 ] && [ "$CTX" = 131072 ]; then
   FL=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 44 | tail -1)
-  FL20=$(python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 20 | tail -1)
-  DEM=$(python3 -c "a=set('$FL'.split(','));b=set('$FL20'.split(','));print(','.join(sorted(a-b,key=int)))")
+  RANK=$(SIM_ORDER=1 python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 44 | tail -1)
+  DEM=$(python3 -c "r='$RANK'.split(',');print(','.join(reversed(r[20:])))")  # demotion order: least valuable first
   PF_ENV="$PF_ENV -e QWEN35_KV_TOKENS=${KV_TOKENS:-32768} -e HYB_ELASTIC_DEMOTE=$DEM"
   FULL=44
 fi

@@ -114,8 +114,16 @@ def main():
         # POC_FETCH_SWEEP="f:F,f:F": the prompts once per fetch setting (fraction f of the misses, at most F per layer and
         # step), in this process (direct fetch: both are plain attributes; the LRU keeps its contents across settings)
         # "f:F:a" = the same with the asynchronous CQ1 fetch (HYB_FETCH_ASYNC; the mesh is opened with 2 CQs then)
+        # "dyn:B:F[:a]" = the dynamic policy (HYB_FETCH_POLICY=dyn) with a budget of B fetched experts per pass
         sweep = [c.split(":") for c in os.environ.get("POC_FETCH_SWEEP", "").split(",") if c]
-        runs = [(float(c[0]), int(c[1]), len(c) > 2 and c[2] == "a") for c in sweep] or [None]
+        runs = [
+            (
+                ("dyn", float(c[1])) if c[0] == "dyn" else ("fixed", float(c[0])),
+                int(c[2] if c[0] == "dyn" else c[1]),
+                c[-1] == "a",
+            )
+            for c in sweep
+        ] or [None]
         if sweep and not (HYB.fetch.direct and all(F <= HYB.fetch.D for _, F, _ in runs)):
             raise ValueError(f"POC_FETCH_SWEEP {runs} needs direct fetch and F <= HYB_LRU ({HYB.fetch.D})")
         jobs = [(cfg, p) for cfg in runs for p in prompts]
@@ -161,7 +169,12 @@ def main():
                     warmed.add(on)
             if cfg is not None:
                 HYB.fetch.commit(HYB.slot_of)  # writes of an async setting land before the mode changes
-                HYB.fetch.f, HYB.fetch.F, HYB.fetch.async_on = cfg
+                (pol, v), HYB.fetch.F, HYB.fetch.async_on = cfg
+                HYB.fetch.policy = pol
+                if pol == "dyn":
+                    HYB.fetch.budget = v
+                else:
+                    HYB.fetch.f = v
                 if cfg[2] and ncq < 2:
                     raise ValueError("an async fetch setting needs HYB_FETCH_ASYNC=1 (two command queues)")
             r = srv.generate(p_text, NEW, gen.page_table[:1], force=forced.get(p_text[:80]))

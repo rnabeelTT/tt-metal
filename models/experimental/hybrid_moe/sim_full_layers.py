@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """HYB_FULL_LAYERS: which layers to hold entirely on the device (all E experts) under a slot budget. Ranks layers by
 their host experts per pass at C slots on the TRAIN routing (passes of R tokens: the union of picks), reports the
-held-out host experts per pass for the top n, and prints the list for n.
+held-out host experts per pass for the top n, and prints the list for n (SIM_ORDER=1: in rank order).
 usage: python sim_full_layers.py <plan.npz> <train routing.npz> <held routing.npz> <n> [C=192] [R=4]"""
+import os
 import sys
 
 import numpy as np
@@ -32,4 +33,6 @@ ho = per_layer(np.load(sys.argv[3])["ids"])
 rank = np.argsort(-tr)
 for k in sorted({0, n // 2, n}):
     print(f"{k:2d} full layers: held-out host experts / pass {ho.sum() - ho[rank[:k]].sum():.1f}")
-print(",".join(str(int(v)) for v in sorted(rank[:n])))
+# SIM_ORDER=1: the top n in rank order (most host experts saved first) instead of sorted, e.g. an elastic demotion order
+order_out = rank[:n] if os.environ.get("SIM_ORDER") == "1" else sorted(rank[:n])
+print(",".join(str(int(v)) for v in order_out))

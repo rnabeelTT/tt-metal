@@ -19,6 +19,11 @@
 #include <tt-metalium/mesh_device.hpp>
 #include <tt-metalium/shard_data_transfer.hpp>
 
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+
 namespace ttm = tt::tt_metal;
 namespace dist = tt::tt_metal::distributed;
 
@@ -132,6 +137,83 @@ int pinx_write_at2(
     return 0;
 }
 
+// Background copy-path writes: one worker thread runs queued pinx_write_at2(.., use_pinned = 0) calls, so the host
+// memcpy into the command queue's buffer leaves the caller's thread. pinx_flush() returns once every queued write has
+// been enqueued on its command queue (then an event recorded on that queue covers them). Use one queue per worker
+// user (the caller must not enqueue on that queue itself until pinx_flush returns).
+namespace {
+struct AsyncWrite {
+    void* mesh;
+    int dst, region, cq_id;
+    std::vector<uint64_t> offsets;
+    uint64_t dst_offset, size;
+};
+std::mutex g_wmu;
+std::condition_variable g_wcv, g_wdone;
+std::deque<AsyncWrite> g_wq;
+int g_inflight = 0;
+int g_werr = 0;
+bool g_wrunning = false;  // a detached worker is alive (detached: process exit never trips on a joinable thread)
+bool g_wstop = false;
+
+void worker_loop() {
+    for (;;) {
+        AsyncWrite w;
+        {
+            std::unique_lock<std::mutex> lk(g_wmu);
+            g_wcv.wait(lk, [] { return g_wstop || !g_wq.empty(); });
+            if (g_wq.empty()) {
+                g_wrunning = false;
+                g_wdone.notify_all();
+                return;
+            }
+            w = std::move(g_wq.front());
+            g_wq.pop_front();
+        }
+        int rc = pinx_write_at2(w.mesh, w.dst, w.region, w.offsets.data(), w.cq_id, w.dst_offset, w.size, 0);
+        {
+            std::lock_guard<std::mutex> lk(g_wmu);
+            if (rc != 0 && g_werr == 0) {
+                g_werr = rc;
+            }
+            --g_inflight;
+        }
+        g_wdone.notify_all();
+    }
+}
+}  // namespace
+
+int pinx_write_async(
+    void* mesh, int dst, int region, const uint64_t* offsets, int ndev, int cq_id, uint64_t dst_offset, uint64_t size) {
+    std::lock_guard<std::mutex> lk(g_wmu);
+    if (!g_wrunning) {
+        g_wstop = false;
+        g_wrunning = true;
+        std::thread(worker_loop).detach();
+    }
+    g_wq.push_back(
+        AsyncWrite{mesh, dst, region, cq_id, std::vector<uint64_t>(offsets, offsets + ndev), dst_offset, size});
+    ++g_inflight;
+    g_wcv.notify_one();
+    return 0;
+}
+
+// Waits until every queued background write is enqueued; returns the first error code seen since the last flush.
+int pinx_flush() {
+    std::unique_lock<std::mutex> lk(g_wmu);
+    g_wdone.wait(lk, [] { return g_inflight == 0; });
+    int rc = g_werr;
+    g_werr = 0;
+    return rc;
+}
+
+void pinx_stop_worker() {
+    std::unique_lock<std::mutex> lk(g_wmu);
+    g_wstop = true;
+    g_wcv.notify_all();
+    g_wdone.wait(lk, [] { return !g_wrunning; });
+}
+
 int pinx_write(void* mesh, int dst, int region, const uint64_t* offsets, int cq_id) {
     return pinx_write_at(mesh, dst, region, offsets, cq_id, 0, 0);
 }
@@ -185,6 +267,8 @@ uint64_t pinx_dst_size(int dst) { return g_dsts.at(dst)->device_local_size(); }
 extern "C" {
 // Drops every destination view and pinned region; call before closing the mesh (their destructors talk to it).
 void pinx_release() {
+    pinx_flush();
+    pinx_stop_worker();
     g_dsts.clear();
     g_regions.clear();
 }

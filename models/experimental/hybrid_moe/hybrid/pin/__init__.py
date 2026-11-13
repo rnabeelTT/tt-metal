@@ -31,6 +31,17 @@ class Pinx:
         lib.pinx_write.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int]
         lib.pinx_write_at.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64), ctypes.c_int, u64, u64]
         lib.pinx_read.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.POINTER(u64)]
+        lib.pinx_write_async.argtypes = [
+            vp,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.POINTER(u64),
+            ctypes.c_int,
+            ctypes.c_int,
+            u64,
+            u64,
+        ]
+        lib.pinx_flush.restype = ctypes.c_int
         lib.pinx_write_at2.argtypes = [
             vp,
             ctypes.c_int,
@@ -111,6 +122,20 @@ class Pinx:
         )
         if rc != 0:
             raise RuntimeError(f"pinx_write_at2 returned {rc} (dst {dst}, region {region}, dst_offset {dst_offset})")
+
+    def write_async(self, dst, region, offsets, dst_offset, size, cq_id=1):
+        """A copy-path write_at run by pinx's background thread (the host memcpy leaves this thread); flush() before
+        anything that must see it is enqueued on cq_id (e.g. an event recorded on that queue)."""
+        rc = self.lib.pinx_write_async(
+            self.mp, dst, region, self._offs(offsets), self.tp, cq_id, int(dst_offset), int(size)
+        )
+        if rc != 0:
+            raise RuntimeError(f"pinx_write_async returned {rc}")
+
+    def flush(self):
+        rc = self.lib.pinx_flush()
+        if rc != 0:
+            raise RuntimeError(f"a background pinx write returned {rc}")
 
     def read(self, dst, region, offsets):
         rc = self.lib.pinx_read(self.mp, dst, region, self._offs(offsets))

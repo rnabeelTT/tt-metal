@@ -84,6 +84,19 @@ class FetchCache:
         # straight into the region on later builds / elastic demotions instead of loading and converting the copies
         self.pin_cache = os.environ.get("HYB_WCACHE", "")
         self.raw_files = {}  # layer -> (cached region file, experts) found by load_host, pinned by finalize
+        # HYB_FETCH_POLICY=dyn (FreeToken-style, choose_dyn): a per-pass budget of fetched experts (HYB_FETCH_BUDGET,
+        # spread over the layers by their share of recent misses) and value-aware admission: per layer a decaying use
+        # score per expert (HYB_FETCH_DECAY per step); a miss is fetched only if it outscores the weakest evictable LRU
+        # resident by HYB_FETCH_MARGIN. "fixed" (default): a fraction f of the misses, at most F per layer, recency order.
+        # HYB_PINX_BGWRITE=1: the async (CQ1) fetch copies are issued from pinx's background thread (pinx_write_async;
+        # the copy path's host memcpy then overlaps this thread's work); commit() flushes them before its CQ1 event
+        self.bgwrite = os.environ.get("HYB_PINX_BGWRITE", "0") == "1"
+        self.policy = os.environ.get("HYB_FETCH_POLICY", "fixed")
+        self.budget = float(os.environ.get("HYB_FETCH_BUDGET", "8"))
+        self.decay = float(os.environ.get("HYB_FETCH_DECAY", "0.9"))
+        self.margin = float(os.environ.get("HYB_FETCH_MARGIN", "0.25"))
+        self.score = {}  # layer -> [E] decaying use score (dyn)
+        self.miss_ema = {}  # layer -> EMA of misses per step (dyn: the budget split)
         v = os.environ.get("HYB_FETCH_VERIFY", "")
         self.verify_layer = int(v) if v else None  # debug: read back one layer's LRU slots at commits (_verify)
         self.nohost = {}  # layer -> experts off the device with no host int4 row (always fetched, never on the CPU)
@@ -428,6 +441,8 @@ class FetchCache:
             self._verify(slot_of)
         if not self.pending:
             return
+        if self.bgwrite:
+            self.px.flush()  # every background copy enqueued on CQ1 before the event that covers them
         ev = ttnn.record_event(self.mesh, cq_id=1)
         ttnn.wait_for_event(0, ev)
         for layer, e, s in self.pending:
@@ -549,6 +564,8 @@ class FetchCache:
     def choose(self, layer, ids, slot_of):
         """After routing a layer's step (ids [m, k]): LRU hits refreshed, the fetch set chosen, slot_of updated in place
         (fetched experts now resident at their LRU slots). Returns (fetched ids, their slots) for stage()."""
+        if self.policy == "dyn":
+            return self.choose_dyn(layer, ids, slot_of)
         self.step += 1
         lru, free, stamp = self.lru[layer], self.free[layer], self.stamp[layer]
         picked = np.unique(ids)
@@ -592,6 +609,59 @@ class FetchCache:
         stamp[picked] = self.step
         return fetched, slots
 
+    def choose_dyn(self, layer, ids, slot_of):
+        """choose() under HYB_FETCH_POLICY=dyn: the layer's share of the per-pass budget, candidates by use score, each
+        admitted only into a free slot or over a resident it outscores (by the margin); the evicted resident goes back
+        to the host (slot_of -1). Same contract as choose()."""
+        self.step += 1
+        lru, free, stamp = self.lru[layer], self.free[layer], self.stamp[layer]
+        E = len(slot_of)
+        sc = self.score.get(layer)
+        if sc is None:
+            sc = self.score[layer] = np.zeros(E, dtype=np.float32)
+        sc *= self.decay
+        picked = np.unique(ids)
+        np.add.at(sc, ids.reshape(-1), 1.0)
+        for e in picked:
+            if e in lru:
+                lru.move_to_end(e)
+        miss = [int(e) for e in picked if slot_of[e] < 0]
+        nh = self.nohost.get(layer)
+        must = [e for e in miss if e in nh] if nh else []
+        if must:
+            miss = [e for e in miss if e not in nh]
+        ema = self.miss_ema[layer] = 0.9 * self.miss_ema.get(layer, float(len(miss))) + 0.1 * len(miss)
+        total = sum(self.miss_ema.values()) or 1.0
+        share = self.budget * ema / total
+        nf = min(int(share) + int(self.rng.random() < share - int(share)), self.F, len(miss))
+        fetched, slots = [], []
+        if nf or must:
+            miss.sort(key=lambda e: (-sc[e], -stamp[e], e))
+            protect = set(int(e) for e in picked)
+            for e in must + miss[:nf]:
+                if free:
+                    s = free.pop()
+                else:
+                    cands = [v for v in lru if v not in protect]
+                    if not cands:
+                        if e in must:
+                            raise RuntimeError(f"layer {layer}: expert {e} has no host copy and no evictable LRU slot")
+                        break
+                    victim = min(cands, key=lambda v: sc[v])
+                    if e not in must and sc[e] <= sc[victim] * (1.0 + self.margin):
+                        continue  # not worth the eviction
+                    s = lru.pop(victim)
+                    slot_of[victim] = -1
+                lru[e] = s
+                if self.async_on:
+                    self.pending.append((layer, e, s))
+                else:
+                    slot_of[e] = s
+                fetched.append(e)
+                slots.append(s)
+        stamp[picked] = self.step
+        return fetched, slots
+
     def stage(self, layer, fetched, slots, st):
         """The fetched experts into the staging buffers and their slots into the page table (host -> device copies on
         CQ0, ahead of the segment that runs device_writes)."""
@@ -605,8 +675,12 @@ class FetchCache:
                 rid, og, od = self.raw_offsets(layer, e)
                 w0 = time.perf_counter()
                 cq = 1 if self.async_on else 0
-                self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
-                self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
+                if self.bgwrite and cq == 1:  # HYB_PINX_BGWRITE: the copies run on pinx's worker thread
+                    self.px.write_async(dg, rid, og, s * ng, ng, cq_id=1)
+                    self.px.write_async(dd, rid, od, s * nd, nd, cq_id=1)
+                else:
+                    self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
+                    self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
                 st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
                 if layer == self.verify_layer:  # debug: read the slot straight back once the write has run
                     self._verify_now(layer, e, s, cq)

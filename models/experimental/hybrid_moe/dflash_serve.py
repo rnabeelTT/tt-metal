@@ -407,7 +407,7 @@ class DFlashServing:
         a0 = time.perf_counter()
         if HYB.elastic is not None and self._pos + self.R + 1 > HYB.elastic.capacity:
             # the context reached the elastic short pool: long profile now, keeping the pool's blocks (hybrid/elastic.py)
-            HYB.elastic.grow_now()
+            HYB.elastic.grow_now(self._pos + self.R + 1)
             if page_table_row is None:  # the runner's row is the generator's table (the plugin passes it every step)
                 self._row = self.gen.page_table[0].clone()
             self._capture()

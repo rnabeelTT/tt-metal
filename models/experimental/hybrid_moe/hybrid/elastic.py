@@ -25,6 +25,7 @@ request, for exactness A/B tests)."""
 from __future__ import annotations
 
 import gc
+import math
 import os
 import time
 
@@ -37,7 +38,9 @@ import ttnn
 class Elastic:
     def __init__(self, hyb, gen, srv, demote):
         self.hyb, self.gen, self.srv = hyb, gen, srv
-        self.D = sorted(int(L) for L in demote)
+        # demotion order: HYB_ELASTIC_DEMOTE as written (least valuable full layer first); a set falls back to sorted
+        env = [int(v) for v in os.environ.get("HYB_ELASTIC_DEMOTE", "").split(",") if v.strip()]
+        self.D = env if env and set(env) == {int(L) for L in demote} else sorted(int(L) for L in demote)
         missing = [L for L in self.D if L not in hyb.ff_build]
         if missing:
             raise RuntimeError(f"HYB_ELASTIC_DEMOTE layers {missing} were not recorded at build (not MoE layers?)")
@@ -48,7 +51,11 @@ class Elastic:
         self.long_tokens = int(gen.max_seq_len)
         self.margin = int(os.environ.get("HYB_ELASTIC_MARGIN", "4096"))
         self.force = os.environ.get("HYB_ELASTIC_FORCE", "")
-        self.long = False
+        # HYB_ELASTIC_GRADUAL=1: demote only as many layers as the context needs; each demoted layer is worth
+        # (long - short) / len(D) tokens of pool (the static profiles: 24 layers <-> 96K tokens). 0: all or none.
+        self.gradual = os.environ.get("HYB_ELASTIC_GRADUAL", "1") == "1"
+        self.step = (self.long_tokens - self.short_tokens) / max(1, len(self.D))
+        self.k = 0  # layers of D demoted (D[:k])
         self.switches = 0
         self.bmap = None  # serving: vLLM block ids -> pool blocks (BlockMap, made by map_row's first call)
         self._last = None  # map_row's last (map epoch, vLLM row, pool row, mapped blocks): decode extends it
@@ -61,23 +68,40 @@ class Elastic:
     def capacity(self):
         return int(self.gen.kv_tokens)
 
+    @property
+    def long(self):
+        return self.k > 0
+
+    def _pool_tokens(self, k):
+        return self.long_tokens if k >= len(self.D) else int(self.short_tokens + k * self.step)
+
+    def _k_for(self, need):
+        if need <= self.short_tokens:
+            return 0
+        if not self.gradual:
+            return len(self.D)
+        return min(len(self.D), int(math.ceil((need - self.short_tokens) / self.step)))
+
     def prepare(self, prompt_len):
-        """Before a request's prefill (traces released): the profile its context needs. Returns True if it changed."""
+        """Before a request's prefill (traces released): the layers its context needs demoted. Growing keeps the pool's
+        blocks (a prefix-cache hit stays valid); shrinking drops them. Returns True if the layout changed."""
         need = int(prompt_len) + self.margin
-        want_long = need > self.short_tokens or self.force == "long"
         if need > self.long_tokens:
             raise ValueError(f"request needs {need} tokens of context, max_seq_len is {self.long_tokens}")
-        if want_long == self.long:
+        k = len(self.D) if self.force == "long" else self._k_for(need)
+        if k == self.k:
             return False
-        self._switch(want_long)
+        self._switch(k, keep=k > self.k)
         return True
 
-    def grow_now(self):
-        """In the middle of a request whose context reached the short pool (decode past the prompt + margin estimate):
-        the long profile, KEEPING the pool's blocks (ids and contents). The caller recaptures its traces."""
-        if self.long:
-            raise RuntimeError(f"elastic grow_now in the long profile (pool {self.capacity} tokens)")
-        self._switch(True, keep=True)
+    def grow_now(self, need=None):
+        """In the middle of a request whose context reached the pool (decode past the prompt + margin estimate): more
+        layers demoted (enough for `need` tokens plus the margin; all of them without HYB_ELASTIC_GRADUAL), KEEPING the
+        pool's blocks (ids and contents). The caller recaptures its traces."""
+        if self.k >= len(self.D):
+            raise RuntimeError(f"elastic grow_now with every layer demoted (pool {self.capacity} tokens)")
+        need = int(need if need is not None else self.capacity) + self.margin
+        self._switch(max(self.k + 1, self._k_for(need)), keep=True)
 
     # ------------------------------------------------------------------ serving: vLLM block ids
     def map_row(self, row, n_tokens, start=0):
@@ -116,8 +140,10 @@ class Elastic:
         return out.clone(), int(start)
 
     # ------------------------------------------------------------------ switching
-    def _switch(self, to_long, keep=False):
+    def _switch(self, k_target, keep=False):
         t0 = time.perf_counter()
+        k_target = int(k_target)
+        to_long = k_target > self.k  # demoting more layers (the pool grows)
         hyb, gen, mesh = self.hyb, self.gen, self.gen.model.mesh_device
         self.srv.release()
         if hyb.fetch.pending:
@@ -132,13 +158,14 @@ class Elastic:
             gen.kv_cache = None
         self.t = {"build": 0.0, "fetch_load": 0.0, "lib": 0.0}
         t1 = time.perf_counter()
-        for L in self.D:
+        layers = self.D[self.k : k_target] if to_long else self.D[k_target : self.k]
+        for L in layers:
             self._rebuild(L, hybrid=to_long)
         t2 = time.perf_counter()
         if to_long:
-            hyb.fetch.finalize_more(self.D, hyb.loader)
+            hyb.fetch.finalize_more(layers, hyb.loader)
         t3 = time.perf_counter()
-        gen.resize_kv(self.long_tokens if to_long else self.short_tokens, keep=keep)
+        gen.resize_kv(self._pool_tokens(k_target), keep=keep)
         t4 = time.perf_counter()
         if self.bmap is not None:
             self.bmap.reset(int(gen.kv_scratch_block), keep=keep)
@@ -149,7 +176,7 @@ class Elastic:
                     f"HYB_ELASTIC_CHECK: kept KV blocks changed ({int((before != after).sum())} values differ)"
                 )
             logger.info(f"HYB_ELASTIC_CHECK: layer 0 K blocks 0..{n_old} identical after the pool grew")
-        self.long = to_long
+        self.k = k_target
         self.switches += 1
         t5 = time.perf_counter()
         self.srv.warm_after_switch()
@@ -161,7 +188,7 @@ class Elastic:
             f"{t3 - t2:.1f} s, KV {t4 - t3:.1f} s, warm {t6 - t5:.1f} s"
         )
         logger.info(
-            f"HYB_ELASTIC: -> {'long' if to_long else 'short'} profile{' (pool kept)' if keep else ''} in {time.perf_counter() - t0:.1f} s "
+            f"HYB_ELASTIC: -> {self.k} of {len(self.D)} layers demoted{' (pool kept)' if keep else ''} in {time.perf_counter() - t0:.1f} s "
             f"(KV pool {gen.kv_tokens} tokens, {len(hyb.full_layers)} full layers, DRAM "
             f"{mem.get('dram_allocated_gib_per_device', '?')} GiB per die)"
         )
