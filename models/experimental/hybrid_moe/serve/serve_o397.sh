@@ -1,7 +1,7 @@
 #!/bin/bash
 # Serve Ornith-1.5-397B with the hybrid-MoE overlay and DFlash speculative decoding (single user) on the QB2.
 # (from templates/serve_model.sh = serve_m27.sh; no elastic: Qwen3.5's KV is small, one 128K layout)
-# usage: serve/serve_m27.sh ; logs -> serve/server_o397.log. env: CTX (max model len, default 131072), FULL (layers with
+# usage: serve/serve_o397.sh ; XENV="-e K=V ..." passes extra env to the server; logs -> serve/server_o397.log. env: CTX (max model len, default 131072), FULL (layers with
 # every expert on the device: 20 at 128K, 36 at 64K, 44 at 32K; default by CTX), SPEC (1 = DFlash, 0 = plain decode),
 # ROWS_SDPA_FROM (shared-KV rows SDPA from this context length; default 0 = off: its program depends on the KV pool
 # shape, which elastic resizing changes, and a new variant cannot compile inside the verify capture), PORT (8000), DK (drafts per pass, default 3), PC (prefix caching, default 1), PF_PREFETCH (prompt tokens from which
@@ -79,7 +79,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_PLAN=/poc/runs/o397/plan_o397_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
   -e HYB_LRU=${LRU:-32} -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_POLICY=${FETCH_POLICY:-auto} -e HYB_FETCH_BUDGET=8 -e HYB_FETCH_MAX=${FETCH_MAX:-8} -e HYB_DEV_EXPERTS=${DEVX-/hyblib/o397_dev_s192} -e HYB_LIB_RESIDENT=${LIB_RESIDENT:-1} -e HYB_PIN_TOP=${PIN_TOP:-0} \
   -e HYB_WCACHE=${WCACHE:-/hyblib/wcache_o397} \
-  -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 -e QWEN35_ROWS_SDPA_SHARED_FROM=${ROWS_SDPA_FROM:-0} $SPEC_ENV $PF_ENV \
+  -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 -e QWEN35_ROWS_SDPA_SHARED_FROM=${ROWS_SDPA_FROM:-0} $SPEC_ENV $PF_ENV ${XENV:-} \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve ornith-ai/Ornith-1.5-397B-FP8 --max-model-len $CTX \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name ornith-1.5-397b-hybrid \

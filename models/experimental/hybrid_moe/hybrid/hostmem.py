@@ -20,6 +20,7 @@ slower) or kill the server.
 """
 
 import os
+import time
 import sys
 
 GIB = 1 << 30
@@ -124,6 +125,11 @@ def check_startup(lib_dir, dev_dir, full_layers, demote):
     start = sorted(lib_layers - set(full_layers))
     peak = sorted(lib_layers - (set(full_layers) - set(demote)))
     need_start, need_peak, avail = needed(start, sizes), needed(peak, sizes), available()
+    # a server that just stopped (a restart, a profile switch) frees its RAM over tens of seconds: wait for it
+    t_end = time.time() + float(os.environ.get("HYB_RAM_WAIT_S", "90"))
+    while avail < need_start and time.time() < t_end:
+        time.sleep(5)
+        avail = available()
     msg = (
         f"[hybrid] host RAM: {_gb(avail)} free; this profile needs {_gb(need_start)} "
         f"({len(start)} hybrid layers x {sum(sizes[L] for L in start) / max(1, len(start)) / 1e9:.2f} GB of expert copies "

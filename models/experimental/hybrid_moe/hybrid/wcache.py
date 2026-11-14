@@ -99,6 +99,8 @@ class ExpertImageCache:
             px.write(dst, rid, [d * n for d in range(tp)])
             ttnn.synchronize_device(mesh)  # the region is reused by the next weight
             out.append(t)
+        for path in (pgu, pdn):  # mark as used: the variants of other slot plans age out by mtime (cleanup by age)
+            os.utime(path)
         self.hits += 1
         self.t_load += time.perf_counter() - t0
         return tuple(out)
