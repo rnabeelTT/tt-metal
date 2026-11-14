@@ -38,13 +38,16 @@ class DFlashDrafterTT:
         self.mesh = mesh
         self.cfg = Qwen3Config.from_pretrained(snapshot)
         raw = json.load(open(os.path.join(snapshot, "config.json")))
-        self.bs = int(raw["block_size"])
+        self.bs = int(raw.get("block_size") or raw["dflash_config"]["block_size"])  # top level (M2.7) or dflash_config
         self.mask_id = int(raw["dflash_config"]["mask_token_id"])
         self.taps = [int(t) for t in raw["dflash_config"]["target_layer_ids"]]
         self.NH, self.NKV, self.HD = self.cfg.num_attention_heads, self.cfg.num_key_value_heads, self.cfg.head_dim
         self.H, self.eps = self.cfg.hidden_size, self.cfg.rms_norm_eps
-        if self.NH != self.NKV:
-            raise ValueError(f"GQA drafter ({self.NH} q / {self.NKV} kv heads) not implemented")
+        # GQA drafter (e.g. Ornith-1.5-397B-DFlash: 32 q / 8 kv heads): each kv head's k_proj / v_proj rows repeated for
+        # its q-head group at load (exactly GQA); the rest of the drafter then runs as multi-head attention
+        if self.NH % self.NKV:
+            raise ValueError(f"drafter heads: {self.NH} q heads not a multiple of {self.NKV} kv heads")
+        self.kv_rep = self.NH // self.NKV
         self.embed_host, self.lm_head, self.vocab = embed_host, lm_head, vocab_size
         self.tp = tp
         self.nh = self.NH // len(mesh.get_device_ids()) if tp else self.NH  # heads per device
@@ -52,10 +55,13 @@ class DFlashDrafterTT:
         rep = ttnn.ReplicateTensorToMesh(mesh)
         f = safe_open(os.path.join(snapshot, "model.safetensors"), "pt")
 
-        def w(key, dt=dtype, split=None):  # [out, in] -> device [in, out]; split: the device dim sharded over the mesh
+        def w(key, dt=dtype, split=None, kv=False):  # [out, in] -> device [in, out]; split: the mesh-sharded dim
             mapper = rep if not (tp and split is not None) else ttnn.ShardTensorToMesh(mesh, dim=split)
+            t = f.get_tensor(key)
+            if kv and self.kv_rep > 1:  # [NKV * HD, in] -> [NH * HD, in]: kv head j serves q heads j * rep .. + rep - 1
+                t = t.reshape(self.NKV, self.HD, -1).repeat_interleave(self.kv_rep, dim=0).reshape(self.NH * self.HD, -1)
             return ttnn.from_torch(
-                f.get_tensor(key).T.contiguous(),
+                t.T.contiguous(),
                 dtype=dt,
                 layout=ttnn.TILE_LAYOUT,
                 device=mesh,
@@ -82,8 +88,8 @@ class DFlashDrafterTT:
                     "in_norm": g(p + "input_layernorm.weight"),
                     "post_norm": g(p + "post_attention_layernorm.weight"),
                     "q": w(p + "self_attn.q_proj.weight", split=-1),
-                    "k": w(p + "self_attn.k_proj.weight", split=-1),
-                    "v": w(p + "self_attn.v_proj.weight", split=-1),
+                    "k": w(p + "self_attn.k_proj.weight", split=-1, kv=True),
+                    "v": w(p + "self_attn.v_proj.weight", split=-1, kv=True),
                     "o": w(p + "self_attn.o_proj.weight", split=-2),
                     "q_norm": g(p + "self_attn.q_norm.weight"),
                     "k_norm": g(p + "self_attn.k_norm.weight"),

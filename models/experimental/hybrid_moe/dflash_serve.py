@@ -43,17 +43,39 @@ WARMUP_PROMPT = "Write a haiku about the sea."
 LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
 
+def _drafter_repo():
+    """DFLASH_DRAFTER (a repo id), else the bundle's auxiliary DFlash weights (TT_AUXILIARY_WEIGHTS), else M2.7's."""
+    if os.environ.get("DFLASH_DRAFTER"):
+        return os.environ["DFLASH_DRAFTER"]
+    for ref in os.environ.get("TT_AUXILIARY_WEIGHTS", "").split(","):
+        repo = ref.strip().partition("@")[0]
+        if "dflash" in repo.lower():
+            return repo
+    return "nvidia/MiniMax-M2.7-DFlash"
+
+
+def _target_embedding():
+    """The target checkpoint's input embedding table [V, H] bf16 (host): the first non-MTP / non-vision
+    ``*embed_tokens.weight`` of HF_MODEL's checkpoint (M2.7: model.embed_tokens; Qwen3.5: model.language_model...)."""
+    from safetensors import safe_open
+
+    snap = hfpath.snapshot(os.environ.get("HF_MODEL", "MiniMaxAI/MiniMax-M2.7"))
+    wm = json.load(open(f"{snap}/model.safetensors.index.json"))["weight_map"]
+    keys = [k for k in wm if k.endswith("embed_tokens.weight") and "mtp" not in k and "visual" not in k]
+    if not keys:
+        raise KeyError(f"no embed_tokens.weight in {snap}")
+    key = sorted(keys, key=len)[0]
+    with safe_open(f"{snap}/{wm[key]}", "pt") as f:
+        return f.get_tensor(key).to(torch.bfloat16)
+
+
 def load_drafter(mesh, rows):
     """The DFlash drafter on `mesh` with the target's host embedding table (LM head attached by DFlashServing)."""
-    import ref_m27
-
-    ref_m27.SNAP = hfpath.snapshot("MiniMaxAI/MiniMax-M2.7")
-    ref_m27.WMAP = json.load(open(f"{ref_m27.SNAP}/model.safetensors.index.json"))["weight_map"]
-    snap = os.environ.get("DFLASH_SNAPSHOT") or hfpath.snapshot("nvidia/MiniMax-M2.7-DFlash")
+    snap = os.environ.get("DFLASH_SNAPSHOT") or hfpath.snapshot(_drafter_repo())
     return DFlashDrafterPaged(
         mesh,
         snap,
-        ref_m27.get("model.embed_tokens.weight"),
+        _target_embedding(),
         None,
         None,
         cmax=int(os.environ.get("DFLASH_CMAX", "2048")),
@@ -81,6 +103,63 @@ class Verify:
         self.tok, self.pos, self.rot, self.pt = dev(tok), dev(pos), dev(rot), dev(pt)
         self.masks = dev(self.rows.rows_pos_masks_host([-1] * self.BW, self.BW))
         self.trace, self.outs = None, None
+        # GDN (linear attention) layers, Qwen3.5 / Ornith: the verify runs them in decode RowS mode (gdn/tp.py
+        # rows_snap): row r's state goes to snapshot r and the bound state is untouched, so a rejected draft never enters
+        # it. The next pass starts from snapshot `base` (the last accepted row; a 4-byte host write, set_base) and its
+        # conv history; materialize() copies it into the bound state (before anything else runs the GDN layers).
+        self.dn = [layer.attention for layer in m.layers if not layer.is_full_attention]
+        self.base_val = None
+        if self.dn:
+            rep = ttnn.ReplicateTensorToMesh(self.mesh)
+            self.snaps, self.hists = [], []
+            for dn in self.dn:
+                if dn.conv_states is None:
+                    dn.reset_state()
+                st = list(dn.rec_state.shape)
+                assert st[0] == 1, f"the verify runs on a B = 1 GDN state, got {st}"
+                self.snaps.append(
+                    ttnn.allocate_tensor_on_device(
+                        ttnn.Shape([self.BW] + st[1:]), dn.rec_state.dtype, ttnn.TILE_LAYOUT, self.mesh, DRAM
+                    )
+                )
+                self.hists.append(
+                    ttnn.allocate_tensor_on_device(
+                        ttnn.Shape([1, 32, int(dn.qkv_dim_tp)]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, DRAM
+                    )
+                )
+            self.qkv_dim = int(self.dn[0].qkv_dim_tp)
+            self.base = ttnn.from_torch(
+                torch.full((1, 32), -1, dtype=torch.int32),
+                dtype=ttnn.uint32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.mesh,
+                memory_config=DRAM,
+                mesh_mapper=rep,
+            )
+
+    def set_base(self, a):
+        """GDN: the next pass starts from accepted row a of the last pass (None: from the bound state)."""
+        if not self.dn or a == self.base_val:
+            return
+        v = torch.full((1, 32), -1 if a is None else int(a), dtype=torch.int32)
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(v, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT), self.base)
+        self.base_val = a
+
+    def materialize(self):
+        """GDN: the current state (snapshot base + conv history rows base + 1 .. base + 3) into the bound buffers (eager,
+        no trace live): before a prefill, a plain decode or anything else that reads the bound GDN state."""
+        if not self.dn or self.base_val is None:
+            return
+        a = self.base_val
+        for dn, snap, hist in zip(self.dn, self.snaps, self.hists):
+            src = ttnn.slice(snap, (a, 0, 0, 0), tuple([a + 1] + list(snap.shape)[1:]))
+            ttnn.copy(src, dn.rec_state)
+            ttnn.deallocate(src)
+            for j in range(1, 4):
+                row = ttnn.slice(hist, (0, a + j, 0), (1, a + j + 1, self.qkv_dim))
+                ttnn.copy(ttnn.reshape(row, list(dn.conv_states[j].shape)), dn.conv_states[j])
+                ttnn.deallocate(row)
+        self.set_base(None)
 
     def stage(self, tokens, positions, page_table_row):
         row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
@@ -110,18 +189,23 @@ class Verify:
         row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
         for layer in m.layers:
             layer.attention.rows_pos_rows = row_idx
+        gi = 0
         for li, layer in enumerate(m.layers):
-            y = self.rows.layer_forward_rows(
-                layer,
-                x,
-                self.R,
-                cos=cos,
-                sin=sin,
-                position_tensor=self.pos,
-                page_table=self.pt,
-                rows_pos_masks=self.masks,
-                gdn_index=0,
-            )
+            if self.dn and not layer.is_full_attention:
+                y = self._gdn_layer_rows(layer, x, gi)
+                gi += 1
+            else:
+                y = self.rows.layer_forward_rows(
+                    layer,
+                    x,
+                    self.R,
+                    cos=cos,
+                    sin=sin,
+                    position_tensor=self.pos,
+                    page_table=self.pt,
+                    rows_pos_masks=self.masks,
+                    gdn_index=0,
+                )
             if li in self.dr.taps:
                 taps.append(ttnn.all_gather(y, dim=3, topology=ttnn.Topology.Linear, memory_config=DRAM))
             ttnn.deallocate(x)
@@ -147,6 +231,20 @@ class Verify:
         else:
             ttnn.deallocate(logits)
         return out
+
+    def _gdn_layer_rows(self, layer, x, gi):
+        """A GDN layer over the BW verify rows in decode rows mode (per-row snapshots, see __init__), with the MoE flags
+        mtp_rows.layer_forward_rows sets, so the hybrid MoE sees the same call as on the attention layers."""
+        ff, dn = layer.feed_forward, layer.attention
+        ff.rows_sorted = os.environ.get("QWEN35_MTP_MOE_ROWS", "pairs") == "sorted"
+        ff.mtp_rows_mode = True
+        dn.rows_snap, dn.rows_base, dn.rows_hist = self.snaps[gi], self.base, self.hists[gi]
+        try:
+            return layer.forward(x, mode="decode")
+        finally:
+            dn.rows_snap = dn.rows_base = dn.rows_hist = None
+            ff.rows_sorted = False
+            ff.mtp_rows_mode = False
 
     def read_logits(self, rows, vocab):
         """Host FP32 log-probs [rows, vocab] of the last run (DFLASH_LP_DIR only)."""
@@ -240,6 +338,9 @@ class DFlashServing:
         """After an elastic profile switch (no trace live): one eager verify pass compiles the programs of the new KV
         pool / layer kinds and allocates the new hybrid layers' host-step buffers (before any capture). Its K / V rows
         go to the scratch block (every page-table column points there), never to a block a request owns."""
+        if self.ver is not None:
+            self.ver.materialize()  # GDN: the accepted state into the bound buffers before this Verify (and its
+            # snapshots) is replaced
         self.ver = Verify(self.gen, self.dr, self.R)  # the page table's width follows the pool
         row = torch.full_like(self.gen.page_table[0], int(self.gen.kv_scratch_block))
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), row)
@@ -335,6 +436,8 @@ class DFlashServing:
         if HYB.elastic is not None:  # before the page-table row is read: a switch rewrites the generator's table
             HYB.elastic.prepare(len(prompt_ids))
         self.dr.reset()
+        if self.ver is not None:  # GDN: the prefill writes the bound state; the first verify starts from it
+            self.ver.set_base(None)
         self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32).clone()
         self._P = len(prompt_ids)
         # per tap: [first row, host rows]; only the rows from P - window on are kept (end_prefill reads no more), and a
@@ -496,6 +599,7 @@ class DFlashServing:
             self.hist = [torch.cat(self.hist)[-W:]]
             self.n_hist = W
         out = drafts[:a] + [top[a]]
+        ver.set_base(a)  # GDN: the next pass continues from row a's state (rows a + 1 .. were rejected drafts)
         self._prev_acc = list(range(p, p + a + 1))
         self._tok, self._pos = top[a], p + a + 1
         st = self.stats
