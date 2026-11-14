@@ -91,6 +91,8 @@ def main():
     head = R.get("model.llm.unembed.weight")[: cfg.unpadded_vocab_size]
     target = torch.stack([torch.from_numpy(np.load(os.path.join(ref_dir, f"ref_{n}.npz"))["top_ids"][:, 0])
                           for n in names]).long()  # [B, T]: the target's argmax at t (predicts token t + 1)
+    tconf = torch.stack([torch.from_numpy(np.load(os.path.join(ref_dir, f"ref_{n}.npz"))["top_lp"][:, 0].astype(np.float32))
+                         for n in names]).exp()  # [B, T] the target's top-1 probability
     prev = hidden
     match = []  # match[k][b, t]: depth k's draft at t == target argmax at t + k + 1
     for d in range(n_depth):
@@ -109,11 +111,18 @@ def main():
     L = min(mm.shape[1] for mm in match)
     run = torch.zeros(B, L)
     alive = torch.ones(B, L, dtype=torch.bool)
-    print("drafts k : expected tokens per verify pass (1 + accepted run)")
+    # teacher forcing on human text compares against a target that is itself unsure (its own top-1 accuracy on these
+    # texts is ~0.5); greedy generation runs on the model's confident tokens. Also report the run restricted to
+    # positions where the target is confident at every compared step (p > 0.5): a closer proxy for generation.
+    conf_all = torch.ones(B, L, dtype=torch.bool)
+    run_c = torch.zeros(B, L)
+    print("drafts k : expected tokens per verify pass (1 + accepted run); [confident-target positions]")
     for k in range(n_depth):
         alive &= match[k][:, :L]
         run += alive.float()
-        print(f"  k={k + 1}: {1 + run.mean():.3f}   (P(accept depth {k}) {alive.float().mean():.3f})")
+        conf_all &= tconf[:, k + 1 : k + 1 + L] > 0.5
+        print(f"  k={k + 1}: {1 + run.mean():.3f}   (P(accept depth {k}) {alive.float().mean():.3f})   "
+              f"[{1 + run[conf_all].mean():.3f} over {conf_all.float().mean():.0%} of positions]")
 
 
 if __name__ == "__main__":

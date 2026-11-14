@@ -195,3 +195,20 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
   - **Next:** the expert precision is the open quality/memory decision. Settle it with `teacher_forced` top-1 through the
     hybrid overlay. Candidates: bfp4 everywhere; gate/up bfp4 + down bfp8; bfp8 for the hot experts in the most
     sensitive layers.
+- **2026-11-14, prefill and MTP.**
+  - **Prefill.** One attention launch per chunk, using the work-unit SDPA (a unit is one item × one KV head, one core per
+    unit). Per layer against the HF fixtures, prefill delta PCC equals decode: L0 0.99999, L2 0.99864, L5 0.99836.
+    640 tokens × 3 layers take 0.06 s, against 3.2 s with rows groups.
+    - Sliding-window rings now hold window + prefill chunk + one block, about 100 MB per die over 35 layers at
+      2048-token chunks, because a chunk's launch needs every row's window live at once.
+    - A fixed K chunk is required in prefill: per-unit dynamic chunk sizes misaligned the CB FIFOs.
+  - **MTP** (`mtp_inkling_ref.py`, teacher-forced on 3 held-out texts).
+    - Depth-0 drafts match the target's argmax at the next position 0.50 of the time, and match nothing at other offsets
+      (about 0.02), so the alignment is verified.
+    - The best inputs are the post-final-norm hidden and the backbone-normed embedding. Raw embeddings drop to 0.38,
+      matching vLLM's comment.
+    - The 8-text run gives an expected 1.42 tokens per pass at k=1 and 1.88 at k=8, and P(accept) falls fast with depth.
+    - This is a teacher-forced figure on human text, where the target's own top-1 accuracy is about 0.5. vLLM quotes
+      about 0.85 depth-1 acceptance, and DSpark 3.35 acceptance length at block 7, both on generation.
+    - **The drafter choice needs a device spec-decode run on generated text.** The confident-position column of
+      `mtp_inkling_ref.py` is a cheaper proxy.
