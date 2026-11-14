@@ -247,9 +247,10 @@ def main():
                         ttnn.synchronize_device(mesh)
                     t_e = time.time()
                     new = drafts[:n] + [nxt]
-                    out += new
+                    hit = next((i for i, t in enumerate(new) if t in eos), None)
+                    out += new if hit is None else new[: hit + 1]  # nothing past the end of turn
                     steps += 1
-                    if eos & set(new):
+                    if hit is not None:
                         break
                     if k:
                         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
@@ -262,6 +263,7 @@ def main():
                         tm["draft"] += t_d - t_e
                     x, p = nxt, p + n + 1
                 dt = time.time() - t0
+                out = out[:limit]  # a multi-token step can overshoot the budget: count / compare exactly `limit`
                 if not timed:
                     continue
                 tot_new += len(out)
