@@ -2,7 +2,7 @@
 
 Starting point: branch `hybrid-moe-starter` (fork `rnabeelTT/tt-metal`). It is the code that serves
 [raahemnabeel/minimax-m2.7-hybrid-qb2](https://huggingface.co/raahemnabeel/minimax-m2.7-hybrid-qb2) (MiniMax-M2.7,
-230B MoE, ~56 tok/s on one QB2, 32K / 64K / 128K profiles), plus copy-and-edit templates. Everything below uses M2.7 as
+230B MoE, ~59-62 tok/s on one QB2, 32K / 64K / 128K profiles), plus copy-and-edit templates. Everything below uses M2.7 as
 the worked example. Deep history and measurements: `HANDOFF.md`.
 
 **The idea in one paragraph.** The model does not fit in the QB2's 4 x 32 GB of DRAM. Each MoE layer keeps its most-used
@@ -18,6 +18,9 @@ git fetch https://github.com/rnabeelTT/tt-metal.git hybrid-moe-starter
 git switch -c hybrid/<your-model> FETCH_HEAD        # one branch per model, off the starter
 tt-model pull raahemnabeel/minimax-m2.7-hybrid-qb2  # the serving image the dev scripts run in (or build your own)
 ```
+
+Coding agents: `skills/hybrid-moe-bringup/SKILL.md` is the agent entry point (link it into `~/.claude/skills/`,
+or the equivalent for your agent).
 
 Keep model-specific files in your branch. A fix that helps every model (in `hybrid/`, the build scripts, the
 templates): cherry-pick it onto `hybrid-moe-starter` so the next person gets it.
@@ -102,7 +105,8 @@ python3 serve/bench.py 128 8000 <label>             # 8 short prompts: mean deco
 python3 serve/elastic_test.py --port 8000           # ~45K-token prompt, prefix-cache resend, switch back
 ```
 
-M2.7 for comparison: short ~56-60 tok/s / 0.63 s TTFT; 45K prompt ~23 s TTFT, ~31 tok/s. Check the `[hybrid] host RAM`
+M2.7 for comparison (v1.4): short ~59-62 tok/s; 45K prompt ~19-22 s TTFT, ~40 tok/s; 85K ~58 s, ~34 tok/s.
+`python3 serve/card_bench.py --port 8000 --runs 4 --long 160000 --cycles 2` prints the model-card rows. Check the `[hybrid] host RAM`
 line in the log against the container's real use (`docker stats`). Judge quality against the CPU reference
 (`compare_m27.py`, teacher forced), not against an earlier run.
 
@@ -128,9 +132,21 @@ line in the log against the container's real use (`docker stats`). Judge quality
   working tree, so build them before `tt-model package` and check they load in the image.
 - **int4 group size**: the CPU kernel needs a group size dividing 64; the builder defaults to 32. `hostk_moe returned -1`
   = mismatch.
-- **Shared-KV rows SDPA** (`QWEN35_ROWS_SDPA_SHARED_FROM`) stays 0: with elastic resizing it hits
-  `!is_capturing_trace` (its program depends on the KV pool shape).
+- **Shared-KV rows SDPA** (`QWEN35_ROWS_SDPA_SHARED_FROM=4096`): its program depends on the KV pool shape, so
+  `dflash_serve._warm_verify` compiles both variants at startup and after every elastic switch, and the variant is
+  chosen from the request's own position. A new variant compiled inside the verify capture hits `!is_capturing_trace`.
+- **Device DRAM fragmentation (elastic past 64K)**: the MoE prefill needs ~35 MB contiguous per bank. The generator
+  drops to 2048-token segments when `largest_contiguous_bytes_free_per_bank` is short (`QWEN35_PREFILL_TIGHT_*`), and
+  the elastic gather (`HYB_ELASTIC_GATHER`) falls back to the image path when it would not fit. Avoid per-tensor
+  temporaries in resize paths: share one zero block (`device_zeros` + `ttnn.clone`).
 - **`HYB_ELASTIC_PREWARM`** stays off: the full 24-layer round trip at startup leaves short decode ~12% slower.
 - **No `--ulimit memlock`** needed: the KMD pins without memlock accounting; mlock of the int4 library is best-effort.
 - **Two copies of the serve settings** (`serve_<tag>.sh` and the yaml's `serve.env`): change one, change both.
+- **Device opens hang** in UMD "Starting devices in cluster": check for other device users first (on our QB2 a
+  Kubernetes TT telemetry stack). Before device work, a bare `ttnn.open_mesh_device` must succeed. Ask the machine's
+  owner before stopping anything you did not start.
+- **Kill by PID**, never `pkill -f <pattern>`: the pattern matches your own shell's command line.
+- **A stall watchdog** must sum CPU over every model process and stop when serving goes idle: an idle server looks hung.
+- **Host RAM**: leaked pinned memory is only returned by a reboot; check `MemAvailable` against the profile's need
+  before long-context runs (an 85K elastic cycle needs ~85 GB).
 - **Disk**: the first boot writes ~110-140 GB of device images into `~/.cache/tt-model/<name>/weights`.

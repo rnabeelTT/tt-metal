@@ -136,7 +136,11 @@ serve:
     QWEN35_PREFIX_CACHING: "1"
     QWEN35_MOE_DN_READERS: "4"
     QWEN35_MOE_DN_CHUNK: "4"
-    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # shared-KV rows SDPA for the verify from 4096 context positions (both variants compiled at startup and after every
+    # elastic switch): long-context decode ~+30% at 45K
+    QWEN35_ROWS_SDPA_SHARED_FROM: "4096"
+    # elastic demotion gathers the hybrid experts from the full layer on the device (byte-identical to the images)
+    HYB_ELASTIC_GATHER: "1"
     # DFlash speculative decoding (nvidia/MiniMax-M2.7-DFlash), 3 drafts per pass
     QWEN35_EXT_SPEC: dflash_serve:build
     QWEN35_EXT_SPEC_K: "3"
