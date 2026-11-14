@@ -19,7 +19,15 @@ The drafter sees the last DFLASH_WINDOW (default 1024) context tokens: its accep
 (window_oracle.py on an 8K prompt: 2.03 tokens per pass at 1024, 1.47 at 4096, 1.10 with the whole context). When the
 window is full, the drafter cache is refilled from host copies of the last window's features and the traces re-captured.
 
-Greedy only: requests with temperature > 0 are decoded greedily (logged once per request).
+Sampling: temperature 0 (or top_k 1) is greedy (drafts accepted while they equal the verify's argmax). Otherwise the
+step samples exactly from the target: the drafts are the drafter's argmax (a point-mass proposal), so speculative
+sampling (Leviathan et al. 2023) accepts draft d_i with probability p_i(d_i) and, on the first rejection, emits a sample
+from p_i with d_i removed; p_i is the verify row's distribution after the request's temperature / top-k / top-p (the
+port's SpecSampler, the same processing as its MTP step). The emitted stream is distributed as plain sampling from the
+target. The verify's logits stay on the device; a second small trace (Verify.cands_body, replayed only for sampled
+requests) takes per-chunk top-64 candidates, which hold any top-k <= 64 exactly (cand_probs checks it; otherwise the
+row's logits are read). ~2 ms per pass. Penalties are not applied. The first token comes from the prefill's device
+sampler, which caps top-k at 32. DFLASH_SAMPLE_DEBUG=N logs the first N sampled passes' distributions.
 env: DFLASH_SNAPSHOT, DFLASH_CMAX (drafter cache, default 2048), DFLASH_WINDOW, DFLASH_TP (drafter split over the mesh,
 default 1), DFLASH_WARMUP (serving: tokens of the startup warm-up generation, default 64, 0 = off).
 """
@@ -40,6 +48,7 @@ from hybrid.patch import HYB, _port
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 WARMUP_PROMPT = "Write a haiku about the sea."
+_SAMPLE_DEBUG = int(os.environ.get("DFLASH_SAMPLE_DEBUG", "0") or 0)  # log the first N sampled passes
 LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
 
@@ -80,7 +89,7 @@ class Verify:
         dev = lambda t: ttnn.to_device(t, self.mesh, memory_config=DRAM)  # noqa: E731
         self.tok, self.pos, self.rot, self.pt = dev(tok), dev(pos), dev(rot), dev(pt)
         self.masks = dev(self.rows.rows_pos_masks_host([-1] * self.BW, self.BW))
-        self.trace, self.outs = None, None
+        self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
 
     def stage(self, tokens, positions, page_table_row):
         row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
@@ -142,16 +151,69 @@ class Verify:
         for t in (h, x):
             ttnn.deallocate(t)
         out = argmax_max(logits)
-        if LP_DIR:  # quality capture: keep the logits (a trace output) for read_logits
-            self.logits = logits
-        else:
-            ttnn.deallocate(logits)
+        self.logits = logits  # a trace output: sampled requests (and DFLASH_LP_DIR captures) read it back
         return out
 
-    def read_logits(self, rows, vocab):
-        """Host FP32 log-probs [rows, vocab] of the last run (DFLASH_LP_DIR only)."""
+    def read_logits_raw(self, rows, vocab):
+        """Host FP32 logits [rows, vocab] of the last run."""
         lg = ttnn.to_torch(self.logits, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1)).float()
-        return torch.log_softmax(lg.reshape(-1, lg.shape[-1])[:rows, :vocab], dim=-1)
+        return lg.reshape(-1, lg.shape[-1])[:rows, :vocab]
+
+    def read_logits(self, rows, vocab):
+        """Host FP32 log-probs [rows, vocab] of the last run."""
+        return torch.log_softmax(self.read_logits_raw(rows, vocab), dim=-1)
+
+    # sampled requests read per-chunk top-k candidates of the logits, not the logits: each die's vocab columns are padded to
+    # a power of two and cut into CAND_CHUNKS chunks (<= 32768 wide, the multi-core top-k bound), top-CAND_K (<= 64) of
+    # each. A chunk can hide part of a row's top-k only if all its CAND_K candidates are in it, so top-k <= CAND_K is
+    # always exact (common tokens have low ids: with 32 per chunk the top 40 often filled die 0's first chunk). The host
+    # still checks it (cand_probs) and reads the row's logits otherwise (top-k > 64, or no top-k).
+    CAND_K, CAND_CHUNKS = 64, 2
+
+    def cands_body(self):
+        lg = self.logits
+        W = int(lg.shape[-1])
+        Wp = 1 << (W - 1).bit_length()
+        x = ttnn.pad(lg, [(0, 0), (0, 0), (0, 0), (0, Wp - W)], value=-3.0e38) if Wp != W else lg
+        chunks = ttnn.split(x, Wp // self.CAND_CHUNKS, dim=3)
+        if x is not lg:
+            ttnn.deallocate(x)
+        vs, ids = [], []
+        for c in chunks:
+            v, i = ttnn.topk(c, k=self.CAND_K, dim=-1)
+            vs.append(v)
+            ids.append(i)
+            ttnn.deallocate(c)
+        self.cand_chunk = Wp // self.CAND_CHUNKS
+        # one values and one ids tensor [1, 1, BW, chunks * K] (ids local to their chunk): two read-backs per pass
+        outs = [ttnn.concat(vs, dim=-1), ttnn.concat(ids, dim=-1)]
+        for t in vs + ids:
+            ttnn.deallocate(t)
+        return outs
+
+    def run_cands(self):
+        """Candidates of the last run's logits: (values [rows, n], vocab ids [rows, n], per-chunk minima [rows, chunks])."""
+        if self.cand_trace is not None:
+            ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
+            outs = self.cand_outs
+        else:
+            outs = self.cands_body()
+        comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
+        nd = len(self.mesh.get_device_ids())
+        per_die = int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1])
+        C, K = self.CAND_CHUNKS, self.CAND_K
+        v = ttnn.to_torch(outs[0], mesh_composer=comp).float().reshape(nd, -1, C, K)  # [nd, rows, chunks, K]
+        i = ttnn.to_torch(outs[1], mesh_composer=comp).long().reshape(nd, -1, C, K)
+        i = i + torch.arange(C).view(1, 1, C, 1) * self.cand_chunk
+        v = torch.where(i < per_die, v, torch.full_like(v, float("-inf")))  # the pad columns
+        i = i + torch.arange(nd).view(nd, 1, 1, 1) * per_die
+        rows = v.shape[1]
+        v = v.permute(1, 0, 2, 3).reshape(rows, nd * C, K)  # [rows, nd * chunks, K]
+        i = i.permute(1, 0, 2, 3).reshape(rows, nd * C, K)
+        if outs is not self.cand_outs:
+            for t in outs:
+                ttnn.deallocate(t)
+        return v.reshape(rows, -1), i.reshape(rows, -1), v.min(dim=-1).values
 
     def run(self):
         HYB.fetch.commit(HYB.slot_of)  # async fetch: last pass's CQ1 writes land before this pass reads the slots
@@ -165,13 +227,53 @@ class Verify:
     def release(self):
         if self.trace is not None:
             ttnn.release_trace(self.mesh, self.trace)
-        self.trace, self.outs = None, None
+        if self.cand_trace is not None:
+            ttnn.release_trace(self.mesh, self.cand_trace)
+        self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
 
     def capture(self):
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.outs = self.body()
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
         self.trace = tid
+        # a separate trace on the verify's persistent logits: greedy passes never pay for it
+        tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+        self.cand_outs = self.cands_body()
+        ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+        self.cand_trace = tid
+
+
+def accept_point_mass(smp, P, drafts):
+    """Speculative sampling with point-mass drafts (the drafter's argmax): P(i) is the dense processed target distribution
+    [V] of row i (after the drafts before d_i). Accept d_i with probability p_i(d_i); on the first rejection emit a sample
+    from p_i without d_i; after k accepts, a sample from p_k. Returns (accepted count, next token)."""
+    for i, d in enumerate(drafts):
+        pi = P(i).clone()
+        if float(torch.rand(1, generator=smp.gen)) < float(pi[d]):
+            continue
+        pi[d] = 0.0
+        tot = float(pi.sum())
+        if tot <= 0.0:
+            raise RuntimeError(f"DFlash sampling: row {i} rejected draft {d} but has no other mass (top_k {smp.top_k})")
+        return i, smp.sample(pi / tot)
+    return len(drafts), smp.sample(P(len(drafts)))
+
+
+def cand_probs(smp, vals, ids, chunk_min, V):
+    """The request's processed distribution [V] of one verify row from its device candidates (vals / vocab ids: the top
+    CAND_K of every vocab chunk; chunk_min: each chunk's smallest kept value), or None when the candidates may not hold
+    the row's top-k: a chunk whose smallest kept value reaches the k-th candidate may hide larger values. Same
+    processing as SpecSampler.probs: top-k of the logits / temperature, softmax over them, then top-p."""
+    k = smp.top_k
+    if not 0 < k <= vals.numel():
+        return None
+    v, j = torch.topk(vals, k)
+    if bool((chunk_min >= v[-1]).any()):
+        return None
+    p = smp._nucleus(torch.softmax(v.float() * (1.0 / smp.temperature), dim=-1))
+    out = torch.zeros(V)
+    out[ids[j]] = p
+    return out
 
 
 def _rows_sdpa_shared_from():
@@ -199,7 +301,7 @@ class DFlashServing:
         self._hooks = None
         self._pos = self._tok = None
         self.stats = None
-        self._warned_sampling = False
+        self._sampler, self._sampling = None, None
 
     # ------------------------------------------------------------------ startup (before any capture)
     def allocate_kv(self, kv_shape, dtype):
@@ -258,6 +360,7 @@ class DFlashServing:
             self._set_rows_sdpa(shared)
             self.ver.run()
             self.ver.run()
+        self.ver.run_cands()  # compiles the candidates' programs (eager; outputs freed)
         self._set_rows_sdpa(False)
 
     def _set_rows_sdpa(self, shared):
@@ -427,7 +530,7 @@ class DFlashServing:
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
         self._capture(P)
         self._pos, self._tok, self._prev_acc = P, int(tok0), []
-        self._warned_sampling = False
+        self._sampler, self._sampling = None, None  # the request's SpecSampler (created by its first sampled step)
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
@@ -456,11 +559,20 @@ class DFlashServing:
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
                 f"(tok {self._tok}, pos {self._pos})"
             )
-        if sampling is not None and sampling[0] > 0 and not self._warned_sampling:
-            logger.warning(f"DFlash serving is greedy: request sampling {sampling} decoded with argmax")
-            self._warned_sampling = True
+        smp = self._sampler_for(sampling)
         if page_table_row is not None:
             self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
+            # every block the verify window [pos, pos + R) writes must be allocated: vLLM pads a row with block 0 (its
+            # null block), so a write there is lost and the real block keeps another request's K / V (the plugin shim
+            # reserves 2K + 1 lookahead slots for this window; positions past the context are never read)
+            bs, limit = int(self.gen.block_size), int(self.gen.max_seq_len)
+            blocks = range(self._pos // bs, min(self._pos + self.R - 1, limit - 1) // bs + 1)
+            null = [b for b in blocks if b >= self._row.numel() or int(self._row[b]) == 0]
+            if null:
+                raise RuntimeError(
+                    f"DFlash verify window {self._pos}..{self._pos + self.R - 1} reaches unallocated block(s) {null}: "
+                    f"row {self._row[: max(blocks) + 2].tolist()}, plugin pos {pos}, block size {bs}, context {limit}"
+                )
         a0 = time.perf_counter()
         if HYB.elastic is not None and self._pos + self.R + 1 > HYB.elastic.capacity:
             # the context reached the elastic short pool: long profile now, keeping the pool's blocks (hybrid/elastic.py)
@@ -494,9 +606,46 @@ class DFlashServing:
             top = self._force[i + 1 : i + 1 + R]
             if len(top) < R:
                 raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
-        a = 0
-        while a < K and drafts[a] == top[a]:
-            a += 1
+        if smp is None or self._force is not None:
+            a = 0
+            while a < K and drafts[a] == top[a]:
+                a += 1
+        else:
+            c0 = time.perf_counter()
+            cands = self.ver.run_cands()
+            dense = {}
+
+            def P(i):  # row i's processed target distribution, built when the accept loop reaches it
+                if i not in dense:
+                    cv, ci = cands[0][i], cands[1][i]
+                    hit = ci == top[i]
+                    if not bool(hit.any()) or float(cv[hit].max()) != float(cv.max()):
+                        # the device argmax is every chunk set's maximum: a mismatch means the vocab ids are misread
+                        raise RuntimeError(
+                            f"DFlash sampling: row {i} device argmax {top[i]} is not the candidates' maximum "
+                            f"(candidate argmax {int(ci[cv.argmax()])}, value {float(cv.max())})"
+                        )
+                    dense[i] = cand_probs(smp, cands[0][i], cands[1][i], cands[2][i], self.V)
+                    if dense[i] is None:  # the candidates may miss part of the request's top-k: the exact row
+                        self.stats["full_rows"] = self.stats.get("full_rows", 0) + 1
+                        dense[i] = smp.probs(self.ver.read_logits_raw(i + 1, self.V)[i])
+                return dense[i]
+
+            a, nxt = accept_point_mass(smp, P, drafts)
+            self.stats["sample"] = self.stats.get("sample", 0.0) + time.perf_counter() - c0
+            if _SAMPLE_DEBUG and self.stats["passes"] < _SAMPLE_DEBUG:
+                tk = self.gen.tokenizer
+                rows = []
+                for i in range(R):
+                    pr = P(i)
+                    v, ix = pr.topk(4)
+                    rows.append(" ".join(f"{tk.decode([int(j)])!r}:{float(x):.2f}" for x, j in zip(v, ix)))
+                logger.info(
+                    f"DFLASH_SAMPLE pos {p} in {tk.decode([t])!r} drafts {[tk.decode([d]) for d in drafts]} "
+                    f"argmax {[tk.decode([x]) for x in top[:R]]} -> accepted {a}, next {tk.decode([nxt])!r} | "
+                    + " || ".join(rows)
+                )
+            top = top[:a] + [nxt]  # rows < a: the accepted drafts; row a: the emitted token
         if self._force is not None:
             if LP_DIR:  # rows 0..a predict the tokens this pass commits (the recorded text)
                 lp = ver.read_logits(a + 1, self.V)
@@ -526,6 +675,18 @@ class DFlashServing:
             self._log_stats("running")
         return out
 
+    def _sampler_for(self, sampling):
+        """The request's SpecSampler, or None for greedy decoding. Created on the request's first step (end_prefill
+        clears it) so its generator (seeded by the request's seed) runs across the whole request."""
+        if sampling is None:
+            return None
+        if self._sampler is None or self._sampling != tuple(sampling):
+            t, k, p, seed = sampling
+            self._sampler = _port("mtp_sampling").SpecSampler(t, k, p, seed)
+            self._sampling = tuple(sampling)
+            logger.info(f"DFlash request sampling: temperature {t} top_k {k} top_p {p} seed {seed}")
+        return None if self._sampler.greedy else self._sampler
+
     def _log_stats(self, why):
         st = self.stats
         if st and st["passes"]:
@@ -533,7 +694,9 @@ class DFlashServing:
             logger.info(
                 f"DFLASH_STATS ({why}): {n} passes, {st['tokens'] / n:.2f} tokens per pass, acceptance hist "
                 f"{st['hist']}, draft {1e3 * st['draft'] / n:.1f} + verify {1e3 * st['verify'] / n:.1f} ms per pass, "
-                f"{st['refills']} refills -> {st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
+                f"{st['refills']} refills, sampling {1e3 * st.get('sample', 0.0) / n:.1f} ms per pass "
+                f"({st.get('full_rows', 0)} full-row reads), stage {1e3 * st['stage'] / n:.1f} ms -> "
+                f"{st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
             )
 
     # ------------------------------------------------------------------ standalone generation
