@@ -283,6 +283,10 @@ class HybridState:
             self.dyn_lru[layer] = OrderedDict()
             self.dyn_free[layer] = []
             return ids
+        if self._freq is None and self.plan_path and os.path.exists(self.plan_path) and "mass" in np.load(self.plan_path).files:
+            # compact plan (sim_*.py output: per layer the routed mass of every expert): the same ranking as the
+            # per-token routing file it was summed from, in 0.5 MB instead of ~150 MB (ships with the code)
+            self._freq = np.load(self.plan_path)["mass"].astype(np.float64)
         if self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             z = np.load(self.plan_path)
             layers = [int(v) for v in z["layers"]]
@@ -680,6 +684,10 @@ def install():
 
     HYB.fetch._lazy_finalize = _finalize_fetch_once
 
+    # first serve: the expert copies this profile needs, built from the model's own checkpoint (hybrid/autobuild.py)
+    from . import autobuild
+
+    autobuild.ensure()
     # before anything loads: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
     hostmem.check_startup(
         HYB.lib_dir, hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", "")), HYB.full_layers, HYB.elastic_demote

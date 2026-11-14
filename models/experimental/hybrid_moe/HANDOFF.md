@@ -458,10 +458,24 @@ Artifacts (make_o397.sh): CPU reference (held ref acc 0.54-0.76), plan, int4 lib
 - Served (bench.py, 8 x 128 tokens, greedy): SPEC=0 SOCK=0 LRU=0 (no fetch): 6.98 tok/s, TTFT 2.72 s, text matches
   the plain path. SOCK=1 LRU=8 PIN_TOP=24: 5.68 / 6.20 tok/s, TTFT 4.3-5.3 s (pinned RAM comes out of the page cache).
   With the ~140 GB back (driver reload / reboot), the int4 library fits resident: ~25 tok/s ceiling (DRAM bandwidth).
-- OPEN: DFlash GDN rows-mode verify is wrong for rows >= 1 (accept cap 0 matches plain decode; caps 1-3 diverge early,
+- (fixed in round 2) DFlash GDN rows-mode verify is wrong for rows >= 1 (accept cap 0 matches plain decode; caps 1-3 diverge early,
   e.g. "Rayleigh" -> "Ray scattering"), in both SOCK modes; all 45 GDN layers are on the decode-ops path. Debug switch:
   runs/dflash_cap. Fallback design: the MTP scan-replay commit (mtp_verify.commit_gdn) instead of snapshots.
 - Fixed on the way: QWEN35_PREFILL_MAX_ROWS=1024 (hidden 4096 overflows L1 in the 2D prefill matmuls), prefill segment
   2048 (M2.7's 4096 overflows the GDN prefill L1), bf16 logits socket for softmax routers, fetch only among pinned
   experts, fetch library pinned on the first fetch without DFlash, DFLASH_BLOCK (16-row drafter blocks exceed the
   11-core shard row), drafter / embedding from config (no silent M2.7 fallback), GQA drafters.
+
+### Ornith-1.5-397B round 2 (2026-11-14, after the host reboot freed ~140 GB)
+- DFlash fixed: hostk.craft read the softmax router's ids from a strided argpartition view (rows >= 1 got another
+  row's experts). GSM8K 60: plain 57, DFlash 58.
+- Served (bench.py, greedy; decode tok/s / TTFT): lean page-cache 6.98 / 2.72 s -> library resident 11.42 / 0.94 ->
+  + DFlash 13.60 / 1.29 -> + socket + fetch (LRU 32, PIN_TOP 128) 17.55 / 1.22 -> + HYB_LOWBIT 0.1 on the NumPy
+  host prep 19.80 / 1.10 (GSM8K 56/60; 0.15: 19.74, 55/60). Bench noise ~±4% (repeat 16.59 / 15.93).
+- Verify pass profile (HYB_LOG_EVERY=20, socket): host experts 90-120 ms (4-row union 510-650 experts, DRAM bound at
+  ~42 GB/s), host step 1 ~50 ms (19 of it waiting for the router output), device ~21 ms. 8 / 10 hostk threads no
+  faster. PCIe fetch reads the same host DRAM: more streaming is zero-sum, only LRU reuse saves bytes (~7%).
+- MTP head: the fused rows kernels need C % 64 == 0; making room for its 512 experts means C = 192: not pursued.
+- Packaging: no experts repo. The image ships plans/plan_o397.npz (per-layer routed mass, 0.5 MB); hybrid/autobuild.py
+  builds the int4 library (~20 s/layer) and the pinned device copies (ranks 223-350, ~9 s/layer) from the official
+  checkpoint into the weight cache on the first start (byte-identical to the validated copies, layer 5 checked).

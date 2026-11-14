@@ -4,7 +4,6 @@
 # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash). Single user, greedy. Built from the M2.7 package
 # (minimaxai_minimax_m2_7/tt-model-hybrid.yaml); the port is the Qwen3.5 one (q122_opt + ornith122_dflash merged).
 # Build: tt-model package --container models/autoports/qwen_qwen3_5_122b_a10b/tt-model-o397-hybrid.yaml
-# STATUS: bring-up. HYB_SLOTS / full layers / DK / the experts repo pin are first-cut values, tuned on the device.
 schema: "5.1"
 
 repo: raahemnabeel/ornith-1.5-397b-hybrid-qb2
@@ -35,6 +34,7 @@ source:
     - models/experimental/hybrid_moe/ref_o397.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/experimental/hybrid_moe/plans
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet
@@ -74,54 +74,81 @@ serve:
     HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
     QWEN35_TRACE_REGION_MIB: "96"
     QWEN35_PREFIX_STATE_SLOTS: "0"
+    QWEN35_PREFIX_CACHING: "0"
     QWEN35_VISION: "0"
     QWEN35_BATCHED_PREFILL: "0"
-    # --- the hybrid overlay (serve_m27.sh's settings; Qwen3.5-specific notes inline) ---
+    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+    QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
+    QWEN35_PREFILL_SEGMENT: "2048"    # 4096-token segments overflow the GDN prefill L1
+    QWEN35_PREFILL_GROUP: "8"
+    QWEN35_MOE_DN_READERS: "4"
+    QWEN35_MOE_DN_CHUNK: "4"
+    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # --- the hybrid overlay ---
     HYB_RAM_CHECK: error
     HYB_ENABLE: "1"
     HYB_PORT: qwen_qwen3_5_122b_a10b
-    HYB_SLOTS: "256"            # first cut (the 2026-11-05 397B run fit C=256 at 128K); tuned with sim_o397 / sim_full_layers
+    HYB_SLOTS: "256"            # device slots per layer (multiple of 64: the fused rows kernels)
     HYB_DYN_SLOTS: "0"
-    HYB_SKIP: "0"               # the 397B run's HYB_SKIP=0.15 cost top-1 0.900 -> 0.838; the M2.7-era paths run skip 0
+    HYB_SKIP: "0"               # no expert is dropped (HYB_SKIP 0.15 cost ~6 points of top-1 on the Qwen3.5-397B)
     HYB_MTP: "0"
     HYB_ROWS: "4"
     HYB_THREADS: "12"
-    HYB_HOSTK_THREADS: "6"
-    HYB_LIB: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/int4_s192
-    HYB_DEV_EXPERTS: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/dev_s192
-    HYB_PLAN: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/plans/plan_o397_routing.npz
+    HYB_HOSTK_THREADS: "6"      # 8 / 10 threads no faster (host DRAM bound, ~42 GB/s)
+    # expert copies: built on the first start from the checkpoint above (hybrid/autobuild.py) into the weight cache;
+    # only the routing plan ships with the code (per layer the routed mass of every expert, from a BF16 CPU reference)
+    HYB_BUILD_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/plan_o397.npz
+    HYB_BUILD_S: "192"
+    HYB_LIB_KEYS: qwen35
+    HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/plan_o397.npz
     HYB_PLAN_WEIGHT: mass
-    HYB_LRU: "0"                # lean host mode: no fetch (pinned copies cost page cache; measured slower here)
+    HYB_LIB: /weight-cache/o397_int4_s192
+    HYB_LIB_RESIDENT: "1"
+    HYB_LOWBIT: "0.1"           # computed misses whose largest routing weight is below this read only their top 2 bits
+    HYB_WCACHE: /weight-cache/wcache_o397
+    # single-trace decode with host sockets + PCIe fetch of recently missed experts into 32 LRU slots per layer, from
+    # pinned device-format copies of each layer's 128 most-used off-device experts
+    HYB_SOCKET: "1"
+    HYB_LRU: "32"
+    HYB_PIN_TOP: "128"
+    HYB_DEV_EXPERTS: /weight-cache/o397_dev_p128
     HYB_FETCH_FRAC: "0.15"
     HYB_FETCH_POLICY: auto
     HYB_FETCH_BUDGET: "8"
     HYB_FETCH_MAX: "8"
-    HYB_WCACHE: /weight-cache/wcache_o397
-    HYB_STREAM: "0"             # prefill streaming needs the port's grouped prefill hooks (not ported yet)
-    HYB_PREFILL_SENTINEL: "0"   # expects the zeroed sorted-down output the Qwen port does not produce yet
-    HYB_SOCKET: "0"             # socket decode needs the direct fetch (HYB_LRU > 0)
-    HYB_PREFETCH: "0"
-    HYB_LIB_RESIDENT: "0"       # the int4 library from the page cache (does not fit RAM on the dev box)
+    HYB_PREFETCH: "1"
     HYB_PF_TOPK: "8"
-    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
-    QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
-    QWEN35_MOE_DN_READERS: "4"
-    QWEN35_MOE_DN_CHUNK: "4"
-    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
-    # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash: GQA drafter, block 16), GDN rows-mode verify
-    # QWEN35_EXT_SPEC: dflash_serve:build   # OFF: GDN rows-mode verify wrong for rows >= 1 (HANDOFF, open)
-    # QWEN35_EXT_SPEC_K: "3"
+    HYB_STREAM: "0"             # prefill streaming needs the port's grouped prefill hooks (not ported yet)
+    HYB_PREFILL_SENTINEL: "0"
+    # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash), 3 drafts, GDN rows-mode verify
+    QWEN35_EXT_SPEC: dflash_serve:build
+    QWEN35_EXT_SPEC_K: "3"
+    DFLASH_DRAFTER: ornith-ai/Ornith-1.5-397B-DFlash
     DFLASH_TP: "1"
-    DFLASH_BLOCK: "8"          # the drafter trained at 16; 16 rows exceed the K / V shard row (11 cores)
+    DFLASH_BLOCK: "8"           # the drafter trained at 16; 16 rows exceed the K / V shard row (11 cores)
     DFLASH_WINDOW: "256"
     DFLASH_WARMUP: "384"
 
 serve_profiles:
   - name: p300x2-128k
-    description: One QB2 (two p300 boards, 4 dies). Single user, up to 128K tokens, speculative decoding.
+    description: >
+      The default: up to 128K tokens, socket decode with PCIe fetch of recently missed experts. The fastest profile;
+      needs ~205 GB of free host RAM (the int4 library plus pinned device-format copies of 128 experts per layer).
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 131072
+  - name: p300x2-128k-lowmem
+    description: >
+      Up to 128K tokens without the PCIe fetch: the CPU computes every off-device expert. ~135 GB of free host RAM
+      and no device-format copies to build or download; slower decode.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 131072
+    env:
+      HYB_SOCKET: "0"
+      HYB_LRU: "0"
+      HYB_PREFETCH: "0"
+      HYB_FETCH_FRAC: "0.3"
 default_profile: p300x2-128k
 
 card:

@@ -77,9 +77,17 @@ def main():
         ttnn.dump_tensor(tmp, ttnn.from_host_shards(shards, ttnn.MeshShape(1, TP)))
         os.replace(tmp, path)
 
+    # HYB_DEV_RANKS=lo:hi: only the experts ranked lo .. hi-1 by the plan's routed mass (stable sort, the server's
+    # order: hybrid/patch.py plan()), e.g. the HYB_PIN_TOP experts after a profile's static slots
+    ranks = os.environ.get("HYB_DEV_RANKS", "")
+    mass = np.load(plan_path)["mass"] if ranks else None
     for L in layers:
         t0 = time.time()
-        ids = sorted(order[L, int(S) :].tolist())
+        if ranks:
+            lo, hi = (int(v) for v in ranks.split(":"))
+            ids = sorted(np.argsort(-mass[L], kind="stable")[lo:hi].tolist())
+        else:
+            ids = sorted(order[L, int(S) :].tolist())
         done = 0
         for e in ids:
             p = os.path.join(out, f"{L}_{e}")
