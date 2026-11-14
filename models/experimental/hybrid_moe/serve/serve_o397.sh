@@ -15,7 +15,7 @@ NS=${NS:-212}  # prefill streaming slots: two banks of 106 (a hybrid layer has 1
 # prefill: 4096-token segments in layer-major groups of 8 (a layer's staged expert copies serve the whole group), up
 # to 3 staging rounds per layer step from 1 token on (no CPU experts in prefill), copies on the second command queue;
 # from PF_PREFETCH tokens on, the next hybrid layer's experts are copied during the current one (0 = off)
-PF_ENV="-e QWEN35_PREFILL_SEGMENT=4096 -e QWEN35_PREFILL_GROUP=${PF_GROUP:-8} -e HYB_STREAM_ROUNDS=3 -e HYB_STREAM_MIN=${PF_MIN:-4}"
+PF_ENV="-e QWEN35_PREFILL_SEGMENT=${PF_SEG:-2048} -e QWEN35_PREFILL_GROUP=${PF_GROUP:-8} -e HYB_STREAM_ROUNDS=3 -e HYB_STREAM_MIN=${PF_MIN:-4}"
 # prompts of 1024+ tokens stream every missed expert (runs/m27/pf_min: 16K 8.5 -> 6.5 s, 4K 2.34 -> 2.0 s)
 PF_ENV="$PF_ENV -e HYB_STREAM_MIN_LONG=1 -e HYB_STREAM_LONG_FROM=1024"
 PF_ENV="$PF_ENV -e HYB_STREAM_CQ1=1 -e HYB_PF_PREFETCH_MIN=${PF_PREFETCH:-1024}"
