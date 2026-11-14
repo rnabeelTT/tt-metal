@@ -20,7 +20,6 @@ import ttnn
 from models.autoports.minimaxai_minimax_m2_7.tt.layer import Qwen35MoeDecoderLayer as _M27Layer
 from models.autoports.thinkingmachines_inkling_small.tt.attention import InklingAttention
 from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
-from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
 from models.demos.blackhole.qwen36.utils.substate import substate
 from models.tt_transformers.tt.common import Mode
 
@@ -37,6 +36,43 @@ class _HFConfigView:
                   "swa_num_attention_heads", "swa_num_key_value_heads", "d_rel", "rel_extent", "sliding_window_size",
                   "log_scaling_n_floor", "log_scaling_alpha", "rms_norm_eps"):
             setattr(self, k, r[k])
+
+
+class InklingDenseMLP:
+    """Layers 0-1: SwiGLU (I 16384, global_scale folded into down_proj by the state dict), TP: gate/up column-parallel,
+    down row-parallel + reduce-scatter (fractured output, like the MoE). bfp8 weights, HiFi4 / fp32 accumulation: two
+    layers only, so precision over the shared Qwen36MLP's bfp4 gate/up."""
+
+    def __init__(self, mesh, args, sd, tt_ccl, dtype=ttnn.bfloat8_b):
+        self.mesh, self.args, self.tt_ccl = mesh, args, tt_ccl
+        self.N = mesh.get_num_devices()
+        col, row = ttnn.ShardTensorToMesh(mesh, dim=-1), ttnn.ShardTensorToMesh(mesh, dim=-2)
+        up = lambda t, m: ttnn.as_tensor(t.to(torch.bfloat16).T.contiguous(), dtype=dtype, layout=ttnn.TILE_LAYOUT,  # noqa
+                                         device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=m)
+        self.w1 = up(sd["gate_proj.weight"], col)
+        self.w3 = up(sd["up_proj.weight"], col)
+        self.w2 = up(sd["down_proj.weight"], row)
+        self.ckc = ttnn.init_device_compute_kernel_config(mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4,
+                                                          math_approx_mode=False, fp32_dest_acc_en=True,
+                                                          packer_l1_acc=True)
+
+    def forward(self, x, mode="decode"):
+        if x.is_sharded():
+            x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
+        mc = ttnn.L1_MEMORY_CONFIG if int(x.shape[-2]) <= 32 else ttnn.DRAM_MEMORY_CONFIG
+        g = ttnn.linear(x, self.w1, compute_kernel_config=self.ckc, memory_config=mc)
+        u = ttnn.linear(x, self.w3, compute_kernel_config=self.ckc, memory_config=mc)
+        h = ttnn.multiply(g, u, input_tensor_a_activations=[ttnn.UnaryOpType.SILU], memory_config=mc)
+        ttnn.deallocate(g)
+        ttnn.deallocate(u)
+        part = ttnn.linear(h, self.w2, compute_kernel_config=self.ckc, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(h)
+        if self.N == 1:
+            return part
+        from models.tt_transformers.tt.ccl import tt_all_reduce
+
+        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=self.args.ccl_topology(),
+                             memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
 
 class InklingDecoderLayer(_M27Layer):
@@ -76,8 +112,7 @@ class InklingDecoderLayer(_M27Layer):
 
     def _build_feed_forward(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
         if not args.is_moe_layer(layer_num):  # dense SwiGLU (global_scale folded into down_proj by the state dict)
-            return Qwen36DecoderLayer._build_feed_forward(self, mesh_device, args, state_dict, layer_num,
-                                                          tensor_cache_path, tt_ccl)
+            return InklingDenseMLP(mesh_device, args, substate(state_dict, f"layers.{layer_num}.mlp"), tt_ccl)
         from models.autoports.thinkingmachines_inkling_small.tt.optimized_decoder import Qwen35MoEOptimized
 
         mlp_state = substate(state_dict, f"layers.{layer_num}.mlp")
