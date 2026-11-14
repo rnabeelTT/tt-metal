@@ -433,15 +433,6 @@ class HybridState:
         if not (self.hostk and self.lib_dir and R <= hostk.MAXR) or not miss.any():
             return None
         lib = self.lib_layer(layer)
-        if lib.get("planar"):  # bit-plane library (HYB_LOWBIT): the torch preparation, returned as a starter like below
-            run = self.host_prepare(
-                layer,
-                X,
-                torch.from_numpy(ids.astype(np.int64)),
-                torch.from_numpy(sc.astype(np.float32)),
-                torch.from_numpy(miss),
-            )
-            return None if run is None else run.start
         ex = np.unique(ids[miss])
         rows_np = lib["row"][ex]
         if (rows_np < 0).any():
@@ -452,9 +443,13 @@ class HybridState:
         out = torch.zeros(R, H, dtype=torch.float32)
         Xf = X.float().contiguous()
         rows, Wt = torch.from_numpy(np.ascontiguousarray(rows_np, dtype=np.int64)), torch.from_numpy(W)
-        call = hostk.moe_prepared(lib, Xf, rows, Wt, out)
+        lo = None
+        if lib.get("planar"):  # HYB_LOWBIT bit-plane library: experts whose largest weight over the rows is below it
+            lo = torch.from_numpy((W.max(1) < self.lowbit).astype(np.int8))  # read only their hi 2 bits
+            self.st["lowbit"] += int(lo.sum())
+        call = hostk.moe_prepared(lib, Xf, rows, Wt, out, lo=lo)
         self.st["host_experts"] += len(ex)
-        keep = (Xf, rows, Wt, lib)
+        keep = (Xf, rows, Wt, lo, lib)
 
         def start():
             def done(dt):
