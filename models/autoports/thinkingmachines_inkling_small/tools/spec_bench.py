@@ -62,6 +62,7 @@ def main():
     TOP_K = int(os.environ.get("SPEC_TOP_K", "0"))
     SEED = int(os.environ.get("SPEC_SEED", "0"))
     TRACE = os.environ.get("SPEC_TRACE") == "1"
+    PROF = os.environ.get("SPEC_PROF") == "1"  # synchronize after the commit so the per-phase times are exact
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
@@ -204,6 +205,7 @@ def main():
         texts = {}
         for k in [0] + list(range(1, K + 1)):
             tot_new, tot_steps, tot_t = 0, 0, 0.0
+            tm = {"verify": 0.0, "accept": 0.0, "commit": 0.0, "draft": 0.0}
             # an untimed warm-up generation first: JIT kernel compiles for this k's row counts stay out of the timing
             runs = ([(PROMPTS[0], WARM, False)] if WARM else []) + [(m, NEW, True) for m in PROMPTS]
             for msgs, limit, timed in runs:
@@ -229,7 +231,9 @@ def main():
                 steps = 0
                 while len(out) < limit:
                     rows = [x] + drafts
-                    am, h, L = verify(rows, p)
+                    t_a = time.time()
+                    am, h, L = verify(rows, p)  # returns after the logits readback: the verify pass has finished
+                    t_b = time.time()
                     if sampler.greedy:
                         n = 0
                         while n < len(drafts) and drafts[n] == am[n]:
@@ -237,7 +241,11 @@ def main():
                         nxt = am[n]
                     else:
                         n, nxt = sampler.accept(L, drafts, qs)
+                    t_c = time.time()
                     commit(n + 1)
+                    if PROF:
+                        ttnn.synchronize_device(mesh)
+                    t_e = time.time()
                     new = drafts[:n] + [nxt]
                     out += new
                     steps += 1
@@ -246,6 +254,12 @@ def main():
                     if k:
                         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
                         drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
+                    t_d = time.time()
+                    if timed:
+                        tm["verify"] += t_b - t_a
+                        tm["accept"] += t_c - t_b
+                        tm["commit"] += t_e - t_c  # with SPEC_PROF=1 synchronized; otherwise the enqueue only
+                        tm["draft"] += t_d - t_e
                     x, p = nxt, p + n + 1
                 dt = time.time() - t0
                 if not timed:
@@ -257,7 +271,8 @@ def main():
                 if k in (0, K):
                     print(f"  k={k} sample: {tok.decode(out[:60])!r}", flush=True)
             print(f"k={k}: {tot_new / tot_steps:.2f} tokens/step, {tot_new / tot_t:.2f} tok/s "
-                  f"({tot_new} tokens, {tot_steps} steps, {tot_t:.1f}s)", flush=True)
+                  f"({tot_new} tokens, {tot_steps} steps, {tot_t:.1f}s) | ms/step: "
+                  + " ".join(f"{a} {1e3 * v / tot_steps:.1f}" for a, v in tm.items()), flush=True)
         if os.environ.get("SPEC_OUT"):
             import json
 
