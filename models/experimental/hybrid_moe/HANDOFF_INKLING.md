@@ -212,3 +212,22 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
       about 0.85 depth-1 acceptance, and DSpark 3.35 acceptance length at block 7, both on generation.
     - **The drafter choice needs a device spec-decode run on generated text.** The confident-position column of
       `mtp_inkling_ref.py` is a cheaper proxy.
+- **2026-11-14, DSpark vs MTP, and the precision findings.**
+  - **DSpark** (`dspark_inkling_ref.py`, the same teacher-forced method as MTP).
+    - Measured on 4 sampled block starts per held-out text. The SpecForge import is satisfied by registering the
+      checkpoint's own `dflash.py`.
+    - Acceptance length by convention: raw embedding with logits /16 gives **1.31**; the other three combinations give
+      1.06–1.16. Native MTP gives 1.42 at k=1 by the same method.
+    - Both are depressed by teacher forcing on human text, and DSpark was trained on the NVFP4 target's hidden states.
+    - Decision: MTP first, as planned. Settle it with on-device generation.
+  - **Host int4 is more accurate than device bfp4.** On layer 40's cold experts and real inputs, expert-output PCC
+    against bf16 is 0.988 for int4 g32 and 0.973 for emulated bfp4.
+  - **Late MoE layers are much more sensitive to bfp4.** Layer 40 measures 0.983 / 0.989 / 0.9986 (bfp4 / gu4-dn8 / bfp8)
+    against layer 5's 0.9915 / 0.9957 / 0.9993. Late layers carry massive activations, with hidden channel 1974 around
+    250K.
+  - **Per-layer sweep running.** `tools/sweep_moe_precision.py` writes `~/.cache/inkling/sweep_moe_precision.json`, the
+    input to the per-layer precision assignment. Options: bfp8 in the sensitive layers, possibly with fewer slots,
+    sending more misses to the more accurate int4 host path.
+  - **Plan.**
+    - At C=194 (2 shared + 192 routed): routed hit 94.4%, 13.4 misses per token, 211 MB per token from the host.
+    - The int4 library for the 64 cold experts per layer is built: `~/.cache/hybrid-moe/inkling_int4_s194`, 38 GB.
