@@ -1,0 +1,197 @@
+# tt-model container (v5.1) manifest for MiniMax-M2.7 (230B MoE, FP8 checkpoint) on one QB2 (2 x p300 = 4 Blackhole
+# dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
+# device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe), DFlash speculative decoding,
+# elastic 128K context. Single user (max_num_seqs 1), greedy.
+# Build: tt-model package --container models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml
+schema: "5.1"
+
+repo: raahemnabeel/minimax-m2.7-hybrid-qb2
+name: minimax-m2.7-hybrid-qb2
+weights: {repo: MiniMaxAI/MiniMax-M2.7, revision: 0a6536713b0b03f3be97494e5cf8d22f668a3164}
+auxiliary_weights:
+  - {repo: nvidia/MiniMax-M2.7-DFlash, revision: 506ca1e2662a58808f673a8c96c3cc1c65bd1e73}
+  # int4 host + bfp4 device copies of the experts that can miss, and the expert plans (build_int4_library.py,
+  # build_dev_experts.py, sim_m27.py, ref_m27.py)
+  - {repo: raahemnabeel/minimax-m2.7-hybrid-qb2-experts, revision: e8a57405e487d95b0838b805332856f5b61a85cc}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/m27-hybrid   # worktree, branch raahem/qwen35-397b-hybrid-moe
+  code:
+    - models/autoports/minimaxai_minimax_m2_7/__init__.py
+    - models/autoports/minimaxai_minimax_m2_7/tt
+    - models/autoports/minimaxai_minimax_m2_7/vllm_metadata.json
+    - models/autoports/minimaxai_minimax_m2_7/vllm_bundle
+    - models/autoports/minimaxai_minimax_m2_7/doc/context_contract.json
+    - models/autoports/minimaxai_minimax_m2_7/doc/datatype_sweep/selected_precision_config.json
+    - models/autoports/minimaxai_minimax_m2_7/doc/datatype_sweep/selected_precision_config_tp2.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/__init__.py
+    - models/autoports/qwen_qwen3_5_122b_a10b/tt
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/context_contract.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/selected_precision_config.json
+    # the hybrid overlay: runtime modules only (no runs/, benchmarks or debug scripts)
+    - models/experimental/hybrid_moe/hybrid
+    - models/experimental/hybrid_moe/serve/sitecustomize.py
+    - models/experimental/hybrid_moe/dflash_serve.py
+    - models/experimental/hybrid_moe/dflash_tt.py
+    - models/experimental/hybrid_moe/ref_m27.py
+    - models/experimental/hybrid_moe/build_int4_library.py
+    - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 8b1f8b1, the plugin of the 122B image the hybrid was developed in
+  extra_models_dir: models/autoports/minimaxai_minimax_m2_7/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 1
+  max_model_len: 131072
+  capabilities:
+    tool_parser: minimax_m2
+    reasoning_parser: minimax_m2
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: all
+      trace_region_size: 100663296
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: MiniMaxAI/MiniMax-M2.7
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
+    HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
+    QWEN35_TRACE_REGION_MIB: "96"
+    QWEN35_PREFIX_STATE_SLOTS: "0"
+    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+    # --- the hybrid overlay: serve/serve_m27.sh at its defaults (CTX 131072, ELASTIC 1, SPEC 1, SOCK 1) ---
+    HYB_ENABLE: "1"
+    HYB_PORT: minimaxai_minimax_m2_7
+    HYB_SLOTS: "192"
+    HYB_DYN_SLOTS: "0"
+    HYB_SKIP: "0"
+    HYB_MTP: "0"
+    HYB_ROWS: "4"
+    HYB_THREADS: "12"
+    HYB_HOSTK_THREADS: "6"
+    HYB_LIB: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/int4_s152
+    HYB_DEV_EXPERTS: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/dev_s152
+    HYB_PLAN: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/plans/plan_m27_routing.npz
+    HYB_PLAN_WEIGHT: mass
+    # elastic 128K: built as the 32K profile (44 full layers, 32K-token KV pool); longer requests demote layers in
+    # this order (sim_full_layers.py 44 and SIM_ORDER=1 on plans/plan_m27.npz)
+    HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
+    HYB_ELASTIC_DEMOTE: "34,27,32,38,53,40,36,21,37,30,48,55,41,54,52,47,46,3,33,51,29,42,19,50"
+    QWEN35_KV_TOKENS: "32768"
+    HYB_LRU: "32"
+    HYB_FETCH_FRAC: "0.15"
+    HYB_FETCH_POLICY: auto
+    HYB_FETCH_BUDGET: "8"
+    HYB_FETCH_MAX: "8"
+    HYB_WCACHE: /weight-cache/wcache_m27   # device images of the routed experts, written on the first boot (~110 GB)
+    HYB_STREAM_SLOTS: "212"
+    HYB_STREAM_ROUNDS: "3"
+    HYB_STREAM_MIN: "4"
+    HYB_STREAM_MIN_LONG: "1"
+    HYB_STREAM_LONG_FROM: "1024"
+    HYB_STREAM_CQ1: "1"
+    HYB_PF_PREFETCH_MIN: "1024"
+    HYB_SOCKET: "1"
+    HYB_PREFETCH: "1"
+    HYB_PF_TOPK: "8"
+    QWEN35_PREFILL_SEGMENT: "4096"
+    QWEN35_PREFILL_GROUP: "8"
+    QWEN35_PREFIX_CACHING: "1"
+    QWEN35_MOE_DN_READERS: "4"
+    QWEN35_MOE_DN_CHUNK: "4"
+    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # DFlash speculative decoding (nvidia/MiniMax-M2.7-DFlash), 3 drafts per pass
+    QWEN35_EXT_SPEC: dflash_serve:build
+    QWEN35_EXT_SPEC_K: "3"
+    DFLASH_TP: "1"
+    DFLASH_WINDOW: "256"
+    DFLASH_WARMUP: "384"
+  args: [--enable-auto-tool-choice]
+
+serve_profiles:
+  - name: p300x2
+    description: One QB2 (two p300 boards, 4 dies). Single user, 128K context, speculative decoding.
+    hardware: p300x2
+    mesh_device: P300x2
+
+card:
+  attribution: >
+    Serves [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) by MiniMax (Built with MiniMax M2.7),
+    with [nvidia/MiniMax-M2.7-DFlash](https://huggingface.co/nvidia/MiniMax-M2.7-DFlash) as the speculative drafter.
+    The expert copies in raahemnabeel/minimax-m2.7-hybrid-qb2-experts are derived from the MiniMax-M2.7 weights.
+  description: >
+    MiniMax-M2.7, a 230B-parameter mixture-of-experts model (10B active, 62 layers x 256 experts, FP8 checkpoint),
+    served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so each layer's most-used experts
+    stay on the device (bfp4) and the rest are computed on the host CPU from int4 copies or streamed over PCIe when a
+    request needs them. Decoding is speculative (DFlash, 3 drafts per pass). Context is elastic up to 128K tokens: the
+    server runs with 44 all-on-device layers and a 32K-token KV pool, and a longer request moves layers to hybrid to
+    grow the pool (a few seconds, once per switch).
+  intended_use: >
+    Single-user chat, coding and agent use (tool calls through the minimax_m2 parser, reasoning split into
+    reasoning_content) on one QB2. Non-commercial use only (see Licensing).
+  prerequisites: |
+    - A host CPU with AVX-512 (the host expert kernel); 16 or more cores recommended
+    - About 40 GB of free host RAM for the server (int4 experts kept resident, pinned staging buffers), and no memory
+      pressure: swapped expert pages make the CPU path several times slower. No `--ulimit memlock` is needed: the
+      Tenstorrent driver pins the staging buffers itself, and locking the int4 library is best-effort.
+    - About 440 GB of disk: MiniMax-M2.7 (230 GB), the expert copies (69 GB), the drafter, and ~110 GB of device images
+      the first boot writes to the weight cache
+  quickstart: |
+    The first boot downloads ~300 GB and converts the weights (about an hour, dominated by the device-image cache);
+    later boots load from the caches. A request longer than 32K tokens takes a one-time few-second switch; the first
+    switch after a fresh cache can take over a minute while that variant's images are written.
+  usage: |
+    Greedy decoding is the measured setting. One request at a time (max_num_seqs 1); prompts sharing a prefix resume
+    from vLLM's prefix cache at 4096-token boundaries.
+  performance: |
+    | eval | this package | reference | prompts |
+    | --- | --- | --- | --- |
+    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.848 (confident tokens 0.933) | — | 8 x 1000 tokens, held out |
+
+    | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2 | ~50 | 128 | 1 | 8 | 0.62 s | — | 56.9 | 2.9 s |
+    | p300x2 (45K prompt, includes the 4.5 s switch) | 44,895 | 128 | 1 | 1 | 23.3 s | 1,930 | 32.1 | 27.3 s |
+    | p300x2 (same 45K prompt resent, prefix-cache hit) | 44,895 | 128 | 1 | 1 | 1.0 s | — | 30.8 | 5.2 s |
+
+    Measured on one QB2 through the OpenAI endpoint, greedy, 2026-11-14; decode varies about ±5% between runs with
+    the text (speculative acceptance). Quality figure from the 2026-11-08 teacher-forced comparison (top-1 counts
+    disagreements on near-tied tokens; confident = reference top-1 probability above 0.5).
+  limitations: |
+    - One user at a time; batching is not supported by the hybrid path.
+    - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
+      Long contexts run with fewer all-on-device layers (about 32 tok/s at 45K vs ~57 short).
+    - Expert placement was planned from routing statistics on general text and code; unusual domains route to more
+      host experts and decode slower.
+    - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 device experts).
+    - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
+  licensing: >
+    MiniMax-M2.7 is under the MiniMax non-commercial license: personal, research and non-profit use is free;
+    commercial use needs prior written authorization from MiniMax (api@minimax.io). The same terms apply to the
+    derived expert copies. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
+  license: {id: other, name: minimax-m2.7-non-commercial, link: https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE}
+
+verify:
+  - "import models.autoports.minimaxai_minimax_m2_7.tt.generator_vllm as g; assert g.MiniMaxM2ForCausalLM"
