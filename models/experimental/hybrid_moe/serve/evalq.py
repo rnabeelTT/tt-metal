@@ -22,12 +22,26 @@ URL = f"http://localhost:{os.environ.get('PORT', '8000')}/v1/chat/completions"
 
 
 def snap(repo, pat):
-    return sorted(glob.glob(f"{HUB}/datasets--{repo}/snapshots/*/{pat}"))[0]
+    hits = sorted(glob.glob(f"{HUB}/datasets--{repo}/snapshots/*/{pat}"))
+    if not hits and repo == "gsm8k":  # the hub moved it to openai/gsm8k
+        hits = sorted(glob.glob(f"{HUB}/datasets--openai--gsm8k/snapshots/*/{pat}"))
+    return hits[0]
+
+
+_MODEL = []
+
+
+def model():
+    """The served model name (env MODEL, else the server's first model)."""
+    if not _MODEL:
+        m = os.environ.get("MODEL") or json.load(urllib.request.urlopen(URL.rsplit("/chat/", 1)[0] + "/models"))["data"][0]["id"]
+        _MODEL.append(m)
+    return _MODEL[0]
 
 
 def chat(prompt, think):
     body = {
-        "model": "qwen3.5-397b-hybrid",
+        "model": model(),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": int(os.environ.get("MAX_TOKENS", 32768 if think else 4096)),
