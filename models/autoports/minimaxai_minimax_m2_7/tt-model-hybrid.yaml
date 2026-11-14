@@ -174,9 +174,10 @@ card:
     MiniMax-M2.7, a 230B-parameter mixture-of-experts model (10B active, 62 layers x 256 experts, FP8 checkpoint),
     served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so each layer's most-used experts
     stay on the device (bfp4) and the rest are computed on the host CPU from int4 copies or streamed over PCIe when a
-    request needs them. Decoding is speculative (DFlash, 3 drafts per pass). Context is elastic up to 128K tokens: the
-    server runs with 44 all-on-device layers and a 32K-token KV pool, and a longer request moves layers to hybrid to
-    grow the pool (a few seconds, once per switch).
+    request needs them. Decoding is speculative (DFlash, 3 drafts per pass). Three serving profiles trade context
+    length for host RAM: 32K and 64K with a fixed layout, and the default 128K, which is elastic: it serves short
+    requests with the 32K layout (44 all-on-device layers) and moves layers to hybrid only while a longer request needs
+    the KV room.
   intended_use: >
     Single-user chat, coding and agent use (tool calls through the minimax_m2 parser, reasoning split into
     reasoning_content) on one QB2. Non-commercial use only (see Licensing).
@@ -198,9 +199,24 @@ card:
     - About 440 GB of disk: MiniMax-M2.7 (230 GB), the expert copies (69 GB), the drafter, and ~110 GB of device images
       the first boot writes to the weight cache
   quickstart: |
-    The first boot downloads ~300 GB and converts the weights (about an hour, dominated by the device-image cache);
-    later boots load from the caches. A request longer than 32K tokens takes a one-time few-second switch; the first
-    switch after a fresh cache can take over a minute while that variant's images are written.
+    ### Choosing a profile
+
+    | profile | max context | layout | free host RAM | short decode | when to pick it |
+    | --- | --- | --- | --- | --- | --- |
+    | `p300x2-128k` (default) | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~56 tok/s | long documents / agent sessions now and then |
+    | `p300x2-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~53 tok/s | steady long contexts without switch pauses |
+    | `p300x2-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~60 tok/s | fastest; a machine with other jobs running |
+
+    `tt-model serve raahemnabeel/minimax-m2.7-hybrid-qb2 --profile p300x2-32k` picks one (`tt-model profiles
+    raahemnabeel/minimax-m2.7-hybrid-qb2` lists them). The profiles share the downloads and caches.
+
+    ### First boot
+
+    The first boot downloads ~300 GB and converts the experts into device images (about an hour); later boots load
+    them in ~40 s and are ready in 3-7 minutes. On the 128K profile's first boot the server also builds the long
+    layouts once (every elastic layer to hybrid and back, ~10 minutes), so the first long request does not pay for it.
+    With the elastic profile, a request that needs more than 32K tokens of context waits for a switch first: ~3-5 s up
+    to ~50K tokens, ~20 s for ~100K, and the next short request switches back (5-14 s).
   usage: |
     Greedy decoding is the measured setting. One request at a time (max_num_seqs 1); prompts sharing a prefix resume
     from vLLM's prefix cache at 4096-token boundaries.
@@ -211,17 +227,28 @@ card:
 
     | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2 | ~50 | 128 | 1 | 8 | 0.62 s | — | 56.9 | 2.9 s |
-    | p300x2 (45K prompt, includes the 4.5 s switch) | 44,895 | 128 | 1 | 1 | 23.3 s | 1,930 | 32.1 | 27.3 s |
-    | p300x2 (same 45K prompt resent, prefix-cache hit) | 44,895 | 128 | 1 | 1 | 1.0 s | — | 30.8 | 5.2 s |
+    | p300x2-32k | ~50 | 128 | 1 | 16 | 0.64 s | — | 60.3 | 2.8 s |
+    | p300x2-32k | 24,291 | 128 | 1 | 1 | 10.0 s | 2,430 | 37.7 | 13.4 s |
+    | p300x2-32k, prompt resent (prefix-cache hit) | 24,291 | 128 | 1 | 1 | 1.3 s | — | 37.3 | 4.7 s |
+    | p300x2-64k | ~50 | 128 | 1 | 16 | 0.75 s | — | 53.1 | 3.2 s |
+    | p300x2-64k | 44,780 | 128 | 1 | 1 | 19.6 s | 2,280 | 31.6 | 23.7 s |
+    | p300x2-64k, prompt resent | 44,780 | 128 | 1 | 1 | 1.6 s | — | 31.2 | 5.7 s |
+    | p300x2-128k | ~50 | 128 | 1 | 32 | 0.63 s | — | 56.3 | 2.9 s |
+    | p300x2-128k, incl. the ~4 s switch | 44,780 | 128 | 1 | 2 | 23.4 s | 1,910 | 31.0 | 27.5 s |
+    | p300x2-128k, prompt resent | 44,780 | 128 | 1 | 2 | 1.8 s | — | 32.4 | 5.8 s |
+    | p300x2-128k, incl. the ~21 s switch | 102,594 | 128 | 1 | 1 | 75.3 s | 1,360 | 21.3 | 81.3 s |
+    | p300x2-128k, prompt resent | 102,594 | 128 | 1 | 1 | 2.0 s | — | 22.9 | 7.6 s |
 
-    Measured on one QB2 through the OpenAI endpoint, greedy, 2026-11-14; decode varies about ±5% between runs with
-    the text (speculative acceptance). Quality figure from the 2026-11-08 teacher-forced comparison (top-1 counts
+    Measured on one QB2 through the OpenAI endpoint with `tt-model serve` (no extra docker flags), greedy, warm caches,
+    2026-11-14; the ~50-token rows are 8 short chat prompts per run. Prefill tok/s = prompt tokens / TTFT (the
+    elastic rows include the switch). Decode varies about ±5% between runs with the text (speculative acceptance). Quality figure from the 2026-11-08 teacher-forced comparison (top-1 counts
     disagreements on near-tied tokens; confident = reference top-1 probability above 0.5).
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
-      Long contexts run with fewer all-on-device layers (about 32 tok/s at 45K vs ~57 short).
+      Long contexts run with fewer all-on-device layers (about 31 tok/s at 45K and 21 tok/s at 100K vs ~56 short).
+    - Elastic profile: a request that crosses the 32K layout waits for a layer switch (see Quickstart), and the next
+      short request switches back.
     - Expert placement was planned from routing statistics on general text and code; unusual domains route to more
       host experts and decode slower.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 device experts).

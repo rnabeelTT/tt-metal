@@ -253,10 +253,40 @@ class DFlashServing:
     def capture(self):
         """The per-request traces are captured after each prefill; at startup only the warm-up generation runs (fills
         the fetch LRU slots and touches the pinned / locked host pages, so the first request runs at steady speed)."""
+        self._elastic_prewarm()
         n = int(os.environ.get("DFLASH_WARMUP", "64"))
         if n:
             r = self.generate(WARMUP_PROMPT, n, self.gen.page_table[:1])
             logger.info(f"DFlash warm-up: {r['tokens']} tokens at {r['tok_s']} tok/s")
+
+    def _elastic_prewarm(self):
+        """HYB_ELASTIC_PREWARM (auto = once per HYB_WCACHE, 1 = every start, 0 = off): at startup, every demotable
+        layer to hybrid and back. A layer's first demotion converts its hybrid device image (~20 s per layer) and the
+        long layouts compile their programs; done here, the first long request does not wait for them (100K tokens on
+        a fresh cache: a 243 s switch vs 21 s). Skipped when the free host RAM cannot hold the full-context layout."""
+        el, mode = HYB.elastic, os.environ.get("HYB_ELASTIC_PREWARM", "auto")
+        if el is None or mode == "0" or not el.D:
+            return
+        import hashlib
+
+        from hybrid import hostmem
+
+        root = os.environ.get("HYB_WCACHE", "")
+        tag = hashlib.sha1(f"{list(el.D)}|{el.short_tokens}|{el.long_tokens}".encode()).hexdigest()[:12]
+        marker = os.path.join(root, f"elastic_prewarm_{tag}.done") if root else ""
+        if mode == "auto" and (not marker or os.path.exists(marker)):
+            return
+        extra = sum(hostmem.layer_bytes(HYB.lib_dir, HYB.fetch.dir).get(L, 0) for L in el.D)
+        if extra > hostmem.available():
+            logger.warning(f"HYB_ELASTIC_PREWARM skipped: the full-context layout needs {extra / 1e9:.0f} GB more RAM")
+            return
+        t0 = time.time()
+        self.release()
+        el._switch(len(el.D), keep=False)
+        el._switch(0, keep=False)
+        if marker:
+            open(marker, "w").close()
+        logger.info(f"HYB_ELASTIC_PREWARM: {len(el.D)} layers to hybrid and back in {time.time() - t0:.1f} s")
 
     # ------------------------------------------------------------------ prefill
     def release(self):
