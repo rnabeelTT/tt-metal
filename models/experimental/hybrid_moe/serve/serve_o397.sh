@@ -22,7 +22,7 @@ PF_ENV="$PF_ENV -e HYB_STREAM_CQ1=1 -e HYB_PF_PREFETCH_MIN=${PF_PREFETCH:-1024}"
 # vLLM automatic prefix caching (PC=0 turns it off): a resent prefix resumes at its last 4096-token boundary
 PF_ENV="$PF_ENV -e QWEN35_PREFIX_CACHING=${PC:-0}"  # the M2.7 scheme refuses GDN models
 # Qwen3.5 port gaps (ADD_A_MODEL / HANDOFF): no prefill streaming hooks yet, no zeroed sorted-down output, text only
-PF_ENV="$PF_ENV -e HYB_STREAM=${STREAM:-0} -e HYB_PREFILL_SENTINEL=0 -e QWEN35_VISION=0 -e QWEN35_BATCHED_PREFILL=0"
+PF_ENV="$PF_ENV -e QWEN35_PREFILL_MAX_ROWS=${PF_MAX_ROWS:-1024} -e HYB_STREAM=${STREAM:-0} -e HYB_PREFILL_SENTINEL=0 -e QWEN35_VISION=0 -e QWEN35_BATCHED_PREFILL=0"
 # rows-mode MoE down op: 4 readers per bank, 4-slot chunks (bench_moe_rows.py: 137 vs 157 us per call)
 PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=4 -e QWEN35_MOE_DN_CHUNK=4"
 # DFlash drafter context window 256 (8K prompt: 1.79 -> 1.91-2.08 tokens per pass vs 1024; runs/m27/fb_win, fb_win2)

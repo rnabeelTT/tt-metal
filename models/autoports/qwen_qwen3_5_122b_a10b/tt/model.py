@@ -38,6 +38,15 @@ from models.demos.blackhole.qwen36.tt.generator_interface import unpack_rope
 from models.demos.blackhole.qwen36.tt.model import Qwen36Model
 from models.tt_transformers.tt.common import Mode
 
+# QWEN35_PREFILL_MAX_ROWS (unset: unchanged): row slices of at most this many rows for the 2D prefill matmuls of the
+# DRAM-sharded projections (qwen36 tp_common.PREFILL_MAX_ROWS). The per-core output block grows with the rows; with
+# hidden 4096 (Ornith-1.5-397B) the GDN qkvzab projection of a 2048-row bucket needs 2.1 MB of circular buffers
+# (> 1.5 MB L1); 1024 rows fit.
+if os.environ.get("QWEN35_PREFILL_MAX_ROWS"):
+    from models.demos.blackhole.qwen36.tt import tp_common as _tpc
+
+    _tpc.PREFILL_MAX_ROWS = int(os.environ["QWEN35_PREFILL_MAX_ROWS"])
+
 
 class _CacheRoot(type(Path())):
     """Weight-cache root handed to the qwen36 / tt_transformers loaders, which build cache names with ``root / key``.

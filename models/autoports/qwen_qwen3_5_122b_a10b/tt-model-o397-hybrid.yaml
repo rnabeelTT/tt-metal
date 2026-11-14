@@ -103,6 +103,7 @@ serve:
     HYB_PREFETCH: "1"
     HYB_PF_TOPK: "8"
     QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+    QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
     QWEN35_MOE_DN_READERS: "4"
     QWEN35_MOE_DN_CHUNK: "4"
     QWEN35_ROWS_SDPA_SHARED_FROM: "0"
