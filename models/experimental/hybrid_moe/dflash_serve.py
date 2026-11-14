@@ -112,6 +112,20 @@ class Verify:
         self.dn = [layer.attention for layer in m.layers if not layer.is_full_attention]
         self.base_val = None
         if self.dn:
+            # rows mode exists only on the GDN decode-ops path (gdn/tp.py _forward_decode_ops_from); the fused and the
+            # python decode paths would treat the verify rows as separate users (silently wrong text)
+            bad = [i for i, dn in enumerate(self.dn) if getattr(dn, "_gdn_ops", None) is None or getattr(dn, "_fused_decode", False)]
+            if bad:
+                a0 = m.args
+                raise RuntimeError(
+                    f"DFlash verify needs the GDN decode ops (QWEN35_GDN_DECODE_OPS) on every GDN layer; {len(bad)} of "
+                    f"{len(self.dn)} lack them (fused_decode {self.dn[bad[0]]._fused_decode}, fuse_ab "
+                    f"{getattr(self.dn[bad[0]], '_fuse_ab', None)}, ab_tile_pad {getattr(a0, 'gdn_ab_tile_pad', None)}, "
+                    f"proj_1d {getattr(a0, 'proj_1d_decode', None)}, out_1d {getattr(a0, 'out_proj_1d_decode', None)}, "
+                    f"fuse_out_mmrs {getattr(a0, 'fuse_out_mmrs_decode', None)}, state {getattr(a0, 'gdn_state_dtype', None)}, "
+                    f"B {getattr(self.dn[bad[0]], 'B', None)}, env {os.environ.get('QWEN35_GDN_DECODE_OPS')})"
+                )
+            logger.info(f"DFlash verify: {len(self.dn)} GDN layers in rows mode (decode ops, per-row snapshots)")
             rep = ttnn.ReplicateTensorToMesh(self.mesh)
             self.snaps, self.hists = [], []
             for dn in self.dn:
