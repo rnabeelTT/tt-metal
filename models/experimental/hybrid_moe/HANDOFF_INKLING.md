@@ -1,0 +1,94 @@
+# Inkling-Small on one QB2: hand-off log
+
+Read this first when resuming. Newest entries at the bottom of **Log**. Branch: `raahem/inkling-small-hybrid` (fork
+`rnabeelTT/tt-metal`), cut from `hybrid-moe-starter`. Approach and gates: see **Plan** below; the M2.7 bring-up this
+follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
+
+## Status (update every session)
+
+| Phase | State |
+|---|---|
+| 0. env / disk | done: 729 GB free after a Docker prune, `libhostk.so` built, BF16 checkpoint downloading |
+| 1. CPU reference + routing | `ref_inkling.py` written and self-tested; text sets built; waiting on the checkpoint |
+| 2. TT port | not started |
+| 3. hybrid integration | not started |
+| 4. spec decode (MTP, DSpark) | not started |
+| 5. optimisation | not started |
+| 6. multimodal, package | not started |
+
+**Next step:** once the checkpoint is complete, run `ref_inkling.py` on the held-out set, check NLL/acc are sane, then on
+the train set (see Commands).
+
+## The model, as it matters for the port
+
+From `config.json` and transformers 5.17 `models/inkling/modeling_inkling.py` (the reference we match):
+
+- **Shape:** 42 layers, H 4096, vocab 201,024 (only the first 200,058 logits are real).
+  - Attention: 32 Q heads, 8 KV heads, head_dim 128.
+  - **Dense MLP** in layers 0–1: I 16384, times a learned `global_scale`.
+  - **MoE** in layers 2–41: 256 routed experts (I 2048, top-6) plus 2 shared experts (I 2048).
+- **Router**, 258 rows (256 routed + 2 shared):
+  - Selection: `sigmoid(logits[:256]) + bias`, top-6.
+  - Weights: `softmax(logsigmoid([6 chosen logits, 2 shared logits]))` × 8 (`route_scale`) × `global_scale`.
+  - The last 2 weights are the shared-expert gammas, multiplied inside the shared SwiGLU before `down`.
+- **Attention has no RoPE.** Layer types:
+  - `hybrid_sliding` layers (window 512): all except 5, 11, 17, 23, 29, 35, 41.
+  - `hybrid` (global) layers: those 7.
+- **Attention internals:**
+  - q and k are RMS-normalised per head (after k's sconv); the scale is 1/head_dim.
+  - **Relative bias** `bias[h, q, k] = (r_proj(x_q).view(heads, 16) @ proj[16, E])[h, q-k]` for 0 ≤ q-k < E, and 0 otherwise.
+  - E = 512 for sliding layers (the whole window) and 1024 for global layers.
+  - **Global layers only:** q and the bias are multiplied by `tau = 1 + 0.1*ln(max(1, (pos+1)/128000))`. This is a no-op below 128K.
+- **sconv**: `y = x + causal_depthwise_conv(x, w[C, 4])` in fp32. There are 4 per layer:
+  - `k_sconv` and `v_sconv` (C = 1024), applied right after the k/v projections and before k_norm and the KV cache;
+  - `attn_sconv` on `o_proj`'s output, before the residual add;
+  - `mlp_sconv` on the MLP/MoE output (shared experts included), before the residual add.
+  - Decode state is the last 3 inputs per conv.
+- **Embedding:** `embed_norm(embed(ids))` (RMSNorm). `embed` and `unembed` are separate tensors.
+- **Output:** `final_norm(x) / 16 @ unembed.T`, truncated to 200,058.
+- **Checkpoint layout:** keys are `model.llm.layers.N.{attn.wq_du, wk_dv, wv_dv, wr_du, wo_ud, ...}`.
+  - Gate/up pairs are **row-interleaved**: `w13`, with gate on the even rows. See `ref_inkling.deinterleave`.
+  - The sconv weights are `[C, 4]`.
+- **MTP:** `mtp.safetensors`, 8 chained layers, each a full block (attention + sconv + dense MLP). Layers 1 and 3 are global, the rest sliding.
+
+Consequences for the port:
+- **KV is small.** Only 7 layers hold full KV, about 15 KB/token in bfp8, so 1M tokens is about 16 GB.
+- **The new device work:**
+  - the band-limited relative bias, in decode, verify and prefill;
+  - 4 stateful fp32 convs per layer, which spec verify must roll back;
+  - the router normalisation;
+  - the shared experts.
+
+## Environment notes
+
+- The HF cache is at **`HF_HOME=/opt/tenstorrent/models`**, not `~/.cache/huggingface`.
+  - The starter's docker scripts mount `~/.cache/huggingface`; mount `/opt/tenstorrent/models` instead.
+  - Host scripts need `HF_HUB=/opt/tenstorrent/models/hub`.
+- **CPU venv** (torch 2.9 cpu, transformers 5.17): `~/inkling-work/venv`.
+- **Sparse checkout:** `git sparse-checkout add <dir>` before using a directory that isn't present yet.
+
+## Commands
+
+```bash
+cd models/experimental/hybrid_moe
+export HF_HUB=/opt/tenstorrent/models/hub PY=~/inkling-work/venv/bin/python
+# text sets (done; 8 held-out + 21 train, 1000 tokens each, Inkling chat template)
+TT_SRC=$PWD/../../autoports TOK_REPO=thinkingmachines/Inkling-Small $PY quality_texts.py runs/inkling/texts_held.json
+TT_SRC=$PWD/../../autoports TOK_REPO=thinkingmachines/Inkling-Small $PY quality_texts.py runs/inkling/texts_train.json train
+# the reference's chunked path vs HF's full forward (tiny random model, no checkpoint)
+$PY ref_inkling_selftest.py
+# CPU reference (hours): routing.npz + ref_<name>.npz; REF_GOLD=1 also writes per-layer fixtures for the port's tests
+REF_GOLD=1 REF_TAPS=5,11,23,29,35 $PY ref_inkling.py runs/inkling/texts_held.json runs/inkling/ref_held
+$PY ref_inkling.py runs/inkling/texts_train.json runs/inkling/ref_train
+```
+
+## Log
+
+- **2026-11-14:** Plan approved: text first, MTP and DSpark both built and picked by measurement, BF16 as source and
+  reference.
+  - Branch created and Docker pruned, keeping the newest tag per repo; 729 GB free.
+  - `libhostk.so` built, BF16 + DSpark download started, CPU venv and text sets built.
+  - `ref_inkling.py` written and validated.
+    - Validation is against HF's full-model forward on a tiny random Inkling, chunked and unchunked: max abs error ≤7e-6.
+    - One bug found and fixed on the way: in a layer-at-a-time run, the HF mask helpers size masks from the first cache
+      layer of each type, so every cache slot is aliased to the current layer's entry.
