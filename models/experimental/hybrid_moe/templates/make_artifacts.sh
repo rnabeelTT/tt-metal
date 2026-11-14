@@ -56,7 +56,7 @@ fi
 if run dev; then  # the same experts in the device's bfp4 TP layout (ttnn packing needs the device)
   docker run --rm --device /dev/tenstorrent --ipc host --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
     -v $HOME/.cache/huggingface:/hf:ro -v $P:/poc -v $LIB:/hyblib --user "$(id -u):$(id -g)" \
-    -e HOME=/tmp -e ARCH_NAME=blackhole -e THREADS=8 -e TT_METAL_LOGGER_LEVEL=Error -e PYTHONPATH=/opt/tt-metal:/poc \
+    -e HOME=/tmp -e ARCH_NAME=blackhole -e THREADS=8 -e HYB_LIB_KEYS=$KEYS -e TT_METAL_LOGGER_LEVEL=Error -e PYTHONPATH=/opt/tt-metal:/poc \
     --entrypoint python $IMG /poc/build_dev_experts.py /hf/hub/models--${MODEL/\//--}/snapshots/$(basename $SNAP) \
     /hyblib/${TAG}_dev_s$S /poc/runs/$TAG/plan_$TAG.npz:$S "$HYBL"
 fi
