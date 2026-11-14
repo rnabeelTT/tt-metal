@@ -2,7 +2,9 @@
 # Teacher-forced quality of the full Inkling model through the hybrid MoE overlay (the quality gate), in the image.
 #
 # usage: tools/eval_hybrid.sh [out.json]      env: S (device slots per layer, default 194), POLICY (doc/precision stem,
-#        default routed_bfp4), EVAL_TEXTS / EVAL_T (subset), FULL (HYB_FULL_LAYERS list), EXTRA (more docker -e flags)
+#        default routed_bfp4), EVAL_TEXTS / EVAL_T (subset), FULL (HYB_FULL_LAYERS list), EXTRA (more docker -e flags),
+#        WCACHE (expert device-image cache in the container, default /cache/wcache = ~/.cache/inkling/wcache: a repeat
+#        build of the same profile skips the ~10 min host conversion; WCACHE= disables it)
 # Needs: an int4 library ~/.cache/hybrid-moe/inkling_int4_s$LIB_S (make_inkling.sh int4, S=LIB_S <= S: it holds every
 # expert outside the top LIB_S, a superset of any S >= LIB_S profile's cold set; default 106), the plan
 # models/experimental/hybrid_moe/runs/inkling/plan_inkling_hyb.npz (make_inkling.sh plan), the reference
@@ -12,6 +14,7 @@ P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 S=${S:-194}
 POLICY=${POLICY:-routed_bfp4}
 OUT=${1:-/cache/eval_s${S}_${POLICY}.json}
+WC=${WCACHE-/cache/wcache}
 SNAP=$(basename $(ls -d ${HF_HOST:-/opt/tenstorrent/models}/hub/models--thinkingmachines--Inkling-Small/snapshots/*))
 export DEV_ENV="-v $HOME/.cache/hybrid-moe:/hyblib \
  -e HF_MODEL=/hf/hub/models--thinkingmachines--Inkling-Small/snapshots/$SNAP \
@@ -20,7 +23,7 @@ export DEV_ENV="-v $HOME/.cache/hybrid-moe:/hyblib \
  -e HYB_FUSED=0 -e HYB_SLOTS=$S -e HYB_LIB=/hyblib/inkling_int4_s${LIB_S:-106} \
  -e HYB_PLAN=/opt/tt-metal/models/experimental/hybrid_moe/runs/inkling/plan_inkling_hyb.npz \
  -e HYB_STREAM_SLOTS=0 -e HYB_SKIP=0 -e HYB_LOWBIT=0 -e HYB_HOSTK_THREADS=${HOSTK_THREADS:-6} \
- -e HYB_DECODE_ROWS=${DECODE_ROWS:-8} \
+ -e HYB_DECODE_ROWS=${DECODE_ROWS:-8} ${WC:+-e HYB_WCACHE=$WC} \
  ${FULL:+-e HYB_FULL_LAYERS=$FULL} ${EVAL_TEXTS:+-e EVAL_TEXTS=$EVAL_TEXTS} ${EVAL_T:+-e EVAL_T=$EVAL_T} ${EXTRA}"
 if [ -n "$TOOL" ]; then  # any other tool with the same hybrid environment, e.g. TOOL=spec_bench.py TOOL_ARGS="4 128"
   exec "$P/tools/run_dev.sh" python models/autoports/thinkingmachines_inkling_small/tools/$TOOL $TOOL_ARGS
