@@ -22,7 +22,8 @@ IMG=${HYB_IMAGE:-tt-model/minimax-m2.7-hybrid-qb2:0c9857a46f16}   # an image wit
 PY=${PY:-$HOME/m27-work/venv/bin/python}
 # ---------------------------------------------------------------- end
 
-P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)   # models/experimental/hybrid_moe
+D=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)   # works from templates/ or from a copy next to the scripts
+if [ -f "$D/build_int4_library.py" ]; then P=$D; else P=$(cd "$D/.." && pwd); fi   # models/experimental/hybrid_moe
 R=$P/runs/$TAG; LIB=$HOME/.cache/hybrid-moe; mkdir -p "$R" "$LIB"
 export HF_HUB=${HF_HUB:-$HOME/.cache/huggingface/hub} TOK_REPO=$MODEL REF_THREADS=${REF_THREADS:-16}
 SNAP=$(ls -d "$HF_HUB/models--${MODEL/\//--}/snapshots/"* | head -1)
