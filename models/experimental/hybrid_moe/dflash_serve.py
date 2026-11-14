@@ -86,6 +86,16 @@ def load_drafter(mesh, rows):
     )
 
 
+def _accept_cap():
+    """Debug switch read every step: <HYB_POC_DIR>/runs/dflash_cap holding an int caps the accepted drafts per pass
+    (0 = every pass emits only the verified next token; the output must still equal plain decode). None = off."""
+    p = os.path.join(os.environ.get("HYB_POC_DIR", "/poc"), "runs", "dflash_cap")
+    try:
+        return int(open(p).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 class Verify:
     """The target's R-row verify pass with persistent inputs."""
 
@@ -601,6 +611,9 @@ class DFlashServing:
         a = 0
         while a < K and drafts[a] == top[a]:
             a += 1
+        cap = _accept_cap()
+        if cap is not None:  # debug: accept at most `cap` drafts (exercises the verify state paths row by row)
+            a = min(a, cap)
         if self._force is not None:
             if LP_DIR:  # rows 0..a predict the tokens this pass commits (the recorded text)
                 lp = ver.read_logits(a + 1, self.V)
