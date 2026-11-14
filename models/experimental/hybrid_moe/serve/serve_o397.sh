@@ -68,7 +68,7 @@ docker run -d --name hybrid-moe-serve \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   -v $HOME/.cache/huggingface:/hf -v $P:/poc -v $P/cache:/cache -v $HOME/.cache/hybrid-moe:/hyblib \
   -v $REPO/models:/opt/tt-metal/models \
-  -v $REPO/models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle:/extra_models/qwen_qwen3_5_122b_a10b:ro \
+  -v $REPO/models/autoports/qwen_qwen3_5_122b_a10b:/extra_models/qwen_qwen3_5_122b_a10b:ro \
   --user "$(id -u):$(id -g)" -p ${PORT:-8000}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=ornith-ai/Ornith-1.5-397B-FP8 -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e HOME=/tmp -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e HF_HUB=/hf/hub -e EXTRA_MODELS_DIR=/extra_models \
@@ -77,7 +77,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_ENABLE=1 -e HYB_PORT=qwen_qwen3_5_122b_a10b -e HYB_SLOTS=${SLOTS:-256} -e HYB_DYN_SLOTS=0 -e HYB_SKIP=0 -e HYB_MTP=0 \
   -e HYB_ROWS=$((${DK:-3} + 1)) -e HYB_THREADS=12 -e HYB_LIB=/hyblib/o397_int4_s192 \
   -e HYB_PLAN=/poc/runs/o397/plan_o397_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
-  -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_POLICY=${FETCH_POLICY:-auto} -e HYB_FETCH_BUDGET=8 -e HYB_FETCH_MAX=${FETCH_MAX:-8} -e HYB_DEV_EXPERTS=/hyblib/o397_dev_s192 \
+  -e HYB_LRU=${LRU:-32} -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_POLICY=${FETCH_POLICY:-auto} -e HYB_FETCH_BUDGET=8 -e HYB_FETCH_MAX=${FETCH_MAX:-8} -e HYB_DEV_EXPERTS=${DEVX-/hyblib/o397_dev_s192} -e HYB_LIB_RESIDENT=${LIB_RESIDENT:-1} -e HYB_PIN_TOP=${PIN_TOP:-0} \
   -e HYB_WCACHE=${WCACHE:-/hyblib/wcache_o397} \
   -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 -e QWEN35_ROWS_SDPA_SHARED_FROM=${ROWS_SDPA_FROM:-0} $SPEC_ENV $PF_ENV \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
