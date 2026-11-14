@@ -53,6 +53,7 @@ if [ "${ELASTIC:-1}" = 1 ] && [ "$CTX" = 131072 ]; then
   RANK=$(SIM_ORDER=1 python3 sim_full_layers.py runs/m27/plan_m27.npz runs/m27/ref_train/routing.npz runs/m27/ref_held/routing.npz 44 | tail -1)
   DEM=$(python3 -c "r='$RANK'.split(',');print(','.join(reversed(r[20:])))")  # demotion order: least valuable first
   PF_ENV="$PF_ENV -e QWEN35_KV_TOKENS=${KV_TOKENS:-32768} -e HYB_ELASTIC_DEMOTE=$DEM"
+  PF_ENV="$PF_ENV -e HYB_ELASTIC_GATHER=${ELASTIC_GATHER:-1} -e HYB_GATHER_CHECK=${GATHER_CHECK:-0}"
   FULL=44
 fi
 SPEC_ENV=""

@@ -31,8 +31,11 @@ class ExpertImageCache:
         os.makedirs(root, exist_ok=True)
         self.px = None
         self.regions = {}  # bytes -> (region id, uint8 view)
-        self.hits = self.misses = 0
-        self.t_load = self.t_store = 0.0
+        self.hits = self.misses = self.gathered = 0
+        self.t_load = self.t_store = self.t_gather = 0.0
+        self.specs = {}  # layer -> the spec of its last build (a full layer's, for gather())
+        self.gather_src = {}  # layer -> (up_gate, down) of its full build, kept by an elastic demotion (gather())
+        self.gather_check = os.environ.get("HYB_GATHER_CHECK") == "1"
 
     # ------------------------------------------------------------------ helpers
     def _key(self, layer, spec):
@@ -75,6 +78,13 @@ class ExpertImageCache:
     def load(self, mesh, layer, spec):
         if layer is None or not self._cacheable(spec) or not self._known(layer):
             return None
+        src = self.gather_src.pop(layer, None)
+        if src is not None:
+            out = self.gather(mesh, layer, spec, *src)
+            if out is not None:
+                self.specs[layer] = spec
+                return out
+        self.specs[layer] = spec
         pgu, pdn = self._paths(layer, self._key(layer, spec))
         if not (os.path.exists(pgu) and os.path.exists(pdn)):
             self.misses += 1
@@ -103,6 +113,71 @@ class ExpertImageCache:
         self.t_load += time.perf_counter() - t0
         return tuple(out)
 
+    def gather(self, mesh, layer, spec, up_gate, down):
+        """An elastic demotion's hybrid tensors from the layer's full ones, on the device: slot s holds expert
+        resident_fn(layer)[s] (ttnn.slice along the expert dim), an empty slot (id < 0: LRU / sink) a zero expert, and
+        ttnn.concat stacks them in slot order. Tile-aligned slices copy whole bfp tiles, so the bytes are the full build's
+        (cache/test_expert_gather.py: exact). Only when the full build's spec matches this one but for the expert count
+        (dtypes, padding, rounding suffix); otherwise None (the image / conversion path). Frees the full tensors.
+        HYB_GATHER_CHECK=1: the result is compared byte for byte with this layer's hybrid image file, when it exists."""
+        full = self.specs.get(layer)
+        ids = [int(e) for e in self.resident_fn(layer)]
+        same = full is not None and {k: v for k, v in full.items() if k != "E"} == {
+            k: v for k, v in spec.items() if k != "E"
+        }
+        if not same or len(ids) != spec["E"]:
+            for t in (up_gate, down):
+                ttnn.deallocate(t)
+            return None
+        t0 = time.perf_counter()
+        out = []
+        for t in (up_gate, down):
+            shp = [int(v) for v in t.shape]  # per device [1, E_full, rows, cols]
+            zero, parts = None, []
+            for e in ids:
+                if e < 0:
+                    if zero is None:
+                        zero = ttnn.zeros(
+                            [1, 1, shp[2], shp[3]],
+                            dtype=t.dtype,
+                            layout=ttnn.TILE_LAYOUT,
+                            device=mesh,
+                            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                        )
+                    parts.append(zero)
+                else:
+                    parts.append(
+                        ttnn.slice(t, [0, e, 0, 0], [1, e + 1, shp[2], shp[3]], memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                    )
+            g = ttnn.concat(parts, dim=1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            for p in {id(p): p for p in parts}.values():
+                ttnn.deallocate(p)
+            ttnn.deallocate(t)
+            out.append(g)
+        ttnn.synchronize_device(mesh)
+        self.gathered += 1
+        self.t_gather += time.perf_counter() - t0
+        if self.gather_check:
+            self._check_gather(mesh, layer, spec, out)
+        return tuple(out)
+
+    def _check_gather(self, mesh, layer, spec, out):
+        paths = self._paths(layer, self._key(layer, spec))
+        if not all(os.path.exists(p) for p in paths):
+            print(f"HYB_GATHER_CHECK: layer {layer}: no hybrid image to compare with", flush=True)
+            return
+        px = self._pinx(mesh)
+        tp = px.tp
+        for path, t in zip(paths, out):
+            dst, n = px.dst(t)
+            rid, buf = self._region(tp * n)
+            px.read(dst, rid, [d * n for d in range(tp)])
+            with open(path, "rb") as f:
+                ref = f.read()
+            if bytes(memoryview(buf)[: tp * n]) != ref:
+                raise RuntimeError(f"HYB_GATHER_CHECK: layer {layer}: gathered bytes differ from {path}")
+        print(f"HYB_GATHER_CHECK: layer {layer}: gathered tensors identical to the hybrid image", flush=True)
+
     def store(self, mesh, layer, spec, up_gate, down):
         if layer is None or not self._cacheable(spec) or not self._known(layer):
             return
@@ -128,5 +203,5 @@ class ExpertImageCache:
     def summary(self):
         return (
             f"HYB_WCACHE: {self.hits} layers loaded from images ({self.t_load:.1f} s), {self.misses} converted "
-            f"(image writes {self.t_store:.1f} s)"
+            f"(image writes {self.t_store:.1f} s), {self.gathered} gathered on the device ({self.t_gather:.1f} s)"
         )
