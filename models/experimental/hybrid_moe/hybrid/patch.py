@@ -21,7 +21,8 @@ Env (read at install):
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
   HYB_LIB_RESIDENT 1 (default): copy each layer's non-static int4 experts into RAM (during the build; with MTP, after the head)
-  HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user)
+  HYB_DECODE_ROWS  valid rows of a decode step (default 1: single user, padded batch rows). Spec verify (eager) needs it
+                   >= the verify row count: rows past it get no host experts (Inkling sets 8)
   HYB_THREADS      host torch threads (default 8)
   HYB_HOSTK        1 (default): one layer's missed experts in one call of the fused C kernel (hybrid/hostk; build it
                    on the host with `python -m hybrid.hostk`); 0: per-expert torch int4 matmuls
@@ -114,6 +115,7 @@ class HybridState:
             os.environ.get("HYB_PLAN_MIN_SCORE", str(self.skip))
         )  # fused MoE decode kernels (moe_decode/fused.py)
         self.decode_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
+        self._warned_rows = False
         # HYB_PLAN_WEIGHT: "count" (default: picks, thresholded by HYB_PLAN_MIN_SCORE) or "mass" (summed routed weight)
         self.plan_weight = os.environ.get("HYB_PLAN_WEIGHT", "count")
         if self.plan_weight not in ("count", "mass"):
@@ -2322,6 +2324,12 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     t0 = time.perf_counter()
     rows = idh.shape[0]
     valid = rows if mode == "prefill" else min(rows, HYB.decode_rows)
+    if valid < rows and not HYB._warned_rows:
+        # rows past HYB_DECODE_ROWS get no host experts: right for padded batch rows, silently wrong for spec-verify
+        # rows (all real: Inkling's eager verify lost every missed expert of rows 1.. this way)
+        HYB._warned_rows = True
+        print(f"[hybrid] WARNING: decode step of {rows} rows computes host experts for the first {valid} only "
+              f"(HYB_DECODE_ROWS={HYB.decode_rows}); spec verify needs HYB_DECODE_ROWS >= its row count", flush=True)
     HYB.st["t_read"] += time.perf_counter() - t0
     use_dyn = self._dyn_attrs is not None
     if use_dyn and mode != "prefill":
