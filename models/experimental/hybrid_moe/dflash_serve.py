@@ -51,7 +51,9 @@ def _drafter_repo():
         repo = ref.strip().partition("@")[0]
         if "dflash" in repo.lower():
             return repo
-    return "nvidia/MiniMax-M2.7-DFlash"
+    if "minimax-m2.7" in os.environ.get("HF_MODEL", "MiniMaxAI/MiniMax-M2.7").lower():
+        return "nvidia/MiniMax-M2.7-DFlash"  # the M2.7 dev scripts' default
+    raise ValueError("no DFlash drafter: set DFLASH_DRAFTER (repo id) or list it in TT_AUXILIARY_WEIGHTS")
 
 
 def _target_embedding():

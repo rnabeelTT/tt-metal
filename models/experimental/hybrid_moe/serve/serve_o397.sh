@@ -59,7 +59,7 @@ if [ "${ELASTIC:-0}" = 1 ] && [ "$CTX" = 131072 ]; then  # off for Qwen3.5 (smal
   FULL=44
 fi
 SPEC_ENV=""
-[ "${SPEC:-1}" = 1 ] && SPEC_ENV="-e QWEN35_EXT_SPEC=dflash_serve:build -e QWEN35_EXT_SPEC_K=${DK:-3}"
+[ "${SPEC:-1}" = 1 ] && SPEC_ENV="-e QWEN35_EXT_SPEC=dflash_serve:build -e QWEN35_EXT_SPEC_K=${DK:-3} -e DFLASH_DRAFTER=ornith-ai/Ornith-1.5-397B-DFlash"
 python3 -m hybrid.hostk >/dev/null && mkdir -p logs cache
 docker rm -f hybrid-moe-serve >/dev/null 2>&1
 docker run --rm --device /dev/tenstorrent --entrypoint tt-smi "$IMG" -r >/dev/null 2>&1
