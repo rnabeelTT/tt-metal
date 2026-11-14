@@ -91,6 +91,11 @@ class InklingAttention:
         self.q_norm = rep(sd["q_norm.weight"])
         self.k_norm = rep(sd["k_norm.weight"])
         kv_shard = ttnn.ShardTensorToMesh(mesh, dim=-1)
+        # explicit matmul precision (ttnn.linear's default config is low fidelity without fp32 accumulation): HiFi2 for
+        # block-float weights (more mantissa than bfp8 holds), HiFi4 for bf16; fp32 accumulation
+        self.ckc = ttnn.init_device_compute_kernel_config(
+            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4 if weight_dtype == ttnn.bfloat16 else ttnn.MathFidelity.HiFi2,
+            math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True)
         self.k_sconv = ShortConv(mesh, sd["k_sconv.conv1d.weight"].reshape(nkv * HD, -1), kv_shard, NKV * HD)
         self.v_sconv = ShortConv(mesh, sd["v_sconv.conv1d.weight"].reshape(nkv * HD, -1), kv_shard, NKV * HD)
         T = relbias.build_tables(sd["rel_logits_proj.proj"].float(), self.scale)
@@ -153,7 +158,7 @@ class InklingAttention:
         tau [1, 1, 1, 1] (global layers past 128K, else None). -> [1, 1, 1, H/N] fractured (reduce) or the [1, 1, 1, H]
         partial sum."""
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
-        p = ttnn.linear(x, self.w_qkvr, memory_config=L1)  # [1, 1, 1, fd]
+        p = ttnn.linear(x, self.w_qkvr, compute_kernel_config=self.ckc, memory_config=L1)  # [1, 1, 1, fd]
         qd, kd, rd = self.qd, self.kd, self.rd
         q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, 1, qd), memory_config=L1)
         k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, 1, qd + kd), memory_config=L1)
@@ -193,7 +198,7 @@ class InklingAttention:
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, 1, NH * HD))
-        part = ttnn.linear(o, self.w_o, memory_config=DRAM)  # [1, 1, 1, H] partial
+        part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)  # [1, 1, 1, H] partial
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
             return part
@@ -210,7 +215,7 @@ class InklingAttention:
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
         R = int(x.shape[2])
         assert R * (NH // NKV) <= 32, f"{R} rows x {NH // NKV} q heads per kv head must fit one tile"
-        p = ttnn.linear(x, self.w_qkvr, memory_config=L1)  # [1, 1, R, fd]
+        p = ttnn.linear(x, self.w_qkvr, compute_kernel_config=self.ckc, memory_config=L1)  # [1, 1, R, fd]
         qd, kd, rd = self.qd, self.kd, self.rd
         q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, R, qd), memory_config=L1)
         k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, R, qd + kd), memory_config=L1)
@@ -254,7 +259,7 @@ class InklingAttention:
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, R, NH * HD))
-        part = ttnn.linear(o, self.w_o, memory_config=DRAM)
+        part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
             return part
@@ -274,7 +279,7 @@ class InklingAttention:
         bs = self.block
         assert p0 % bs == 0 and T % 64 == 0 and T <= self.prefill_chunk, (p0, T, self.prefill_chunk)
         mc = DRAM
-        p = ttnn.linear(x, self.w_qkvr, memory_config=mc)  # [1, 1, T, fd]
+        p = ttnn.linear(x, self.w_qkvr, compute_kernel_config=self.ckc, memory_config=mc)  # [1, 1, T, fd]
         qd, kd, rd = self.qd, self.kd, self.rd
         q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, T, qd), memory_config=mc)
         k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, T, qd + kd), memory_config=mc)
@@ -333,7 +338,7 @@ class InklingAttention:
         if not self.sliding:
             ttnn.deallocate(pt)
         o = ttnn.reshape(o, (1, 1, T, NH * HD))
-        part = ttnn.linear(o, self.w_o, memory_config=DRAM)
+        part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
             return part

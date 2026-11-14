@@ -98,7 +98,7 @@ class InklingDecoderLayer(_M27Layer):
             mesh_device, _HFConfigView(args), {k: attn_sd[k] for k in attn_sd}, layer_num, tt_ccl=tt_ccl,
             block_size=int(getattr(args, "kv_block_size", 64)), max_seq_len=int(args.max_seq_len),
             weight_dtype=getattr(args, "attn_weight_dtype", None) or ttnn.bfloat8_b,
-            kv_dtype=getattr(args, "inkling_kv_dtype", None) or ttnn.bfloat8_b,
+            kv_dtype=getattr(args, "inkling_kv_dtype", None) or getattr(args, "kv_dtype", None) or ttnn.bfloat8_b,
             own_global_cache=bool(getattr(args, "inkling_own_kv", True)),
         )
         H, N = args.dim, self.num_devices

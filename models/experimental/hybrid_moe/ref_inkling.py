@@ -124,7 +124,7 @@ def load_layer(cfg, li):
     sd = layer_state_dict(cfg, li)
     raw = dict(sd)  # the checkpoint dtypes (cast_like_hf converts sd in place; the router reads fp32 bias / scale)
     cast_like_hf(layer, sd, li)
-    if hasattr(layer.mlp, "gate"):
+    if hasattr(layer.mlp, "gate") and os.environ.get("REF_ROUTER", "fp32") == "fp32":  # REF_ROUTER=hf: HF's bf16
         fp32_router(layer.mlp, raw)
     return layer.eval()
 

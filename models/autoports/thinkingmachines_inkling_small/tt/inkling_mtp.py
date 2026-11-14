@@ -110,7 +110,8 @@ class InklingMtp:
             blk = InklingDecoderLayer(self.mesh, self.args, state, d, None, tt_ccl=model.tt_ccl)
             p = parts[d]
             nw = lambda w: ttnn.as_tensor(w.reshape(1, 1, 1, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,  # noqa
-                                          layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=rep)
+                                          layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                                          memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=rep)
             w_in = ttnn.as_tensor(p["input_proj"].to(torch.bfloat16).T.contiguous(), dtype=ttnn.bfloat8_b,
                                   layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG,
                                   mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))  # [2H, H] col-parallel
