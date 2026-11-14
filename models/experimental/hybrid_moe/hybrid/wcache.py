@@ -79,6 +79,14 @@ class ExpertImageCache:
         if not (os.path.exists(pgu) and os.path.exists(pdn)):
             self.misses += 1
             return None
+        bad = [p for p in (pgu, pdn) if os.path.getsize(p) != self._expected_bytes(mesh, spec, p == pgu)]
+        if bad:  # a truncated entry (a short write before the write loop below existed): rebuild, never crash
+            print(f"[wcache] layer {layer}: {[os.path.basename(p) for p in bad]} have the wrong size; rebuilding",
+                  flush=True)
+            for p in (pgu, pdn):
+                os.remove(p)
+            self.misses += 1
+            return None
         t0 = time.perf_counter()
         px = self._pinx(mesh)
         tp = px.tp
@@ -103,6 +111,16 @@ class ExpertImageCache:
         self.t_load += time.perf_counter() - t0
         return tuple(out)
 
+    def _expected_bytes(self, mesh, spec, gate_up):
+        """Bytes an entry must hold: every device's buffer of the per-device shape (as load allocates it)."""
+        shape = self._shapes(spec)[0 if gate_up else 1]
+        dt = spec["gate_up_dtype"] if gate_up else spec["down_dtype"]
+        t = ttnn.allocate_tensor_on_device(ttnn.Shape(shape), _DT[dt], ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG)
+        px = self._pinx(mesh)
+        _, n = px.dst(t)
+        ttnn.deallocate(t)
+        return px.tp * n
+
     def store(self, mesh, layer, spec, up_gate, down):
         if layer is None or not self._cacheable(spec) or not self._known(layer):
             return
@@ -120,8 +138,14 @@ class ExpertImageCache:
             rid, buf = self._region(tp * n)
             px.read(dst, rid, [d * n for d in range(tp)])
             tmp = path + ".tmp"
+            mv = memoryview(buf)[: tp * n]
             with open(tmp, "wb", buffering=0) as f:
-                f.write(memoryview(buf)[: tp * n])
+                done = 0
+                while done < len(mv):  # a raw write may write less than asked (> ~2 GB, ENOSPC) without raising
+                    w = f.write(mv[done:])
+                    if not w:
+                        raise OSError(f"wcache: write of {tmp} stalled at {done} of {len(mv)} bytes")
+                    done += w
             os.replace(tmp, path)
         self.t_store += time.perf_counter() - t0
 
