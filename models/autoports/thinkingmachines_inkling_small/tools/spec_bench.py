@@ -67,7 +67,8 @@ def main():
     TOP_K = int(os.environ.get("SPEC_TOP_K", "0"))
     SEED = int(os.environ.get("SPEC_SEED", "0"))
     TRACE = os.environ.get("SPEC_TRACE") == "1"
-    PROF = os.environ.get("SPEC_PROF") == "1"  # synchronize after the commit so the per-phase times are exact
+    PROF = os.environ.get("SPEC_PROF") == "1"
+    PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # synchronize after the commit so the per-phase times are exact
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
@@ -250,6 +251,8 @@ def main():
                     t_a = time.time()
                     am, h, L = verify(rows, p)  # returns after the logits readback: the verify pass has finished
                     t_b = time.time()
+                    if PROF_DRAIN and timed:  # device profiler (TT_METAL_DEVICE_PROFILER=1): drain after every pass
+                        ttnn.ReadDeviceProfiler(mesh)
                     if sampler.greedy:
                         n = 0
                         while n < len(drafts) and drafts[n] == am[n]:
