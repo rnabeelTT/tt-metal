@@ -99,7 +99,8 @@ serve:
     # unchanged) but the first-token numerics then differ from a single admission (batched GDN form, PCC 0.9995), and
     # the parameter-conformance suite's seeded-reproducibility / greedy-consistency tests across batch compositions
     # failed (12 / 73, bundle run 8). Off keeps 73 / 73; turn on for throughput-first deployments.
-    QWEN35_BATCHED_PREFILL: "0"
+    QWEN35_BATCHED_PREFILL: "1"  # served A/B 2026-11-07: greedy 8/8+8/8 identical, TTFT 32x128 4848->2886 ms (with DISPATCH_MC)
+    QWEN35_DISPATCH_MC: "1"  # multi-core MoE dispatch, served A/B 2026-11-07: greedy identical, TTFT 2048x1 555->487 ms (Ornith-122B)
   # Thinking ON by default (owner decision 2026-10-02; the model's own default): a plain chat request reasons first and
   # answers in `content`; the reasoning arrives in the message's `reasoning` field (vLLM 0.26; `reasoning_content` in
   # older clients). Clients turn it off per request with "chat_template_kwargs": {"enable_thinking": false}. Caveats
@@ -218,6 +219,22 @@ card:
     | p300x2 | 128 | 128 | 1 | 4 | 230 | 557 | 133.1 | 1.18 |
     | p300x2 | 1024 | 256 | 32 | 128 | 12,072 | 85 | 21.2 | 23.98 |
     | p300x2-longctx | 128 | 128 | 1 | 4 | 219 | 584 | 132.6 | 1.17 |
+
+    #### Prefill update (2026-11-07)
+
+    This revision prefills short prompts (up to 512 tokens) four at a time in one batched pass and spreads the MoE
+    expert dispatch over more cores (on in every profile; measured on p300x2, the p300x2-longctx rows were not remeasured). Output is unchanged: greedy output matched token for token, one request
+    at a time and with eight concurrent requests, and the vLLM sampling conformance suite (74 tests) gives the same
+    results. Decode speed is unchanged. Measured 2026-11-07 on the published image, served as shipped; before = the same
+    build with both changes off. Random-token prompts, 128 output tokens, median TTFT over N requests. The tables below
+    were measured before this change; prompts over 512 tokens gain only from the dispatch change (the 2,048-token rows).
+
+    | Profile | Input tokens | Users | N | TTFT before -> after (ms) | Change |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 1 | 8 | 176 -> 185 | +5 % |
+    | p300x2 | 2,048 | 1 | 4 | 555 -> 519 | -6 % |
+    | p300x2 | 128 | 8 | 32 | 1,411 -> 1,009 | **-28 %** |
+    | p300x2 | 128 | 32 | 64 | 4,848 -> 2,874 | **-41 %** |
 
     #### p300x2 (default profile)
 
