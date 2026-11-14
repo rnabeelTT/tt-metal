@@ -273,7 +273,8 @@ def main():
                         break
                     if k:
                         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
-                        drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
+                        with mtp.own_ccl():  # the drafter's collectives never touch the target traces' semaphores
+                            drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
                     t_d = time.time()
                     if timed:
                         tm["verify"] += t_b - t_a

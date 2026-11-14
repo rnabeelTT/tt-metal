@@ -105,9 +105,14 @@ class InklingMtp:
         self.args = _MtpArgs(args, raw)
         state, parts = mtp_state(args.CKPT_DIR, self.n_depth)
         rep = ttnn.ReplicateTensorToMesh(self.mesh)
+        # the drafter's own CCL semaphores: a traced target pass bakes in the target's double-buffered global
+        # semaphores; eager drafter collectives cycling those same semaphores between replays hung the next replay
+        from models.tt_transformers.tt.ccl import TT_CCL
+
+        self.ccl = TT_CCL(self.mesh) if self.N > 1 else model.tt_ccl
         self.depths = []
         for d in range(self.n_depth):
-            blk = InklingDecoderLayer(self.mesh, self.args, state, d, None, tt_ccl=model.tt_ccl)
+            blk = InklingDecoderLayer(self.mesh, self.args, state, d, None, tt_ccl=self.ccl)
             p = parts[d]
             nw = lambda w: ttnn.as_tensor(w.reshape(1, 1, 1, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,  # noqa
                                           layout=ttnn.TILE_LAYOUT, device=self.mesh,
@@ -126,8 +131,23 @@ class InklingMtp:
     def _gather(self, x):
         from models.tt_transformers.tt.ccl import tt_all_gather
 
-        return tt_all_gather(x, self.mesh, self.model.tt_ccl, cluster_axis=None, dim=3,
+        return tt_all_gather(x, self.mesh, self.ccl, cluster_axis=None, dim=3,
                              topology=self.model.args.ccl_topology())
+
+    def own_ccl(self):
+        """Context: the target model's shared helpers (embedding, LM head) run on the drafter's CCL semaphores."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def ctx():
+            prev = self.model.tt_ccl
+            self.model.tt_ccl = self.ccl
+            try:
+                yield
+            finally:
+                self.model.tt_ccl = prev
+
+        return ctx()
 
     def _norm(self, x, w):
         return ttnn.multiply(ttnn.rms_norm(x, epsilon=self.eps), w)
