@@ -24,7 +24,11 @@ N = 1000
 
 
 def snap(repo, pat):
-    return sorted(glob.glob(f"{HF}/datasets--{repo}/snapshots/*/{pat}"))[0]
+    for r in (repo, f"openai--{repo}"):  # gsm8k is cached as datasets--openai--gsm8k by newer hub clients
+        found = sorted(glob.glob(f"{HF}/datasets--{r}/snapshots/*/{pat}"))
+        if found:
+            return found[0]
+    raise FileNotFoundError(f"dataset {repo} ({pat}) not in {HF}: hf download --repo-type dataset ...")
 
 
 def chat(pairs):

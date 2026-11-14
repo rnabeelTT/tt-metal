@@ -35,7 +35,7 @@ if [ "${SOCK:-1}" = 1 ]; then
 else
   FFRAC=${FFRAC:-0.3}
 fi
-IMG=${HYB_IMAGE:-tt-model/qwen3-5-122b-a10b:8a750811ffec}
+IMG=${HYB_IMAGE:-tt-model/minimax-m2.7-hybrid-qb2:0c9857a46f16}  # tt-model pull raahemnabeel/minimax-m2.7-hybrid-qb2
 TR_MIB=${TRACE_MIB:-96}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
