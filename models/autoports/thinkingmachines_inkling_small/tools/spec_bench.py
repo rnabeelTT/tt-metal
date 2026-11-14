@@ -17,6 +17,9 @@ usage (in the image, hybrid env as tools/eval_hybrid.sh): .../tools/spec_bench.p
        speculative sampling (M2.7 tt/mtp_sampling.py SpecSampler): drafts are sampled from the MTP head's processed q,
        accepted with min(1, p/q), the first rejection resamples norm(max(0, p - q)); the emitted stream is distributed
        as plain sampling from the target
+       env SPEC_TRACE=1: the target's verify pass and its conv-state commits replay as traces (one per row count R,
+       captured on first use after an eager warm-up; the hybrid MoE's host step runs between trace segments, hybrid/seg.py).
+       Greedy output must equal the eager run's token for token. The MTP drafter stays eager.
        env SPEC_OUT=/cache/spec.json: every timed generation's text per k (for tools/text_quality.py-style scoring)
 """
 
@@ -58,10 +61,11 @@ def main():
     TOP_P = float(os.environ.get("SPEC_TOP_P", "1.0"))
     TOP_K = int(os.environ.get("SPEC_TOP_K", "0"))
     SEED = int(os.environ.get("SPEC_SEED", "0"))
+    TRACE = os.environ.get("SPEC_TRACE") == "1"
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=64_000_000)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=int(os.environ.get("SPEC_TRACE_REGION", "400000000")))
     try:
         args, model = create_model(mesh, max_seq_len=8192)
         mtp = InklingMtp(model, max(K, 1))
@@ -99,9 +103,71 @@ def main():
             # MTP wants final_norm(h) without the 1/16 the state dict folded into the norm weight: x16
             return L.argmax(-1).tolist(), ttnn.multiply(h, float(args.logits_mup_width_multiplier)), L
 
-        def commit(n_rows):
+        def commit_eager(n_rows):
             for layer in model.layers:
                 layer.commit_rows(n_rows)
+
+        sconvs = [c for layer in model.layers
+                  for c in (layer.attention.k_sconv, layer.attention.v_sconv, layer.attn_sconv, layer.mlp_sconv)]
+        mup = float(args.logits_mup_width_multiplier)
+
+        class Traced:
+            """Verify pass + commits as traces, per row count R. Inputs go through persistent device buffers written
+            before each replay; the conv history each capture creates (sconv._last_seq) is kept referenced so its
+            trace-owned buffers stay allocated (a commit trace reads them)."""
+
+            def __init__(self):
+                self.bufs, self.tid, self.out, self.keep, self.ctid = {}, {}, {}, {}, {}
+                self.last_R = None
+
+            def _write(self, ids, p0):
+                R = len(ids)
+                if R not in self.bufs:
+                    self.bufs[R] = (dev_ids([0] * R), dev_pos(0, R))
+                di, dp = self.bufs[R]
+                ttnn.copy_host_to_device_tensor(
+                    ttnn.from_torch(torch.tensor(ids, dtype=torch.int32).reshape(1, R), dtype=ttnn.uint32,
+                                    layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), di)
+                ttnn.copy_host_to_device_tensor(
+                    ttnn.from_torch(torch.arange(p0, p0 + R, dtype=torch.int32), dtype=ttnn.int32,
+                                    layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), dp)
+
+            def _body(self, R):
+                di, dp = self.bufs[R]
+                x = model.embd(di)
+                x = ttnn.reshape(x, (1, 1, R, x.shape[-1]))
+                for layer in model.layers:
+                    x = layer.forward_rows(x, dp, pt, commit_all=False)
+                h = model._final_norm_decode(x)
+                return model._lm_head(h), ttnn.multiply(h, mup)
+
+            def rows(self, ids, p0):
+                R = len(ids)
+                self._write(ids, p0)
+                if R not in self.tid:
+                    self._body(R)  # eager warm-up: compiles every program, allocates the hybrid's width-R buffers
+                    tid = ttnn.begin_trace_capture(mesh, cq_id=0)
+                    out = self._body(R)
+                    ttnn.end_trace_capture(mesh, tid, cq_id=0)
+                    self.tid[R], self.out[R] = tid, out
+                    self.keep[R] = [c._last_seq for c in sconvs]
+                    for n in range(1, R + 1):  # commits read THIS capture's conv history: capture them now
+                        t = ttnn.begin_trace_capture(mesh, cq_id=0)
+                        commit_eager(n)
+                        ttnn.end_trace_capture(mesh, t, cq_id=0)
+                        self.ctid[(R, n)] = t
+                ttnn.execute_trace(mesh, self.tid[R], cq_id=0, blocking=False)
+                self.last_R = R
+                lg, hm = self.out[R]
+                L = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:R, :V]
+                return L.argmax(-1).tolist(), hm, L
+
+            def commit(self, n):
+                ttnn.execute_trace(mesh, self.ctid[(self.last_R, n)], cq_id=0, blocking=False)
+
+        tr = Traced() if TRACE else None
+        verify = tr.rows if TRACE else target_rows
+        commit = tr.commit if TRACE else commit_eager
 
         def mtp_draft(hrows, tokens_after, p0, k, sampler):
             """Depth 0 rows mode over the accepted rows (hidden rows j, token after row j, position p0 + j), then
@@ -154,7 +220,7 @@ def main():
                 for g in range(0, len(rest) - 1, 8):  # the remaining prompt tokens as committed row groups
                     chunk = rest[g : min(g + 8, len(rest) - 1)]
                     target_rows(chunk, pre + g)
-                    commit(len(chunk))
+                    commit_eager(len(chunk))
                 out = []
                 x, p = rest[-1], P - 1  # the last prompt token, at position P-1
                 drafts, qs = [], []
@@ -163,7 +229,7 @@ def main():
                 steps = 0
                 while len(out) < limit:
                     rows = [x] + drafts
-                    am, h, L = target_rows(rows, p)
+                    am, h, L = verify(rows, p)
                     if sampler.greedy:
                         n = 0
                         while n < len(drafts) and drafts[n] == am[n]:
