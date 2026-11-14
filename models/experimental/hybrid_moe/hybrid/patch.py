@@ -1689,7 +1689,7 @@ def _forward_fused(self, x4, orig, partial, logits=None):
             program_config=f.router_pc,
             memory_config=dram,
             # sigmoid + bias selection compares sigmoid values ~1e-3 apart: FP32 logits, as the model computes them
-            dtype=ttnn.float32 if HYB.router_kind == "sigmoid_bias" else None,
+            dtype=ttnn.float32 if HYB.router_kind in ("sigmoid_bias", "inkling") else None,
         )
     m = int(x4.shape[-2])
     mk = _kernel_rows(m)

@@ -36,7 +36,22 @@ class Qwen35MoEOptimized(_M27MoE):
     """Inkling MoE: 256 routed + 2 shared experts as one 258-expert block, router_kind "inkling"."""
 
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None, tt_ccl=None, layer_num=None):
-        super().__init__(mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
+        # The hybrid overlay's fused decode (HYB_FUSED=1) runs the fused MoE kernels on host-crafted rows (the routing
+        # happens on the host: patch.py _route_host's inkling branch), so the kernels' own router kind is irrelevant;
+        # the base class only builds them for router_kind "sigmoid_bias". Build them under that name, then restore.
+        # (Full layers, which would run the fused kernels' own sigmoid-bias router, are not supported with it: Inkling's
+        # weights normalise over the 2 shared experts too.)
+        fused_build = os.environ.get("QWEN35_MOE_FUSED_DECODE") == "1" and os.environ.get("HYB_ENABLE") == "1"
+        if fused_build:
+            if int(args.num_experts) == int(args.n_routed_experts) + int(args.n_shared_experts):
+                raise RuntimeError(f"layer {layer_num}: HYB_FUSED=1 with all 258 experts on the device (a full layer) "
+                                   "would run the fused kernels' sigmoid-bias router; use HYB_FULL_LAYERS= (none)")
+            args.router_kind = "sigmoid_bias"
+        try:
+            super().__init__(mesh_device, args, state_dict, tensor_cache_path, tt_ccl=tt_ccl, layer_num=layer_num)
+        finally:
+            args.router_kind = "inkling"
+        self.router_kind = "inkling"
         self.n_routed = int(args.n_routed_experts)
         self.n_shared = int(args.n_shared_experts)
         self.top_k_routed = int(args.top_k_routed)
