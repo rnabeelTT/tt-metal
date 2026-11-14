@@ -241,3 +241,21 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
   - **Per-layer emulation:** bfp4 error grows with depth, from 0.995 at L2 to 0.989 by L12–14 and 0.983 at L40.
     - int4 g32 (the host library) is about as accurate as gu4-dn8.
     - Next: a per-layer precision assignment within the measured DRAM headroom (`teacher_force.py` now prints it).
+- **2026-11-14, 8-text bfp4 baseline (C=194).**
+  - **Mean:** top-1 0.831, confident top-1 0.927, kl32 0.302. Device NLL is within 0.02–0.12 of the reference on every
+    text.
+  - **Spread by text:** livecodebench is worst (0.666 / 0.817 / 0.84), then doc_markdown and chat_english; code_mbpp is
+    best (0.912 / 0.958).
+  - **Per-span:** livecodebench's confident top-1 falls from 0.93 in the first 250 tokens to 0.72–0.83 after them. The
+    other texts are roughly flat.
+  - **The reference is sound.** Checked on trivial prompts: " Rome" at 0.986; the chat reply opens with
+    `<|content_text|>` at 1.0. Its odd confident predictions on livecodebench (literal `\r\n`, LaTeX problem text) are
+    the model's real behaviour on off-distribution raw text, and that text dominates kl32.
+  - **Use the 8-text numbers as a relative measure between configurations.** For absolute quality, add free-running task
+    evals (GSM8K / IFEval).
+  - **DRAM after the build:** 27.1 GB allocated per die, 4.6 GB free (0.58 GiB × 8 banks). At C=194, bfp8 for a layer
+    costs +0.6 GB per die and gu4-dn8 +0.2 GB per die.
+  - **Emulated MoE PCC with bfp4, all 40 layers** (`~/.cache/inkling/emulate_moe_precision.json`): about 0.995 at L2,
+    0.984–0.987 for L24–40, back to 0.994 at L41. bfp8 is ≥ 0.9999 everywhere; int4 is 0.993–0.998.
+  - **Running now:** layers 24–40 with gu4-dn8 (+3.5 GB per die) plus a bf16 LM head
+    (`doc/precision/late_gu4dn8_lmbf16.json`).
