@@ -65,7 +65,7 @@ def layer_bytes(lib_dir, dev_dir):
     """{layer: host bytes the server keeps for that layer's missable experts when it is hybrid} (cached):
     missable = E - (HYB_SLOTS - 1 - HYB_LRU) per layer (static slots; the fused path's sink and the LRU slots hold no
     static expert), capped at the library's experts; int4 copies counted when resident (HYB_LIB_RESIDENT, default 1:
-    =0 serves them from the page cache), device-format copies (only with HYB_LRU > 0: the fetch) up to HYB_PIN_TOP per
+    =0 serves them from the page cache), device-format copies (only with the fetch, HYB_LRU > 0, or prefill streaming, HYB_STREAM) up to HYB_PIN_TOP per
     layer (0 = all)."""
     global _sizes
     if _sizes is None:
@@ -86,6 +86,7 @@ def layer_bytes(lib_dir, dev_dir):
         lru = int(os.environ.get("HYB_LRU", "0") or 0)
         pin_top = int(os.environ.get("HYB_PIN_TOP", "0") or 0)
         resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
+        stream = os.environ.get("HYB_STREAM", "1") == "1"  # hybrid/stream.py: on by default when HYB_DEV_EXPERTS is set
         sizes = {}
         for L in set(lib) | set(dev):
             n_lib = n_dev.get(L, 0)  # the library and the device copies hold the same experts (one plan, one S)
@@ -95,7 +96,7 @@ def layer_bytes(lib_dir, dev_dir):
             b = 0
             if resident and L in lib:
                 b += lib[L] * cold // n_lib if n_lib else lib[L]
-            if lru > 0 and L in dev and n_lib:  # the device-format copies load only with the fetch on (HYB_LRU > 0)
+            if (lru > 0 or stream) and L in dev and n_lib:  # loaded only for the fetch (HYB_LRU) or prefill streaming
                 b += dev[L] * (min(cold, pin_top) if pin_top else cold) // n_lib
             sizes[L] = b
         _sizes = sizes

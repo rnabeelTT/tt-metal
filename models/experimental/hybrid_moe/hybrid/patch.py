@@ -775,7 +775,9 @@ def install():
         self._static_attrs = None
         self._dyn_attrs = None
         self._hyb_bufs = {}  # T -> persistent device buffers the host step writes (allocated before any capture)
-        if HYB.fetch.dir and self._hyb_fused:  # device-format copies of the experts that can miss (fetch, stream)
+        # device-format copies of the experts that can miss: only for the fetch (HYB_LRU) or prefill streaming (HYB_STREAM);
+        # with neither, loading them only cost host RAM (Ornith-1.5-397B: ~127 GB)
+        if HYB.fetch.dir and self._hyb_fused and (HYB.fetch.on or HYB.stream.on):
             HYB.fetch.note_shapes(self)
             if HYB.fetch.on:
                 HYB.fetch.init_layer(self)
