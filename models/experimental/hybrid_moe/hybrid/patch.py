@@ -713,7 +713,13 @@ def install():
         from .wcache import ExpertImageCache
 
         HYB.wcache = ExpertImageCache(os.environ["HYB_WCACHE"], resident_fn=lambda L: HYB.resident[L], tag=PORT)
-        _port("moe").EXPERT_WEIGHT_HOOK = HYB.wcache
+        # on the module that DEFINES Qwen35MoE (its __init__ reads the global there): a port whose moe module only
+        # re-exports the shared class (Inkling) would otherwise get the attribute on the wrong module, silently
+        import sys as _sys
+
+        _moe = _port("moe")
+        _moe.EXPERT_WEIGHT_HOOK = HYB.wcache
+        _sys.modules[_moe.Qwen35MoE.__module__].EXPERT_WEIGHT_HOOK = HYB.wcache
 
     orig_init = od.Qwen35MoEOptimized.__init__
 

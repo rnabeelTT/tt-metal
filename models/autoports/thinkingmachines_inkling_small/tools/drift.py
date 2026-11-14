@@ -43,7 +43,8 @@ def main():
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=64_000_000)
     try:
-        args, model = create_model(mesh, max_seq_len=4096)
+        nl = os.environ.get("DRIFT_LAYERS")  # a reduced model: layers 0 .. DRIFT_LAYERS-1 (all experts fit on device)
+        args, model = create_model(mesh, max_seq_len=4096, layer_indices=list(range(int(nl))) if nl else None)
         model.reset_sequence_state()
         pt_host = torch.arange(model.layers[0].attention.max_blocks, dtype=torch.int32)
         rep = ttnn.ReplicateTensorToMesh(mesh)
