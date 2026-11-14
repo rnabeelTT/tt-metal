@@ -67,11 +67,10 @@ def main():
     TOP_K = int(os.environ.get("SPEC_TOP_K", "0"))
     SEED = int(os.environ.get("SPEC_SEED", "0"))
     TRACE = os.environ.get("SPEC_TRACE") == "1"
-    PROF = os.environ.get("SPEC_PROF") == "1"
-    KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"
+    PROF = os.environ.get("SPEC_PROF") == "1"  # synchronize after the commit so the per-phase times are exact
+    KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"  # all verify rows' K / V in one program per layer (qwen36)
     FAKE_DRAFT = os.environ.get("SPEC_FAKE_DRAFT") == "1"  # debug: drafts = the last token repeated, no MTP device work
-    PRECAPTURE = os.environ.get("SPEC_PRECAPTURE") == "1"  # debug: capture every row count before any generation  # all verify rows' K / V in one program per layer (qwen36)
-    PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # synchronize after the commit so the per-phase times are exact
+    PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # device profiler: drain after every timed verify pass
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
@@ -263,8 +262,16 @@ def main():
                     commit_eager(len(chunk))
                 out = []
                 x, p = rest[-1], P - 1  # the last prompt token, at position P-1
-                if TRACE and PRECAPTURE and not tr.tid:
-                    for R in range(1, K + 2):  # rows at p.. are uncommitted: the generation overwrites them
+                if TRACE and not tr.tid:
+                    # Before ANY capture: one eager pass at every width the run can use (verify 1..K+1, the prompt
+                    # tail's row groups up to 8). Layers cache device tensors per width on first use (the hybrid's
+                    # per-width buffers, the routed path's sparsity masks); one allocated after a capture can sit in
+                    # that trace's freed intermediates, and every replay of that trace then overwrites it -- the
+                    # traced k > 0 hang (a 2-row replay after 1-row replays). Then capture every verify width up
+                    # front. Rows at p.. are uncommitted: the generation overwrites them.
+                    for R in range(1, 9):
+                        target_rows([x] * R, p)
+                    for R in range(1, K + 2):
                         print(f"  precapture R={R}", flush=True)
                         tr.rows([x] * R, p)
                 drafts, qs = [], []
