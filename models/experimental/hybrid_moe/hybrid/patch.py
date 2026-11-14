@@ -433,14 +433,15 @@ class HybridState:
         if not (self.hostk and self.lib_dir and R <= hostk.MAXR) or not miss.any():
             return None
         lib = self.lib_layer(layer)
-        if lib.get("planar"):
-            return self.host_prepare(
+        if lib.get("planar"):  # bit-plane library (HYB_LOWBIT): the torch preparation, returned as a starter like below
+            run = self.host_prepare(
                 layer,
                 X,
                 torch.from_numpy(ids.astype(np.int64)),
                 torch.from_numpy(sc.astype(np.float32)),
                 torch.from_numpy(miss),
             )
+            return None if run is None else run.start
         ex = np.unique(ids[miss])
         rows_np = lib["row"][ex]
         if (rows_np < 0).any():
