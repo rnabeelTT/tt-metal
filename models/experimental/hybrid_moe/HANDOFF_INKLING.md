@@ -259,3 +259,25 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
     0.984–0.987 for L24–40, back to 0.994 at L41. bfp8 is ≥ 0.9999 everywhere; int4 is 0.993–0.998.
   - **Running now:** layers 24–40 with gu4-dn8 (+3.5 GB per die) plus a bf16 LM head
     (`doc/precision/late_gu4dn8_lmbf16.json`).
+- **2026-11-14, calibration and where the drift comes from.**
+  - **Noise floor** (`compare_refs.py`): the fp32-router reference against HF's bf16-router reference gives top-1 0.925,
+    confident top-1 0.978, kl32 0.081 (livecodebench alone 0.82 / 0.93 / 0.26). The device's 0.831 / 0.927 / 0.302 is a
+    real gap.
+  - **Late layers don't help.** Layers 24–40 at gu4-dn8 (+3.5 GB per die) moved the 8-text mean only from 0.831 to 0.834
+    top-1 and from 0.302 to 0.290 kl32.
+  - **Drift map** (`tools/drift.py`, full hybrid model, math_gsm8k, against the gold residuals).
+
+    | Layers | Cumulative residual PCC | Per-layer contribution PCC, on the device's own input (mean / p01) |
+    |---|---|---|
+    | 0–1 | 0.99999 | 0.99999 |
+    | 2–11 | 0.9998 → 0.9995 | 0.997–0.999 |
+    | 12–16 | falling to 0.9934 | from 0.993 to 0.966 (p01 0.84) |
+    | 18–40 | 0.99 → 0.95 | 0.89–0.95 (p01 0.2–0.5) |
+
+    - The same layers isolated on the gold input score 0.986–0.999. The step collapse therefore comes from the layers'
+      sensitivity to small input drift: near-tie routing flips change whole experts.
+    - Once drift builds in L12–16, it amplifies downstream. This is why the late-layer upgrade barely helped.
+    - **The lever is the early MoE layers**, which keep the inputs to L12+ close. Running now:
+      `doc/precision/early_gu4dn8.json` (L2–17 gu4-dn8, LM head HiFi2).
+  - **Attention:** explicit HiFi2 + fp32 accumulation on its matmuls (`ttnn.linear`'s default config is lower fidelity).
+    A small gain: L5 attention mean PCC 0.99954 → 0.99963.

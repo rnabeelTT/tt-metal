@@ -50,7 +50,8 @@ def main():
         comp = ttnn.ConcatMeshToTensor(mesh, dim=-1)
         tok = ttnn.from_torch(ids.to(torch.int32).reshape(1, T), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
                               device=mesh, mesh_mapper=rep)
-        x = ttnn.reshape(model.embd(tok), (1, 1, T, args.dim))
+        e = model.embd(tok)  # hidden-sharded across the dies (the fractured residual)
+        x = ttnn.reshape(e, (1, 1, T, e.shape[-1]))
         prev = ttnn.to_torch(x, mesh_composer=comp).float().reshape(T, -1)
         c0 = pcc_rows(prev, xs[0])
         print(f"embed: cum pcc mean {c0.mean():.5f} worst {c0.min():.5f}", flush=True)
