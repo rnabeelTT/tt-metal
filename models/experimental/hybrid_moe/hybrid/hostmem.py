@@ -65,7 +65,8 @@ def layer_bytes(lib_dir, dev_dir):
     """{layer: host bytes the server keeps for that layer's missable experts when it is hybrid} (cached):
     missable = E - (HYB_SLOTS - 1 - HYB_LRU) per layer (static slots; the fused path's sink and the LRU slots hold no
     static expert), capped at the library's experts; int4 copies counted when resident (HYB_LIB_RESIDENT, default 1:
-    =0 serves them from the page cache), device-format copies up to HYB_PIN_TOP per layer (0 = all)."""
+    =0 serves them from the page cache), device-format copies (only with HYB_LRU > 0: the fetch) up to HYB_PIN_TOP per
+    layer (0 = all)."""
     global _sizes
     if _sizes is None:
         lib, dev, n_dev = {}, {}, {}
@@ -94,7 +95,7 @@ def layer_bytes(lib_dir, dev_dir):
             b = 0
             if resident and L in lib:
                 b += lib[L] * cold // n_lib if n_lib else lib[L]
-            if L in dev and n_lib:
+            if lru > 0 and L in dev and n_lib:  # the device-format copies load only with the fetch on (HYB_LRU > 0)
                 b += dev[L] * (min(cold, pin_top) if pin_top else cold) // n_lib
             sizes[L] = b
         _sizes = sizes

@@ -1295,14 +1295,17 @@ def _route_host(self, lg, m, ids=None):
         ids, sc = hostk.route(lg, k, HYB.sel_bias[L])
     elif HYB.router_kind == "sigmoid_bias":  # MiniMax-M2 / GLM: select on sigmoid + bias, weight by normalized sigmoid
         sg = 1.0 / (1.0 + np.exp(-z))
-        if ids is None:
-            ids = np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k]
+        if ids is None:  # contiguous: the C calls (hostk.craft, the host experts) read ids as a dense [m, k] array
+            ids = np.ascontiguousarray(np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k])
         elif (ids < 0).any() or (ids >= E).any():
             raise RuntimeError(f"layer {L}: device-selected expert ids out of range: {ids.tolist()}")
         sw = np.take_along_axis(sg, ids, 1)
         sc = sw / sw.sum(1, keepdims=True)
     else:
-        ids = np.argpartition(-z, k, axis=1)[:, :k]
+        # contiguous: argpartition(...)[:, :k] is a view with an E-wide row stride, and the C calls (hostk.craft, the
+        # host experts) read ids as a dense [m, k] array: every row after the first read the wrong experts (Ornith-397B
+        # DFlash verify rows >= 1 diverged; one-row decode was unaffected)
+        ids = np.ascontiguousarray(np.argpartition(-z, k, axis=1)[:, :k])
         zs = np.take_along_axis(z, ids, 1)
         e = np.exp(zs - zs.max(1, keepdims=True))
         sc = e / e.sum(1, keepdims=True)  # softmax over the top-k logits == softmax over all E, top-k, renormalized
