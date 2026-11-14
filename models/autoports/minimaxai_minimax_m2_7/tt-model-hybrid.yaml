@@ -10,9 +10,6 @@ name: minimax-m2.7-hybrid-qb2
 weights: {repo: MiniMaxAI/MiniMax-M2.7, revision: 0a6536713b0b03f3be97494e5cf8d22f668a3164}
 auxiliary_weights:
   - {repo: nvidia/MiniMax-M2.7-DFlash, revision: 506ca1e2662a58808f673a8c96c3cc1c65bd1e73}
-  # int4 host + bfp4 device copies of the experts that can miss, and the expert plans (build_int4_library.py,
-  # build_dev_experts.py, sim_m27.py, ref_m27.py)
-  - {repo: raahemnabeel/minimax-m2.7-hybrid-qb2-experts, revision: e8a57405e487d95b0838b805332856f5b61a85cc}
 kind: vllm-plugin
 arch: blackhole
 
@@ -41,6 +38,7 @@ source:
     - models/experimental/hybrid_moe/ref_m27.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/experimental/hybrid_moe/plans/m27_plan.npz
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet
@@ -89,9 +87,17 @@ serve:
     HYB_ROWS: "4"
     HYB_THREADS: "12"
     HYB_HOSTK_THREADS: "6"
-    HYB_LIB: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/int4_s152
-    HYB_DEV_EXPERTS: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/dev_s152
-    HYB_PLAN: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/plans/plan_m27_routing.npz
+    # the experts that can miss (outside each layer's top 152 of the plan's order, in the 42 layers any profile runs
+    # hybrid) are copied from the checkpoint on the first boot into the weight cache: int4 for the CPU, bfp4 for PCIe
+    # fetches (hybrid/firstboot.py; byte-identical to the earlier published copies). Only official weights download.
+    HYB_LIB: /weight-cache/int4_s152
+    HYB_DEV_EXPERTS: /weight-cache/dev_s152
+    HYB_LIB_KEYS: minimax_m2
+    HYB_BUILD_STATIC: "152"
+    HYB_BUILD_LAYERS: "0,1,3,19,21,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,40,41,42,43,44,45,46,47,48,50,51,52,53,54,55,56,57,58,59,60,61"
+    # expert placement: per layer, the routed mass of reference runs (ranks the static experts) and the build order
+    # (plans/m27_plan.npz, 85 KB of statistics, no weights)
+    HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/m27_plan.npz
     HYB_PLAN_WEIGHT: mass
     # HYB_RAM_CHECK (hybrid/hostmem.py): refuse to start when the host's free RAM cannot hold the profile's expert
     # copies at its full context (error); warn / off to override
@@ -173,7 +179,8 @@ card:
   attribution: >
     Serves [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) by MiniMax (Built with MiniMax M2.7),
     with [nvidia/MiniMax-M2.7-DFlash](https://huggingface.co/nvidia/MiniMax-M2.7-DFlash) as the speculative drafter.
-    The expert copies in raahemnabeel/minimax-m2.7-hybrid-qb2-experts are derived from the MiniMax-M2.7 weights.
+    Only these two official checkpoints are downloaded; the first boot derives the expert copies the server needs from
+    the MiniMax-M2.7 weights on your machine.
   description: >
     MiniMax-M2.7, a 230B-parameter mixture-of-experts model (10B active, 62 layers x 256 experts, FP8 checkpoint),
     served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so each layer's most-used experts
@@ -200,8 +207,8 @@ card:
       `HYB_RAM_CHECK=warn` to start anyway (elastic: long contexts may then swap or get the server killed). Swapped
       expert pages make the CPU path several times slower. No `--ulimit memlock` is needed: the Tenstorrent driver
       pins the staging buffers itself, and locking the int4 library is best-effort.
-    - About 440 GB of disk: MiniMax-M2.7 (230 GB), the expert copies (69 GB), the drafter, and ~110 GB of device images
-      the first boot writes to the weight cache
+    - About 440 GB of disk: MiniMax-M2.7 (230 GB) and the drafter downloaded, plus what the first boot writes to the
+      weight cache: the expert copies (69 GB) and ~110 GB of device images
   quickstart: |
     ### Choosing a profile
 
@@ -216,7 +223,8 @@ card:
 
     ### First boot
 
-    The first boot downloads ~300 GB and converts the experts into device images (about an hour); later boots load
+    The first boot downloads ~235 GB (MiniMax-M2.7 and the drafter), builds the host copies of the experts that can miss
+    (69 GB, FIRSTBOOT_BUILD_TIME) and converts the experts into device images (about an hour); later boots load
     them in ~40 s and are ready in 3-7 minutes. With the elastic profile, a request that needs more than 32K tokens of
     context waits for a switch first: ~2-5 s up to ~50K tokens, ~7-9 s at ~85K, and the next short request switches
     back (~3 s from 50K, ~9 s from 85K). A layer moving to hybrid is gathered from its on-device experts; only when the
@@ -283,7 +291,7 @@ card:
   licensing: >
     MiniMax-M2.7 is under the MiniMax non-commercial license: personal, research and non-profit use is free;
     commercial use needs prior written authorization from MiniMax (api@minimax.io). The same terms apply to the
-    derived expert copies. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
+    expert copies the first boot derives from it. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
   license: {id: other, name: minimax-m2.7-non-commercial, link: https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE}
 
 verify:

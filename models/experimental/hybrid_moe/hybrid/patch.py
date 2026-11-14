@@ -285,6 +285,12 @@ class HybridState:
             return ids
         if self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             z = np.load(self.plan_path)
+        if self._freq is None and self.plan_path and os.path.exists(self.plan_path) and "freq" in z.files:
+            # a compact plan (plans/m27_plan.npz): the per-layer routed mass the routing file's picks sum to
+            if self.plan_weight != "mass":
+                raise ValueError(f"{self.plan_path} carries routed mass only: HYB_PLAN_WEIGHT must be mass")
+            self._freq = z["freq"].astype(np.float64)
+        elif self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             layers = [int(v) for v in z["layers"]]
             f = np.zeros((max(layers) + 1, E))
             for k in z.files:
@@ -675,7 +681,11 @@ def _log_stats(replays):
 def install():
     from . import hostmem
 
-    # before anything loads: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
+    # first boot: build the expert copies from the checkpoint (hybrid/firstboot.py; first process only, before the device
+    # is opened), then: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
+    from . import firstboot
+
+    firstboot.ensure()
     hostmem.check_startup(
         HYB.lib_dir, hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", "")), HYB.full_layers, HYB.elastic_demote
     )
