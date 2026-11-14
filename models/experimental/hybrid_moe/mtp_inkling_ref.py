@@ -65,16 +65,7 @@ def depth_layer(cfg, mtp_cfg, d, f):
         "mlp.global_scale": g("mlp.global_scale"),
     }
     sd["mlp.gate_proj.weight"], sd["mlp.up_proj.weight"] = R.deinterleave(g("mlp.w13_dn.weight"), 0)
-    params = dict(layer.named_parameters())
-    for k, t in list(sd.items()):
-        if params[k].numel() != t.numel():
-            raise RuntimeError(f"MTP depth {d} {k}: checkpoint {tuple(t.shape)} vs module {tuple(params[k].shape)}")
-        sd[k] = t.reshape(params[k].shape)
-        if t.dtype == torch.float32:
-            params[k].data = params[k].data.float()
-    missing, unexpected = layer.load_state_dict(sd, strict=False)
-    if missing or unexpected:
-        raise RuntimeError(f"MTP depth {d}: missing {missing} unexpected {unexpected}")
+    R.cast_like_hf(layer, sd, f"mtp{d}")
     p = f"model.mtp.layers.{d}."
     norm = lambda w: (lambda x, w=w.to(torch.bfloat16): w * (  # noqa: E731
         x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + cfg.rms_norm_eps)).to(torch.bfloat16))

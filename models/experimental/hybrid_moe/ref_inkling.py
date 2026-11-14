@@ -122,21 +122,28 @@ def load_layer(cfg, li):
         layer = M.InklingDecoderLayer(cfg, li)
     layer = layer.to_empty(device="cpu").to(torch.bfloat16)
     sd = layer_state_dict(cfg, li)
+    cast_like_hf(layer, sd, li)
+    return layer.eval()
+
+
+def cast_like_hf(layer, sd, tag):
+    """Load sd into the layer with transformers' from_pretrained(dtype=bfloat16) dtypes: everything bf16 (the router
+    weight, its bias and global_scale included) except the short-conv weights, which Inkling keeps in fp32
+    (_keep_in_fp32_modules_strict = attn_sconv, mlp_sconv, k_sconv, v_sconv)."""
     params = dict(layer.named_parameters()) | dict(layer.named_buffers())
     for name, t in sd.items():
         p = params[name]
         if t.numel() != p.numel():
-            raise RuntimeError(f"layer {li} {name}: checkpoint {tuple(t.shape)} vs module {tuple(p.shape)}")
-        sd[name] = t.reshape(p.shape)  # sconv weights: [C, K] in the checkpoint, [C, 1, K] in nn.Conv1d
-        if t.dtype == torch.float32:
-            p.data = p.data.float()
+            raise RuntimeError(f"layer {tag} {name}: checkpoint {tuple(t.shape)} vs module {tuple(p.shape)}")
+        fp32 = "sconv" in name
+        sd[name] = t.reshape(p.shape).to(torch.float32 if fp32 else torch.bfloat16)
+        p.data = p.data.to(torch.float32 if fp32 else torch.bfloat16)
     missing, unexpected = layer.load_state_dict(sd, strict=False)
     missing = [k for k in missing if k not in ("mlp.gate.e_score_correction_bias",)]
     if unexpected or missing:
-        raise RuntimeError(f"layer {li}: missing {missing} unexpected {unexpected}")
+        raise RuntimeError(f"layer {tag}: missing {missing} unexpected {unexpected}")
     if hasattr(layer.mlp, "gate"):
-        layer.mlp.gate.e_score_correction_bias = sd["mlp.gate.e_score_correction_bias"].float()
-    return layer.eval()
+        layer.mlp.gate.e_score_correction_bias = sd["mlp.gate.e_score_correction_bias"].to(torch.bfloat16)
 
 
 def run_layer(cfg, layer, x, chunk):
