@@ -47,6 +47,8 @@ TIME_KEYS = (
     "t_pf_sroute",
     "t_pf_hostadd",
     "t_pf_reduce",
+    "t_pf_decide",
+    "t_pf_prep",
 )
 SOURCES = ("/poc/hybrid/patch.py", "/poc/dflash_serve.py", "/poc/dflash_tt.py", "/poc/hybrid/fetch.py")
 

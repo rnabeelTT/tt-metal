@@ -1887,6 +1887,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     ttnn.deallocate(ids)
     ttnn.deallocate(scores)
     HYB.st["t_up"] += time.perf_counter() - t1
+    HYB.st["t_pf_prep"] = HYB.st.get("t_pf_prep", 0.0) + time.perf_counter() - t1  # merge layout + uploads
     HYB._pf_t = time.perf_counter()
     # sentinel picks are gathered from the dispatch's trailing padding group, which the skip-padding expert matmuls
     # never write: the sorted path zero-fills its down output for them
@@ -2242,8 +2243,12 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     t0 = time.perf_counter()
     idh = ttnn.to_torch(_die0(ids)).reshape(-1, k).long()
     sch = ttnn.to_torch(_die0(scores)).reshape(-1, k).float()
-    HYB.st["t_read"] += time.perf_counter() - t0
-    return _decide_core(self, x4, idh, sch, mode, defer_host)
+    t1 = time.perf_counter()
+    HYB.st["t_read"] += t1 - t0
+    out = _decide_core(self, x4, idh, sch, mode, defer_host)
+    if mode == "prefill":  # host planning while the device waits for this layer's routed call
+        HYB.st["t_pf_decide"] = HYB.st.get("t_pf_decide", 0.0) + time.perf_counter() - t1
+    return out
 
 
 SENTINEL_ID = 0xFFFF  # an expert id >= any slot count: moe_sorted_dispatch counts no row for it
