@@ -38,6 +38,7 @@ from __future__ import annotations
 import gc
 import math
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -48,7 +49,7 @@ import torch
 
 import ttnn
 
-from . import hostk
+from . import hfpath, hostk
 
 # The autoport the overlay patches (models/autoports/<HYB_PORT>/tt): the Qwen3.5-122B port (default, serving the 397B)
 # or a port of the same lineage, e.g. minimaxai_minimax_m2_7 (sigmoid + bias router, no shared expert).
@@ -117,8 +118,8 @@ class HybridState:
         self.plan_weight = os.environ.get("HYB_PLAN_WEIGHT", "count")
         if self.plan_weight not in ("count", "mass"):
             raise ValueError(f"HYB_PLAN_WEIGHT={self.plan_weight}: expected count or mass")
-        self.plan_path = os.environ.get("HYB_PLAN", "")
-        self.lib_dir = os.environ.get("HYB_LIB", "")
+        self.plan_path = hfpath.resolve(os.environ.get("HYB_PLAN", ""))
+        self.lib_dir = hfpath.resolve(os.environ.get("HYB_LIB", ""))
         self._bf16_cache = OrderedDict()  # (layer, expert) -> bf16 (gate|up, down), without an int4 library
         self.sd = None
         self.slot_of = {}  # layer -> np.int32[E] static slot (-1 = none)
@@ -592,17 +593,34 @@ class HybridState:
         return h_gu, h_dn
 
 
+_MLOCK_WARNED = False
+
+
 def _mlock(t):
     """mlock a CPU tensor's storage (the host expert library: the page cache of the checkpoint load otherwise pushes
-    it to swap, and a swapped-in expert costs the host step milliseconds). Needs an unlimited memlock rlimit
-    (run_in_image.sh: --ulimit memlock=-1); raises when the lock is refused."""
+    it to swap, and a swapped-in expert costs the host step milliseconds). The lock needs a memlock rlimit as large as
+    the library (docker: --ulimit memlock=<bytes>); a container started without one (Docker's default is 8 MiB) gets
+    the pages pre-faulted instead (MADV_POPULATE_READ), resident but swappable, with one warning. HYB_MLOCK=strict
+    raises when the lock is refused."""
     import ctypes
 
+    global _MLOCK_WARNED
     libc = ctypes.CDLL("libc.so.6", use_errno=True)
     n = t.numel() * t.element_size()
-    if n and libc.mlock(ctypes.c_void_p(t.data_ptr()), ctypes.c_size_t(n)) != 0:
-        err = ctypes.get_errno()
+    if not n or libc.mlock(ctypes.c_void_p(t.data_ptr()), ctypes.c_size_t(n)) == 0:
+        return
+    err = ctypes.get_errno()
+    if os.environ.get("HYB_MLOCK") == "strict":
         raise RuntimeError(f"mlock of {n} bytes failed (errno {err}): raise the memlock limit or set HYB_MLOCK=0")
+    if not _MLOCK_WARNED:
+        _MLOCK_WARNED = True
+        sys.stderr.write(
+            f"[hybrid] mlock refused (errno {err}, memlock limit too low): the host expert library is pre-faulted but "
+            "not locked; under memory pressure the CPU experts can slow down (raise the memlock limit to lock it)\n"
+        )
+    page = 4096
+    start = t.data_ptr() // page * page  # madvise needs a page-aligned start
+    libc.madvise(ctypes.c_void_p(start), ctypes.c_size_t(n + t.data_ptr() - start), 22)  # MADV_POPULATE_READ
 
 
 TILE_W = 32

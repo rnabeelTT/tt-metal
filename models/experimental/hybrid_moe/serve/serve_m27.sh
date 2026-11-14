@@ -2,7 +2,8 @@
 # Serve MiniMax-M2.7 with the hybrid-MoE overlay and DFlash speculative decoding (single user) on the QB2.
 # usage: serve/serve_m27.sh ; logs -> serve/server_m27.log. env: CTX (max model len, default 131072), FULL (layers with
 # every expert on the device: 20 at 128K, 36 at 64K, 44 at 32K; default by CTX), SPEC (1 = DFlash, 0 = plain decode),
-# PORT (8000), DK (drafts per pass, default 3), PC (prefix caching, default 1), PF_PREFETCH (prompt tokens from which
+# ROWS_SDPA_FROM (shared-KV rows SDPA from this context length; default 0 = off: its program depends on the KV pool
+# shape, which elastic resizing changes, and a new variant cannot compile inside the verify capture), PORT (8000), DK (drafts per pass, default 3), PC (prefix caching, default 1), PF_PREFETCH (prompt tokens from which
 # prefill prefetches the next layer's experts, default 1024; 0 = off), NS (staging slots, default 212), ELASTIC (default 1: elastic 128K, below). Profiles: CTX=131072 (FULL 20), CTX=65536 (FULL 36), CTX=32768 (FULL 44).
 # Tool calls: minimax_m2 tool parser. Reasoning: minimax_m2 splits it into reasoning_content (the chat template opens the
 # turn with <think>, so the output has only </think>); minimax_m2_append_think instead leaves <think>...</think> in content.
@@ -75,7 +76,7 @@ docker run -d --name hybrid-moe-serve \
   -e HYB_PLAN=/poc/runs/m27/plan_m27_routing.npz -e HYB_PLAN_WEIGHT=mass -e HYB_FULL_LAYERS=$FL \
   -e HYB_LRU=32 -e HYB_FETCH_FRAC=$FFRAC -e HYB_FETCH_POLICY=${FETCH_POLICY:-auto} -e HYB_FETCH_BUDGET=8 -e HYB_FETCH_MAX=${FETCH_MAX:-8} -e HYB_DEV_EXPERTS=/hyblib/minimax_m27_dev_s152 \
   -e HYB_WCACHE=${WCACHE:-/hyblib/wcache_m27} \
-  -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 $SPEC_ENV $PF_ENV \
+  -e HYB_STREAM_SLOTS=$NS -e DFLASH_TP=1 -e QWEN35_ROWS_SDPA_SHARED_FROM=${ROWS_SDPA_FROM:-0} $SPEC_ENV $PF_ENV \
   -e PYTHONPATH=/poc/serve:/opt/tt-metal:/poc \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve MiniMaxAI/MiniMax-M2.7 --max-model-len $CTX \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name minimax-m2.7-hybrid \

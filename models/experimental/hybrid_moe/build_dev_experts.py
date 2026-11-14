@@ -7,7 +7,7 @@ bfp4 per die; the 4 die shards are aggregated into one host tensor and dumped as
 <L>_<e>_dn.tensorbin. ttnn's bfp4 packing needs the cluster (run in the image with the device attached; no mesh is
 opened, but run it while no other job uses the device).
 
-usage: python build_dev_experts.py <hf snapshot dir> <out dir> <plan.npz>:<S> [layers a-b]
+usage: python build_dev_experts.py <hf snapshot dir> <out dir> <plan.npz>:<S> [layers: a-b or a list a,b,c]
        (every expert outside each layer's top S of the plan's `order`)
 """
 
@@ -43,7 +43,9 @@ def main():
     order = np.load(plan_path)["order"]
     wm = json.load(open(os.path.join(snap, "model.safetensors.index.json")))["weight_map"]
     layers = range(order.shape[0])
-    if len(sys.argv) > 4:
+    if len(sys.argv) > 4 and "," in sys.argv[4]:  # an explicit list, e.g. the hybrid layers of a profile
+        layers = sorted(int(v) for v in sys.argv[4].split(","))
+    elif len(sys.argv) > 4:
         a, b = sys.argv[4].split("-")
         layers = range(int(a), int(b) + 1)
     handles = {}

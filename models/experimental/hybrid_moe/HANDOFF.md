@@ -71,6 +71,11 @@ Pieces (all traced, per-prompt re-capture):
   forced over the 8 held-out 1000-token texts vs the CPU reference, compare_m27.py): top-1 0.848 / confident 0.933 /
   KL 0.196 (before the slot-0 fix and the session's changes, runs/m27dev/tf_c192: 0.850 / 0.933 / 0.183).
 - Host int4 library mlocked (`HYB_MLOCK`, `--ulimit memlock=-1`): swapped library pages made the CPU path 4x slower.
+  Without a memlock limit (tt-model's container, Docker's default 8 MiB) the lock is best-effort: one warning, the
+  pages are pre-faulted instead (HYB_MLOCK=strict fails instead). pinx pinning goes through the KMD and needs no
+  memlock. Paths: HYB_LIB / HYB_DEV_EXPERTS / HYB_PLAN take hf://<org>/<repo>/<path> (hybrid/hfpath.py, pinned by
+  TT_AUXILIARY_WEIGHTS); the package (autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml) reads them from
+  raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,

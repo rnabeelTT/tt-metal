@@ -23,9 +23,12 @@ from safetensors import safe_open
 from transformers import AutoConfig
 from transformers.models.minimax_m2 import modeling_minimax_m2 as M
 
-HUB = os.environ.get("HF_HUB", os.path.expanduser("~/.cache/huggingface/hub"))
-SNAP = glob.glob(f"{HUB}/models--MiniMaxAI--MiniMax-M2.7/snapshots/*")[0]
-WMAP = json.load(open(f"{SNAP}/model.safetensors.index.json"))["weight_map"]
+HUB = os.environ.get("HF_HUB") or os.environ.get("HF_HUB_CACHE") or os.path.join(
+    os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub"
+)
+_SNAPS = sorted(glob.glob(f"{HUB}/models--MiniMaxAI--MiniMax-M2.7/snapshots/*"))
+SNAP = _SNAPS[0] if _SNAPS else None  # importers that resolve the snapshot themselves set SNAP / WMAP (dflash_serve)
+WMAP = json.load(open(f"{SNAP}/model.safetensors.index.json"))["weight_map"] if SNAP else None
 torch.set_num_threads(int(os.environ.get("REF_THREADS", "16")))
 _files = {}
 

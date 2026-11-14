@@ -26,7 +26,6 @@ default 1), DFLASH_WARMUP (serving: tokens of the startup warm-up generation, de
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import time
@@ -36,6 +35,7 @@ from loguru import logger
 
 import ttnn
 from dflash_tt import DFlashDrafterPaged, argmax_max, read_argmax
+from hybrid import hfpath
 from hybrid.patch import HYB, _port
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -47,9 +47,9 @@ def load_drafter(mesh, rows):
     """The DFlash drafter on `mesh` with the target's host embedding table (LM head attached by DFlashServing)."""
     import ref_m27
 
-    ref_m27.SNAP = glob.glob("/hf/hub/models--MiniMaxAI--MiniMax-M2.7/snapshots/*")[0]
+    ref_m27.SNAP = hfpath.snapshot("MiniMaxAI/MiniMax-M2.7")
     ref_m27.WMAP = json.load(open(f"{ref_m27.SNAP}/model.safetensors.index.json"))["weight_map"]
-    snap = os.environ.get("DFLASH_SNAPSHOT") or glob.glob("/hf/hub/models--nvidia--MiniMax-M2.7-DFlash/snapshots/*")[0]
+    snap = os.environ.get("DFLASH_SNAPSHOT") or hfpath.snapshot("nvidia/MiniMax-M2.7-DFlash")
     return DFlashDrafterPaged(
         mesh,
         snap,

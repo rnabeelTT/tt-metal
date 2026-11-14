@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from safetensors import safe_open
 
-GS = int(os.environ.get("HYB_INT4_GS", "128"))
+GS = int(os.environ.get("HYB_INT4_GS", "32"))  # hostk needs gs dividing 64 (32 / 64); the shipped libraries are 32
 BLOCK = 128
 
 

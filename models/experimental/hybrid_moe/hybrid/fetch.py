@@ -44,13 +44,15 @@ import torch
 
 import ttnn
 
+from . import hfpath
+
 
 class FetchCache:
     def __init__(self):
         self.D = int(os.environ.get("HYB_LRU", "0") or 0)
         self.f = float(os.environ.get("HYB_FETCH_FRAC", "0.4"))
         self.F = int(os.environ.get("HYB_FETCH_MAX", "2"))
-        self.dir = os.environ.get("HYB_DEV_EXPERTS", "")
+        self.dir = hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", ""))
         if self.D and not self.dir:
             raise ValueError("HYB_LRU needs HYB_DEV_EXPERTS (the device-format copies of the experts that can miss)")
         if self.D and not (0 < self.F <= self.D):

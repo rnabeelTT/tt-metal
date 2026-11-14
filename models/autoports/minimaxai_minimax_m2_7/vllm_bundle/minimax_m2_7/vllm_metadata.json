@@ -1,0 +1,9 @@
+{
+  "arch": "MiniMaxM2ForCausalLM",
+  "main_class": "models.autoports.minimaxai_minimax_m2_7.tt.generator_vllm:MiniMaxM2ForCausalLM",
+  "hf_model": "MiniMaxAI/MiniMax-M2.7",
+  "mesh_device": [
+    "P300x2"
+  ],
+  "notes": "MiniMax-M2.7 (HF minimax_m2, 230B total / 10B active, 62 layers, 256 experts top-8) on a (1,4) Blackhole mesh: the GLM-4.5-Air / Qwen3.5 autoport code with full-width QK-norm; served through the hybrid-MoE overlay (models/experimental/hybrid_moe, serve/serve_m27.sh); registered by the vLLM TT plugin from EXTRA_MODELS_DIR."
+}
