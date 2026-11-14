@@ -40,7 +40,9 @@ class Qwen35MoEOptimized(_M27MoE):
         self.n_routed = int(args.n_routed_experts)
         self.n_shared = int(args.n_shared_experts)
         self.top_k_routed = int(args.top_k_routed)
-        assert self.num_experts == self.n_routed + self.n_shared and self.top_k == self.top_k_routed + self.n_shared
+        # (the hybrid overlay builds the block with num_experts = its device slot count C: the expert stacks hold C
+        # slots, while the router stays 258 wide and _route returns expert ids, which the overlay maps to slots)
+        assert self.top_k == self.top_k_routed + self.n_shared, (self.top_k, self.top_k_routed, self.n_shared)
         tp = self.num_devices
         rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if tp > 1 else {}
         b = state_dict["gate.e_score_correction_bias"].float().reshape(1, 1, 1, -1)
