@@ -1,0 +1,138 @@
+# tt-model container (v5.1) manifest for Ornith-1.5-397B (Qwen3.5-MoE, 60 layers x 512 experts top-10, FP8 checkpoint)
+# on one QB2 (2 x p300 = 4 Blackhole dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's
+# most-used experts stay on the device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe),
+# DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash). Single user, greedy. Built from the M2.7 package
+# (minimaxai_minimax_m2_7/tt-model-hybrid.yaml); the port is the Qwen3.5 one (q122_opt + ornith122_dflash merged).
+# Build: tt-model package --container models/autoports/qwen_qwen3_5_122b_a10b/tt-model-o397-hybrid.yaml
+# STATUS: bring-up. HYB_SLOTS / full layers / DK / the experts repo pin are first-cut values, tuned on the device.
+schema: "5.1"
+
+repo: raahemnabeel/ornith-1.5-397b-hybrid-qb2
+name: ornith-1.5-397b-hybrid-qb2
+weights: {repo: ornith-ai/Ornith-1.5-397B-FP8, revision: a5445ea43d2733470400bd7cf341582cdcd68152}
+auxiliary_weights:
+  - {repo: ornith-ai/Ornith-1.5-397B-DFlash, revision: db9c35a091e89f942c609880f98bb385019dc4f8}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/o397-hybrid   # worktree, branch ornith397-hybrid
+  code:
+    - models/autoports/qwen_qwen3_5_122b_a10b/__init__.py
+    - models/autoports/qwen_qwen3_5_122b_a10b/tt
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_metadata.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/context_contract.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/selected_precision_config.json
+    # the hybrid overlay: runtime modules only (no runs/, benchmarks or debug scripts)
+    - models/experimental/hybrid_moe/hybrid
+    - models/experimental/hybrid_moe/serve/sitecustomize.py
+    - models/experimental/hybrid_moe/dflash_serve.py
+    - models/experimental/hybrid_moe/dflash_tt.py
+    - models/experimental/hybrid_moe/ref_o397.py
+    - models/experimental/hybrid_moe/build_int4_library.py
+    - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 8b1f8b1 (rnabeelTT/vllm-tt-plugin, branch dflash), as M2.7
+  extra_models_dir: models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+  lock: requirements.lock
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 1
+  capabilities:
+    tool_parser: qwen3_xml
+    reasoning_parser: qwen3
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: all
+      trace_region_size: 100663296
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: ornith-ai/Ornith-1.5-397B-FP8
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
+    HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
+    QWEN35_TRACE_REGION_MIB: "96"
+    QWEN35_PREFIX_STATE_SLOTS: "0"
+    QWEN35_VISION: "0"
+    QWEN35_BATCHED_PREFILL: "0"
+    # --- the hybrid overlay (serve_m27.sh's settings; Qwen3.5-specific notes inline) ---
+    HYB_RAM_CHECK: error
+    HYB_ENABLE: "1"
+    HYB_PORT: qwen_qwen3_5_122b_a10b
+    HYB_SLOTS: "256"            # first cut (the 2026-11-05 397B run fit C=256 at 128K); tuned with sim_o397 / sim_full_layers
+    HYB_DYN_SLOTS: "0"
+    HYB_SKIP: "0"               # the 397B run's HYB_SKIP=0.15 cost top-1 0.900 -> 0.838; the M2.7-era paths run skip 0
+    HYB_MTP: "0"
+    HYB_ROWS: "4"
+    HYB_THREADS: "12"
+    HYB_HOSTK_THREADS: "6"
+    HYB_LIB: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/int4_s192
+    HYB_DEV_EXPERTS: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/dev_s192
+    HYB_PLAN: hf://raahemnabeel/ornith-1.5-397b-hybrid-qb2-experts/plans/plan_o397_routing.npz
+    HYB_PLAN_WEIGHT: mass
+    HYB_LRU: "32"
+    HYB_FETCH_FRAC: "0.15"
+    HYB_FETCH_POLICY: auto
+    HYB_FETCH_BUDGET: "8"
+    HYB_FETCH_MAX: "8"
+    HYB_WCACHE: /weight-cache/wcache_o397
+    HYB_STREAM: "0"             # prefill streaming needs the port's grouped prefill hooks (not ported yet)
+    HYB_PREFILL_SENTINEL: "0"   # expects the zeroed sorted-down output the Qwen port does not produce yet
+    HYB_SOCKET: "1"
+    HYB_PREFETCH: "1"
+    HYB_PF_TOPK: "8"
+    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+    QWEN35_MOE_DN_READERS: "4"
+    QWEN35_MOE_DN_CHUNK: "4"
+    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash: GQA drafter, block 16), GDN rows-mode verify
+    QWEN35_EXT_SPEC: dflash_serve:build
+    QWEN35_EXT_SPEC_K: "3"
+    DFLASH_TP: "1"
+    DFLASH_WINDOW: "256"
+    DFLASH_WARMUP: "384"
+
+serve_profiles:
+  - name: p300x2-128k
+    description: One QB2 (two p300 boards, 4 dies). Single user, up to 128K tokens, speculative decoding.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 131072
+default_profile: p300x2-128k
+
+card:
+  attribution: >
+    Serves [ornith-ai/Ornith-1.5-397B-FP8](https://huggingface.co/ornith-ai/Ornith-1.5-397B-FP8) with
+    [ornith-ai/Ornith-1.5-397B-DFlash](https://huggingface.co/ornith-ai/Ornith-1.5-397B-DFlash) as the speculative
+    drafter.
+  description: >
+    Ornith-1.5-397B (Qwen3.5-MoE: 60 layers, 512 experts per layer, top-10, gated-delta-net linear attention with gated
+    full attention every 4th layer) served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so
+    each layer's most-used experts stay on the device and the rest are computed on the host CPU from int4 copies or
+    streamed over PCIe. Bring-up: the performance and limitations sections are filled in after measurement.
+  limitations: |
+    - Bring-up build: not yet measured.
+
+verify:
+  - "import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
