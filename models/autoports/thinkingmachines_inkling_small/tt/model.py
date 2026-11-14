@@ -65,13 +65,18 @@ class Qwen35MoeModel(_M27Model):
             if logits_rows == "all" or c0 + n == T:
                 # rows [r0, r1) of the chunk: everything, or the 32-row tile holding the last real row
                 r0, r1 = (0, Tp) if logits_rows == "all" else (((n - 1) // 32) * 32, ((n - 1) // 32) * 32 + 32)
-                xs = ttnn.slice(x, (0, 0, r0, 0), (1, 1, r1, x.shape[-1]))
-                xn = self.norm(xs, mode=Mode.PREFILL)
-                lg = self._lm_head(xn)
-                t = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])
-                out.append(t[:n, :V] if logits_rows == "all" else t[n - 1 - r0 : n - r0, :V])
-                for z in (xs, xn, lg):
-                    ttnn.deallocate(z)
+                # the LM head in 128-row slices: all rows' logits at once (rows x vocab/N) can exceed the DRAM left
+                # beside the experts
+                ts = []
+                for s0 in range(r0, r1, 128):
+                    xs = ttnn.slice(x, (0, 0, s0, 0), (1, 1, min(s0 + 128, r1), x.shape[-1]))
+                    xn = self.norm(xs, mode=Mode.PREFILL)
+                    lg = self._lm_head(xn)
+                    ts.append(ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:, :V])
+                    for z in (xs, xn, lg):
+                        ttnn.deallocate(z)
+                t = torch.cat(ts)
+                out.append(t[:n] if logits_rows == "all" else t[n - 1 - r0 : n - r0])
             ttnn.deallocate(x)
         res = torch.cat(out)
         return res[-1] if logits_rows == "last" else res
