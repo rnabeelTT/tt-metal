@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Inkling decoder layer on the qwen35 autoport framework (TP over a (1, N) mesh, fractured residual [1, 1, T, H/N]):
+
+    a = attention(attention_norm(x))          tt/attention.InklingAttention -> reduce-scatter -> fractured
+    h = x + attn_sconv(a)                      fp32 short conv on the die's hidden slice (depthwise: no collective)
+    f = feed_forward(ffn_norm(h))              dense MLP (layers 0-1) or the Inkling MoE (tt/optimized_decoder.py)
+    out = h + mlp_sconv(f)
+
+Same contract as the qwen36 layer (``forward(x, cos, sin, mode, position_tensor, page_table, ...)``; cos / sin are
+ignored: no RoPE), the norms and the feed-forward built by the shared code (so the hybrid overlay's MoE patches apply).
+Implemented: one-row decode. Prefill / spec-verify rows come next.
+"""
+
+from __future__ import annotations
+
+import torch
+
+import ttnn
+from models.autoports.minimaxai_minimax_m2_7.tt.layer import Qwen35MoeDecoderLayer as _M27Layer
+from models.autoports.thinkingmachines_inkling_small.tt.attention import InklingAttention
+from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
+from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
+from models.demos.blackhole.qwen36.utils.substate import substate
+from models.tt_transformers.tt.common import Mode
+
+
+class _HFConfigView:
+    """The fields InklingAttention reads, from the framework args (args.inkling = the raw text config)."""
+
+    def __init__(self, args):
+        r = args.inkling
+        L = args.n_layers_total if hasattr(args, "n_layers_total") else len(args.attention_type_list)
+        local = set(r["local_layer_ids"])
+        self.layer_types = ["hybrid_sliding" if i in local else "hybrid" for i in range(max(L, 64))]
+        for k in ("hidden_size", "head_dim", "num_attention_heads", "num_key_value_heads", "swa_head_dim",
+                  "swa_num_attention_heads", "swa_num_key_value_heads", "d_rel", "rel_extent", "sliding_window_size",
+                  "log_scaling_n_floor", "log_scaling_alpha", "rms_norm_eps"):
+            setattr(self, k, r[k])
+
+
+class InklingDecoderLayer(_M27Layer):
+    def __init__(self, mesh_device, args, state_dict, layer_num, tensor_cache_path=None, tt_ccl=None):
+        # not Qwen36DecoderLayer.__init__: it would build the qwen attention; the parts kept are rebuilt here
+        self.layer_num = layer_num
+        self.device = mesh_device
+        self.args = args
+        self.tt_ccl = tt_ccl
+        self.num_devices = getattr(args, "num_devices", 1)
+        self._tp_modules = True
+        self.is_full_attention = True  # every layer is attention (the model loop passes position / page table)
+        self._decode_replicated = False
+        self._fuse_norm_agmm = False
+        self._fuse_ff_agmm = False
+        self._addnorm = None
+        self.attention_norm = self._make_norm(mesh_device, args, state_dict, layer_num, "input_layernorm",
+                                              tensor_cache_path, tt_ccl, "attention_norm")
+        self.ffn_norm = self._make_norm(mesh_device, args, state_dict, layer_num, "post_attention_layernorm",
+                                        tensor_cache_path, tt_ccl, "ff_norm")
+        attn_sd = substate(state_dict, f"layers.{layer_num}.self_attn")
+        self.attention = InklingAttention(
+            mesh_device, _HFConfigView(args), {k: attn_sd[k] for k in attn_sd}, layer_num, tt_ccl=tt_ccl,
+            block_size=int(getattr(args, "kv_block_size", 64)), max_seq_len=int(args.max_seq_len),
+            weight_dtype=getattr(args, "attn_weight_dtype", None) or ttnn.bfloat8_b,
+            kv_dtype=getattr(args, "inkling_kv_dtype", None) or ttnn.bfloat8_b,
+            own_global_cache=bool(getattr(args, "inkling_own_kv", True)),
+        )
+        H, N = args.dim, self.num_devices
+        shard = ttnn.ShardTensorToMesh(mesh_device, dim=-1) if N > 1 else None
+        self.attn_sconv = ShortConv(mesh_device, state_dict[f"layers.{layer_num}.attn_sconv.weight"].reshape(H, -1),
+                                    shard, H // N)
+        self.mlp_sconv = ShortConv(mesh_device, state_dict[f"layers.{layer_num}.mlp_sconv.weight"].reshape(H, -1),
+                                   shard, H // N)
+        self.feed_forward = self._build_feed_forward(mesh_device, args, state_dict, layer_num, tensor_cache_path,
+                                                     tt_ccl)
+
+    def _build_feed_forward(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
+        if not args.is_moe_layer(layer_num):  # dense SwiGLU (global_scale folded into down_proj by the state dict)
+            return Qwen36DecoderLayer._build_feed_forward(self, mesh_device, args, state_dict, layer_num,
+                                                          tensor_cache_path, tt_ccl)
+        from models.autoports.thinkingmachines_inkling_small.tt.optimized_decoder import Qwen35MoEOptimized
+
+        mlp_state = substate(state_dict, f"layers.{layer_num}.mlp")
+        mlp_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
+        return Qwen35MoEOptimized(mesh_device, args, mlp_state, mlp_cache, tt_ccl=tt_ccl, layer_num=layer_num)
+
+    def reset(self):
+        self.attention.reset()
+        self.attn_sconv.reset()
+        self.mlp_sconv.reset()
+
+    def forward(self, x, cos=None, sin=None, mode="decode", chunk_size=128, position_tensor=None, page_table=None,
+                chunk_page_table=None, chunk_start_idx=None, chunk_start_idx_tensor=None, valid_len=None,
+                gdn_collect=False, tau=None):
+        if mode != "decode":
+            raise NotImplementedError("Inkling prefill: next step (tt/attn prefill kernel)")
+        norm_cfg = self.args.get_norm_config("attn", Mode.DECODE) if self.num_devices > 1 else None
+        attn_in = self.attention_norm(x, mode=Mode.DECODE, norm_config=norm_cfg)
+        if attn_in.is_sharded():
+            attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.L1_MEMORY_CONFIG)
+        a = self.attention.forward_decode(attn_in, position_tensor, page_table, tau=tau)
+        ttnn.deallocate(attn_in)
+        a2 = self.attn_sconv.decode(a)
+        ttnn.deallocate(a)
+        h = ttnn.add(x, a2)
+        ttnn.deallocate(a2)
+        ff_in = self.ffn_norm(h, mode=Mode.DECODE, norm_config=norm_cfg)
+        f = self.feed_forward.forward(ff_in, mode="decode")
+        ttnn.deallocate(ff_in)
+        f2 = self.mlp_sconv.decode(f)
+        ttnn.deallocate(f)
+        out = ttnn.add(h, f2)
+        ttnn.deallocate(h)
+        ttnn.deallocate(f2)
+        return out

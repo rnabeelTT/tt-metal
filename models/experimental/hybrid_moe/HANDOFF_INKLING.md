@@ -59,6 +59,20 @@ Consequences for the port:
   - the router normalisation;
   - the shared experts.
 
+## Traps found (read before touching the reference or the config)
+
+- **transformers 5.17 resolves the expert width wrongly.** `InklingTextConfig` moves the checkpoint's
+  `dense_intermediate_size` (16384) into `intermediate_size`, overwriting the checkpoint's `intermediate_size` (2048, the
+  expert width). It then leaves `moe_intermediate_size` at its class default of 3072, so HF modules built from that
+  config have wrong-shaped experts.
+  - The real shapes are `w13 [256, 4096, 4096]` and `w2 [256, 4096, 2048]`.
+  - `ref_inkling.config()` and `tt/weights.load_config()` pin `moe_intermediate_size=2048, intermediate_size=16384`.
+- **The serving image's transformers (5.12) has no Inkling.**
+  - `tt/hf_config_inkling.py` vendors the 5.17 config classes and `register()`s them with AutoConfig.
+  - It also extends `ALLOWED_LAYER_TYPES` with `hybrid_sliding`, which 5.12's validator rejects otherwise.
+  - Device tests compare against host-made fixtures (`fixtures_inkling.py`), not live HF modules.
+- **sconv weights are `[C, 1, 4]`** in the checkpoint, not `[C, 4]`.
+
 ## Environment notes
 
 - The HF cache is at **`HF_HOME=/opt/tenstorrent/models`**, not `~/.cache/huggingface`.

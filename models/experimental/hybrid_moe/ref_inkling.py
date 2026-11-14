@@ -66,6 +66,12 @@ def deinterleave(t, dim):
 def config():
     cfg = AutoConfig.from_pretrained(SNAP).text_config
     cfg._attn_implementation = "sdpa"  # transformers' sdpa path folds the relative position bias into the mask
+    # transformers 5.17's InklingTextConfig moves the checkpoint's dense_intermediate_size (16384) into
+    # intermediate_size, overwriting the checkpoint's intermediate_size (2048 = the expert width), and leaves
+    # moe_intermediate_size at its class default 3072. The experts are 2048 wide (w13 [256, 4096, 4096]): pin both.
+    raw = json.load(open(f"{SNAP}/config.json"))["text_config"]
+    cfg.moe_intermediate_size = raw["intermediate_size"]
+    cfg.intermediate_size = raw["dense_intermediate_size"]
     return cfg
 
 

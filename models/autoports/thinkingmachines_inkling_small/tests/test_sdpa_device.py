@@ -140,7 +140,11 @@ CASES = [
     (512, 512, [9000]),
     (512, 512, [700, 701, 702, 703]),
     (512, 512, [8190, 8191, 8192, 8193]),
+    (0, 1024, [2000 + j for j in range(8)]),  # 8-row verify (the most rows a tile holds at G = 4)
+    (512, 512, [3000 + j for j in range(8)]),
 ]
+if os.environ.get("INK_LONG"):  # long context: the band on one core of many
+    CASES += [(0, 1024, [131071]), (0, 1024, [131064 + j for j in range(8)]), (512, 512, [131071])]
 
 
 def main():
