@@ -127,6 +127,27 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- ROUND 8 (2026-11-14, evening): sampling + a KV allocation bug (commits 4ff62fe1fba..db9a9c197c5).
+  - Bug (production, greedy too): under async scheduling the DFlash step runs one step (up to K + 1 tokens) ahead of
+    vLLM, and the MTP shim reserved only K lookahead slots, so a verify window crossing into a new KV block wrote its
+    last positions to block 0 (vLLM's null block, the row padding): that K / V was lost and later reads saw a previous
+    request's data. 3 of 12 served greedy requests hit it (windows 63..66, 125..128, 253..256; repeated phrases after
+    a block boundary, garbage under sampling). Fix: the shim reserves 2K + 1 (tests/test_mtp_plugin_shim.py fails on
+    the old shim), and dflash_serve.step raises if its window reaches an unallocated block below the context limit.
+    The forced-text quality runs never saw it (the runner allocates its own page table).
+  - Sampling (was: temperature > 0 silently decoded greedily): exact speculative sampling (accept_sparse; drafts sampled
+    from the drafter's block rows, min(1, p / q)); per-chunk top-64 device candidates of the verify and drafter logits
+    (dflash_tt.cands_body, separate traces replayed only for sampled requests; exact for top-k <= 64, checked per row).
+    Host test test_dflash_sampling.py (Monte Carlo TV 0.003). 32K profile, T 1.0 / top-p 0.95 / top-k 40: argmax
+    drafts 47.3 tok/s (1.85 tokens per pass), sampled drafts + sparse accept 51.9 (2.07, 2.9 ms sampling per pass);
+    greedy 63.6 (2.26). With 32 candidates per 16K chunk the top 40 often filled die 0's first chunk (low ids = common
+    tokens): 70-100% of rows fell back to full logits (10 ms); 64 per 32K chunk never does.
+  - Greedy is not bit-reproducible across requests: the experts' device (bfp4) / host (int4) placement follows earlier
+    requests, so near-tied tokens can flip; every variant is coherent after the fix.
+  - Packaging: tt-model-hybrid.yaml packages from the ~/m27-hybrid worktree (source.tt_metal): move it to the commit to
+    ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
+    old package images + `docker builder prune -af` freed ~130 GB.
+  - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
 - ROUND 7 (2026-11-14, after the HF package v1 raahemnabeel/minimax-m2.7-hybrid-qb2), all served 128K elastic:
   - Shared-KV rows SDPA on by default (QWEN35_ROWS_SDPA_SHARED_FROM=4096; package env too). Bug fixed: the capture
     picked the variant from the previous request's position (end_prefill captured before setting _pos) and the
