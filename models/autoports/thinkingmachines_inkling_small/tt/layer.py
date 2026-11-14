@@ -151,7 +151,7 @@ class InklingDecoderLayer(_M27Layer):
         ttnn.deallocate(f2)
         return out
 
-    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True):
+    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, kv_idx=None):
         """R <= 8 rows at consecutive positions (spec verify / prefill row groups): x [1, 1, R, H/N] fractured,
         positions [R] int32. commit_all=False leaves the 4 conv states for commit_rows(n) (verify)."""
         R = int(x.shape[2])
@@ -159,7 +159,7 @@ class InklingDecoderLayer(_M27Layer):
         attn_in = self.attention_norm(x, mode=Mode.DECODE, norm_config=norm_cfg)
         if attn_in.is_sharded():
             attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.L1_MEMORY_CONFIG)
-        a = self.attention.forward_rows(attn_in, positions, page_table, tau=tau, commit_all=commit_all)
+        a = self.attention.forward_rows(attn_in, positions, page_table, tau=tau, commit_all=commit_all, kv_idx=kv_idx)
         ttnn.deallocate(attn_in)
         a2 = self.attn_sconv.rows(a, commit_all=commit_all)
         ttnn.deallocate(a)

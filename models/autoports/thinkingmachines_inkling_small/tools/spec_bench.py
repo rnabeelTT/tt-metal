@@ -68,6 +68,7 @@ def main():
     SEED = int(os.environ.get("SPEC_SEED", "0"))
     TRACE = os.environ.get("SPEC_TRACE") == "1"
     PROF = os.environ.get("SPEC_PROF") == "1"
+    KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"  # all verify rows' K / V in one program per layer (qwen36)
     PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # synchronize after the commit so the per-phase times are exact
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
@@ -95,6 +96,16 @@ def main():
             return ttnn.from_torch(torch.arange(p0, p0 + n, dtype=torch.int32), dtype=ttnn.int32,
                                    layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=rep)
 
+        def idx_host(p0, n):
+            """kv_rows_update's [n, n] mask: row u -> position p0 + u on the diagonal, -1 elsewhere."""
+            m = torch.full((n, n), -1, dtype=torch.int32)
+            m[torch.arange(n), torch.arange(n)] = torch.arange(p0, p0 + n, dtype=torch.int32)
+            return m
+
+        def dev_idx(p0, n):
+            return ttnn.from_torch(idx_host(p0, n), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,
+                                   mesh_mapper=rep) if KVROWS else None
+
         def target_rows(ids, p0):
             """Rows mode over ids at positions p0..: -> (argmax per row [R], normed hidden [1,1,R,H] replicated,
             fp32 logits [R, V] on the host)."""
@@ -102,8 +113,9 @@ def main():
             x = model.embd(dev_ids(ids))
             x = ttnn.reshape(x, (1, 1, R, x.shape[-1]))
             pos = dev_pos(p0, R)
+            kvi = dev_idx(p0, R)
             for layer in model.layers:
-                x = layer.forward_rows(x, pos, pt, commit_all=False)
+                x = layer.forward_rows(x, pos, pt, commit_all=False, kv_idx=kvi)
             h = model._final_norm_decode(x)  # replicated, normed (the model's 1/16 folded in)
             lg = model._lm_head(h)
             L = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:R, :V]
@@ -130,8 +142,12 @@ def main():
             def _write(self, ids, p0):
                 R = len(ids)
                 if R not in self.bufs:
-                    self.bufs[R] = (dev_ids([0] * R), dev_pos(0, R))
-                di, dp = self.bufs[R]
+                    self.bufs[R] = (dev_ids([0] * R), dev_pos(0, R), dev_idx(0, R))
+                di, dp, dk = self.bufs[R]
+                if dk is not None:
+                    ttnn.copy_host_to_device_tensor(
+                        ttnn.from_torch(idx_host(p0, R), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                        mesh_mapper=rep), dk)
                 ttnn.copy_host_to_device_tensor(
                     ttnn.from_torch(torch.tensor(ids, dtype=torch.int32).reshape(1, R), dtype=ttnn.uint32,
                                     layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), di)
@@ -140,11 +156,11 @@ def main():
                                     layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), dp)
 
             def _body(self, R):
-                di, dp = self.bufs[R]
+                di, dp, dk = self.bufs[R]
                 x = model.embd(di)
                 x = ttnn.reshape(x, (1, 1, R, x.shape[-1]))
                 for layer in model.layers:
-                    x = layer.forward_rows(x, dp, pt, commit_all=False)
+                    x = layer.forward_rows(x, dp, pt, commit_all=False, kv_idx=dk)
                 h = model._final_norm_decode(x)
                 return model._lm_head(h), ttnn.multiply(h, mup)
 

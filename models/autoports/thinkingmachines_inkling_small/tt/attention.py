@@ -207,10 +207,13 @@ class InklingAttention:
         return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
                              memory_config=DRAM)
 
-    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, reduce=True):
+    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, reduce=True, kv_idx=None):
         """R <= 8 rows at consecutive positions (spec verify / prefill in row groups): x [1, 1, R, H] replicated (normed),
         positions [R] int32 (the rows' positions). Each row attends causally to its own position; every row's K/V is
-        written (a rejected verify row is overwritten by the next pass). The k/v sconv states advance past all R rows
+        written (a rejected verify row is overwritten by the next pass). kv_idx: the [R, R] int32 row-major mask of
+        qwen36's kv_rows_update (diagonal = the rows' logical positions, -1 elsewhere): all rows' K / V in ONE program
+        per layer (sliding layers through the read-side ring table: same physical slots, same bytes as the per-row
+        writes); None keeps the per-row paged_update_cache loop. The k/v sconv states advance past all R rows
         (commit_all) or wait for commit_rows(n). -> [1, 1, R, H/N] fractured (reduce) or the [1, 1, R, H] partial."""
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
         R = int(x.shape[2])
@@ -234,7 +237,13 @@ class InklingAttention:
             q = ttnn.multiply(q, tau, memory_config=L1)
             r = ttnn.multiply(r, tau, memory_config=L1)
         pt = self.ring_table if self.sliding else page_table
-        for j in range(R):  # one row at a time: its own position
+        if kv_idx is not None:
+            from models.demos.blackhole.qwen36.tt.attn_decode.kvrows import kv_rows_update
+
+            v_l1 = ttnn.to_memory_config(v, L1)
+            kv_rows_update(self.k_cache, k, self.v_cache, v_l1, kv_idx, pt)
+            ttnn.deallocate(v_l1)
+        for j in range(R if kv_idx is None else 0):  # one row at a time: its own position
             # (with R == 1 a whole-tensor slice can return its input: never free a slice that aliases it)
             pos_j = positions if R == 1 else ttnn.slice(positions, (j,), (j + 1,))
             wpos, wpt = self._write_target(pos_j, page_table)
