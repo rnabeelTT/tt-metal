@@ -235,18 +235,20 @@ class InklingAttention:
             r = ttnn.multiply(r, tau, memory_config=L1)
         pt = self.ring_table if self.sliding else page_table
         for j in range(R):  # one row at a time: its own position
-            pos_j = ttnn.slice(positions, (j,), (j + 1,))
+            # (with R == 1 a whole-tensor slice can return its input: never free a slice that aliases it)
+            pos_j = positions if R == 1 else ttnn.slice(positions, (j,), (j + 1,))
             wpos, wpt = self._write_target(pos_j, page_table)
             for cache, t in ((self.k_cache, k), (self.v_cache, v)):
-                row = ttnn.slice(t, (0, j, 0, 0), (1, j + 1, NKV, HD), memory_config=L1)
+                row = t if R == 1 else ttnn.slice(t, (0, j, 0, 0), (1, j + 1, NKV, HD), memory_config=L1)
                 tp = ttnn.pad(row, [1, 1, 32, HD], [0, 0, 0, 0], 0.0, memory_config=L1)
                 tsh = ttnn.to_memory_config(tp, self._kv_shard)
                 ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=wpt)
-                for z in (tsh, tp, row):
+                for z in (tsh, tp) + (() if row is t else (row,)):
                     ttnn.deallocate(z)
             if wpos is not pos_j:
                 ttnn.deallocate(wpos)
-            ttnn.deallocate(pos_j)
+            if pos_j is not positions:
+                ttnn.deallocate(pos_j)
         ttnn.deallocate(k)
         ttnn.deallocate(v)
         q_in = ttnn.to_memory_config(q, DRAM)
