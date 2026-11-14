@@ -148,6 +148,18 @@ Pieces (all traced, per-prompt re-capture):
     ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
     old package images + `docker builder prune -af` freed ~130 GB.
   - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
+- FUTURE SCOPE (2026-11-14, not started):
+  - Host-tier prefix cache (vLLM CPU KV offload / LMCache-style): copy a finished or evicted request's KV blocks to host
+    RAM and copy them back when the conversation returns. M2.7 KV is ~135 KB per token (62 layers): a 45K-token
+    conversation is ~6 GB, ~0.15-0.3 s over PCIe vs ~19-24 s re-prefill. Today a resent prompt hits only while its
+    blocks stay on the device (another long request or an elastic switch evicts them). Exact (byte copies). Needs host
+    RAM (scarce while the leak holds ~140 GB) and plumbing through vLLM's block bookkeeping, the generator and the
+    elastic pool's block map (hybrid/elastic.py bmap).
+  - Rejected: KV on the host for decode (every verify pass reads the whole KV: 0.55 GB at 4K, 6 GB at 45K = 11-22 /
+    120-240 ms over PCIe vs a few ms from device DRAM; the DRAM freed buys ~1-2% per promoted layer); CPU attention
+    over host KV (host DRAM is already the CPU experts' bottleneck); sparse / windowed KV fetch (changes the output).
+  - Fused LM head + per-row top-K (gpt-oss fused_decode LinearStream out_mode 6, PR 61548): removes the sampled path's
+    2 x 0.66 ms candidate top-k and some read-back (~+5-7% sampled, ~+1% greedy); a port of custom kernels.
 - ROUND 7 (2026-11-14, after the HF package v1 raahemnabeel/minimax-m2.7-hybrid-qb2), all served 128K elastic:
   - Shared-KV rows SDPA on by default (QWEN35_ROWS_SDPA_SHARED_FROM=4096; package env too). Bug fixed: the capture
     picked the variant from the previous request's position (end_prefill captured before setting _pos) and the
