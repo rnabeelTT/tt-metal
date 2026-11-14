@@ -301,8 +301,14 @@ class HybridState:
                     for li, L in enumerate(layers):
                         np.add.at(f[L], a[:, li, :].ravel(), w[:, li, :].ravel())
             self._freq = f
+            # an explicit per-layer ranking (plan_from_routing.py <sim plan>: the order the host int4 library and the
+            # device images were built from) wins over re-ranking the routing: the resident set then matches the
+            # library's cold set by construction (Inkling: the shared experts 256, 257 pinned first)
+            self._order = z["order"] if "order" in z.files else None
         n_real = C - 1 if self.fused else C  # fused: the last slot is the all-zero sink (expert id -1)
-        if self._freq is not None and layer < self._freq.shape[0] and self._freq[layer].sum() > 0:
+        if getattr(self, "_order", None) is not None and layer < self._order.shape[0]:
+            rank = [int(v) for v in self._order[layer]]
+        elif self._freq is not None and layer < self._freq.shape[0] and self._freq[layer].sum() > 0:
             rank = list(np.argsort(-self._freq[layer], kind="stable"))
         else:
             rank = list(range(E))
@@ -743,8 +749,14 @@ def install():
             if HYB.prefetch:
                 w = state_dict["gate.weight"].to(torch.bfloat16).contiguous()
                 HYB.gate_wT[layer_num] = w.view(torch.int16).numpy().view(np.uint16)
+        elif HYB.router_kind == "inkling":
+            # Inkling: select 6 of the 256 routed on sigmoid + bias, then weight those 6 and the 2 shared experts
+            # (experts 256, 257: always picked) by their normalised sigmoids (the port's _route, tt/optimized_decoder.py)
+            HYB.sel_bias[layer_num] = state_dict["gate.e_score_correction_bias"].float().numpy()
+            HYB.n_routed = int(args.n_routed_experts)
+            HYB.top_k_routed = int(args.top_k_routed)
         elif HYB.router_kind != "softmax":
-            raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax or sigmoid_bias")
+            raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax, sigmoid_bias or inkling")
         if int(self.router_w.shape[-1]) != E:
             raise RuntimeError(f"router width {self.router_w.shape} != E {E}")
         self._hyb_fused = False
@@ -1273,6 +1285,14 @@ def _route_host(self, lg, m, ids=None):
             ids = np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k]
         elif (ids < 0).any() or (ids >= E).any():
             raise RuntimeError(f"layer {L}: device-selected expert ids out of range: {ids.tolist()}")
+        sw = np.take_along_axis(sg, ids, 1)
+        sc = sw / sw.sum(1, keepdims=True)
+    elif HYB.router_kind == "inkling":
+        sg = 1.0 / (1.0 + np.exp(-z))
+        R, kr = HYB.n_routed, HYB.top_k_routed
+        if ids is None:
+            picks = np.argpartition(-(sg[:, :R] + HYB.sel_bias[L]), kr, axis=1)[:, :kr]
+            ids = np.concatenate([picks, np.broadcast_to(np.arange(R, E), (z.shape[0], E - R))], axis=1)
         sw = np.take_along_axis(sg, ids, 1)
         sc = sw / sw.sum(1, keepdims=True)
     else:

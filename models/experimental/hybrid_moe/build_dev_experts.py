@@ -70,6 +70,14 @@ def main():
         ttnn.dump_tensor(tmp, ttnn.from_host_shards(shards, ttnn.MeshShape(1, TP)))
         os.replace(tmp, path)
 
+    port_sd = None
+    if os.environ.get("HYB_LIB_KEYS", "").startswith("port:"):  # the port owns the checkpoint layout (as build_int4_library)
+        import importlib
+
+        port_sd = importlib.import_module(
+            f"models.autoports.{os.environ['HYB_LIB_KEYS'][5:]}.tt.weights"
+        ).StreamingStateDict(snap)
+
     for L in layers:
         t0 = time.time()
         ids = sorted(order[L, int(S) :].tolist())
@@ -78,8 +86,13 @@ def main():
             p = os.path.join(out, f"{L}_{e}")
             if os.path.exists(p + "_dn.tensorbin"):
                 continue
-            pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
-            gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
+            if port_sd is not None:
+                gu, down = port_sd.one_expert(L, e)
+                gu, down = gu.float(), down.float()
+                gate, up = gu[: gu.shape[0] // 2], gu[gu.shape[0] // 2 :]
+            else:
+                pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
+                gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
             N, H = gate.shape
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]

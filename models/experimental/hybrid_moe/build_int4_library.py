@@ -9,7 +9,10 @@ group GS along K) in torch's CPU tinygemm layout (_convert_weight_to_int4pack_fo
 One file per layer: <out>/layer_<L>.pt with gu_p, gu_sz, dn_p, dn_sz stacked over experts.
 
 usage: build_int4_library.py <hf snapshot dir> <out dir> [layers: a range e.g. 0-59, or a list e.g. 0,1,3]
-env: HYB_LIB_KEYS qwen35 (default) | minimax_m2 (block_sparse_moe.experts.E.w1/w3/w2 = gate/up/down);
+env: HYB_LIB_KEYS qwen35 (default) | minimax_m2 (block_sparse_moe.experts.E.w1/w3/w2 = gate/up/down) |
+     port:<autoport> (experts read through models/autoports/<autoport>/tt/weights.StreamingStateDict.one_expert(L, e):
+     the port owns the key layout, fused/interleaved storage, shared experts and any folded scale; e.g.
+     port:thinkingmachines_inkling_small);
      HYB_LIB_COLD=<plan.npz>:<C> builds only the experts outside each layer's top C of the plan's `order` and
      stores their ids as "experts" (row i = expert experts[i]); otherwise every expert, row = expert id.
 """
@@ -55,7 +58,13 @@ def main():
     torch.set_num_threads(int(os.environ.get("THREADS", "8")))
     wm = json.load(open(os.path.join(snap, "model.safetensors.index.json")))["weight_map"]
     style = os.environ.get("HYB_LIB_KEYS", "qwen35")
-    if style == "minimax_m2":
+    port_sd = None
+    if style.startswith("port:"):
+        import importlib
+
+        port_sd = importlib.import_module(f"models.autoports.{style[5:]}.tt.weights").StreamingStateDict(snap)
+        pat, pre, names = None, None, None
+    elif style == "minimax_m2":
         pat = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(w1|w2|w3)\.weight$")
         pre, names = "model.layers.{L}.block_sparse_moe.experts.{e}.", ("w1", "w3", "w2")
     elif style == "qwen35":
@@ -64,14 +73,18 @@ def main():
         )
         pre, names = "model.language_model.layers.{L}.mlp.experts.{e}.", ("gate_proj", "up_proj", "down_proj")
     else:
-        raise ValueError(f"HYB_LIB_KEYS={style}: expected qwen35 or minimax_m2")
+        raise ValueError(f"HYB_LIB_KEYS={style}: expected qwen35, minimax_m2 or port:<autoport>")
     cold = None
     if os.environ.get("HYB_LIB_COLD"):
         plan_path, C = os.environ["HYB_LIB_COLD"].rsplit(":", 1)
         order = np.load(plan_path)["order"]
         cold = {L: sorted(order[L, int(C) :].tolist()) for L in range(order.shape[0])}
     experts = {}
-    for k in wm:
+    if port_sd is not None:
+        cfg = port_sd.ck.cfg
+        n_e = cfg.n_routed_experts + getattr(cfg, "n_shared_experts", 0)
+        experts = {L: set(range(n_e)) for L in range(cfg.num_hidden_layers) if cfg.mlp_layer_types[L] == "sparse"}
+    for k in wm if port_sd is None else ():
         m = pat.match(k)
         if m:
             experts.setdefault(int(m.group(1)), set()).add(int(m.group(2)))
@@ -105,9 +118,14 @@ def main():
         ids = cold[L] if cold is not None else list(range(max(experts[L]) + 1))
         gu_p, gu_sz, dn_p, dn_sz = [], [], [], []
         for e in ids:
-            p = pre.format(L=L, e=e)
-            gate, up, down = (get(p + n + ".weight") for n in names)
-            a, b = quant_pack(torch.cat([gate, up], 0))  # [2N, H]
+            if port_sd is not None:
+                gu, down = port_sd.one_expert(L, e)
+                gu, down = gu.float(), down.float()
+            else:
+                p = pre.format(L=L, e=e)
+                gate, up, down = (get(p + n + ".weight") for n in names)
+                gu = torch.cat([gate, up], 0)
+            a, b = quant_pack(gu)  # [2N, H]
             c, d = quant_pack(down)  # [H, N]
             gu_p.append(a)
             gu_sz.append(b)

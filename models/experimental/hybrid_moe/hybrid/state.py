@@ -184,8 +184,10 @@ def hybrid_fused_state_dict(port, checkpoint_dir, *, resident_fn):
 
     class _Hybrid(base):
         def _fused_experts(self, layer_idx, which):
-            per = self._experts[layer_idx]
             ids = list(resident_fn(layer_idx))
+            if hasattr(base, "one_expert"):  # the port reads single experts itself (fused / interleaved checkpoints)
+                return base._fused_experts(self, layer_idx, which, ids=ids)
+            per = self._experts[layer_idx]
             real = [e for e in ids if e >= 0]
             if which == "gate_up_proj":
                 one = lambda e: torch.cat(
@@ -201,6 +203,8 @@ def hybrid_fused_state_dict(port, checkpoint_dir, *, resident_fn):
             return out
 
         def expert(self, li, e):
+            if hasattr(base, "one_expert"):
+                return base.one_expert(self, li, e)
             per = self._experts[li]
             gu = torch.cat([self._hf(per[(e, "gate_proj")]), self._hf(per[(e, "up_proj")])], 0).to(torch.bfloat16)
             return gu, self._hf(per[(e, "down_proj")]).to(torch.bfloat16)
