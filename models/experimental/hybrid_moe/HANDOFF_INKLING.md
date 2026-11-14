@@ -305,3 +305,22 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
       `doc/precision/early_gu4dn8.json` (L2–17 gu4-dn8, LM head HiFi2).
   - **Attention:** explicit HiFi2 + fp32 accumulation on its matmuls (`ttnn.linear`'s default config is lower fidelity).
     A small gain: L5 attention mean PCC 0.99954 → 0.99963.
+- **2026-11-14 evening, precision profiles, first spec decode, and the verify-row bug.**
+  - **Profiles** (8-text means, prefill path, top-1 / conf / kl32): early gu4-dn8 at C=194 0.842 / 0.933 / 0.287;
+    **all bfp8 at C=106 0.862 / 0.945 / 0.218** (best; excluding livecodebench 0.885 / 0.960 / 0.158); all gu4-dn8 at
+    C=150 0.847 / 0.937 / 0.262. More precision with fewer slots wins: the int4 host misses are more accurate than device
+    bfp4. Non-expert paths at bf16 (`all_bfp8_mixers_bf16`) were *worse* (0.853 / 0.945 / 0.265; doc_markdown kl32
+    0.215 → 0.357): one of those bf16 paths is suspect, bisect queued (`all_bfp8_kvccl_bf16`, `all_bfp8_weights_bf16`).
+    The runtime's mixer fidelity is hifi2 | lofi only.
+  - **Decode path = prefill path** (`EVAL_PATH=rows EVAL_ROWS=1`, 3 texts): 0.906 / 0.970 / 0.094 vs prefill
+    0.912 / 0.972 / 0.098 on the same texts.
+  - **Verify-row bug, fixed** (`1043efe8881`): in eager hybrid decode the host computes missed experts only for the
+    first `HYB_DECODE_ROWS` rows (default 1, meant for padded batch rows). Spec-verify rows 1.. and the prompt's tail
+    row groups lost every missed expert (at C=106 a large share of the 6 routed picks). Found with
+    `tools/rows_consistency.py` (row 0 bit-exact, rows 1.. logits PCC down to 0.71) and `tools/rows_layer_diff.py`
+    (first divergence: the first hybrid MoE layer, rows 1.. only). Inkling's env sets `HYB_DECODE_ROWS=8`; the overlay
+    now warns once. After the fix: verify rows and rejected drafts are **bit-identical** to plain decode (PCC 1.00000,
+    max diff 0, 3 prompts x 96 tokens). Every multi-row spec number before the fix (acceptance, tok/s) is void.
+  - **Spec decode, eager, pre-fix** (for the record only): plain 3.7–4.2 tok/s; MTP k=2–3 6.3–7.6 tok/s at 2.1–2.3
+    tokens/step greedy, 1.9–2.1 at temperature 0.7. Exact speculative sampling (`SPEC_TEMP` etc., M2.7 `SpecSampler`)
+    runs end to end; the garble score found no real defects (flags were dictionary misses).
