@@ -589,7 +589,8 @@ class FetchCache:
         for e in picked:
             if e in lru:
                 lru.move_to_end(e)
-        miss = [int(e) for e in picked if slot_of[e] < 0]
+        # only experts with a pinned device-format copy can be fetched (HYB_PIN_TOP pins a subset; all otherwise)
+        miss = [int(e) for e in picked if slot_of[e] < 0 and self.has_expert(layer, int(e))]
         nh = self.nohost.get(layer)
         must = [e for e in miss if e in nh] if nh else []  # no host int4 row: always fetched
         if must:
@@ -662,7 +663,8 @@ class FetchCache:
         for e in picked:
             if e in lru:
                 lru.move_to_end(e)
-        miss = [int(e) for e in picked if slot_of[e] < 0]
+        # only experts with a pinned device-format copy can be fetched (HYB_PIN_TOP pins a subset; all otherwise)
+        miss = [int(e) for e in picked if slot_of[e] < 0 and self.has_expert(layer, int(e))]
         nh = self.nohost.get(layer)
         must = [e for e in miss if e in nh] if nh else []
         if must:
