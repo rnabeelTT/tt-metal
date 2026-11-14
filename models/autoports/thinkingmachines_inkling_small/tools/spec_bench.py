@@ -68,7 +68,9 @@ def main():
     SEED = int(os.environ.get("SPEC_SEED", "0"))
     TRACE = os.environ.get("SPEC_TRACE") == "1"
     PROF = os.environ.get("SPEC_PROF") == "1"
-    KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"  # all verify rows' K / V in one program per layer (qwen36)
+    KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"
+    FAKE_DRAFT = os.environ.get("SPEC_FAKE_DRAFT") == "1"  # debug: drafts = the last token repeated, no MTP device work
+    PRECAPTURE = os.environ.get("SPEC_PRECAPTURE") == "1"  # debug: capture every row count before any generation  # all verify rows' K / V in one program per layer (qwen36)
     PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # synchronize after the commit so the per-phase times are exact
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
@@ -138,6 +140,7 @@ def main():
             def __init__(self):
                 self.bufs, self.tid, self.out, self.keep, self.ctid = {}, {}, {}, {}, {}
                 self.last_R = None
+                self.seen = set()
 
             def _write(self, ids, p0):
                 R = len(ids)
@@ -177,6 +180,7 @@ def main():
                         for t, v in zip(c.state, sv):
                             ttnn.copy(v, t)
                             ttnn.deallocate(v)
+                    print(f"  [trace] capture R={R}", flush=True)
                     tid = ttnn.begin_trace_capture(mesh, cq_id=0)
                     out = self._body(R)
                     ttnn.end_trace_capture(mesh, tid, cq_id=0)
@@ -187,6 +191,9 @@ def main():
                         commit_eager(n)
                         ttnn.end_trace_capture(mesh, t, cq_id=0)
                         self.ctid[(R, n)] = t
+                if R not in self.seen:
+                    print(f"  [trace] first replay R={R}", flush=True)
+                    self.seen.add(R)
                 ttnn.execute_trace(mesh, self.tid[R], cq_id=0, blocking=False)
                 self.last_R = R
                 lg, hm = self.out[R]
@@ -256,6 +263,10 @@ def main():
                     commit_eager(len(chunk))
                 out = []
                 x, p = rest[-1], P - 1  # the last prompt token, at position P-1
+                if TRACE and PRECAPTURE and not tr.tid:
+                    for R in range(1, K + 2):  # rows at p.. are uncommitted: the generation overwrites them
+                        print(f"  precapture R={R}", flush=True)
+                        tr.rows([x] * R, p)
                 drafts, qs = [], []
                 sampler = SpecSampler(TEMP, TOP_K, TOP_P, seed=SEED + len(prompt))  # reproducible per prompt
                 t0 = time.time()
@@ -287,7 +298,9 @@ def main():
                     steps += 1
                     if hit is not None:
                         break
-                    if k:
+                    if k and FAKE_DRAFT:
+                        drafts, qs = [nxt] * k, None
+                    elif k:
                         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
                         with mtp.own_ccl():  # the drafter's collectives never touch the target traces' semaphores
                             drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
