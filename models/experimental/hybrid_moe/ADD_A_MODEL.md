@@ -145,6 +145,13 @@ line in the log against the container's real use (`docker stats`). Judge quality
 - **Device opens hang** in UMD "Starting devices in cluster": check for other device users first (on our QB2 a
   Kubernetes TT telemetry stack). Before device work, a bare `ttnn.open_mesh_device` must succeed. Ask the machine's
   owner before stopping anything you did not start.
+- **Speculative steps write ahead of vLLM**: under async scheduling the DFlash step runs one step ahead of the
+  scheduler, so its verify window ends up to 2K + 1 positions past vLLM's token count. The port's MTP shim must reserve
+  that many lookahead slots (`mtp_plugin_shim._shim_scheduler_init`), or windows crossing a block boundary write to
+  vLLM's null block and later reads see another request's K / V; `dflash_serve.step` now raises if that happens.
+- **Sampling**: DFlash serving samples exactly (speculative sampling, `dflash_serve.accept_sparse`; host test
+  `test_dflash_sampling.py`). Measure both greedy and the model's recommended settings
+  (`serve/card_bench.py --sampled`); sampled decode runs ~15-20% slower (lower acceptance).
 - **Kill by PID**, never `pkill -f <pattern>`: the pattern matches your own shell's command line.
 - **A stall watchdog** must sum CPU over every model process and stop when serving goes idle: an idle server looks hung.
 - **Host RAM**: leaked pinned memory is only returned by a reboot; check `MemAvailable` against the profile's need
