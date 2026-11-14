@@ -36,6 +36,11 @@ if os.environ.get("HYB_ENABLE") == "1":
     import hybrid
 
     hybrid.install()
+    from hybrid.patch import HYB as _HYB
+
+    HSTATS = _HYB.st
+else:
+    HSTATS = None
 
 import ttnn  # noqa: E402
 from models.autoports.thinkingmachines_inkling_small.tt.inkling_mtp import InklingMtp  # noqa: E402
@@ -147,6 +152,14 @@ def main():
                 self._write(ids, p0)
                 if R not in self.tid:
                     self._body(R)  # eager warm-up: compiles every program, allocates the hybrid's width-R buffers
+                    # the commits' programs too (a capture cannot compile): run each eagerly, then restore the states
+                    saved = [[ttnn.clone(t) for t in c.state] for c in sconvs]
+                    for n in range(1, R + 1):
+                        commit_eager(n)
+                    for c, sv in zip(sconvs, saved):
+                        for t, v in zip(c.state, sv):
+                            ttnn.copy(v, t)
+                            ttnn.deallocate(v)
                     tid = ttnn.begin_trace_capture(mesh, cq_id=0)
                     out = self._body(R)
                     ttnn.end_trace_capture(mesh, tid, cq_id=0)
@@ -206,6 +219,7 @@ def main():
         for k in [0] + list(range(1, K + 1)):
             tot_new, tot_steps, tot_t = 0, 0, 0.0
             tm = {"verify": 0.0, "accept": 0.0, "commit": 0.0, "draft": 0.0}
+            hst = None
             # an untimed warm-up generation first: JIT kernel compiles for this k's row counts stay out of the timing
             runs = ([(PROMPTS[0], WARM, False)] if WARM else []) + [(m, NEW, True) for m in PROMPTS]
             for msgs, limit, timed in runs:
@@ -229,6 +243,8 @@ def main():
                 sampler = SpecSampler(TEMP, TOP_K, TOP_P, seed=SEED + len(prompt))  # reproducible per prompt
                 t0 = time.time()
                 steps = 0
+                if timed and hst is None and HSTATS is not None:
+                    hst = dict(HSTATS)  # hybrid counters at the first timed generation of this k
                 while len(out) < limit:
                     rows = [x] + drafts
                     t_a = time.time()
@@ -275,6 +291,13 @@ def main():
             print(f"k={k}: {tot_new / tot_steps:.2f} tokens/step, {tot_new / tot_t:.2f} tok/s "
                   f"({tot_new} tokens, {tot_steps} steps, {tot_t:.1f}s) | ms/step: "
                   + " ".join(f"{a} {1e3 * v / tot_steps:.1f}" for a, v in tm.items()), flush=True)
+            if hst is not None:  # the overlay's own counters over this k's timed generations, per step
+                d = {key: HSTATS[key] - hst.get(key, 0) for key in HSTATS if isinstance(HSTATS[key], (int, float))}
+                hit = d.get("dec_hits", 0) / max(1, d.get("dec_picks", 0))
+                print(f"     hybrid: decode hit {hit:.3f} | ms/step "
+                      + " ".join(f"{key} {1e3 * d[key] / tot_steps:.1f}" for key in sorted(d)
+                                 if key.startswith("t_") and d[key] > 0)
+                      + f" | host experts/step {d.get('host_experts', 0) / tot_steps:.1f}", flush=True)
         if os.environ.get("SPEC_OUT"):
             import json
 
