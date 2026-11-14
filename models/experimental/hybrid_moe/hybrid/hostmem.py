@@ -98,13 +98,13 @@ def check_startup(lib_dir, dev_dir, full_layers, demote):
         fit = int((avail - need_start) // step) if step else 0
         short = int(os.environ.get("QWEN35_KV_TOKENS", "0") or 0)
         long_ = int(os.environ.get("QWEN35_MAX_TOKENS_ALL_USERS", "0") or 0)
-        reach = f" (contexts up to ~{short + fit * (long_ - short) // len(demote) // 1024}K tokens)" if short and long_ else ""
+        reach = f" (contexts up to ~{(short + fit * (long_ - short) // len(demote)) // 1024}K tokens)" if short and long_ else ""
         problem = (
             f"only {fit} of the {len(peak) - len(start)} elastic demotions fit{reach}: longer contexts would swap the "
             f"expert copies or get the server killed"
         )
     else:
-        problem = "not enough free RAM even for the short layout"
+        problem = "not enough free RAM for this profile" + (" even at short context" if demote else "")
     advice = (
         f"Free {_gb(need_peak - avail)} of host RAM (stop other jobs on this machine), or pick a profile with fewer "
         f"hybrid layers (`tt-model profiles <id>`: the 32K profile needs the least), or set HYB_RAM_CHECK=warn to start "
