@@ -442,3 +442,26 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - 2026-11-03: full 60-layer traced run crashed at capture: L1 CB clash (router scores/ids kept live in L1 per layer
   for the host step). Fix: DRAM copies for the host step. Repo initialised, plan copied to docs/PLAN.md.
 - 2026-11-03: overlay written; 122B M1 coherent; int4 library built; dynamic bfp8 side cache working on 4-layer 397B.
+
+## Ornith-1.5-397B (2026-11-14, branch ornith397-hybrid; image tt-model/ornith-1.5-397b-hybrid-qb2:d93f70587da0)
+Merged q122_opt + ornith122_dflash into the starter; ported the M2.7 port hooks to the Qwen3.5 port (bucket split,
+EXPERT_WEIGHT_HOOK, lazy state, QWEN35_EXT_SPEC); compressed-tensors FP8 (per-channel scales) in every loader.
+Artifacts (make_o397.sh): CPU reference (held ref acc 0.54-0.76), plan, int4 library S=192 (141 GB), device copies
+(127 GB), device-image cache (102 GB, warm boot loads 60 layers in ~30 s, ready in ~6 min).
+- Plan (runs/o397/sim_o397.txt): routing is FLAT (512 experts, top-10): held-out hit 0.686 at C=256 (M2.7: 0.864 at
+  192/256); misses 188 / token = 1.5 GB of int4 reads per token; a 4-row verify pass unions ~620 misses (3.2x one
+  row), so DFlash gains little here. Full layers vs uniform C under the same slot budget: within 1-2%.
+- Host RAM is the bottleneck: ~140 GB of this box is held kernel-side (memory note qb2-host-memory-leak), ~85 GB
+  usable. Lean mode (HYB_LIB_RESIDENT=0: the int4 library from the page cache; HYB_PIN_TOP pins a fetch subset).
+  Misses spread evenly over the cold set (top 128 of 257 cold experts: 60% of misses), so ~40% read from NVMe
+  (~800 MB/s during decode, CPU 80% idle).
+- Served (bench.py, 8 x 128 tokens, greedy): SPEC=0 SOCK=0 LRU=0 (no fetch): 6.98 tok/s, TTFT 2.72 s, text matches
+  the plain path. SOCK=1 LRU=8 PIN_TOP=24: 5.68 / 6.20 tok/s, TTFT 4.3-5.3 s (pinned RAM comes out of the page cache).
+  With the ~140 GB back (driver reload / reboot), the int4 library fits resident: ~25 tok/s ceiling (DRAM bandwidth).
+- OPEN: DFlash GDN rows-mode verify is wrong for rows >= 1 (accept cap 0 matches plain decode; caps 1-3 diverge early,
+  e.g. "Rayleigh" -> "Ray scattering"), in both SOCK modes; all 45 GDN layers are on the decode-ops path. Debug switch:
+  runs/dflash_cap. Fallback design: the MTP scan-replay commit (mtp_verify.commit_gdn) instead of snapshots.
+- Fixed on the way: QWEN35_PREFILL_MAX_ROWS=1024 (hidden 4096 overflows L1 in the 2D prefill matmuls), prefill segment
+  2048 (M2.7's 4096 overflows the GDN prefill L1), bf16 logits socket for softmax routers, fetch only among pinned
+  experts, fetch library pinned on the first fetch without DFlash, DFLASH_BLOCK (16-row drafter blocks exceed the
+  11-core shard row), drafter / embedding from config (no silent M2.7 fallback), GQA drafters.
