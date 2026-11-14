@@ -1,7 +1,7 @@
 # tt-model container (v5.1) manifest for MiniMax-M2.7 (230B MoE, FP8 checkpoint) on one QB2 (2 x p300 = 4 Blackhole
 # dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
 # device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe), DFlash speculative decoding,
-# elastic 128K context. Single user (max_num_seqs 1), greedy.
+# elastic 128K context. Single user (max_num_seqs 1); greedy or sampled (exact speculative sampling).
 # Build: tt-model package --container models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml
 schema: "5.1"
 
@@ -223,8 +223,13 @@ card:
     device memory is too fragmented for that does it load a device image, which a fresh install converts once (~20 s
     per layer).
   usage: |
-    Greedy decoding is the measured setting. One request at a time (max_num_seqs 1); prompts sharing a prefix resume
-    from vLLM's prefix cache at 4096-token boundaries.
+    Greedy (temperature 0) and sampled decoding both work. MiniMax recommends temperature 1.0, top_p 0.95, top_k 40;
+    sampling is exact (speculative sampling: the output is distributed as sampling from the model itself) and runs
+    about 15-20% slower than greedy, because fewer drafted tokens are accepted. top_k up to 64 is sampled from on-device
+    candidates; larger or unset top_k reads the full logits and is slower. Presence / frequency / repetition penalties
+    are not applied. The same seed does not reproduce identical text across requests (the experts' device / host
+    placement, which follows recent requests, shifts the logits slightly). One request at a time (max_num_seqs 1);
+    prompts sharing a prefix resume from vLLM's prefix cache at 4096-token boundaries.
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
