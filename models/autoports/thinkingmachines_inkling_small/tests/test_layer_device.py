@@ -71,6 +71,12 @@ def main():
             if t < 3 or t % 128 == 0 or t == T - 1:
                 print(f"t={t:5d} pcc out {p_out[-1]:.5f} delta {p_delta[-1]:.5f}", flush=True)
         mean = lambda v: sum(v) / len(v)  # noqa: E731
+        if os.environ.get("LAYER_MODE") == "prefill":
+            worst = sorted(range(len(p_delta)), key=lambda t: p_delta[t])[:5]
+            for t in worst:
+                dr, dd = x_out[t] - x_in[t], got[t] - x_in[t]
+                print(f"  worst t={t}: delta pcc {p_delta[t]:.4f} |x_in| {x_in[t].norm():.0f} |delta ref| {dr.norm():.0f} "
+                      f"|delta dev| {dd.norm():.0f} max|x_in| {x_in[t].abs().max():.0f} argmax {int(x_in[t].abs().argmax())}")
         print(f"layer {li}: {T} tokens; out pcc worst {min(p_out):.5f} mean {mean(p_out):.5f}; "
               f"delta pcc worst {min(p_delta):.5f} mean {mean(p_delta):.5f}")
         ok = min(p_delta) > 0.98 and mean(p_delta) > 0.995

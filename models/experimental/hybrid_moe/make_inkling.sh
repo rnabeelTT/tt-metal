@@ -26,7 +26,7 @@ PY=${PY:-$HOME/inkling-work/venv/bin/python}
 P=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)   # models/experimental/hybrid_moe
 R=$P/runs/$TAG; LIB=$HOME/.cache/hybrid-moe; mkdir -p "$R" "$LIB"
 export HF_HUB=${HF_HUB:-${HF_HUB_CACHE:-/opt/tenstorrent/models/hub}} TOK_REPO=$MODEL REF_THREADS=${REF_THREADS:-16}
-export TT_SRC=${TT_SRC:-$P/../../autoports} PYTHONPATH=${PYTHONPATH:-$(cd "$P/../../.." && pwd)}
+export TT_SRC=${TT_SRC:-$P/../../autoports} PYTHONPATH=$(cd "$P/../../.." && pwd)  # this repo only: another checkout's regular models/ package would shadow it
 SNAP=$(ls -d "$HF_HUB/models--${MODEL/\//--}/snapshots/"* | head -1)
 cd "$P"
 step=${1:-all}

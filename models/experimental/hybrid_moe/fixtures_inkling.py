@@ -15,7 +15,8 @@ streaming path), then that layer once more with forward hooks, and saves for the
   x_out     [T, H]  the layer's output
   fp32 except x_in (bf16 as the model carries it).
 
-usage (host venv): python fixtures_inkling.py <texts.json> <text name> <layers, e.g. 0,2,5> <T> <out dir>
+usage (host venv): python fixtures_inkling.py <texts.json> <text name> <layers, e.g. 0,2,5 | moe_all> <T> <out dir>
+(moe_all: every MoE layer, compact files with mlp_in / mlp_out / topk_ids only, for the MoE precision sweep)
 """
 
 import json
@@ -32,7 +33,8 @@ from transformers.models.inkling import modeling_inkling as M  # noqa: E402
 @torch.no_grad()
 def main():
     texts, name, layers, T, out = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5]
-    layers = sorted(int(x) for x in layers.split(","))
+    compact = layers == "moe_all"  # every MoE layer, only what the MoE precision sweep needs: mlp_in / mlp_out / ids
+    layers = list(range(2, 42)) if compact else sorted(int(x) for x in layers.split(","))
     os.makedirs(out, exist_ok=True)
     ids = torch.tensor([json.load(open(texts))[name][:T]])
     cfg = R.config()
@@ -85,8 +87,11 @@ def main():
             for k in ("topk_ids", "topk_w", "gammas"):
                 if k in rec:
                     rec[k] = torch.cat(rec[k], 0)
-            rec["x_in"] = x_in[0].clone()
-            rec["x_out"] = x[0].float().clone()
+            if compact:
+                rec = {k: rec[k] for k in ("mlp_in", "mlp_out", "topk_ids")}
+            if not compact:
+                rec["x_in"] = x_in[0].clone()
+                rec["x_out"] = x[0].float().clone()
             torch.save(rec, os.path.join(out, f"layer{li}.pt"))
             print(f"layer {li}: saved {sorted(rec)}", flush=True)
         else:
