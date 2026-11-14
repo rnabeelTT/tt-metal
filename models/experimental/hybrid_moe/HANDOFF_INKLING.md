@@ -119,6 +119,32 @@ REF_GOLD=1 REF_TAPS=5,11,23,29,35 $PY ref_inkling.py runs/inkling/texts_held.jso
 $PY ref_inkling.py runs/inkling/texts_train.json runs/inkling/ref_train
 ```
 
+### Prefill kernel plan (Phase 5, item 1)
+
+Prefill currently runs as rows groups of 8. That is exact and reuses the verify path, but every group re-reads the
+global layers' whole KV, and host op launches scale with T/8. The proper kernel:
+
+1. **Precompute G.** Per query row and head, `G = r_q @ proj_rev / scale`, the relative logits over distance stored
+   reversed. That is one ttnn matmul per layer per chunk: [T, NH, E].
+2. **Base.** Copy the stock chunked SDPA prefill kernels (ttnn/.../transformer/sdpa/device/kernels) in their
+   **use_provided_mask + chunked** configuration. In that configuration the reader streams one mask tile per
+   (q chunk, k chunk) and compute adds it.
+3. **Synthesise instead of read.** The reader no longer reads mask tiles from DRAM; it builds them.
+   - Band k-tiles: row i takes the 32 contiguous G values at offset E-1-(d0+i) (a skewed copy), with -inf past the
+     causal edge or outside the sliding window.
+   - Far k-tiles: zeros.
+4. **Port only that factory slice to python.** Port the slice of `sdpa_program_factory.cpp` for that configuration as a
+   generic_op, as `rows_sdpa.py` did for decode.
+
+Estimated bias-synthesis cost: about 1 ms per layer per 4K tokens.
+
+**DSpark (Phase 4).** `RadixArk/Inkling-Small-DSpark-Preview` is downloaded and has its reference code (`dspark.py`,
+`dflash.py`).
+- It has 0.9B params: 5 Qwen3 layers (64 heads / 16 KV heads, head_dim 64, FFN 8192) with YaRN RoPE (theta 8e6,
+  factor 128).
+- Block 15, mask token 200064, taps [5, 11, 23, 29, 35], plus a Markov head (rank 256) and a confidence head.
+- The model card reports a mean acceptance length of 3.35 at block 7, measured against the NVFP4 target.
+
 ### Device tests (in the image, via the port's runner)
 
 ```bash
