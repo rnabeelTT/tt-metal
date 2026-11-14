@@ -235,33 +235,45 @@ card:
     | --- | --- | --- | --- |
     | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.848 (confident tokens 0.933) | — | 8 x 1000 tokens, held out |
 
-    | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
-    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-32k | ~50 | 128 | 1 | 16 | 0.61 s | — | 62.0 | 2.7 s |
-    | p300x2-32k | 23,483 | 128 | 1 | 1 | 9.8 s | 2,390 | 43.0 | 12.8 s |
-    | p300x2-32k, prompt resent (prefix-cache hit) | 23,483 | 128 | 1 | 1 | 1.2 s | — | 44.6 | 4.0 s |
-    | p300x2-64k | ~50 | 128 | 1 | 16 | 0.70 s | — | 59.4 | 2.9 s |
-    | p300x2-64k | 44,767 | 128 | 1 | 1 | 19.1 s | 2,350 | 40.7 | 22.2 s |
-    | p300x2-64k, prompt resent | 44,767 | 128 | 1 | 1 | 1.5 s | — | 42.1 | 4.5 s |
-    | p300x2-128k | ~50 | 128 | 1 | 32 | 0.67 s | — | 58.6 | 2.9 s |
-    | p300x2-128k, incl. the ~2-5 s switch | 44,767 | 128 | 1 | 2 | 22.4 s | 2,000 | 40.5 | 25.5 s |
-    | p300x2-128k, prompt resent | 44,767 | 128 | 1 | 2 | 1.4 s | — | 42.4 | 4.3 s |
-    | p300x2-128k, incl. the ~7-9 s switch | 85,516 | 128 | 1 | 4 | 57.5 s | 1,490 | 33.9 | 61.3 s |
-    | p300x2-128k, prompt resent | 85,516 | 128 | 1 | 4 | 1.1 s | — | 38.0 | 4.5 s |
+    | profile | decoding | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2-32k | greedy | ~50 | 128 | 1 | 16 | 0.60 s | — | 66.8 | 2.5 s |
+    | p300x2-32k | sampled | ~50 | 128 | 1 | 16 | 0.61 s | — | 53.9 | 3.0 s |
+    | p300x2-32k | greedy | 23,483 | 128 | 1 | 1 | 9.8 s | 2,395 | 43.8 | 12.7 s |
+    | p300x2-32k, prompt resent (prefix-cache hit) | greedy | 23,483 | 128 | 1 | 1 | 1.2 s | — | 44.0 | 4.0 s |
+    | p300x2-32k, prompt resent | sampled | 23,483 | 128 | 1 | 2 | 1.2 s | — | 40.5 | 4.4 s |
+    | p300x2-64k | greedy | ~50 | 128 | 1 | 16 | 0.71 s | — | 61.6 | 2.8 s |
+    | p300x2-64k | sampled | ~50 | 128 | 1 | 16 | 0.69 s | — | 51.1 | 3.2 s |
+    | p300x2-64k | greedy | 44,767 | 128 | 1 | 1 | 19.3 s | 2,318 | 37.0 | 22.7 s |
+    | p300x2-64k, prompt resent | greedy | 44,767 | 128 | 1 | 1 | 1.8 s | — | 39.9 | 5.0 s |
+    | p300x2-64k, prompt resent | sampled | 44,767 | 128 | 1 | 2 | 1.6 s | — | 36.3 | 5.1 s |
+    | p300x2-128k | greedy | ~50 | 128 | 1 | 32 | 0.60 s | — | 68.9 | 2.5 s |
+    | p300x2-128k | sampled | ~50 | 128 | 1 | 16 | 0.65 s | — | 53.7 | 3.1 s |
+    | p300x2-128k, incl. the ~2-5 s switch | greedy | 44,767 | 128 | 1 | 2 | 24.0 s | 1,868 | 40.8 | 27.1 s |
+    | p300x2-128k, incl. the switch | sampled | 44,767 | 128 | 1 | 1 | 20.1 s | 2,232 | 36.8 | 23.5 s |
+    | p300x2-128k, prompt resent | greedy | 44,767 | 128 | 1 | 2 | 1.3 s | — | 42.6 | 4.3 s |
+    | p300x2-128k, prompt resent | sampled | 44,767 | 128 | 1 | 1 | 1.2 s | — | 38.3 | 4.5 s |
+    | p300x2-128k, incl. the ~7-9 s switch | greedy | 85,516 | 128 | 1 | 2 | 61.1 s | 1,400 | 31.2 | 65.1 s |
+    | p300x2-128k, prompt resent | greedy | 85,516 | 128 | 1 | 2 | 1.1 s | — | 33.6 | 4.9 s |
 
-    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, greedy, warm
-    caches, 2026-11-14 (`serve/card_bench.py`); the ~50-token rows are the 8 short chat prompts per run. Prefill tok/s =
-    prompt tokens / TTFT (the elastic rows include the switch). The 85K rows ran with `HYB_RAM_CHECK=warn` on a host
-    with less free RAM than the 128K profile asks for (no 100K row this time); their TTFT is 49-61 s depending on
-    whether the device has room for 4096-token prefill segments (2048-token segments otherwise, ~20% slower prefill).
-    Decode varies about ±5% between runs with the text (speculative acceptance). Long-context decode uses a shared-KV
-    multi-row attention for the speculative verify from 4096 tokens (vs the BF16 reference on a 4.6K-token text: top-1
-    0.913 and KL 0.083, stock attention 0.913 / 0.093). Quality figure from the 2026-11-08 teacher-forced comparison
-    (top-1 counts disagreements on near-tied tokens; confident = reference top-1 probability above 0.5).
+    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, warm caches,
+    2026-11-14 (`serve/card_bench.py`, `--sampled` for the sampled rows: temperature 1.0, top_p 0.95, top_k 40, the
+    recommended settings); the ~50-token rows are the 8 short chat prompts per run. Prefill tok/s = prompt tokens / TTFT
+    (the elastic rows include the switch). Sampled decode is ~15-20% slower than greedy at short context (fewer drafted
+    tokens accepted: ~2.07 vs ~2.26 per pass, plus ~3 ms per pass of candidate read-back) and ~5-10% at 45K. The 85K
+    rows ran with `HYB_RAM_CHECK=warn` on a host with less free RAM than the 128K profile asks for; a later 85K request
+    on that host was killed by the kernel's OOM killer (host RAM, see Prerequisites). Prefill falls back to 2048-token
+    segments (~20% slower prefill, identical logits) when elastic switches leave the device memory fragmented, which
+    shows in the 45K elastic TTFT. Decode varies about ±5% between runs with the text (speculative acceptance).
+    Long-context decode uses a shared-KV multi-row attention for the speculative verify from 4096 tokens (vs the BF16
+    reference on a 4.6K-token text: top-1 0.913 and KL 0.083, stock attention 0.913 / 0.093). Quality figure from the
+    2026-11-08 teacher-forced comparison (top-1 counts disagreements on near-tied tokens; confident = reference top-1
+    probability above 0.5).
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
-      Long contexts run with fewer all-on-device layers (about 40 tok/s at 45K and 34 tok/s at 85K vs ~59 short).
+      Long contexts run with fewer all-on-device layers (greedy about 41 tok/s at 45K and 31-34 tok/s at 85K vs ~62-69
+      short).
     - Elastic profile: a request that crosses the 32K layout waits for a layer switch (see Quickstart), and the next
       short request switches back.
     - Expert placement was planned from routing statistics on general text and code; unusual domains route to more
