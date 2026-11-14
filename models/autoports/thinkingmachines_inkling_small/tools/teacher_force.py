@@ -59,6 +59,13 @@ def main():
         t0 = time.time()
         args, model = create_model(mesh, max_seq_len=max(4096, min(T_all, T_max) + 64), layer_indices=layers)
         print(f"model built in {time.time() - t0:.0f}s", flush=True)
+        try:  # the per-die DRAM budget left (mesh allocation is in lockstep across the dies)
+            mv = ttnn.device.get_memory_view(mesh, ttnn.BufferType.DRAM)
+            fields = {k: getattr(mv, k) for k in dir(mv) if not k.startswith("_") and isinstance(getattr(mv, k), int)}
+            print("DRAM per die: " + ", ".join(f"{k} {v / 2**30:.2f} GiB" if "bytes" in k else f"{k} {v}"
+                                               for k, v in sorted(fields.items())), flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"DRAM memory view unavailable: {e}")
         rep = ttnn.ReplicateTensorToMesh(mesh)
         nblk = model.layers[0].attention.max_blocks
         pt_host = torch.arange(nblk, dtype=torch.int32)

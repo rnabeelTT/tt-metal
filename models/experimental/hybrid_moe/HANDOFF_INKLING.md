@@ -231,3 +231,13 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
   - **Plan.**
     - At C=194 (2 shared + 192 routed): routed hit 94.4%, 13.4 misses per token, 211 MB per token from the host.
     - The int4 library for the 64 cold experts per layer is built: `~/.cache/hybrid-moe/inkling_int4_s194`, 38 GB.
+- **2026-11-14, first end-to-end result through the hybrid overlay** (`tools/eval_hybrid.sh`).
+  - Profile: all-bfp4 device experts, C=194 slots, int4 host library, no prefill streaming, eager decode
+    (`HYB_FUSED=0`), on 2 held-out texts.
+  - **Results:** top-1 0.874, confident top-1 0.951, kl32 0.141, NLL 2.359 against the reference's 2.349. Gates: 0.90 /
+    0.95 / 0.10. M2.7 measured 0.848 / 0.933 / 0.196.
+  - **Timing:** a 1000-token prefill takes 4 s once warm. The first model build takes 25 min (194 experts × 40 layers
+    converted to bfp4 on the host); `HYB_WCACHE` would cache that.
+  - **Per-layer emulation:** bfp4 error grows with depth, from 0.995 at L2 to 0.989 by L12–14 and 0.983 at L40.
+    - int4 g32 (the host library) is about as accurate as gu4-dn8.
+    - Next: a per-layer precision assignment within the measured DRAM headroom (`teacher_force.py` now prints it).
