@@ -213,10 +213,10 @@ card:
     ### First boot
 
     The first boot downloads ~300 GB and converts the experts into device images (about an hour); later boots load
-    them in ~40 s and are ready in 3-7 minutes. On the 128K profile's first boot the server also builds the long
-    layouts once (every elastic layer to hybrid and back, ~10 minutes), so the first long request does not pay for it.
-    With the elastic profile, a request that needs more than 32K tokens of context waits for a switch first: ~3-5 s up
-    to ~50K tokens, ~20 s for ~100K, and the next short request switches back (5-14 s).
+    them in ~40 s and are ready in 3-7 minutes. With the elastic profile, a request that needs more than 32K tokens of
+    context waits for a switch first: ~3-5 s up to ~50K tokens, ~20 s for ~100K, and the next short request switches
+    back (5-15 s). The first time a layer switches on a fresh install its device image is converted once (~20 s per
+    layer), so the first very long request can wait a few minutes (~4 minutes at 100K tokens).
   usage: |
     Greedy decoding is the measured setting. One request at a time (max_num_seqs 1); prompts sharing a prefix resume
     from vLLM's prefix cache at 4096-token boundaries.

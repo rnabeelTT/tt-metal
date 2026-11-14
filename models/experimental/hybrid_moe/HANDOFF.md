@@ -76,6 +76,10 @@ Pieces (all traced, per-prompt re-capture):
   memlock. Paths: HYB_LIB / HYB_DEV_EXPERTS / HYB_PLAN take hf://<org>/<repo>/<path> (hybrid/hfpath.py, pinned by
   TT_AUXILIARY_WEIGHTS); the package (autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml) reads them from
   raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
+- OPEN (2026-11-14, tt-model package e.g. 5e77f21b0271): after a deep elastic round trip (all 24 layers to hybrid and
+  back, HYB_ELASTIC_PREWARM=1) short decode stays ~12% slower until restart (bench 49.3 / 51.9 vs 59.2 / 58.2 after a
+  restart without it; a 45K request's 4-layer round trip leaves it at 58.6 / 56.2). The engine also keeps ~7 GB more
+  host RAM after promoting back. A served ~100K request (19 layers, keep=True) does not do it: bench 54.0 / 56.2 after.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,

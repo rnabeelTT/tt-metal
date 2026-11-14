@@ -260,11 +260,14 @@ class DFlashServing:
             logger.info(f"DFlash warm-up: {r['tokens']} tokens at {r['tok_s']} tok/s")
 
     def _elastic_prewarm(self):
-        """HYB_ELASTIC_PREWARM (auto = once per HYB_WCACHE, 1 = every start, 0 = off): at startup, every demotable
-        layer to hybrid and back. A layer's first demotion converts its hybrid device image (~20 s per layer) and the
-        long layouts compile their programs; done here, the first long request does not wait for them (100K tokens on
-        a fresh cache: a 243 s switch vs 21 s). Skipped when the free host RAM cannot hold the full-context layout."""
-        el, mode = HYB.elastic, os.environ.get("HYB_ELASTIC_PREWARM", "auto")
+        """HYB_ELASTIC_PREWARM (0 = off, the default; auto = once per HYB_WCACHE; 1 = every start): at startup, every
+        demotable layer to hybrid and back. A layer's first demotion converts its hybrid device image (~20 s per layer)
+        and the long layouts compile their programs; done here, the first long request does not wait for them (100K
+        tokens on a fresh cache: a 243 s switch vs 34 s after the prewarm). Off by default: after the full 24-layer
+        round trip the short decode runs ~12% slower for the rest of the process (2026-11-14: 49-52 vs 58-59 tok/s on
+        the bench; a 4-layer round trip leaves it unchanged), cause not found. Skipped when the free host RAM cannot
+        hold the full-context layout."""
+        el, mode = HYB.elastic, os.environ.get("HYB_ELASTIC_PREWARM", "0")
         if el is None or mode == "0" or not el.D:
             return
         import hashlib
