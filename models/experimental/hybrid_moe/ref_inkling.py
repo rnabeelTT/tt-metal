@@ -10,6 +10,7 @@ streamed one layer at a time), teacher-forced over a text set. Same outputs as r
   taps.pt          (REF_TAPS) residual stream after the listed layers, e.g. DSpark's tap layers
   gold.pt          (REF_GOLD=1) the residual stream entering every layer and the final hidden state, for sequence 0:
                    the fixtures the TT port's layer tests compare against
+  final_hidden.pt  final_norm(h) [B, T, H] bf16 for every sequence: the target hidden the MTP drafter consumes
 
 Long texts are processed in query chunks (REF_CHUNK, default 2048) against a per-layer DynamicCache, which is how
 the HF model itself does chunked prefill (sliding-window + full KV, the 4 sconv states, relative-bias offsets).
@@ -230,7 +231,10 @@ def main():
         return
     fnorm = M.InklingRMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
     fnorm.weight.data = get("model.llm.norm.weight").to(torch.bfloat16)
-    x = fnorm(x) / cfg.logits_mup_width_multiplier
+    x = fnorm(x)
+    # the target hidden the MTP drafter consumes (vLLM's Inkling returns final_norm(h); the 1/16 is the LM head's)
+    torch.save({"names": names, "hidden": x.clone()}, os.path.join(out_dir, "final_hidden.pt"))
+    x = x / cfg.logits_mup_width_multiplier
     if gold is not None:
         gold["x_out"] = x[0].clone()  # after the final norm and the 1/16
         torch.save(gold, os.path.join(out_dir, "gold.pt"))
