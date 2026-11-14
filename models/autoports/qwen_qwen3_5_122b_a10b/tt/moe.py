@@ -262,6 +262,8 @@ class Qwen35MoE:
             sfx=sfx,
             gate_up_tile=str(_gu_tile),
         )
+        E, N, H = self.num_experts, self.inter, self.hidden  # used below the weights too (both branches)
+        Nl = self.inter_local
         cached = hook.load(mesh_device, layer_num, spec) if hook is not None else None
         if cached is not None:
             self.up_gate, self.down = cached
