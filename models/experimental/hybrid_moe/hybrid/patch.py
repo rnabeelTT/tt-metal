@@ -1079,7 +1079,9 @@ class _HybSockets:
             return s
 
         E, C = HYB.E, HYB.C
-        self.lg = d2h(0, (E + TILE_W) * 4)
+        # routing logits: FP32 for sigmoid + bias routers (_forward_fused computes them so), the model's bf16 otherwise
+        self.lg_fp32 = HYB.router_kind == "sigmoid_bias"
+        self.lg = d2h(0, (E + TILE_W) * (4 if self.lg_fp32 else 2))
         self.x = d2h(1, H * 2)
         self.rows = [h2d(d, 2, (C + TILE_W) * 2) for d in range(ndev)]
         self.part = h2d(0, 3, H * 2)
@@ -1089,9 +1091,9 @@ class _HybSockets:
     def read_lg(self, m):
         b = self.lg_buf.get(m)
         if b is None:
-            b = self.lg_buf[m] = torch.empty(m, HYB.E + TILE_W, dtype=torch.float32)
+            b = self.lg_buf[m] = torch.empty(m, HYB.E + TILE_W, dtype=torch.float32 if self.lg_fp32 else torch.bfloat16)
         self.lg.read_tensor(b)
-        return b.numpy()
+        return b.numpy() if self.lg_fp32 else b.float().numpy()
 
     def read_x(self, m, H):
         b = self.x_buf.get(m)
