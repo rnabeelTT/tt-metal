@@ -62,18 +62,34 @@ void kernel_main() {
     const uint32_t pos_addr = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t page_table_addr = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t page_table_page_size = get_arg_val<uint32_t>(arg_idx++);
-    const uint32_t cur_head = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t group = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t core_num_in_reduce = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t rq_addr = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t tbl_addr = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
 
+    CircularBuffer cb_page_table(cb_id_page_table);
+    cb_page_table.reserve_back(1);
+    volatile tt_l1_ptr uint32_t* page_table_ptr =
+        read_page_table_for_batch(noc, cb_id_page_table, 0, page_table_args, page_table_addr, page_table_page_size);
+    cb_page_table.push_back(1);
+
+    // Work units: unit = item * num_kv_heads + kv head. A unit is one 32-row Q tile (item = R consecutive rows of the
+    // sequence x the G query heads of one kv head), computed by the num_cores_per_head cores of a group (decode: one
+    // item, groups = kv heads, cores split the K span + tree reduction; prefill: one core per group, the items spread
+    // over the groups round-robin, no reduction). Positions page `item` = that item's R rows; q / rq / out row r of
+    // item i = sequence row i * R + r.
+    for (uint32_t unit = group; unit < n_units; unit += n_groups) {
+    const uint32_t cur_head = unit % num_kv_heads;
+    const uint32_t item = unit / num_kv_heads;
     // cur_pos stick -> the writer's CB and (L1 -> L1) the compute's CB (the stock op's #44366 split)
     CircularBuffer cb_writer(cb_writer_cur_pos);
     cb_writer.reserve_back(1);
     const uint32_t pos_l1 = cb_writer.get_write_ptr();
     {
         const auto pos_reader = TensorAccessor(pos_args, pos_addr);
-        noc.async_read(pos_reader, CoreLocalMem<uint32_t>(pos_l1), pos_stick_bytes, {.page_id = 0}, {});
+        noc.async_read(pos_reader, CoreLocalMem<uint32_t>(pos_l1), pos_stick_bytes, {.page_id = item}, {});
         noc.async_read_barrier();
     }
     const uint8_t noc_id = noc.get_noc_id();
@@ -96,7 +112,7 @@ void kernel_main() {
     uint32_t lim[R];
     uint32_t max_pos = 0, min_lim = 0;
     if (!rows_sdpa_limits<R>([&](uint32_t j) { return pos_ptr[j]; }, lim, max_pos, min_lim)) {
-        return;  // every row skipped
+        continue;  // every row skipped
     }
 
     uint32_t min_lo = max_pos;
@@ -111,7 +127,7 @@ void kernel_main() {
     auto [PSt, k_num_chunks, k_chunk_start, k_chunk_end, window_start_unaligned, window_start_chunk] =
         get_workload_for_core(max_pos, 0, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff);
     if (k_chunk_start == k_chunk_end) {
-        return;
+        continue;
     }
 
     constexpr uint32_t q_tile_bytes = get_tile_size(cb_q_in);
@@ -133,7 +149,7 @@ void kernel_main() {
         const auto q_reader = TensorAccessor(q_args, q_addr, q_tile_bytes);
         const uint32_t r0 = cur_head * G, r1 = cur_head * G + G;  // tile rows [r0, r1)
         for (uint32_t t = 0; t < R * DHt; ++t) {
-            const uint64_t src = q_reader.get_noc_addr(t);
+            const uint64_t src = q_reader.get_noc_addr(item * R * DHt + t);
             for (uint32_t top = 0; top < 32; top += 16) {  // face rows 0-15 (faces 0, 1), 16-31 (faces 2, 3)
                 const uint32_t a = r0 > top ? r0 : top;
                 const uint32_t b = r1 < top + 16 ? r1 : top + 16;
@@ -180,7 +196,7 @@ void kernel_main() {
         const auto rq_reader = TensorAccessor(rq_args, rq_addr, q_tile_bytes);
         const uint32_t r0 = cur_head * G, r1 = cur_head * G + G;
         for (uint32_t t = 0; t < R; ++t) {
-            const uint64_t src = rq_reader.get_noc_addr(t);
+            const uint64_t src = rq_reader.get_noc_addr(item * R + t);
             for (uint32_t top = 0; top < 32; top += 16) {
                 const uint32_t a = r0 > top ? r0 : top;
                 const uint32_t b = r1 < top + 16 ? r1 : top + 16;
@@ -217,11 +233,6 @@ void kernel_main() {
     cb_rqc.push_back(R);
 
     // the sequence's page-table row (every verify row shares it: row 0 is read)
-    CircularBuffer cb_page_table(cb_id_page_table);
-    cb_page_table.reserve_back(1);
-    volatile tt_l1_ptr uint32_t* page_table_ptr =
-        read_page_table_for_batch(noc, cb_id_page_table, 0, page_table_args, page_table_addr, page_table_page_size);
-    cb_page_table.push_back(1);
 
     const auto k_reader = TensorAccessor(k_args, k_addr);
     const auto v_reader = TensorAccessor(v_args, v_addr);
@@ -273,4 +284,5 @@ void kernel_main() {
             page_table_ptr,
             barrier_count);
     }
+    }  // units
 }

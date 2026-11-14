@@ -56,7 +56,8 @@ def pcc(a, b):
     return torch.corrcoef(torch.stack([a, b]))[0, 1].item()
 
 
-def run_case(dev, W, E, pos, seed):
+def run_case(dev, W, E, pos, seed, items_r=0):
+    """items_r > 0: prefill mode, the rows `pos` (consecutive) split into items of items_r rows (one launch)."""
     torch.manual_seed(seed)
     R = len(pos)
     P = max(pos) + 1
@@ -71,8 +72,8 @@ def run_case(dev, W, E, pos, seed):
         nphys = nlog + 2
         perm = torch.randperm(nphys)[:nlog]  # logical b -> physical perm[b]
         pt = perm
-    else:  # ring cache
-        nphys = W // BLK + 1
+    else:  # ring cache: the window + every row of the launch (prefill: all items' windows live at once) + a block
+        nphys = (W + (len(pos) if items_r else 0)) // BLK + 2 if items_r else W // BLK + 1
         pt = torch.arange(nlog) % nphys
     Kc = torch.zeros(nphys, NKV, BLK, HD)
     Vc = torch.zeros(nphys, NKV, BLK, HD)
@@ -87,7 +88,7 @@ def run_case(dev, W, E, pos, seed):
     # the value each position holds in the (rounded) cache = what the op reads (in-window positions are live)
     Kpos = torch.stack([Kq[pt[p // BLK], :, p % BLK] for p in range(P)])
     Vpos = torch.stack([Vq[pt[p // BLK], :, p % BLK] for p in range(P)])
-    page_table = torch.zeros(R, max(nlog, 1), dtype=torch.int32)
+    page_table = torch.zeros(1, max(nlog, 1), dtype=torch.int32)
     page_table[:] = pt[:nlog].to(torch.int32)
     q = ttnn.from_torch(q_h, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=dram)
     qf = ttnn.to_torch(q).float()[0]
@@ -101,9 +102,10 @@ def run_case(dev, W, E, pos, seed):
     )
     # the device table holds bf16(proj / scale) and 1/scale = 128 is a power of two: its proj is bf16(proj)
     proj_eff = proj.bfloat16().float()
-    cur = ttnn.from_torch(
-        torch.tensor(pos, dtype=torch.int32), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram
-    )
+    pos_t = torch.tensor(pos, dtype=torch.int32)
+    if items_r:
+        pos_t = pos_t.reshape(-1, items_r)
+    cur = ttnn.from_torch(pos_t, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     ptt = ttnn.from_torch(page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     out = inkling_sdpa_decode(q, K, V, cur, ptt, rq, table, SCALE, W, E)
     got = ttnn.to_torch(out).float()[0]
@@ -143,6 +145,8 @@ CASES = [
     (0, 1024, [2000 + j for j in range(8)]),  # 8-row verify (the most rows a tile holds at G = 4)
     (512, 512, [3000 + j for j in range(8)]),
 ]
+# prefill mode: (W, E, first position, rows): one launch, items of 8 rows
+PREFILL = [(0, 1024, 0, 640), (512, 512, 0, 640), (0, 1024, 1000, 256), (512, 512, 2040, 256), (0, 1024, 4000, 1024)]
 if os.environ.get("INK_LONG"):  # long context: the band on one core of many
     CASES += [(0, 1024, [131071]), (0, 1024, [131064 + j for j in range(8)]), (512, 512, [131071])]
 
@@ -156,6 +160,12 @@ def main():
             ok = p_ok > 0.999 and (p_nob < 0.995 or max(pos) == 0)
             fails += not ok
             print(f"{'OK  ' if ok else 'FAIL'} W={W:3d} E={E:4d} pos={pos}: pcc {p_ok:.5f} (no-bias {p_nob:.4f}) max err {err:.3e}", flush=True)
+        for i, (W, E, p0, T) in enumerate(PREFILL):
+            p_ok, p_nob, err = run_case(dev, W, E, list(range(p0, p0 + T)), seed=100 + i, items_r=8)
+            ok = p_ok > 0.999 and p_nob < 0.995
+            fails += not ok
+            print(f"{'OK  ' if ok else 'FAIL'} prefill W={W:3d} E={E:4d} rows {p0}..{p0 + T - 1}: pcc {p_ok:.5f} "
+                  f"(no-bias {p_nob:.4f}) max err {err:.3e}", flush=True)
     finally:
         ttnn.close_device(dev)
     print("ALL OK" if not fails else f"{fails} FAILED")

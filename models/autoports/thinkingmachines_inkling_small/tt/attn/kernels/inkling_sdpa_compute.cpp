@@ -96,7 +96,17 @@ void kernel_main() {
     for (uint32_t r = 0; r < MAX_TREE_REDUCTION_ROUNDS; ++r) {
         children_per_round[r] = get_arg_val<uint32_t>(arg_idx++);
     }
+    const uint32_t group = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
 
+    compute_kernel_hw_startup<SrcOrder::Reverse>(cb_q_in, cb_k_in, cb_qk_im);
+    // Work units: unit = item * num_kv_heads + kv head. A unit is one 32-row Q tile (item = R consecutive rows of the
+    // sequence x the G query heads of one kv head), computed by the num_cores_per_head cores of a group (decode: one
+    // item, groups = kv heads, cores split the K span + tree reduction; prefill: one core per group, the items spread
+    // over the groups round-robin, no reduction). Positions page `item` = that item's R rows; q / rq / out row r of
+    // item i = sequence row i * R + r.
+    for (uint32_t unit = group; unit < n_units; unit += n_groups) {
     // the rows' positions (mailbox-synchronized reads, stock op #27979)
     uint32_t pos[R];
     CircularBuffer(cb_cur_pos).wait_front(1);
@@ -107,7 +117,7 @@ void kernel_main() {
     uint32_t lim[R];
     uint32_t max_pos = 0, min_lim = 0;
     if (!rows_sdpa_limits<R>([&](uint32_t j) { return pos[j]; }, lim, max_pos, min_lim)) {
-        return;
+        continue;
     }
 
     uint32_t min_lo = max_pos, max_lo = 0;
@@ -122,7 +132,7 @@ void kernel_main() {
     auto [PSt, k_num_chunks, k_chunk_start, k_chunk_end, window_start_unaligned, window_start_chunk] =
         get_workload_for_core(max_pos, 0, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff);
     if (k_chunk_start == k_chunk_end) {
-        return;
+        continue;
     }
 
     uint32_t num_active_children = 0;
@@ -139,7 +149,6 @@ void kernel_main() {
         }
     }
 
-    compute_kernel_hw_startup<SrcOrder::Reverse>(cb_q_in, cb_k_in, cb_qk_im);
     matmul_init(cb_q_in, cb_k_in);
     CircularBuffer(cb_q_in).wait_front(q_chunk_tiles);
 
@@ -330,4 +339,5 @@ void kernel_main() {
     }
     CircularBuffer(cb_q_in).pop_front(q_chunk_tiles);
     CircularBuffer(cb_rq).pop_front(R);
+    }  // units
 }

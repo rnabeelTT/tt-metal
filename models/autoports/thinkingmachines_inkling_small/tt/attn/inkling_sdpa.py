@@ -99,10 +99,19 @@ def tree_params(core_id, n):
     return is_root, parent, send, children
 
 
-def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, scale, window, extent, k_chunk_size=0):
-    """-> [1, R, NH, HD] bf16 L1 (freshly allocated; the caller frees it). window: 0 (global) or the sliding window;
-    extent: rel_extent E (the table must be relbias.build_tables(proj, scale) for this E)."""
-    R, NH, HD = int(q.shape[1]), int(q.shape[2]), int(q.shape[3])
+def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, scale, window, extent, k_chunk_size=0,
+                        out_memory_config=None):
+    """-> [1, n_items * R, NH, HD] bf16 (freshly allocated; the caller frees it). window: 0 (global) or the sliding
+    window; extent: rel_extent E (the table must be relbias.build_tables(proj, scale) for this E).
+
+    cur_pos [R] (one item: decode / spec verify; the K span of each kv head is split over many cores) or [n_items, R]
+    (prefill: n_items Q tiles of R consecutive rows each, q / rq / out rows stacked by item; one core per (item, kv
+    head) unit, the units spread over the grid). Item i's rows are sequence rows i * R .. i * R + R - 1."""
+    n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
+    R = int(cur_pos.shape[-1])
+    NH, HD = int(q.shape[2]), int(q.shape[3])
+    if int(q.shape[1]) != n_items * R:
+        raise ValueError(f"inkling_sdpa_decode: q {tuple(q.shape)} for {n_items} items x {R} rows")
     _, NKV, block, HDk = (int(s) for s in k_cache.shape)
     if tuple(v_cache.shape) != tuple(k_cache.shape) or HDk != HD or HD % TILE:
         raise ValueError(f"rows_sdpa_decode: q {tuple(q.shape)}, K {tuple(k_cache.shape)}, V {tuple(v_cache.shape)}")
@@ -113,13 +122,17 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
         )
     if q.dtype != ttnn.bfloat16 or q.layout != ttnn.TILE_LAYOUT or q.is_sharded():
         raise ValueError(f"rows_sdpa_decode: q must be interleaved bf16 TILE, got {q.dtype} {q.layout}")
-    if tuple(rq.shape) != (1, R, NH, TILE) or rq.dtype != ttnn.bfloat16 or rq.layout != ttnn.TILE_LAYOUT:
-        raise ValueError(f"inkling_sdpa_decode: rq must be [1, {R}, {NH}, 32] bf16 TILE, got {tuple(rq.shape)}")
+    if tuple(rq.shape) != (1, n_items * R, NH, TILE) or rq.dtype != ttnn.bfloat16 or rq.layout != ttnn.TILE_LAYOUT:
+        raise ValueError(f"inkling_sdpa_decode: rq must be [1, {n_items * R}, {NH}, 32] bf16 TILE, got {tuple(rq.shape)}")
     M_tiles = relbias.n_tiles(extent)
     if tuple(table.shape) != (1, TILE, TILE, M_tiles * TILE) or table.dtype != ttnn.bfloat16:
         raise ValueError(f"inkling_sdpa_decode: table {tuple(table.shape)} for extent {extent}")
-    if int(cur_pos.shape[-1]) != R or cur_pos.dtype != ttnn.int32:
+    if cur_pos.dtype != ttnn.int32:
         raise ValueError(f"rows_sdpa_decode: cur_pos {tuple(cur_pos.shape)} {cur_pos.dtype} for {R} rows")
+    if n_items > 1 and not k_chunk_size:
+        # prefill: a core runs several units; the stock dynamic chunk size grows with each unit's position, and CB
+        # blocks of different sizes on one core would misalign the circular buffers. One fixed chunk for all units.
+        k_chunk_size = DST_TILES * TILE
     Sk_fixed = k_chunk_size // TILE if k_chunk_size else 0
     if k_chunk_size % TILE or Sk_fixed > DST_TILES:
         raise ValueError(f"rows_sdpa_decode: k_chunk_size {k_chunk_size} (multiple of 32, <= {DST_TILES * TILE})")
@@ -127,17 +140,24 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     DHt = HD // TILE
     mesh = q.device()
     grid = mesh.compute_with_storage_grid_size()
-    cpk = min((grid.x * grid.y) // NKV, 1 << MAX_TREE_ROUNDS)  # cores per kv head
-    if cpk < 1:
-        raise ValueError(f"rows_sdpa_decode: {NKV} kv heads on a {grid.x}x{grid.y} grid")
-    n_cores = NKV * cpk
+    n_units = n_items * NKV
+    if n_items == 1:  # decode / verify: groups = kv heads, cpk cores per group split the K span (tree reduction)
+        cpk = min((grid.x * grid.y) // NKV, 1 << MAX_TREE_ROUNDS)  # cores per kv head
+        if cpk < 1:
+            raise ValueError(f"rows_sdpa_decode: {NKV} kv heads on a {grid.x}x{grid.y} grid")
+        n_groups = NKV
+    else:  # prefill: one core per group, the units round-robin over the groups
+        cpk = 1
+        n_groups = min(grid.x * grid.y, n_units)
+    n_cores = n_groups * cpk
     cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(n_cores)]  # row-major (stock op)
     noc = [mesh.worker_core_from_logical_core(c) for c in cores]
     cr = _range_set(cores)
     rounds = (cpk - 1).bit_length() if cpk > 1 else 0
 
     out = ttnn.allocate_tensor_on_device(
-        ttnn.Shape([1, R, NH, HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.L1_MEMORY_CONFIG
+        ttnn.Shape([1, n_items * R, NH, HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
+        out_memory_config or (ttnn.L1_MEMORY_CONFIG if n_items == 1 else ttnn.DRAM_MEMORY_CONFIG),
     )
 
     Sk_cb = Sk_fixed or DST_TILES
@@ -178,7 +198,7 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     rd_ct = [R, G, DHt, DHt, Sk_fixed, DST_TILES, NKV, block // TILE, cpk, pos_stick, n_cores, window, extent, M_tiles]
     for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table):
         rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-    wr_ct = [R, G, DHt, Sk_fixed, DST_TILES, cpk, 0, n_cores, MASK_NEG_BF16, window]
+    wr_ct = [R, G, DHt, Sk_fixed, DST_TILES, cpk, 0, n_cores, MASK_NEG_BF16, window, NKV]
     wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
     cp_ct = [DHt, DHt, Sk_fixed, DST_TILES, cpk, R, struct.unpack("<I", struct.pack("<f", float(scale)))[0], DST_TILES]
     cp_ct += [window, extent]
@@ -200,6 +220,8 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
                 c,
                 rq.buffer_address(),
                 table.buffer_address(),
+                n_groups,
+                n_units,
             ]
         )
         wr_rt.append(
@@ -207,8 +229,9 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
             + children
             + [p.x for p in group]
             + [p.y for p in group]
+            + [n_groups, n_units]
         )
-        cp_rt.append([c, int(is_root), parent] + children)
+        cp_rt.append([c, int(is_root), parent] + children + [g, n_groups, n_units])
 
     def dm(source, ct, rt, riscv, noc_id):
         return ttnn.KernelDescriptor(

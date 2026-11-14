@@ -36,7 +36,8 @@ void kernel_main() {
     constexpr uint32_t num_cores = get_compile_time_arg_val(7);
     constexpr uint32_t mask_neg_bf16 = get_compile_time_arg_val(8);
     constexpr uint32_t W = get_compile_time_arg_val(9);  // sliding window (0 = global layer)
-    constexpr auto out_args = TensorAccessorArgs<10>();
+    constexpr uint32_t num_kv_heads_w = get_compile_time_arg_val(10);
+    constexpr auto out_args = TensorAccessorArgs<11>();
 
     constexpr uint32_t cb_mask_in = tt::CBIndex::c_3;
     constexpr uint32_t cb_identity_scale_in = tt::CBIndex::c_5;
@@ -54,7 +55,7 @@ void kernel_main() {
 
     uint32_t arg_idx = 0;
     const uint32_t out_addr = get_arg_val<uint32_t>(arg_idx++);
-    const uint32_t cur_head = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t group = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t core_num_in_reduce = get_arg_val<uint32_t>(arg_idx++);
     const bool is_tree_root = get_arg_val<uint32_t>(arg_idx++) == 1;
     const uint32_t parent_core_in_group = get_arg_val<uint32_t>(arg_idx++);
@@ -67,11 +68,29 @@ void kernel_main() {
     arg_idx += num_cores_per_head;
     tt_l1_ptr uint32_t* reduction_group_core_ys = (tt_l1_ptr uint32_t*)(get_arg_addr(arg_idx));
     arg_idx += num_cores_per_head;
+    const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
 
     // Semaphore encoding (stock op): each round counts in its own 4-bit field of the reducer semaphore
     constexpr uint32_t step_semaphore_inc[6] = {1, 16, 256, 4096, 65536, 1048576};
     constexpr uint32_t step_semaphore_shift[6] = {0, 4, 8, 12, 16, 20};
 
+    // constant tiles the compute kernel keeps for the whole program: produced once
+    dataflow_kernel_lib::calculate_and_prepare_reduce_scaler<
+        cb_identity_scale_in,
+        ckernel::PoolType::MAX,
+        ckernel::ReduceDim::REDUCE_ROW,
+        dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>();
+    dataflow_kernel_lib::prepare_zero_tile<cb_zero_in>();
+
+    // Work units: unit = item * num_kv_heads + kv head. A unit is one 32-row Q tile (item = R consecutive rows of the
+    // sequence x the G query heads of one kv head), computed by the num_cores_per_head cores of a group (decode: one
+    // item, groups = kv heads, cores split the K span + tree reduction; prefill: one core per group, the items spread
+    // over the groups round-robin, no reduction). Positions page `item` = that item's R rows; q / rq / out row r of
+    // item i = sequence row i * R + r.
+    for (uint32_t unit = group; unit < n_units; unit += n_groups) {
+    const uint32_t cur_head = unit % num_kv_heads_w;
+    const uint32_t item = unit / num_kv_heads_w;
     uint32_t raw_pos[R];
     uint32_t lim[R];
     uint32_t max_pos = 0, min_lim = 0;
@@ -87,7 +106,7 @@ void kernel_main() {
         any = rows_sdpa_limits<R>([&](uint32_t j) { return raw_pos[j]; }, lim, max_pos, min_lim);
     }
     if (!any) {
-        return;
+        continue;
     }
 
     uint32_t lo[R];
@@ -103,7 +122,7 @@ void kernel_main() {
     auto [PSt, k_num_chunks, k_chunk_start, k_chunk_end, window_start_unaligned, window_start_chunk] =
         get_workload_for_core(max_pos, 0, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff);
     if (k_chunk_start == k_chunk_end) {
-        return;  // no data: not part of the reduction
+        continue;  // no data: not part of the reduction
     }
 
     // children with data (a child at core_num has data iff core_num < k_num_chunks)
@@ -122,12 +141,6 @@ void kernel_main() {
     }
     const bool should_send_to_parent = (parent_core_in_group != UINT32_MAX);
 
-    dataflow_kernel_lib::calculate_and_prepare_reduce_scaler<
-        cb_identity_scale_in,
-        ckernel::PoolType::MAX,
-        ckernel::ReduceDim::REDUCE_ROW,
-        dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>();
-    dataflow_kernel_lib::prepare_zero_tile<cb_zero_in>();
 
     // per-row causal masks, one Sk-tile block per masked chunk, in chunk order
     constexpr uint32_t mask_tile_bytes = get_tile_size(cb_mask_in);
@@ -241,7 +254,7 @@ void kernel_main() {
 
     if (!is_tree_root) {
         if (!should_send_to_parent) {
-            return;
+            continue;
         }
         // send (l, m, o) to the parent's round slot, then bump its round counter
         CircularBuffer cb_out_w(cb_out_worker);
@@ -285,7 +298,7 @@ void kernel_main() {
         cb_out_m_buf.pop_front(PNHt);
         cb_out_l_buf.pop_front(PNHt);
         noc.async_atomic_barrier();
-        return;
+        continue;
     }
 
     // root: tile row r*G+i of each result tile -> row cur_head*G+i of verify row r's output tile (two face rows)
@@ -309,7 +322,7 @@ void kernel_main() {
                         out_writer,
                         k * 32,
                         {},
-                        {.page_id = r * vDHt + d, .offset_bytes = rows_sdpa_row_off(t) + half * 512});
+                        {.page_id = (item * R + r) * vDHt + d, .offset_bytes = rows_sdpa_row_off(t) + half * 512});
                     if (++barrier_count == barrier_threshold) {
                         noc.async_writes_flushed();
                         barrier_count = 0;
@@ -320,4 +333,5 @@ void kernel_main() {
     }
     noc.async_write_barrier();
     cb_out_buf.pop_front(out_chunk_tiles);
+    }  // units
 }
