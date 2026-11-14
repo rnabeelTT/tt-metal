@@ -38,9 +38,9 @@ if run ref; then  # BF16 CPU reference over both sets: per-token routing (hours 
   [ -f $R/ref_held/routing.npz ] || $PY $REF $R/texts_held.json $R/ref_held
   [ -f $R/ref_train/routing.npz ] || $PY $REF $R/texts_train.json $R/ref_train
 fi
-if run plan; then  # expert order per layer by routed mass + the HYB_PLAN file (= the train routing)
+if run plan; then  # expert order per layer by routed mass + the HYB_PLAN file (the train routing, plan_from_routing.py)
   [ -f $R/plan_$TAG.npz ] || $PY $SIM $R/ref_train/routing.npz $R/ref_held/routing.npz $R/plan_$TAG.npz | tee $R/sim_$TAG.txt
-  cp -n $R/ref_train/routing.npz $R/plan_${TAG}_routing.npz
+  [ -f $R/plan_${TAG}_routing.npz ] || $PY plan_from_routing.py $R/ref_train/routing.npz $R/plan_${TAG}_routing.npz
   for n in 0 4 8 12 16; do  # full-layer sets per profile (edit the counts to your profiles)
     echo "full@$n: $($PY sim_full_layers.py $R/plan_$TAG.npz $R/ref_train/routing.npz $R/ref_held/routing.npz $n | tail -1)"
   done | tee $R/full_layers.txt
