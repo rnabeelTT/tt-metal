@@ -34,6 +34,8 @@ from loguru import logger
 
 import ttnn
 
+from . import hostmem
+
 
 class Elastic:
     def __init__(self, hyb, gen, srv, demote):
@@ -159,6 +161,8 @@ class Elastic:
         self.t = {"build": 0.0, "fetch_load": 0.0, "lib": 0.0}
         t1 = time.perf_counter()
         layers = self.D[self.k : k_target] if to_long else self.D[k_target : self.k]
+        if to_long:
+            hostmem.warn_switch(hyb.lib_dir, hyb.fetch.dir, layers)
         for L in layers:
             self._rebuild(L, hybrid=to_long)
         t2 = time.perf_counter()

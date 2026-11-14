@@ -60,7 +60,6 @@ serve:
   port: 8000
   block_size: 64
   max_num_seqs: 1
-  max_model_len: 131072
   capabilities:
     tool_parser: minimax_m2
     reasoning_parser: minimax_m2
@@ -80,8 +79,7 @@ serve:
     HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
     QWEN35_TRACE_REGION_MIB: "96"
     QWEN35_PREFIX_STATE_SLOTS: "0"
-    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
-    # --- the hybrid overlay: serve/serve_m27.sh at its defaults (CTX 131072, ELASTIC 1, SPEC 1, SOCK 1) ---
+    # --- the hybrid overlay: serve/serve_m27.sh (SPEC 1, SOCK 1); the context-dependent part is per profile ---
     HYB_ENABLE: "1"
     HYB_PORT: minimaxai_minimax_m2_7
     HYB_SLOTS: "192"
@@ -95,11 +93,9 @@ serve:
     HYB_DEV_EXPERTS: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/dev_s152
     HYB_PLAN: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/plans/plan_m27_routing.npz
     HYB_PLAN_WEIGHT: mass
-    # elastic 128K: built as the 32K profile (44 full layers, 32K-token KV pool); longer requests demote layers in
-    # this order (sim_full_layers.py 44 and SIM_ORDER=1 on plans/plan_m27.npz)
-    HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
-    HYB_ELASTIC_DEMOTE: "34,27,32,38,53,40,36,21,37,30,48,55,41,54,52,47,46,3,33,51,29,42,19,50"
-    QWEN35_KV_TOKENS: "32768"
+    # HYB_RAM_CHECK (hybrid/hostmem.py): refuse to start when the host's free RAM cannot hold the profile's expert
+    # copies at its full context (error); warn / off to override
+    HYB_RAM_CHECK: error
     HYB_LRU: "32"
     HYB_FETCH_FRAC: "0.15"
     HYB_FETCH_POLICY: auto
@@ -128,13 +124,46 @@ serve:
     DFLASH_TP: "1"
     DFLASH_WINDOW: "256"
     DFLASH_WARMUP: "384"
-  args: [--enable-auto-tool-choice]
 
+# One QB2 (two p300 boards, 4 dies), single user, DFlash speculative decoding. The profiles trade context for host RAM
+# and speed: a layer that keeps all 256 experts on the device ("full") leaves less DRAM for the KV cache; the others
+# ("hybrid") hold their 192 most-used experts on the device and the rest on the host (int4 for the CPU, a bfp4 copy for
+# PCIe), ~1.75 GB of host RAM each. Full-layer sets: sim_full_layers.py <n> on plans/plan_m27.npz (serve_m27.sh FULL).
 serve_profiles:
-  - name: p300x2
-    description: One QB2 (two p300 boards, 4 dies). Single user, 128K context, speculative decoding.
+  - name: p300x2-128k
+    description: >
+      Up to 128K tokens, elastic (the default). Starts as the 32K layout; a longer request moves layers to hybrid
+      (least valuable first, 4K tokens of KV each; a few seconds, once per switch) and a short one moves them back.
+      Needs ~85 GB of free host RAM (the full-context layout).
     hardware: p300x2
     mesh_device: P300x2
+    max_model_len: 131072
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
+      # demotion order, least valuable first (sim_full_layers.py 44 with SIM_ORDER=1, reversed)
+      HYB_ELASTIC_DEMOTE: "34,27,32,38,53,40,36,21,37,30,48,55,41,54,52,47,46,3,33,51,29,42,19,50"
+      QWEN35_KV_TOKENS: "32768"
+      QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+  - name: p300x2-64k
+    description: >
+      Up to 64K tokens, fixed layout (36 full layers, 26 hybrid): no switch pauses. Needs ~57 GB of free host RAM.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 65536
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,29,30,33,37,39,41,42,46,47,48,49,50,51,52,54,55"
+      QWEN35_MAX_TOKENS_ALL_USERS: "65536"
+  - name: p300x2-32k
+    description: >
+      Up to 32K tokens, fixed layout (44 full layers, 18 hybrid): the fastest decode and the least host RAM (~43 GB
+      free). For machines with other jobs running.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 32768
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
+      QWEN35_MAX_TOKENS_ALL_USERS: "32768"
+default_profile: p300x2-128k
 
 card:
   attribution: >
@@ -153,9 +182,19 @@ card:
     reasoning_content) on one QB2. Non-commercial use only (see Licensing).
   prerequisites: |
     - A host CPU with AVX-512 (the host expert kernel); 16 or more cores recommended
-    - About 40 GB of free host RAM for the server (int4 experts kept resident, pinned staging buffers), and no memory
-      pressure: swapped expert pages make the CPU path several times slower. No `--ulimit memlock` is needed: the
-      Tenstorrent driver pins the staging buffers itself, and locking the int4 library is best-effort.
+    - Free host RAM for the profile (the host copies of the experts each hybrid layer cannot keep on the device):
+
+      | profile | context | hybrid layers | free host RAM |
+      | --- | --- | --- | --- |
+      | `p300x2-32k` | 32K | 18 | ~43 GB |
+      | `p300x2-64k` | 64K | 26 | ~57 GB |
+      | `p300x2-128k` (default, elastic) | 128K | 18, up to 42 | ~85 GB |
+
+      The server checks this at startup against the RAM free right now (other jobs on the machine count) and refuses
+      to start if the profile does not fit, naming how much to free or which profile to pick; set the env
+      `HYB_RAM_CHECK=warn` to start anyway (elastic: long contexts may then swap or get the server killed). Swapped
+      expert pages make the CPU path several times slower. No `--ulimit memlock` is needed: the Tenstorrent driver
+      pins the staging buffers itself, and locking the int4 library is best-effort.
     - About 440 GB of disk: MiniMax-M2.7 (230 GB), the expert copies (69 GB), the drafter, and ~110 GB of device images
       the first boot writes to the weight cache
   quickstart: |

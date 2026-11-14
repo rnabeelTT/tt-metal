@@ -673,6 +673,12 @@ def _log_stats(replays):
 
 
 def install():
+    from . import hostmem
+
+    # before anything loads: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
+    hostmem.check_startup(
+        HYB.lib_dir, hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", "")), HYB.full_layers, HYB.elastic_demote
+    )
     torch.set_num_threads(int(os.environ.get("HYB_THREADS", "8")))
     from .seg import SEG
 
