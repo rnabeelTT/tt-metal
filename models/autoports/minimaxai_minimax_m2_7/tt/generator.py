@@ -751,13 +751,14 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         G = int(getattr(self, "prefill_group_size", 1))
         if segment is None:
             segment = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
-            # QWEN35_PREFILL_TIGHT_FROM (default 65536; 0 = off): a KV pool past this many tokens leaves little DRAM
-            # headroom (the elastic pool grows ~2 MB per bank faster than a demoted layer frees), and the MoE's
-            # per-call dispatch buffers of a 4096-token segment need ~35 MB contiguous per bank. When the largest free
-            # DRAM block is below QWEN35_PREFILL_TIGHT_MB (default 72 MB per bank: two such buffers), the prefill runs in
-            # 2048-token segments (half the transient; logits identical, runs/m27/pf_tight; ~20% slower) in groups twice
-            # as long (the same tokens per group)
-            tight = int(os.environ.get("QWEN35_PREFILL_TIGHT_FROM", "65536") or 0)
+            # QWEN35_PREFILL_TIGHT_FROM (default 1: any KV pool; 0 = off): the MoE's per-call dispatch buffers of a
+            # 4096-token segment need ~35 MB contiguous per bank, and elastic switches fragment the DRAM (the pool
+            # grows ~2 MB per bank faster than a demoted layer frees). When the largest free DRAM block is below
+            # QWEN35_PREFILL_TIGHT_MB (default 72 MB per bank: two such buffers), the prefill runs in 2048-token
+            # segments (half the transient; logits identical, runs/m27/pf_tight; ~20% slower) in groups twice as long
+            # (the same tokens per group). The default was 65536 until a 49K pool after two 85K cycles OOMed (largest
+            # block 29.7 MB, package card run 2026-11-14).
+            tight = int(os.environ.get("QWEN35_PREFILL_TIGHT_FROM", "1") or 0)
             if tight and segment > 2048 and int(getattr(self, "kv_tokens", 0) or 0) > tight:
                 need = int(os.environ.get("QWEN35_PREFILL_TIGHT_MB", "72")) << 20
                 free = int(
