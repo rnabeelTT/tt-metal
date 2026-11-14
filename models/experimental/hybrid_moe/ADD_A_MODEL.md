@@ -31,7 +31,7 @@ Files that matter (the rest of `hybrid_moe/` is benchmarks and debugging history
 | `dflash_serve.py`, `dflash_tt.py` | the DFlash drafter + verify loop (plugged in via `QWEN35_EXT_SPEC=dflash_serve:build`) |
 | `quality_texts.py`, `ref_m27.py`, `sim_m27.py`, `sim_full_layers.py`, `build_int4_library.py`, `build_dev_experts.py` | the offline artifact pipeline |
 | `serve/serve_m27.sh`, `serve/bench.py`, `serve/elastic_test.py` | dev serving and the two tests every number here comes from |
-| `templates/` | `build_artifacts.sh`, `serve_model.sh`, `tt-model-hybrid.yaml`: copy these |
+| `templates/` | `make_artifacts.sh`, `serve_model.sh`, `tt-model-hybrid.yaml`: copy these |
 | `../../autoports/minimaxai_minimax_m2_7/` | the M2.7 port the overlay patches, and its `tt-model-hybrid.yaml` |
 
 ## 1. Will it fit? (do this before anything else)
@@ -83,10 +83,10 @@ model-specific spots in the overlay:
 ## 4. Build the artifacts
 
 ```bash
-cp templates/build_artifacts.sh build_<tag>.sh   # edit the CHANGE ME block
-./build_<tag>.sh texts && ./build_<tag>.sh ref     # ref: hours on CPU (REF_THREADS)
-./build_<tag>.sh plan                              # prints hit rates (runs/<tag>/sim_<tag>.txt) + full-layer sets
-./build_<tag>.sh int4 && ./build_<tag>.sh dev      # dev needs the device, nothing else on it
+cp templates/make_artifacts.sh make_<tag>.sh   # edit the CHANGE ME block
+./make_<tag>.sh texts && ./make_<tag>.sh ref     # ref: hours on CPU (REF_THREADS)
+./make_<tag>.sh plan                              # prints hit rates (runs/<tag>/sim_<tag>.txt) + full-layer sets
+./make_<tag>.sh int4 && ./make_<tag>.sh dev      # dev needs the device, nothing else on it
 ```
 
 Needs a venv with torch (cpu), transformers, safetensors, numpy, pandas, pyarrow, and these datasets in the HF cache:

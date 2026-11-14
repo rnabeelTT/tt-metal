@@ -2,7 +2,7 @@
 # ============================================================================================================
 # TEMPLATE: the MiniMax-M2.7 dev serve script (serve/serve_m27.sh as of 2026-11-14), to copy as serve/serve_<tag>.sh.
 # The model-specific values - search for each and CHANGE it:
-#   `case $CTX in`        full-layer count per context length: from runs/<tag>/full_layers.txt (build_artifacts.sh)
+#   `case $CTX in`        full-layer count per context length: from runs/<tag>/full_layers.txt (make_artifacts.sh)
 #   `IMG=`                an image with this branch (default: the published M2.7 image; `tt-model pull` it first)
 #   `runs/m27/`           plan / reference routing files -> runs/<tag>/ (sim_full_layers.py calls)
 #   `r[20:]`              20 = full layers of your longest-context profile (elastic demotes the rest of the 44)
