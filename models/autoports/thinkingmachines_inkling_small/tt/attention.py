@@ -105,8 +105,16 @@ class InklingAttention:
             self.n_ring = self.W // block_size + 1
             self.k_cache, self.v_cache = self._alloc_cache(self.n_ring)
             ring = (torch.arange(self.max_blocks) % self.n_ring).to(torch.int32).reshape(1, -1)
-            self.ring_table = ttnn.from_torch(
+            self.ring_table = ttnn.from_torch(  # read side: logical block b -> physical b mod n_ring (the SDPA op)
                 ring, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
+            )
+            # write side: the stock paged_update_cache wants a table no wider than the cache, so writes go through an
+            # identity table at position pos mod (n_ring * block) -- the same physical slot as the read side's mapping
+            self.ring_period = self.n_ring * block_size
+            self.ring_write_table = ttnn.from_torch(
+                torch.arange(self.n_ring, dtype=torch.int32).reshape(1, -1), dtype=ttnn.int32,
+                layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM,
                 mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
             )
         elif own_global_cache:
@@ -160,12 +168,15 @@ class InklingAttention:
             r = ttnn.multiply(r, tau, memory_config=L1)
         # KV write at cur_pos
         pt = self.ring_table if self.sliding else page_table
+        wpos, wpt = self._write_target(cur_pos, page_table)
         for cache, t in ((self.k_cache, k), (self.v_cache, v)):
             tp = ttnn.pad(t, [1, 1, 32, HD], [0, 0, 0, 0], 0.0, memory_config=L1)
             tsh = ttnn.to_memory_config(tp, self._kv_shard)
-            ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=cur_pos, page_table=pt)
+            ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=wpt)
             ttnn.deallocate(tsh)
             ttnn.deallocate(tp)
+        if wpos is not cur_pos:
+            ttnn.deallocate(wpos)
         ttnn.deallocate(k)
         ttnn.deallocate(v)
         # the op's inputs: q [1, R=1, NH, HD] and rq [1, 1, NH, 32] interleaved DRAM
@@ -216,13 +227,16 @@ class InklingAttention:
         pt = self.ring_table if self.sliding else page_table
         for j in range(R):  # one row at a time: its own position
             pos_j = ttnn.slice(positions, (j,), (j + 1,))
+            wpos, wpt = self._write_target(pos_j, page_table)
             for cache, t in ((self.k_cache, k), (self.v_cache, v)):
                 row = ttnn.slice(t, (0, j, 0, 0), (1, j + 1, NKV, HD), memory_config=L1)
                 tp = ttnn.pad(row, [1, 1, 32, HD], [0, 0, 0, 0], 0.0, memory_config=L1)
                 tsh = ttnn.to_memory_config(tp, self._kv_shard)
-                ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=pos_j, page_table=pt)
+                ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=wpt)
                 for z in (tsh, tp, row):
                     ttnn.deallocate(z)
+            if wpos is not pos_j:
+                ttnn.deallocate(wpos)
             ttnn.deallocate(pos_j)
         ttnn.deallocate(k)
         ttnn.deallocate(v)
@@ -249,6 +263,12 @@ class InklingAttention:
         """Spec verify: the k/v conv states advance past the first n of the last forward_rows' rows."""
         self.k_sconv.commit_rows(n)
         self.v_sconv.commit_rows(n)
+
+    def _write_target(self, pos, page_table):
+        """(update index tensor, page table) for paged_update_cache at positions `pos` (int32 row-major)."""
+        if not self.sliding:
+            return pos, page_table
+        return ttnn.remainder(pos, self.ring_period), self.ring_write_table
 
     def _rows_page_table(self, pt, R):
         """The SDPA op reads page-table row 0 for every row (one sequence): a [1, max_blocks] table serves any R."""
