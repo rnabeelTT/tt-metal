@@ -21,15 +21,20 @@ import torch
 
 import ttnn
 
-from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets
+from .experts import MATH_FIDELITY_NAME, TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets
 from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer, upload_selection_bias
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
-CACHE_SUFFIX = f".r{WEIGHT_SIG_BITS}"
+# above LoFi (QWEN35_MOE_DECODE_FIDELITY) the multiply reads the whole weight: no rounding, and its own cache key
+ROUND_WEIGHTS = MATH_FIDELITY_NAME == "lofi"
+CACHE_SUFFIX = f".r{WEIGHT_SIG_BITS}" if ROUND_WEIGHTS else f".{MATH_FIDELITY_NAME}"
 
 
 def round_sig(t: torch.Tensor, bits: int = WEIGHT_SIG_BITS) -> torch.Tensor:
-    """Round to nearest (half away from zero) with `bits` significant bits, on the FP32 bit pattern."""
+    """Round to nearest (half away from zero) with `bits` significant bits, on the FP32 bit pattern (the identity when
+    the expert matmuls run above LoFi)."""
+    if not ROUND_WEIGHTS:
+        return t.float()
     drop = 24 - bits  # FP32 has 24 significant bits
     i = t.float().contiguous().view(torch.int32)
     i = (i + (1 << (drop - 1))) & ~((1 << drop) - 1)

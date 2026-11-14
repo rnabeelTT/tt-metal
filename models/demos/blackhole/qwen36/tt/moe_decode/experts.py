@@ -22,11 +22,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import torch
 
 import ttnn
 
 KERNEL_DIR = Path(__file__).parent / "kernels"
+# QWEN35_MOE_DECODE_FIDELITY (default lofi: every existing port unchanged): the expert matmuls' math fidelity. LoFi reads
+# 5 significant bits of the weight (srcA), so the fused path stores weights rounded to 5 (fused.round_sig): fine for
+# bfp4, lossy for bfp8. hifi2 adds the low srcA phase (the weight at full bfp8 precision, the activation at 7 bits as
+# in LoFi): the unfused path's routed fidelity in the bfp8 policies; fused.round_sig is then the identity.
+_FID = {"lofi": ttnn.MathFidelity.LoFi, "hifi2": ttnn.MathFidelity.HiFi2, "hifi3": ttnn.MathFidelity.HiFi3,
+        "hifi4": ttnn.MathFidelity.HiFi4}
+MATH_FIDELITY_NAME = os.environ.get("QWEN35_MOE_DECODE_FIDELITY", "lofi").lower()
+MATH_FIDELITY = _FID[MATH_FIDELITY_NAME]
+
 TILE = 32
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 MAX_PACKET_BYTES = 16384
@@ -258,7 +269,7 @@ def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, r
             runtime_args=cp_rt if cp_rt is not None else [],
             defines=list(defines),
             config=ttnn.ComputeConfigDescriptor(
-                math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False,
+                math_fidelity=MATH_FIDELITY, fp32_dest_acc_en=True, math_approx_mode=False,
                 dst_full_sync_en=dst_full,
             ),
         ),
