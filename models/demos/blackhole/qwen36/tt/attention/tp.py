@@ -1228,7 +1228,8 @@ class TPAttention:
                     # so each call writes one row (no per-row slice / reshard: 2 ops per row instead of ~10).
                     # per-row index tensors: shared by every layer when the caller built them once per pass
                     # (rows_pos_rows: list of [B] int32, row b = -1 except position b), else sliced here
-                    _rows = getattr(self, "rows_pos_rows", None)
+                    # (rows_pos_list: the same, staged by the Qwen3.5 DFlash verify)
+                    _rows = getattr(self, "rows_pos_rows", None) or getattr(self, "rows_pos_list", None)
                     # QWEN35_ROWS_FUSED_KV (default on): K and V of a row in ONE paged_fused_update_cache (its two inputs
                     # must be sharded on disjoint cores: V moves to the next core row)
                     fused_kv = os.environ.get("QWEN35_ROWS_FUSED_KV", "1") == "1"

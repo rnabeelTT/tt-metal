@@ -161,6 +161,22 @@ if _MTP_K > 0:
     mtp_plugin_shim.apply(_MTP_K + 1)
 
 
+def _dflash_bs_env() -> int:
+    """QWEN35_DFLASH=1: single-user speculative decoding with the DFlash 2 drafter (tt/dflash_serving.py), block
+    QWEN35_DFLASH_BLOCK (default 8: measured better than the drafter's 16, doc/dflash). Off with chunked prefill (not wired together, as MTP) and with MTP."""
+    if os.environ.get("QWEN35_DFLASH", "0") != "1" or os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
+        return 0
+    assert _MTP_K == 0, "QWEN35_DFLASH and QWEN35_MTP are exclusive"
+    return int(os.environ.get("QWEN35_DFLASH_BLOCK", "8"))
+
+
+_DFLASH_BS = _dflash_bs_env()
+if _DFLASH_BS > 0:
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(_DFLASH_BS)
+
+
 # QWEN35_VISION=1: serve image content parts (the checkpoint's ViT on the mesh through tt/vision.py; images are spliced
 # into the prompt embedding inside the traced prefill buckets, M-RoPE per request, per-slot decode deltas). Off: text
 # only (the processor advertises no image / video support, so vLLM rejects multimodal requests at the frontend).
@@ -255,6 +271,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # chunked prefill on, the plugin schedules such a prompt only whole and rejects one past the step budget
         "mm_prompts_whole": True,
         **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
+        **({"max_output_tokens_per_step": _DFLASH_BS} if _DFLASH_BS > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
     # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
@@ -317,6 +334,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
+        elif _DFLASH_BS > 0:
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_serving import DFlashServing
+
+            self._mtp = DFlashServing(self._gen, _DFLASH_BS)
         if os.environ.get("QWEN35_FAULTHANDLER", "1") == "1":
             # `kill -USR1 <EngineCore pid>` dumps every thread's Python stack to the engine's stderr (the readiness
             # runner's server.log): the only introspection available for a host-side stall under vLLM (no ptrace).
@@ -413,6 +434,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     _PREFIX_SLOT_GIB = 48.0 / 1024 * 4 / _PREFIX_DEVICES
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
+    # QWEN35_DFLASH: per die the drafter (TP bfp8 matmul weights ~0.2 GiB, replicated conv projections ~0.07), the verify
+    # pass's GDN state snapshots (36 layers x block x 0.5 MiB = 0.14 GiB at block 8), the context-row staging (~0.04)
+    _DFLASH_GIB = 0.75
     _KV_LAYERS = 12  # attention layers holding paged K/V
     # The context contract's DRAM total (31.331 GiB) was measured with a 512 MiB trace region; a larger region (stage 10:
     # 768 MiB for the per-width decode traces) shrinks the allocator's DRAM by the difference.
@@ -444,6 +468,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             # server ran out of DRAM allocating the head's K/V after vLLM had taken the whole pool
             nonkv += cls._MTP_HEAD_GIB
             kv_bytes_per_token = kv_bytes_per_token * (cls._KV_LAYERS + 1) // cls._KV_LAYERS
+        if _DFLASH_BS > 0:
+            nonkv += cls._DFLASH_GIB
         trace_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
         cls._budget_trace_region_mib = trace_mib
         trace_extra_gib = (trace_mib - cls._CONTRACT_TRACE_REGION_MIB) / 1024
@@ -484,8 +510,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             assert slot_bytes <= self._PREFIX_SLOT_GIB * 2**30, "prefix-cache snapshot larger than its KV-pool budget"
         if self._mtp is not None:
             self._mtp.allocate_kv(shape, self._gen.kv_dtype)
-            hk = self._mtp.head.kv_cache[0]
-            logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
+            if self._mtp.head is not None:
+                hk = self._mtp.head.kv_cache[0]
+                logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
         logger.info(
             f"KV cache: vLLM {num_blocks} blocks (+1 scratch, {alloc_blocks} allocated) x {block} tokens, "
             f"{self._gen.kv_dtype}, {num_layers} attention layers, page-table width {width}"
@@ -635,7 +662,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if prefix_state is not None:
             chunked["prefix_state"] = prefix_state
         if self._mtp is not None:
-            if chunked:
+            # DFlash: prefix-cache resumes (start > 0, final) are fine - the drafter's context then covers the uncached
+            # suffix only; intermediate chunks (chunked prefill) are not wired (DFlash is off with chunked prefill)
+            dflash_ok = self._mtp.head is None and all(finals)
+            if chunked and not dflash_ok:
                 raise NotImplementedError(
                     f"MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL); starts {starts} "
                     f"finals {finals} prompt_lens {plens} slots {slots} live {sorted(self._live_slots)} "
@@ -647,7 +677,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             for u in range(N):
                 self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
             try:
-                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp)
+                out = self._gen.prefill_serving(
+                    tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp, **chunked
+                )
             except Exception:
                 self._mtp.abort_prefill()
                 raise

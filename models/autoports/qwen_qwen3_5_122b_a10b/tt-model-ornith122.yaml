@@ -9,6 +9,9 @@ repo: raahemnabeel/ornith-1.5-122b
 name: ornith-1.5-122b
 # weights stay a pointer: the exact HF snapshot every stage of the bring-up validated
 weights: {repo: ornith-ai/Ornith-1.5-122B, revision: 7681ef608624e7532d8164128bcffdbdbaf1b1af}
+# DFlash 2 speculative decoding (QWEN35_DFLASH=1, doc/dflash) is not shipped: measured break-even or slower on this
+# box. To try it: add `auxiliary_weights: [{repo: incoai/Ornith-1.5-122B-DFlash2, revision: 9baefc1bec85c08193ab442e0ca5f7057669b61d}]`
+# and a profile with env {QWEN35_DFLASH: "1"}.
 kind: vllm-plugin
 arch: blackhole
 

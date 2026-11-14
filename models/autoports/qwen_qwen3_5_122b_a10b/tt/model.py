@@ -727,7 +727,7 @@ class Qwen35MoeModel(Qwen36Model):
         x = ttnn.to_memory_config(x, ttnn.DRAM_MEMORY_CONFIG)
         x = self._apply_vision_merge(x, length=bucket)
         vlen = bi["len"]
-        for layer in self.layers:
+        for li, layer in enumerate(self.layers):
             if layer.is_full_attention:
                 x_new = layer.forward(
                     x,
@@ -744,6 +744,9 @@ class Qwen35MoeModel(Qwen36Model):
                 x_new = layer.forward(x, mode="prefill", chunk_size=self.args.gdn_chunk_size, valid_len=vlen)
             ttnn.deallocate(x)
             x = x_new
+            layer_hook = self.__dict__.get("_dflash_layer_hook")  # DFlash: the drafter's context layers (in the trace)
+            if layer_hook is not None:
+                layer_hook(bi, bucket, li, x)
         return x
 
     def _set_vision_merge(self, ids_host, vision_tokens, vis_row_offset=0):
