@@ -8,16 +8,39 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 
 | Phase | State |
 |---|---|
-| 0. env / disk | done: 729 GB free after a Docker prune, `libhostk.so` built, BF16 checkpoint downloading |
-| 1. CPU reference + routing | `ref_inkling.py` written and self-tested; text sets built; waiting on the checkpoint |
-| 2. TT port | not started |
-| 3. hybrid integration | not started |
-| 4. spec decode (MTP, DSpark) | not started |
-| 5. optimisation | not started |
+| 0. env / disk | done. 729 GB were free after the Docker prune; `libhostk.so` is built; the BF16 checkpoint is downloading. |
+| 1. CPU reference + routing | `ref_inkling.py` is self-tested, and it records routing, top-32, gold residuals, taps and `final_hidden`. Text sets are built. It is queued to run once the download finishes. |
+| 2. TT port | decode path written: attention, layer, MoE router, model, weights. The SDPA kernel passes on device (PCC 0.9996–0.9998 vs fp32, decode and 8-row verify, up to 128K). sconv passes on device. Layer tests against HF fixtures are pending: they need weights. |
+| 3. hybrid integration | overlay, int4/dev builders, plan and sim support for Inkling are written but not run. Next: `make_inkling.sh plan int4 dev`, then `tools/teacher_force.py` with `HYB_ENABLE=1`. |
+| 4. spec decode | rows mode (verify) is written. `mtp_inkling_ref.py` (CPU acceptance of the native MTP) is written. DSpark is not started. |
+| 5. optimisation | not started. The prefill kernel (band-bias chunked SDPA, see Plan) is the first item. Prefill currently runs as rows groups of 8: exact but slow. |
 | 6. multimodal, package | not started |
 
-**Next step:** once the checkpoint is complete, run `ref_inkling.py` on the held-out set, check NLL/acc are sane, then on
-the train set (see Commands).
+**Next steps, in order:**
+1. Layer device tests on the fixtures. Commands are below; the gate is delta PCC > 0.995 mean.
+2. `ref_inkling.py` on the train set, then `make_inkling.sh plan int4 dev`.
+3. `teacher_force.py` through the hybrid overlay. This is the quality gate: top-1 ≥ 0.90, confident top-1 ≥ 0.95, kl32 ≤ 0.10.
+4. `mtp_inkling_ref.py`: decide how many MTP depths to run.
+5. The prefill kernel.
+
+### Design decisions taken (and why)
+
+- **Attention bias as tile matmuls.** In decode and verify, `bias = Σ_rows Rq_row @ T[phase][m]`, where T is a pre-tilized
+  per-layer table (`tt/relbias.py`). The data-movement cores do no per-element work, and verify rows each get their own
+  phase. The QK matmul adds the bias block, with the causal/window mask folded into it.
+- **Sliding-window layers use a ring KV through the page table.** Logical block b maps to physical block b mod n_ring,
+  where n_ring = 512/64 + 1. The SDPA reads only the window, through the stock helper's window workload. KV for the 35
+  sliding layers is constant (about 1 MB per layer per die) at any context length.
+- **The 2 shared experts are experts 256 and 257.** Inkling's router weights them in the same 8-way normalisation as the
+  6 routed picks, so the MoE is "8 weighted experts of 258".
+  - The shared experts are pinned resident in the hybrid plan.
+  - route_scale × global_scale is folded into every expert's down projection (`tt/weights.py expert_scale`), so router
+    weights sum to 1 everywhere: device router, host routing, crafted rows, int4 library and device images.
+  - `tests/test_router_host.py` proves this equals HF `InklingMoE`.
+- **Model-level folds at load** (`tt/weights.py`): the embedding table carries embed_norm, the final norm carries the
+  1/16, and the dense layers' down projection carries their global_scale.
+- **One ranking for the hybrid.** `plan_from_routing.py <routing> <out> <sim plan>` embeds the sim's `order`, and the
+  overlay uses it as is. The resident set therefore equals the complement of the int4 library's cold set.
 
 ## The model, as it matters for the port
 
@@ -95,6 +118,21 @@ $PY ref_inkling_selftest.py
 REF_GOLD=1 REF_TAPS=5,11,23,29,35 $PY ref_inkling.py runs/inkling/texts_held.json runs/inkling/ref_held
 $PY ref_inkling.py runs/inkling/texts_train.json runs/inkling/ref_train
 ```
+
+### Device tests (in the image, via the port's runner)
+
+```bash
+cd models/autoports/thinkingmachines_inkling_small
+tools/run_dev.sh python models/autoports/thinkingmachines_inkling_small/tests/test_sdpa_device.py      # kernel vs fp32
+DEV_ENV="-e INK_LONG=1" tools/run_dev.sh python .../tests/test_sdpa_device.py                            # + 128K cases
+tools/run_dev.sh python .../tests/test_sconv_device.py
+tools/run_dev.sh python .../tests/test_attention_device.py /cache/fixtures/layer5.pt 5                   # HF fixtures
+tools/run_dev.sh python .../tests/test_layer_device.py /cache/fixtures/layer0.pt 0
+tools/run_dev.sh python .../tests/test_layer_device.py /cache/ref/held/gold.pt 17                        # gold residuals
+# host-only tests (CPU venv): relbias, sconv, router formulation
+PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --import-mode=importlib .../tests/test_*_host.py
+```
+(`/cache` in the container = `~/.cache/inkling` on the host: fixtures in `fixtures/`, the reference in `ref/`.)
 
 ## Log
 
