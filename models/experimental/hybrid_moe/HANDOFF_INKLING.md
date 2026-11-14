@@ -8,20 +8,19 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 
 | Phase | State |
 |---|---|
-| 0. env / disk | done. 729 GB were free after the Docker prune; `libhostk.so` is built; the BF16 checkpoint is downloading. |
-| 1. CPU reference + routing | `ref_inkling.py` is self-tested, and it records routing, top-32, gold residuals, taps and `final_hidden`. Text sets are built. It is queued to run once the download finishes. |
-| 2. TT port | decode path written: attention, layer, MoE router, model, weights. The SDPA kernel passes on device (PCC 0.9996–0.9998 vs fp32, decode and 8-row verify, up to 128K). sconv passes on device. Layer tests against HF fixtures are pending: they need weights. |
-| 3. hybrid integration | overlay, int4/dev builders, plan and sim support for Inkling are written but not run. Next: `make_inkling.sh plan int4 dev`, then `tools/teacher_force.py` with `HYB_ENABLE=1`. |
-| 4. spec decode | rows mode (verify) is written. `mtp_inkling_ref.py` (CPU acceptance of the native MTP) is written. DSpark is not started. |
-| 5. optimisation | not started. The prefill kernel (band-bias chunked SDPA, see Plan) is the first item. Prefill currently runs as rows groups of 8: exact but slow. |
+| 0. env / disk | done. Watch disk: the expert-image cache `~/.cache/inkling/wcache` grows by ~130 GB per precision profile (a full disk killed the 12:38 queue on 2026-11-14). |
+| 1. CPU reference + routing | done. fp32 router as vLLM computes it. Noise floor between two valid references: top-1 0.925 / conf 0.978 / kl32 0.081 (`compare_refs.py`). |
+| 2. TT port | done for text: decode, 8-row verify and chunked prefill all match the fixtures per layer (prefill PCC = decode; 1000-token prefill ≈ 4 s warm). |
+| 3. hybrid integration | runs end to end; **quality gate not met**. 8-text means at C=194: all-bfp4 0.831 / 0.927 / 0.302; late (L24–40) gu4-dn8 0.834 / 0.928 / 0.290; early (L2–17) gu4-dn8 0.842 / 0.933 / 0.287. Running: quality profile (all bfp8, C=106) and middle profile (all gu4-dn8, C=150), both on the S=106 int4 library. |
+| 4. spec decode | native MTP drafter on TT (`tt/inkling_mtp.py`); chosen over DSpark on CPU acceptance (1.42 vs 1.31 tokens per pass, teacher-forced). Queued: first device spec run (`tools/spec_bench.py`, K=4, 128 tokens). DSpark CPU reference only. |
+| 5. optimisation | chunked prefill done (work-unit SDPA). Decode not started: no tok/s measured yet. |
 | 6. multimodal, package | not started |
 
 **Next steps, in order:**
-1. Layer device tests on the fixtures. Commands are below; the gate is delta PCC > 0.995 mean.
-2. `ref_inkling.py` on the train set, then `make_inkling.sh plan int4 dev`.
-3. `teacher_force.py` through the hybrid overlay. This is the quality gate: top-1 ≥ 0.90, confident top-1 ≥ 0.95, kl32 ≤ 0.10.
-4. `mtp_inkling_ref.py`: decide how many MTP depths to run.
-5. The prefill kernel.
+1. Results of the quality/middle profiles: pick a profile, or look beyond expert precision if all-bfp8 at C=106 still misses the gate.
+2. Device spec-decode tok/s with MTP; choose the number of MTP depths.
+3. Free-running task evals (GSM8K / IFEval) for absolute quality; the 8 raw texts are a relative measure.
+4. Decode optimisation: traced spec rounds, M2.7 MoE kernels adapted to top-6, fused boundary op.
 
 ### Design decisions taken (and why)
 

@@ -12,6 +12,7 @@ Per step (k drafts):
 Plain decode (k = 0) is the same loop with no drafts (one row per step).
 
 usage (in the image, hybrid env as tools/eval_hybrid.sh): .../tools/spec_bench.py [K=4] [new tokens=128]
+       env SPEC_WARM=48: untimed warm-up tokens per k, so first-use kernel compiles stay out of tok/s
 """
 
 import os
@@ -46,6 +47,7 @@ PROMPTS = [
 def main():
     K = int(sys.argv[1]) if len(sys.argv) > 1 else 4
     NEW = int(sys.argv[2]) if len(sys.argv) > 2 else 128
+    WARM = int(os.environ.get("SPEC_WARM", "48"))  # untimed warm-up tokens per k (0 = none)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=64_000_000)
     try:
@@ -114,7 +116,9 @@ def main():
 
         for k in [0] + list(range(1, K + 1)):
             tot_new, tot_steps, tot_t = 0, 0, 0.0
-            for msgs in PROMPTS:
+            # an untimed warm-up generation first: JIT kernel compiles for this k's row counts stay out of the timing
+            runs = ([(PROMPTS[0], WARM, False)] if WARM else []) + [(m, NEW, True) for m in PROMPTS]
+            for msgs, limit, timed in runs:
                 prompt = tok.encode(tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True,
                                                             reasoning_effort="none"), add_special_tokens=False)
                 model.reset_sequence_state()
@@ -135,7 +139,7 @@ def main():
                 hprev, tafter, pmtp = None, None, None
                 t0 = time.time()
                 steps = 0
-                while len(out) < NEW:
+                while len(out) < limit:
                     rows = [x] + drafts
                     am, h = target_rows(rows, p)
                     n = 0
@@ -152,6 +156,8 @@ def main():
                         drafts = mtp_draft(hrows, rows[1 : n + 1] + [am[n]], p, k)
                     x, p = am[n], p + n + 1
                 dt = time.time() - t0
+                if not timed:
+                    continue
                 tot_new += len(out)
                 tot_steps += steps
                 tot_t += dt
