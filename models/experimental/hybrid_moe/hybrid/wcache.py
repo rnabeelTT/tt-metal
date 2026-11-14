@@ -31,7 +31,7 @@ class ExpertImageCache:
         os.makedirs(root, exist_ok=True)
         self.px = None
         self.regions = {}  # bytes -> (region id, uint8 view)
-        self.hits = self.misses = self.gathered = 0
+        self.hits = self.misses = self.gathered = self.gather_skipped = 0
         self.t_load = self.t_store = self.t_gather = 0.0
         self.specs = {}  # layer -> the spec of its last build (a full layer's, for gather())
         self.gather_src = {}  # layer -> (up_gate, down) of its full build, kept by an elastic demotion (gather())
@@ -125,7 +125,7 @@ class ExpertImageCache:
         same = full is not None and {k: v for k, v in full.items() if k != "E"} == {
             k: v for k, v in spec.items() if k != "E"
         }
-        if not same or len(ids) != spec["E"]:
+        if not same or len(ids) != spec["E"] or not self._gather_fits(mesh, up_gate, len(ids)):
             for t in (up_gate, down):
                 ttnn.deallocate(t)
             return None
@@ -160,6 +160,23 @@ class ExpertImageCache:
         if self.gather_check:
             self._check_gather(mesh, layer, spec, out)
         return tuple(out)
+
+    def _gather_fits(self, mesh, up_gate, n_slots):
+        """Whether the DRAM has room for a gather next to the full tensors it reads: the slices plus the contiguous
+        concat output of the larger (gate|up) tensor, with 25% margin. The image path frees the full tensors first, so
+        a tight DRAM (many elastic switches fragment it) takes that path instead."""
+        mv = ttnn.get_memory_view(mesh, ttnn.BufferType.DRAM)
+        from .pin import tile_bytes
+
+        shp = [int(v) for v in up_gate.shape]  # per device [1, E_full, rows, cols]
+        out = n_slots * (shp[2] // 32) * (shp[3] // 32) * tile_bytes(up_gate.dtype) // int(mv.num_banks)
+        fits = (
+            int(mv.total_bytes_free_per_bank) >= 2.5 * out
+            and int(mv.largest_contiguous_bytes_free_per_bank) >= 1.25 * out
+        )
+        if not fits:
+            self.gather_skipped += 1
+        return fits
 
     def _check_gather(self, mesh, layer, spec, out):
         paths = self._paths(layer, self._key(layer, spec))
@@ -203,5 +220,6 @@ class ExpertImageCache:
     def summary(self):
         return (
             f"HYB_WCACHE: {self.hits} layers loaded from images ({self.t_load:.1f} s), {self.misses} converted "
-            f"(image writes {self.t_store:.1f} s), {self.gathered} gathered on the device ({self.t_gather:.1f} s)"
+            f"(image writes {self.t_store:.1f} s), {self.gathered} gathered on the device ({self.t_gather:.1f} s, "
+            f"{self.gather_skipped} skipped for DRAM room)"
         )
