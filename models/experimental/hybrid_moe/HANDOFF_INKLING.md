@@ -22,6 +22,31 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 3. Free-running task evals (GSM8K / IFEval) for absolute quality; the 8 raw texts are a relative measure.
 4. Decode optimisation: traced spec rounds, M2.7 MoE kernels adapted to top-6, fused boundary op.
 
+### Quality standard (the M2.7 / GLM bring-up bar; quality is never traded for speed)
+
+Every item holds for the serving profile before it ships, and every speed change re-runs 1–3 and must not move them.
+Judge numerics against the BF16 reference, never against an earlier device run (M2.7: two equally valid roundings
+differed by KL 0.22 from each other).
+
+1. **Teacher-forced vs the BF16 CPU reference, 8 held-out 1000-token texts** (`tools/teacher_force.py`): top-1 ≥ 0.90,
+   confident top-1 ≥ 0.95, kl32 ≤ 0.10. Measure it on the **decode path** (the verify rows that serve tokens), not only
+   prefill. M2.7's decode path reached top-1 0.902 / KL 0.045, equal to its stock all-on-device port.
+2. **The hybrid costs nothing:** hybrid quality = stock quality at the same precision. Fetches, prefetch and caches are
+   bit-identical on/off. M2.7's lost-writes bug was found this way.
+3. **Speculative decoding is exact.**
+   - Greedy: the verify pass reproduces plain decode row by row (PCC, argmax). Tools: M2.7 `tools/mtp_pass_check.py`,
+     here `tools/rows_consistency.py`. Rejected drafts leave no state behind.
+   - **Sampling:** the accept rule makes the emitted stream distributed exactly as plain sampling from the target
+     (Leviathan/Chen rejection sampling; M2.7 `tt/mtp_sampling.py SpecSampler` + `tests/test_mtp_sampling.py`).
+     Drafts are sampled from the MTP head's processed q; accept with min(1, p/q), else resample norm(max(0, p − q)).
+4. **Sampled text quality at served context lengths** (M2.7 `tools/longctx_quality.py` + `tools/text_quality.py`): the
+   garble score (glued subwords, doubled words/punctuation, unclosed delimiters) with the sampling parameters the
+   bundle serves. This catches wrong tokens sampled out of a noisy logit tail, which greedy top-1 metrics miss.
+5. **Task evals through the server** (`serve/evalq.py`): IFEval (541), GSM8K (400), GPQA-Diamond (198, thinking),
+   compared with published Inkling-Small numbers / a BF16 run.
+6. Teacher forcing at long context (M2.7 book p2048 / p32768), plus determinism (stock decode is bit-deterministic
+   run to run; M2.7 `tools/check_determinism.py`).
+
 ### Design decisions taken (and why)
 
 - **Attention bias as tile matmuls.** In decode and verify, `bias = Σ_rows Rq_row @ T[phase][m]`, where T is a pre-tilized
