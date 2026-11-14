@@ -182,6 +182,7 @@ class StreamingStateDict(Mapping):
         self._top = {"tok_embeddings.weight": "model.llm.embed.weight", "embed_norm.weight": "model.llm.embed_norm.weight",
                      "norm.weight": "model.llm.norm.weight", "output.weight": "model.llm.unembed.weight"}
         self._slices = {}
+        self._scales = {}
 
     # --- raw access
     def _hf(self, hf_key):
@@ -196,8 +197,19 @@ class StreamingStateDict(Mapping):
             sl = self._slices[hf_key] = f.get_slice(hf_key)
         return sl
 
+    def expert_scale(self, li: int) -> float:
+        """route_scale x the router's global_scale of layer li: folded into every expert's down projection (routed and
+        shared), so the router's weights are a plain normalisation (sum 1) on every path (device, host int4, streamed
+        device images, the hybrid's crafted rows)."""
+        sc = self._scales.get(li)
+        if sc is None:
+            gs = float(self.ck.get(f"model.llm.layers.{li}.mlp.gate.global_scale").float().reshape(-1)[0])
+            sc = self._scales[li] = float(self.ck.cfg.route_scale) * gs
+        return sc
+
     def one_expert(self, li: int, e: int):
-        """(gate_up [2I, H] gate rows first, down [H, I]) bf16 of expert e (e >= 256: shared expert e - 256)."""
+        """(gate_up [2I, H] gate rows first, down [H, I] x expert_scale(li)) bf16 of expert e (e >= 256: shared expert
+        e - 256)."""
         m = f"model.llm.layers.{li}.mlp."
         if e < self.E:
             gu, dn = self._slice(m + "experts.w13_weight")[e], self._slice(m + "experts.w2_weight")[e]
@@ -206,7 +218,7 @@ class StreamingStateDict(Mapping):
             gu = self._slice(m + "shared_experts.shared_w13_weight")[s]
             dn = self._slice(m + "shared_experts.shared_w2_weight")[s]
         g, u = deinterleave(gu, 0)
-        return torch.cat([g, u], 0).to(torch.bfloat16), dn.to(torch.bfloat16)
+        return torch.cat([g, u], 0).to(torch.bfloat16), (dn.float() * self.expert_scale(li)).to(torch.bfloat16)
 
     def _fused_experts(self, li: int, which: str, ids=None):
         """Stack of experts in `ids` order (default all 258; -1 = an all-zero expert): which = gate_up_proj | down_proj."""
@@ -216,7 +228,11 @@ class StreamingStateDict(Mapping):
                 g, u = deinterleave(self.ck.get(m + "experts.w13_weight"), 1)
                 sg, su = deinterleave(self.ck.get(m + "shared_experts.shared_w13_weight"), 1)
                 return torch.cat([torch.cat([g, u], 1), torch.cat([sg, su], 1)], 0)
-            return torch.cat([self.ck.get(m + "experts.w2_weight"), self.ck.get(m + "shared_experts.shared_w2_weight")], 0)
+            dn = torch.cat([self.ck.get(m + "experts.w2_weight"), self.ck.get(m + "shared_experts.shared_w2_weight")], 0)
+            sc = self.expert_scale(li)
+            for s0 in range(0, dn.shape[0], 32):  # in place, in blocks (the stack is 4 GB in bf16)
+                dn[s0 : s0 + 32] = (dn[s0 : s0 + 32].float() * sc).to(dn.dtype)
+            return dn
         k = 0 if which == "gate_up_proj" else 1
         real = [e for e in ids if e >= 0]
         first = self.one_expert(li, real[0])[k]

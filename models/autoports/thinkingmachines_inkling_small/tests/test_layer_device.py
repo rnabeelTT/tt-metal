@@ -7,6 +7,7 @@ the layer's contribution (out - x_in vs x_out - x_in: the residual dominates the
 
 usage (in the image): tools/run_dev.sh python models/autoports/thinkingmachines_inkling_small/tests/test_layer_device.py \
         /cache/fixtures/layer0.pt 0 [T]
+   or with the reference's gold residuals (ref_inkling.py REF_GOLD=1):  .../test_layer_device.py /cache/ref_held/gold.pt 17
 """
 
 import sys
@@ -26,7 +27,13 @@ def main():
     fx_path, li = sys.argv[1], int(sys.argv[2])
     T_max = int(sys.argv[3]) if len(sys.argv) > 3 else 10**9
     fx = torch.load(fx_path)
-    x_in, x_out = fx["x_in"].float(), fx["x_out"].float()
+    if isinstance(fx.get("x_in"), list):  # ref_inkling REF_GOLD=1 format: the residual entering every layer
+        xs = fx["x_in"] + [fx["x_out"]]
+        x_in, x_out = xs[li].float(), xs[li + 1].float()
+        if li + 1 == len(fx["x_in"]):
+            raise SystemExit("the last layer's gold output is post-final-norm; test layers < n_layers - 1")
+    else:  # fixtures_inkling.py per-layer format
+        x_in, x_out = fx["x_in"].float(), fx["x_out"].float()
     T = min(x_in.shape[0], T_max)
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=64_000_000)

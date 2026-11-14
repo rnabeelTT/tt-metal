@@ -186,3 +186,70 @@ class InklingAttention:
 
         return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
                              memory_config=DRAM)
+
+    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, reduce=True):
+        """R <= 8 rows at consecutive positions (spec verify / prefill in row groups): x [1, 1, R, H] replicated (normed),
+        positions [R] int32 (the rows' positions). Each row attends causally to its own position; every row's K/V is
+        written (a rejected verify row is overwritten by the next pass). The k/v sconv states advance past all R rows
+        (commit_all) or wait for commit_rows(n). -> [1, 1, R, H/N] fractured (reduce) or the [1, 1, R, H] partial."""
+        NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
+        R = int(x.shape[2])
+        assert R * (NH // NKV) <= 32, f"{R} rows x {NH // NKV} q heads per kv head must fit one tile"
+        p = ttnn.linear(x, self.w_qkvr, memory_config=L1)  # [1, 1, R, fd]
+        qd, kd, rd = self.qd, self.kd, self.rd
+        q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, R, qd), memory_config=L1)
+        k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, R, qd + kd), memory_config=L1)
+        v = ttnn.slice(p, (0, 0, 0, qd + kd), (1, 1, R, qd + 2 * kd), memory_config=L1)
+        r = ttnn.slice(p, (0, 0, 0, qd + 2 * kd), (1, 1, R, self.fd), memory_config=L1)
+        ttnn.deallocate(p)
+        k = self.k_sconv.rows(k, commit_all=commit_all)
+        v = self.v_sconv.rows(v, commit_all=commit_all)
+        q = ttnn.reshape(q, (1, R, NH, HD))
+        q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=L1), self.q_norm, memory_config=L1)
+        k = ttnn.reshape(k, (1, R, NKV, HD))
+        k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=L1), self.k_norm, memory_config=L1)
+        v = ttnn.reshape(v, (1, R, NKV, HD))
+        r = ttnn.reshape(r, (1, R, NH, DR))
+        if tau is not None and self.log_scaling:  # tau [1, R, 1, 1]: per-row
+            q = ttnn.multiply(q, tau, memory_config=L1)
+            r = ttnn.multiply(r, tau, memory_config=L1)
+        pt = self.ring_table if self.sliding else page_table
+        for j in range(R):  # one row at a time: its own position
+            pos_j = ttnn.slice(positions, (j,), (j + 1,))
+            for cache, t in ((self.k_cache, k), (self.v_cache, v)):
+                row = ttnn.slice(t, (0, j, 0, 0), (1, j + 1, NKV, HD), memory_config=L1)
+                tp = ttnn.pad(row, [1, 1, 32, HD], [0, 0, 0, 0], 0.0, memory_config=L1)
+                tsh = ttnn.to_memory_config(tp, self._kv_shard)
+                ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=pos_j, page_table=pt)
+                for z in (tsh, tp, row):
+                    ttnn.deallocate(z)
+            ttnn.deallocate(pos_j)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
+        q_in = ttnn.to_memory_config(q, DRAM)
+        ttnn.deallocate(q)
+        rq = ttnn.pad(r, [1, R, NH, 32], [0, 0, 0, 0], 0.0, memory_config=DRAM)
+        ttnn.deallocate(r)
+        pt_rows = self._rows_page_table(pt, R)
+        o = inkling_sdpa_decode(q_in, self.k_cache, self.v_cache, positions, pt_rows, rq, self.table, self.scale,
+                                self.W, self.E)
+        ttnn.deallocate(q_in)
+        ttnn.deallocate(rq)
+        o = ttnn.reshape(o, (1, 1, R, NH * HD))
+        part = ttnn.linear(o, self.w_o, memory_config=DRAM)
+        ttnn.deallocate(o)
+        if not reduce or self.N == 1:
+            return part
+        from models.tt_transformers.tt.ccl import tt_all_reduce
+
+        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
+                             memory_config=DRAM)
+
+    def commit_rows(self, n: int):
+        """Spec verify: the k/v conv states advance past the first n of the last forward_rows' rows."""
+        self.k_sconv.commit_rows(n)
+        self.v_sconv.commit_rows(n)
+
+    def _rows_page_table(self, pt, R):
+        """The SDPA op reads page-table row 0 for every row (one sequence): a [1, max_blocks] table serves any R."""
+        return pt

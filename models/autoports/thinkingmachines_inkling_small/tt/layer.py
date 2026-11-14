@@ -92,8 +92,10 @@ class InklingDecoderLayer(_M27Layer):
     def forward(self, x, cos=None, sin=None, mode="decode", chunk_size=128, position_tensor=None, page_table=None,
                 chunk_page_table=None, chunk_start_idx=None, chunk_start_idx_tensor=None, valid_len=None,
                 gdn_collect=False, tau=None):
+        if mode == "rows":
+            return self.forward_rows(x, position_tensor, page_table, tau=tau)
         if mode != "decode":
-            raise NotImplementedError("Inkling prefill: next step (tt/attn prefill kernel)")
+            raise NotImplementedError("Inkling prefill: next step (tt/attn prefill kernel); use mode='rows' groups")
         norm_cfg = self.args.get_norm_config("attn", Mode.DECODE) if self.num_devices > 1 else None
         attn_in = self.attention_norm(x, mode=Mode.DECODE, norm_config=norm_cfg)
         if attn_in.is_sharded():
@@ -113,3 +115,33 @@ class InklingDecoderLayer(_M27Layer):
         ttnn.deallocate(h)
         ttnn.deallocate(f2)
         return out
+
+    def forward_rows(self, x, positions, page_table, tau=None, commit_all=True):
+        """R <= 8 rows at consecutive positions (spec verify / prefill row groups): x [1, 1, R, H/N] fractured,
+        positions [R] int32. commit_all=False leaves the 4 conv states for commit_rows(n) (verify)."""
+        R = int(x.shape[2])
+        norm_cfg = self.args.get_norm_config("attn", Mode.DECODE) if self.num_devices > 1 else None
+        attn_in = self.attention_norm(x, mode=Mode.DECODE, norm_config=norm_cfg)
+        if attn_in.is_sharded():
+            attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.L1_MEMORY_CONFIG)
+        a = self.attention.forward_rows(attn_in, positions, page_table, tau=tau, commit_all=commit_all)
+        ttnn.deallocate(attn_in)
+        a2 = self.attn_sconv.rows(a, commit_all=commit_all)
+        ttnn.deallocate(a)
+        h = ttnn.add(x, a2)
+        ttnn.deallocate(a2)
+        ff_in = self.ffn_norm(h, mode=Mode.DECODE, norm_config=norm_cfg)
+        f = self.feed_forward.forward(ff_in, mode="decode")
+        ttnn.deallocate(ff_in)
+        f2 = self.mlp_sconv.rows(f, commit_all=commit_all)
+        ttnn.deallocate(f)
+        out = ttnn.add(h, f2)
+        ttnn.deallocate(h)
+        ttnn.deallocate(f2)
+        return out
+
+    def commit_rows(self, n: int):
+        """Spec verify: every conv state advances past the first n rows of the last forward_rows."""
+        self.attention.commit_rows(n)
+        self.attn_sconv.commit_rows(n)
+        self.mlp_sconv.commit_rows(n)

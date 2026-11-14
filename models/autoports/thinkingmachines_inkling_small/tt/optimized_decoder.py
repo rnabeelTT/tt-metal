@@ -9,6 +9,10 @@ Router (transformers `InklingTopkRouter`), with l = x @ W_gate^T over 258 rows (
     weights = sigmoid(l[picks ∪ {256, 257}]) / sum(same 8) * route_scale * global_scale
     (= softmax of the 8 logsigmoids, HF's form: exp(logsigmoid(x)) = sigmoid(x))
 
+The constant route_scale * global_scale is folded into every expert's down projection by tt/weights.py
+(expert_scale), so ``_route`` returns the plain normalised weights (sum 1) -- the form the hybrid overlay's crafted
+rows and host experts use too.
+
 The last two weights are the shared experts' gammas (HF multiplies them inside the shared SwiGLU before the linear
 down projection, which equals scaling the shared expert's output). So the shared experts are experts 256, 257 of the
 fused expert tensors and every token computes 8 weighted experts; the routed-expert paths of the base class need no
@@ -41,7 +45,6 @@ class Qwen35MoEOptimized(_M27MoE):
         rep = {"mesh_mapper": ttnn.ReplicateTensorToMesh(mesh_device)} if tp > 1 else {}
         b = state_dict["gate.e_score_correction_bias"].float().reshape(1, 1, 1, -1)
         self.inkling_bias = ttnn.from_torch(b, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh_device, **rep)
-        self.inkling_scale = float(args.route_scale) * float(state_dict["gate.global_scale"].float().reshape(-1)[0])
         self._shared_ids = {}
 
     def _shared_id_rows(self, T):
@@ -79,7 +82,6 @@ class Qwen35MoEOptimized(_M27MoE):
         ttnn.deallocate(w6)
         ttnn.deallocate(shared)
         denom = ttnn.sum(w8, dim=-1, keepdim=True, memory_config=mc)
-        denom = ttnn.multiply(denom, 1.0 / self.inkling_scale, memory_config=mc)
         wn = ttnn.div(w8, denom, memory_config=mc)
         ttnn.deallocate(w8)
         ttnn.deallocate(denom)
