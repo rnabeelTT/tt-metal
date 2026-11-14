@@ -112,9 +112,18 @@ def main():
             r = {"T": T, "top1": top1.mean().item(), "top1_conf": top1[conf].mean().item(), "conf_frac": conf.float().mean().item(),
                  "kl32": kl.mean().item(), "nll": nll.mean().item(), "nll_ref": float(ref["nll"].mean()),
                  "tok_per_s": T / dt}
+            span = 125  # agreement by position: a decay with position points at long-range attention / KV, not precision
+            r["top1_by_span"] = [round(top1[i : i + span].mean().item(), 3) for i in range(0, len(top1), span)]
+            r["top1_conf_by_span"] = [round(top1[i : i + span][conf[i : i + span]].mean().item(), 3)
+                                      if conf[i : i + span].any() else None for i in range(0, len(top1), span)]
+            if out_path:  # the device's top-32 for offline analysis
+                dt32 = lp.topk(32, -1)
+                torch.save({"top_ids": dt32.indices.to(torch.int32), "top_lp": dt32.values.half()},
+                           out_path.replace(".json", f"_{name}.pt"))
             results[name] = r
             print(f"{name}: top1 {r['top1']:.4f}  top1_conf {r['top1_conf']:.4f}  kl32 {r['kl32']:.4f}  nll {r['nll']:.3f} "
-                  f"(ref {r['nll_ref']:.3f})  [{T} tok, {dt:.0f}s]", flush=True)
+                  f"(ref {r['nll_ref']:.3f})  [{T} tok, {dt:.0f}s]\n    top1 by 125-token span {r['top1_by_span']}\n"
+                  f"    conf top1 by span {r['top1_conf_by_span']}", flush=True)
         if results:
             agg = {k: float(np.mean([v[k] for v in results.values()])) for k in ("top1", "top1_conf", "kl32", "nll", "nll_ref")}
             results["_mean"] = agg
