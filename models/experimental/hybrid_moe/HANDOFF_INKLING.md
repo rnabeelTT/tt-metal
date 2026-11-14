@@ -170,3 +170,28 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
     - Validation is against HF's full-model forward on a tiny random Inkling, chunked and unchunked: max abs error ≤7e-6.
     - One bug found and fixed on the way: in a layer-at-a-time run, the HF mask helpers size masks from the first cache
       layer of each type, so every cache slot is aliased to the current layer's entry.
+- **2026-11-14, first real-weight device results** (640 tokens of `code_python_file`, HF fixtures):
+  - **Attention** (alone, PCC per token): layer 0 (sliding) worst 0.9995 / mean 0.9998; layer 5 (global) worst 0.9984 /
+    mean 0.9995.
+  - **Whole layers, contribution PCC** (`out - x_in` vs the reference's): dense layer 0 1.0000; dense layer 1 0.99995.
+    - The MoE layers before the router fix below: layer 2 0.9985 mean; layer 5 0.9981 mean, worst 0.9745.
+  - **MoE, measured alone** (`tests/test_moe_device.py`, layer 5; "same-routing" means tokens where device and
+    reference pick the same 6 experts):
+
+    | Experts | Same-routing PCC, mean | Same-routing PCC, worst |
+    |---|---|---|
+    | bfp4 | 0.9915 | 0.984 |
+    | bfp4 gate/up + bfp8 down | 0.9957 | 0.989 |
+    | bfp8 | 0.9993 | 0.9985 |
+
+  - Layer 2 shows the same ranking: 0.9951 / 0.9982 / 0.9996.
+  - Routing flips against the reference are now 1 in 640.
+  - Policies are in `doc/precision/*.json`; pass one with `QWEN35_PRECISION_CONFIG`.
+  - **The reference's router is now fp32**, as vLLM's InklingGate computes it: fp32 logits from the bf16 matmul, then
+    fp32 bias, sigmoid and global_scale.
+    - Transformers' all-bf16 router flipped 12% of the picks.
+    - One more bug: an in-place bf16 cast of the bias in the reference flipped another 5%.
+    - The port's router always used fp32. Against the fp32 reference it flips 0.2% (near-ties: logits within about 1e-3).
+  - **Next:** the expert precision is the open quality/memory decision. Settle it with `teacher_forced` top-1 through the
+    hybrid overlay. Candidates: bfp4 everywhere; gate/up bfp4 + down bfp8; bfp8 for the hot experts in the most
+    sensitive layers.

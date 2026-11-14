@@ -122,8 +122,45 @@ def load_layer(cfg, li):
         layer = M.InklingDecoderLayer(cfg, li)
     layer = layer.to_empty(device="cpu").to(torch.bfloat16)
     sd = layer_state_dict(cfg, li)
+    raw = dict(sd)  # the checkpoint dtypes (cast_like_hf converts sd in place; the router reads fp32 bias / scale)
     cast_like_hf(layer, sd, li)
+    if hasattr(layer.mlp, "gate"):
+        fp32_router(layer.mlp, raw)
     return layer.eval()
+
+
+def fp32_router(moe, sd):
+    """The router as the model's serving stacks compute it (vLLM's InklingGate: fp32 gate logits from the bf16 matmul,
+    fp32 selection bias / sigmoid / log-sigmoid renorm / global_scale), not transformers' all-bf16 one, whose rounding
+    flips ~10% of the top-6 picks on near ties. Weights stay fp32 into the experts (the routed experts' weighted sum
+    upcasts; the shared experts' gammas are applied in fp32 and the product cast to bf16 for their down projection)."""
+    import torch.nn.functional as F
+
+    gate, shared = moe.gate, moe.shared_experts
+    W = sd["mlp.gate.weight"].to(torch.bfloat16)
+    bias = sd["mlp.gate.e_score_correction_bias"].float()
+    gscale = float(sd["mlp.gate.global_scale"].float().reshape(-1)[0])
+    S, K = gate.n_shared_experts, gate.top_k
+
+    def route(hidden_states):
+        flat = hidden_states.reshape(-1, gate.hidden_dim)
+        logits = flat.float() @ W.float().T  # [T, 258] fp32 (bf16 products, fp32 accumulation)
+        routed, sh = logits[..., :-S], logits[..., -S:]
+        idx = torch.topk(routed.sigmoid() + bias, K, dim=-1, sorted=False)[1]
+        lp = F.logsigmoid(torch.cat([routed.gather(-1, idx), sh], -1))
+        w = torch.exp(lp - torch.logsumexp(lp, -1, keepdim=True)) * gate.route_scale * gscale
+        return routed, w[..., :K].contiguous(), idx, w[..., K:].contiguous()
+
+    def shared_fwd(hidden_states, gammas):
+        shp = hidden_states.shape
+        h = hidden_states.reshape(1, -1, shp[-1]).expand(shared.n_shared_experts, -1, -1)
+        g = gammas.reshape(-1, shared.n_shared_experts, 1).transpose(0, 1)
+        a = shared.act_fn(torch.bmm(h, shared.gate_proj.transpose(1, 2))) * torch.bmm(h, shared.up_proj.transpose(1, 2))
+        a = (a.float() * g).to(h.dtype)
+        return torch.bmm(a, shared.down_proj.transpose(1, 2)).float().sum(0).to(hidden_states.dtype).view(shp)
+
+    gate.forward = route
+    shared.forward = shared_fwd
 
 
 def cast_like_hf(layer, sd, tag):
