@@ -205,6 +205,13 @@ def route(lg, k, bias):
 
 def craft(ids, sc, slot_of, C, filler, lg, E, row):
     """The crafted logits rows into row [m, C + 32] float32 (see hostk_craft); returns the resident picks."""
+    import numpy as np
+
+    # the C side reads dense row-major arrays: a strided view (e.g. argpartition(...)[:, :k]) reads the wrong rows
+    ids = np.ascontiguousarray(ids, dtype=np.int64)
+    sc = np.ascontiguousarray(sc, dtype=np.float32)
+    if not (lg.flags.c_contiguous and row.flags.c_contiguous and slot_of.flags.c_contiguous):
+        raise ValueError("hostk.craft: non-contiguous lg / row / slot_of")
     m, k = ids.shape
     return _lib.hostk_craft(
         m,
