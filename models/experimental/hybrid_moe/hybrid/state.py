@@ -3,8 +3,9 @@
 """Streaming state dict for the hybrid prototype.
 
 Extends the autoport's ``StreamingStateDict`` with:
-* FP8 block dequantization: any ``X.weight`` with a ``X.weight_scale_inv`` companion is returned as bf16
-  (``w * scale_inv`` over 128x128 blocks, the Qwen3.5 FP8 checkpoint format).
+* FP8 dequantization: any ``X.weight`` with a ``X.weight_scale_inv`` (128x128 blocks, the Qwen3.5 FP8 format) or a
+  ``X.weight_scale`` (per output channel [O, 1], compressed-tensors, e.g. Ornith-1.5-397B-FP8) companion is returned
+  as bf16 (``w * scale``, broadcast per block or per row).
 * per-expert checkpoints (``mlp.experts.N.{gate,up,down}_proj.weight``, the 397B FP8 layout) and fused ones
   (``mlp.experts.gate_up_proj`` / ``down_proj``, the 122B bf16 layout) behind one interface.
 * ``layer(i)`` returns the routed experts fused for the RESIDENT experts of that layer only (slot order), so the device
@@ -23,11 +24,25 @@ _EXPERT_RE = re.compile(r"^layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate_proj|up_pro
 BLOCK = 128
 
 
-def dequant_fp8(w: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
-    """FP8 [O, I] with block scale_inv [ceil(O/128), ceil(I/128)] -> bf16."""
+SCALE_SUFFIXES = (".weight_scale_inv", ".weight_scale")  # block (Qwen3.5 FP8) / per-channel (compressed-tensors)
+
+
+def scale_key(weight_key):
+    """The scale companion's suffix stem of a ``.weight`` key, for either FP8 format (``...weight`` + suffix)."""
+    return [weight_key[: -len(".weight")] + s for s in SCALE_SUFFIXES]
+
+
+def dequant_fp8_f32(w: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    """FP8 [O, I] times its scale -> fp32. Block scale_inv [ceil(O/128), ceil(I/128)] or per-channel [O, 1] / [O]."""
     O, I = w.shape
+    if s.numel() == O and (s.dim() == 1 or s.shape[-1] == 1):  # per output channel
+        return w.float() * s.float().reshape(O, 1)
     sf = s.float().repeat_interleave(BLOCK, 0)[:O].repeat_interleave(BLOCK, 1)[:, :I]
-    return (w.float() * sf).to(torch.bfloat16)
+    return w.float() * sf
+
+
+def dequant_fp8(w: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    return dequant_fp8_f32(w, s).to(torch.bfloat16)
 
 
 class HybridStateDict(StreamingStateDict):
@@ -39,7 +54,7 @@ class HybridStateDict(StreamingStateDict):
         self._fused = {}  # layer -> {"gate_up": key, "down": key} (122B layout)
         for key in list(self._entries):
             e = self._entries[key]
-            if e.hf_key.endswith(".weight_scale_inv"):
+            if e.hf_key.endswith(SCALE_SUFFIXES):
                 del self._entries[key]
                 self._drop_layer_key(key)
                 continue
@@ -60,8 +75,9 @@ class HybridStateDict(StreamingStateDict):
         with open(self.checkpoint_dir / "model.safetensors.index.json") as f:
             wm = json.load(f)["weight_map"]
         for hk, shard in wm.items():
-            if hk.endswith(".weight_scale_inv"):
-                self._scale[hk[: -len("_scale_inv")]] = (shard, hk)
+            for suf in SCALE_SUFFIXES:
+                if hk.endswith(suf):
+                    self._scale[hk[: -len(suf)] + ".weight"] = (shard, hk)
         self.fp8 = bool(self._scale)
         self.per_expert = bool(self._experts)
         expert_layers = {li for (li, _e, _p) in self._experts}
@@ -77,7 +93,7 @@ class HybridStateDict(StreamingStateDict):
             raise KeyError("checkpoint has no mtp.* tensors")
         out, per_expert = {}, {}
         for hf_key, shard in self._mtp.items():
-            if hf_key.endswith(".weight_scale_inv"):
+            if hf_key.endswith(SCALE_SUFFIXES):
                 continue
             p = hf_key.split(".")
             if len(p) >= 7 and p[1] == "layers" and p[3] == "mlp" and p[4] == "experts" and p[5].isdigit():

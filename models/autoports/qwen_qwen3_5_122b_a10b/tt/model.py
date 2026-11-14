@@ -694,10 +694,14 @@ class Qwen35MoeModel(Qwen36Model):
         the zero rows of the 32-row selector) — the exact spec of the decode sampler's input, so the serving adapter can
         sample the prefill token on device with the programs the decode warm-up compiled (stage 9)."""
         x = self._run_bucket_hidden(bi, bucket, chunk_start)
-        vlen = bi["len"]
         mtp_hook = self.__dict__.get("_mtp_bucket_hook")
         if mtp_hook is not None:
             mtp_hook(bi, bucket, chunk_start, x)  # the MTP head's prompt rows over this segment (part of the trace)
+        return self._bucket_logits(bi, x)
+
+    def _bucket_logits(self, bi, x):
+        """Next-token logits of a segment's final hidden [1, 1, bucket, dim] (freed): see :meth:`_run_bucket_dev`."""
+        vlen = bi["len"]
         x_last = ttnn.matmul(vlen.logit_sel, x)  # [1,1,32,dim]: row 0 = hidden row actual_len-1, rows 1..31 zero
         ttnn.deallocate(x)
         x_last = ttnn.to_memory_config(x_last, ttnn.DRAM_MEMORY_CONFIG)
@@ -721,33 +725,41 @@ class Qwen35MoeModel(Qwen36Model):
         return ttnn.reshape(logits, (1, 1, logits.shape[-1])), logits_sh
 
     def _run_bucket_hidden(self, bi, bucket, chunk_start):
-        """Embedding -> all layers over the staged bucket inputs; returns hidden [1, 1, bucket, dim] (device)."""
-        x = self.embd(bi["tok"])
-        x = ttnn.reshape(x, (1, 1, bucket, x.shape[-1]))
-        x = ttnn.to_memory_config(x, ttnn.DRAM_MEMORY_CONFIG)
-        x = self._apply_vision_merge(x, length=bucket)
-        vlen = bi["len"]
+        """Embedding -> all layers over the staged bucket inputs; returns hidden [1, 1, bucket, dim] (device). Split into
+        _bucket_embed / _bucket_layer (the hybrid-MoE overlay wraps the per-layer step, as on the M2.7 port)."""
+        x = self._bucket_embed(bi, bucket)
         for li, layer in enumerate(self.layers):
-            if layer.is_full_attention:
-                x_new = layer.forward(
-                    x,
-                    cos=bi["cos"],
-                    sin=bi["sin"],
-                    mode="prefill",
-                    page_table=bi["full_pt"],
-                    chunk_page_table=bi["chunk_pt"],
-                    chunk_start_idx=chunk_start,  # host int: sizes nothing here (fixed-width tables), flex SDPA uses csi
-                    chunk_start_idx_tensor=bi["csi"],
-                    valid_len=vlen,
-                )
-            else:
-                x_new = layer.forward(x, mode="prefill", chunk_size=self.args.gdn_chunk_size, valid_len=vlen)
-            ttnn.deallocate(x)
-            x = x_new
+            x = self._bucket_layer(layer, x, bi, chunk_start)
             layer_hook = self.__dict__.get("_dflash_layer_hook")  # DFlash: the drafter's context layers (in the trace)
             if layer_hook is not None:
                 layer_hook(bi, bucket, li, x)
         return x
+
+    def _bucket_embed(self, bi, bucket):
+        x = self.embd(bi["tok"])
+        x = ttnn.reshape(x, (1, 1, bucket, x.shape[-1]))
+        x = ttnn.to_memory_config(x, ttnn.DRAM_MEMORY_CONFIG)
+        return self._apply_vision_merge(x, length=bucket)
+
+    def _bucket_layer(self, layer, x, bi, chunk_start):
+        """One decoder layer over a segment's staged inputs; frees x, returns the layer output."""
+        vlen = bi["len"]
+        if layer.is_full_attention:
+            x_new = layer.forward(
+                x,
+                cos=bi["cos"],
+                sin=bi["sin"],
+                mode="prefill",
+                page_table=bi["full_pt"],
+                chunk_page_table=bi["chunk_pt"],
+                chunk_start_idx=chunk_start,  # host int: sizes nothing here (fixed-width tables), flex SDPA uses csi
+                chunk_start_idx_tensor=bi["csi"],
+                valid_len=vlen,
+            )
+        else:
+            x_new = layer.forward(x, mode="prefill", chunk_size=self.args.gdn_chunk_size, valid_len=vlen)
+        ttnn.deallocate(x)
+        return x_new
 
     def _set_vision_merge(self, ids_host, vision_tokens, vis_row_offset=0):
         """The base splice staging, with the packed image rows given as a HOST tensor [n, dim] (the serving adapter

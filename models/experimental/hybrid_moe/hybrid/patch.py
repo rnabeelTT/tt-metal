@@ -743,7 +743,13 @@ def install():
             if HYB.prefetch:
                 w = state_dict["gate.weight"].to(torch.bfloat16).contiguous()
                 HYB.gate_wT[layer_num] = w.view(torch.int16).numpy().view(np.uint16)
-        elif HYB.router_kind != "softmax":
+        elif HYB.router_kind == "softmax":
+            if HYB.prefetch:  # HYB_PREFETCH predicts by sigmoid(logit) + bias ranking: monotonic, so a zero bias gives
+                # the softmax top-k (Qwen3.5 / Ornith); sel_bias is read only on the sigmoid_bias paths otherwise
+                HYB.sel_bias[layer_num] = np.zeros(E, dtype=np.float32)
+                w = state_dict["gate.weight"].to(torch.bfloat16).contiguous()
+                HYB.gate_wT[layer_num] = w.view(torch.int16).numpy().view(np.uint16)
+        else:
             raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax or sigmoid_bias")
         if int(self.router_w.shape[-1]) != E:
             raise RuntimeError(f"router width {self.router_w.shape} != E {E}")

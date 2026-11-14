@@ -23,7 +23,7 @@ from safetensors import safe_open
 import ttnn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_int4_library import dequant  # noqa: E402
+from build_int4_library import dequant, scale_of  # noqa: E402
 
 TP, SIG_BITS = 4, 5
 
@@ -58,7 +58,8 @@ def main():
             return handles[sh].get_tensor(k)
 
         t = h(key)
-        return dequant(t, h(key + "_scale_inv")) if key + "_scale_inv" in wm else t.float()
+        sk = scale_of(key, wm)
+        return dequant(t, h(sk)) if sk is not None else t.float()
 
     def dump(path, full, dim):
         n = full.shape[dim] // TP

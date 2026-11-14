@@ -29,9 +29,21 @@ BLOCK = 128
 
 
 def dequant(w, s):
+    """FP8 [O, I] times its scale -> fp32: block scale_inv [O/128, I/128] (Qwen3.5 FP8) or per channel [O, 1]
+    (compressed-tensors, e.g. Ornith-1.5-397B-FP8)."""
     O, I = w.shape
+    if s.numel() == O and (s.dim() == 1 or s.shape[-1] == 1):
+        return w.float() * s.float().reshape(O, 1)
     sf = s.float().repeat_interleave(BLOCK, 0)[:O].repeat_interleave(BLOCK, 1)[:, :I]
     return w.float() * sf
+
+
+def scale_of(key, wm):
+    """The checkpoint key of a weight's FP8 scale (``_scale_inv`` block or ``_scale`` per-channel), or None."""
+    for sk in (key + "_scale_inv", key + "_scale"):
+        if sk in wm:
+            return sk
+    return None
 
 
 def quant_pack(w_out_in):
@@ -89,8 +101,8 @@ def main():
         if sh not in handles:
             handles[sh] = safe_open(os.path.join(snap, sh), framework="pt")
         t = handles[sh].get_tensor(key)
-        sk = key + "_scale_inv"
-        if sk in wm:
+        sk = scale_of(key, wm)
+        if sk is not None:
             sh2 = wm[sk]
             if sh2 not in handles:
                 handles[sh2] = safe_open(os.path.join(snap, sh2), framework="pt")
