@@ -5,7 +5,9 @@ times, then for each long-prompt size (characters of this repo's source, as serv
 long prompt, the same prompt resent (prefix-cache hit) and one short request (an elastic profile switches back). Prints
 one JSON line per request and a CARD row per kind: mean TTFT, prefill tok/s (prompt tokens / TTFT), decode tok/s
 (tokens after the first / time after the first) and E2EL.
-usage: python3 serve/card_bench.py --port 20000 [--runs 4] [--long 160000] [--long 300000] [--cycles 2]"""
+With --sampled the requests use MiniMax's recommended sampling (temperature 1.0, top-p 0.95, top-k 40; seed = request
+index) instead of greedy.
+usage: python3 serve/card_bench.py --port 20000 [--runs 4] [--long 160000] [--long 300000] [--cycles 2] [--sampled]"""
 
 import argparse
 import json
@@ -25,6 +27,7 @@ ap.add_argument("--runs", type=int, default=2)
 ap.add_argument("--long", type=int, action="append", default=[])
 ap.add_argument("--cycles", type=int, default=1)
 ap.add_argument("--max-tokens", type=int, default=128)
+ap.add_argument("--sampled", action="store_true")
 a = ap.parse_args()
 url = f"http://localhost:{a.port}/v1/chat/completions"
 model = json.load(urllib.request.urlopen(f"http://localhost:{a.port}/v1/models"))["data"][0]["id"]
@@ -32,8 +35,14 @@ files = sorted((here / "hybrid").glob("*.py")) + sorted(here.glob("*.py"))
 doc = "".join(p.read_text() for p in files)
 
 
+N_ASKED = [0]
+
+
 def ask(content):
     body = dict(model=model, messages=[{"role": "user", "content": content}], max_tokens=a.max_tokens, temperature=0)
+    if a.sampled:
+        body.update(temperature=1.0, top_p=0.95, top_k=40, seed=N_ASKED[0])
+    N_ASKED[0] += 1
     body.update(stream=True, stream_options={"include_usage": True})
     req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
     t0, ttft, usage = time.perf_counter(), None, None

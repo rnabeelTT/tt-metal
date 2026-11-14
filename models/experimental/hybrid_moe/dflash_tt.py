@@ -360,6 +360,59 @@ class DFlashDrafterTraced(DFlashDrafterTT):
         self.traces[name] = tid
 
 
+# Sampled requests read per-chunk top-k candidates of vocab-sharded logits, not the logits: each die's columns are padded
+# to a power of two and cut into CAND_CHUNKS chunks (<= 32768 wide, the multi-core top-k bound), top-CAND_K (<= 64) of
+# each. A chunk can hide part of a row's top-k only if all its CAND_K candidates are in it, so top-k <= CAND_K is always
+# exact (common tokens have low ids: with 32 per chunk the top 40 often filled die 0's first chunk). dflash_serve's
+# cand_probs still checks it per row and reads the row's logits otherwise (top-k > 64, or no top-k).
+CAND_K, CAND_CHUNKS = 64, 2
+
+
+def cands_body(logits):
+    """Device candidates of vocab-sharded TILE logits [1, 1, rows, V / tp]: [values, chunk-local ids], each
+    [1, 1, rows, CAND_CHUNKS * CAND_K] per die (read back by read_cands)."""
+    W = int(logits.shape[-1])
+    Wp = 1 << (W - 1).bit_length()
+    x = ttnn.pad(logits, [(0, 0), (0, 0), (0, 0), (0, Wp - W)], value=-3.0e38) if Wp != W else logits
+    chunks = ttnn.split(x, Wp // CAND_CHUNKS, dim=3)
+    if x is not logits:
+        ttnn.deallocate(x)
+    vs, ids = [], []
+    for c in chunks:
+        v, i = ttnn.topk(c, k=CAND_K, dim=-1)
+        vs.append(v)
+        ids.append(i)
+        ttnn.deallocate(c)
+    outs = [ttnn.concat(vs, dim=-1), ttnn.concat(ids, dim=-1)]  # two read-backs per pass
+    for t in vs + ids:
+        ttnn.deallocate(t)
+    return outs
+
+
+def read_cands(mesh, outs, per_die):
+    """(values [rows, n], global vocab ids [rows, n], per-chunk minima [rows, n_chunks]) from cands_body's outputs;
+    per_die = the LM head's columns per die."""
+    comp = ttnn.ConcatMeshToTensor(mesh, dim=0)
+    nd = len(mesh.get_device_ids())
+    C, K = CAND_CHUNKS, CAND_K
+    chunk = (1 << (per_die - 1).bit_length()) // C
+    v = ttnn.to_torch(outs[0], mesh_composer=comp).float().reshape(nd, -1, C, K)  # [nd, rows, chunks, K]
+    i = ttnn.to_torch(outs[1], mesh_composer=comp).long().reshape(nd, -1, C, K)
+    i = i + torch.arange(C).view(1, 1, C, 1) * chunk
+    v = torch.where(i < per_die, v, torch.full_like(v, float("-inf")))  # the pad columns
+    i = i + torch.arange(nd).view(nd, 1, 1, 1) * per_die
+    rows = v.shape[1]
+    v = v.permute(1, 0, 2, 3).reshape(rows, nd * C, K)
+    i = i.permute(1, 0, 2, 3).reshape(rows, nd * C, K)
+    return v.reshape(rows, -1), i.reshape(rows, -1), v.min(dim=-1).values
+
+
+def read_logits(mesh, logits, rows, vocab):
+    """Host FP32 logits [rows, vocab] of vocab-sharded device logits."""
+    lg = ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float()
+    return lg.reshape(-1, lg.shape[-1])[:rows, :vocab]
+
+
 def argmax_max(logits):
     """Per-die argmax and max of vocab-sharded logits [1, 1, rows, V / tp] (read back by read_argmax)."""
     lg = ttnn.to_layout(logits, ttnn.ROW_MAJOR_LAYOUT)
@@ -594,7 +647,21 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
             x = ttnn.add(x, self._reduce(self._mm(self._mlp(h2), L["down"])))
         h = self._rms(x, self.norm)
         logits = ttnn.linear(h, self.lm_head, memory_config=DRAM)
+        self.logits = logits  # a trace output: sampled requests take candidates of it (run_cands)
         return argmax_max(logits)
+
+    def run_cands(self):
+        """Candidates of the last pass's logits (the "cands" trace when captured; eager otherwise)."""
+        if "cands" in self.traces:
+            ttnn.execute_trace(self.mesh, self.traces["cands"], cq_id=0, blocking=False)
+            outs = self.outs["cands"]
+        else:
+            outs = cands_body(self.logits)
+        got = read_cands(self.mesh, outs, int(ttnn.get_device_tensors(self.lm_head)[0].shape[-1]))
+        if "cands" not in self.traces:
+            for t in outs:
+                ttnn.deallocate(t)
+        return got
 
     def fill_prompt(self, feats, start=0):
         """Eager: context features [n, n_taps * H] (host) of the tokens at positions start .. start + n - 1 -> every

@@ -483,11 +483,12 @@ def test_prepare_wrapper_restores_output_width(applied):
 
 def test_scheduler_reserves_lookahead_for_the_verify_window(applied):
     scheduler = _scheduler(block_size=16)
-    assert scheduler.num_lookahead_tokens == K
-    request = _request(max_tokens=64, prompt_len=30)
+    # the step runs up to one step (K + 1 tokens) ahead of the scheduler and verifies K + 1 positions from there
+    assert scheduler.num_lookahead_tokens == 2 * K + 1
+    request = _request(max_tokens=64, prompt_len=28)
     scheduler.add_request(request)
     scheduler.schedule()
-    # 30 prompt tokens + K lookahead = 33 slots -> 3 blocks of 16 (2 without lookahead).
+    # 28 prompt tokens + 2K + 1 lookahead = 35 slots -> 3 blocks of 16 (2 with only K lookahead: 31 slots).
     assert len(scheduler.kv_cache_manager.get_block_ids(request.request_id)[0]) == 3
 
 
