@@ -275,7 +275,8 @@ class Verify:
 class DFlashServing:
     """Single-user DFlash step with MtpServing's single-user interface (generator_vllm drives it as its `_mtp`)."""
 
-    adaptive = multi = per_slot = in_trace = False
+    adaptive = multi = per_slot = in_trace = in_phase = False
+    head = None  # no MTP head (the Qwen3.5 port's generator_vllm reads it)
 
     def __init__(self, gen, k: int = 3, drafter=None):
         self.gen, self.k, self.R = gen, int(k), int(k) + 1

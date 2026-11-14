@@ -177,6 +177,27 @@ if _DFLASH_BS > 0:
     mtp_plugin_shim.apply(_DFLASH_BS)
 
 
+def _ext_spec_env():
+    """QWEN35_EXT_SPEC="module:factory" + QWEN35_EXT_SPEC_K=k: an external single-user speculative step (the
+    hybrid-MoE DFlash, models/experimental/hybrid_moe/dflash_serve.py) driven through MtpServing's single-user
+    interface; `factory(generator, k)` builds it (as on the M2.7 port). Returns (spec, k) or (None, 0)."""
+    spec = os.environ.get("QWEN35_EXT_SPEC", "")
+    if not spec:
+        return None, 0
+    k = int(os.environ.get("QWEN35_EXT_SPEC_K", "0"))
+    if ":" not in spec or k < 1:
+        raise ValueError(f"QWEN35_EXT_SPEC={spec!r} QWEN35_EXT_SPEC_K={k}: expected 'module:factory' and k >= 1")
+    assert _MTP_K == 0 and _DFLASH_BS == 0, "QWEN35_EXT_SPEC excludes QWEN35_MTP and QWEN35_DFLASH"
+    return spec, k
+
+
+_EXT_SPEC, _EXT_SPEC_K = _ext_spec_env()
+if _EXT_SPEC_K > 0:
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(_EXT_SPEC_K + 1)
+
+
 # QWEN35_VISION=1: serve image content parts (the checkpoint's ViT on the mesh through tt/vision.py; images are spliced
 # into the prompt embedding inside the traced prefill buckets, M-RoPE per request, per-slot decode deltas). Off: text
 # only (the processor advertises no image / video support, so vLLM rejects multimodal requests at the frontend).
@@ -194,7 +215,10 @@ _PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048"))  # the 
 _PREFIX_DEVICES = {"P150": 1, "N150": 1, "P100": 1, "P300": 2, "P150X2": 2}.get(
     os.environ.get("MESH_DEVICE", "P300x2").strip().upper(), 4
 )
-_PREFIX_STATE_SLOTS = int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if _MTP_K == 0 else 0
+# not wired with a speculative step (MTP, or the external spec whose GDN state lives in its verify snapshots)
+_PREFIX_STATE_SLOTS = (
+    int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if (_MTP_K == 0 and _EXT_SPEC_K == 0) else 0
+)
 _PREFIX_STATE_MIN = int(os.environ.get("QWEN35_PREFIX_STATE_MIN", "1024"))
 # QWEN35_PREFIX_STATE_PROMPT_END=1 also snapshots each prompt's last block boundary: hits reach the end of the previous
 # turn, but every cold prompt pays one more prefill pass (+57..133 ms on Ornith p300x2) and its segment split (numerics)
@@ -272,6 +296,7 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         "mm_prompts_whole": True,
         **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
         **({"max_output_tokens_per_step": _DFLASH_BS} if _DFLASH_BS > 0 else {}),
+        **({"max_output_tokens_per_step": _EXT_SPEC_K + 1} if _EXT_SPEC_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
     # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
@@ -338,6 +363,14 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_serving import DFlashServing
 
             self._mtp = DFlashServing(self._gen, _DFLASH_BS)
+        elif _EXT_SPEC is not None:
+            if B != 1:
+                raise ValueError(f"QWEN35_EXT_SPEC={_EXT_SPEC}: a single-user step needs --max-num-seqs 1 (got {B})")
+            import importlib
+
+            mod, fn = _EXT_SPEC.split(":")
+            self._mtp = getattr(importlib.import_module(mod), fn)(self._gen, _EXT_SPEC_K)
+            logger.info(f"external speculative step {_EXT_SPEC} (k={_EXT_SPEC_K}): {type(self._mtp).__name__}")
         if os.environ.get("QWEN35_FAULTHANDLER", "1") == "1":
             # `kill -USR1 <EngineCore pid>` dumps every thread's Python stack to the engine's stderr (the readiness
             # runner's server.log): the only introspection available for a host-side stall under vLLM (no ptrace).
