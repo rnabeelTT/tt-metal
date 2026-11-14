@@ -127,6 +127,39 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- ROUND 7 (2026-11-14, after the HF package v1 raahemnabeel/minimax-m2.7-hybrid-qb2), all served 128K elastic:
+  - Shared-KV rows SDPA on by default (QWEN35_ROWS_SDPA_SHARED_FROM=4096; package env too). Bug fixed: the capture
+    picked the variant from the previous request's position (end_prefill captured before setting _pos) and the
+    shared variant was never compiled before capture (TT_FATAL on a long request after a long one). Now
+    _capture(pos) + _warm_verify (both variants at startup and after every switch). Quality, 4.6K forced text vs the
+    BF16 reference (runs/m27/lp46_*, ref46): top-1 0.9126 both, KL 0.0829 shared vs 0.0925 stock; 8K x3 no errors,
+    52.4 -> 55.0 tok/s (fb46_*). Served: 45K decode 31.0 (card) -> 39-41 tok/s, 85.6K 34-39 tok/s.
+  - Elastic demotion gathers the hybrid experts from the full layer's tensors on the device (wcache.gather,
+    HYB_ELASTIC_GATHER=1): every gathered layer byte-identical to its hybrid image (HYB_GATHER_CHECK=1, 18 layers);
+    needs no hybrid image (the first-switch conversion is gone for demotions).
+  - KV resize: one device-made zero block per resize (device_zeros: bf16 fill + typecast, ttnn.zeros bfp8 is built on
+    the host, bench_kv_alloc.py 48 vs 13 ms), cloned / concatenated per layer. Slicing the old pool on shrink and a
+    per-tensor temporary fragmented DRAM (OOM on the next 85K switch, largest free block 27 of 80 MB): not kept.
+  - Result (image path -> now): 45K switch 5.0 -> ~2.8 s, TTFT 23.5 -> 21.4 s; back to short 6-7 -> ~3.2 s (next
+    short TTFT 7.1 -> 3.9 s); 85.6K switch 21.5 -> 8.2 s, TTFT 64.5 -> 49.5 s, back 13 -> 9 s.
+  - Prefill (runs/m27/pf_host, pf_async): host planning is 2-6% of prefill; the main-thread expert copies (~1 s,
+    13.8 GB per prefill) already overlap the device - the background-writer prefetch was 2-10% slower (not kept).
+    Segment pipelining (route on CQ1 while the next segment's attention runs) is worth <=6-8% and collides with the
+    CQ1 staging copies: not done.
+  - Robustness (found serving the package through repeated switches): the elastic pool leaves ~80 MB per DRAM bank at
+    85K (the pool grows ~2 MB/bank per demoted layer faster than the layer frees), so the sorted MoE's per-call 4096-row
+    dispatch buffers (~35 MB contiguous per bank) and a gather's transient (~90 MB/bank) could OOM after a few switches.
+    Prefill now runs 2048-token segments when the pool is past 64K and the largest free block is < 72 MB/bank
+    (QWEN35_PREFILL_TIGHT_FROM / _MB; logits identical, ~20% slower prefill when engaged), and gather() falls back to
+    the image path when the DRAM has no room. Stress (package, 45K x3 + 85K x3 switch cycles): no OOM.
+  - Package v1.4 pushed to raahemnabeel/minimax-m2.7-hybrid-qb2 (rev f43ec00854cf; card rows measured with the package's
+    launch command, serve/card_bench.py). Packaging gotcha: hybrid/hostk/libhostk.so and hybrid/pin/pinx.so are
+    git-ignored build outputs; a fresh worktree must get them copied in before `tt-model package`, or the overlay fails
+    to install (the server then converts the full model and cannot fit). Seed the package weight cache by hard-linking
+    ~/.cache/hybrid-moe/wcache_m27 into ~/.cache/tt-model/minimax-m2.7-hybrid-qb2/weights/wcache_m27.
+  - Ops: the node's k8s telemetry (tt_telemetry_server / collector, tt-fabric-manager-agent) made device opens hang
+    in UMD "Starting devices"; cache/telemetry_guard.sh freezes them (SIGSTOP, user-approved). cache/watchdog.sh kills
+    and resets a device job whose log and CPU (< 2 s per 5 min) stall.
 - DEMO BUILD v1.3 (tag m27-poc-v1.3): + fetch slack controller by default in serving (HYB_FETCH_POLICY=auto: the
   per-pass fetch budget moved by measured pass time; fb_auto: short / 8K = fixed 15% / 2; el_long_auto: 40K context 3%
   faster per pass with ~27 vs 39 host experts / pass). Served: 8-prompt bench 60.1 tok/s, TTFT 0.63 s; 45K prompt

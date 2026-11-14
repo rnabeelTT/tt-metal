@@ -40,6 +40,9 @@ from . import hostmem
 class Elastic:
     def __init__(self, hyb, gen, srv, demote):
         self.hyb, self.gen, self.srv = hyb, gen, srv
+        # HYB_ELASTIC_GATHER (default 1; 0 = the image cache): a demoted layer's hybrid experts are gathered from its full tensors on the
+        # device (wcache.gather) instead of written from the image cache
+        self.gather = os.environ.get("HYB_ELASTIC_GATHER", "1") == "1"
         # demotion order: HYB_ELASTIC_DEMOTE as written (least valuable full layer first); a set falls back to sorted
         env = [int(v) for v in os.environ.get("HYB_ELASTIC_DEMOTE", "").split(",") if v.strip()]
         self.D = env if env and set(env) == {int(L) for L in demote} else sorted(int(L) for L in demote)
@@ -204,6 +207,11 @@ class Elastic:
         sd = root.layer(L) if hasattr(root, "layer") else root
         old = layer.feed_forward
         layer.feed_forward = None
+        wc = getattr(hyb, "wcache", None)
+        if hybrid and self.gather and wc is not None and getattr(old, "up_gate", None) is not None:
+            # demotion: the hybrid build gathers its slots from these full tensors on the device (wcache.gather)
+            wc.gather_src[L] = (old.up_gate, old.down)
+            old.up_gate = old.down = None
         for name in ("up_gate", "down"):
             t = getattr(old, name, None)
             if t is not None:
@@ -223,6 +231,9 @@ class Elastic:
         gc.collect()
         a = time.perf_counter()
         layer.feed_forward = layer._build_feed_forward(mesh, args, sd, L, cache, tt_ccl)
+        left = wc.gather_src.pop(L, None) if wc is not None else None
+        for t in left or ():  # the build took another path than the image hook: the kept full tensors go now
+            ttnn.deallocate(t)
         b = time.perf_counter()
         if hybrid:
             fl = getattr(layer.feed_forward, "_fetch_load", None)

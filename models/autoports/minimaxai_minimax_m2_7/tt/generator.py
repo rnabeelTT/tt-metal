@@ -39,6 +39,7 @@ except ImportError:  # the serving container ships without the bring-up runtime:
 import ttnn
 from models.autoports.minimaxai_minimax_m2_7.tt.model import create_model
 from models.common.sampling.sampling_params import SamplingParams
+from models.demos.blackhole.qwen36.tt.model import device_zeros
 from models.tt_transformers.tt.generator import Generator as TTGenerator
 
 BLOCK_SIZE = 64
@@ -407,19 +408,20 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 )
             extra = num_blocks - int(self.kv_cache_shape[0])
             new = []
+            zeros = {}  # one zero block per dtype, shared by every layer's concat
             for k_old, v_old in old:
                 pair = []
                 for t in (k_old, v_old):
                     if extra:
-                        z = ttnn.zeros(
-                            (extra,) + shape[1:], dtype=t.dtype, layout=ttnn.TILE_LAYOUT, device=self.model.mesh_device
-                        )
-                        g = ttnn.concat([t, z], dim=0, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                        ttnn.deallocate(z)
+                        if t.dtype not in zeros:
+                            zeros[t.dtype] = device_zeros((extra,) + shape[1:], t.dtype, self.model.mesh_device)
+                        g = ttnn.concat([t, zeros[t.dtype]], dim=0, memory_config=ttnn.DRAM_MEMORY_CONFIG)
                         ttnn.deallocate(t)
                         t = g
                     pair.append(t)
                 new.append(pair)
+            for z in zeros.values():
+                ttnn.deallocate(z)
             self.model.set_paged_kv_caches(new)
             self.kv_cache = new
         else:
@@ -746,7 +748,28 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         GDN/KV state forward through ``chunk_start``; the tail runs at the smallest bucket >= its length. Returns host
         logits ``[1, 1, vocab]`` after the last real token; with ``want_sharded`` the pair ``(host logits, device
         vocab-sharded logits [1,1,32,vocab/TP] of the last segment)`` for on-device sampling (row 0)."""
-        segment = segment or int(getattr(self.model, "PREFILL_SEGMENT", 2048))
+        G = int(getattr(self, "prefill_group_size", 1))
+        if segment is None:
+            segment = int(getattr(self.model, "PREFILL_SEGMENT", 2048))
+            # QWEN35_PREFILL_TIGHT_FROM (default 65536; 0 = off): a KV pool past this many tokens leaves little DRAM
+            # headroom (the elastic pool grows ~2 MB per bank faster than a demoted layer frees), and the MoE's
+            # per-call dispatch buffers of a 4096-token segment need ~35 MB contiguous per bank. When the largest free
+            # DRAM block is below QWEN35_PREFILL_TIGHT_MB (default 72 MB per bank: two such buffers), the prefill runs in
+            # 2048-token segments (half the transient; logits identical, runs/m27/pf_tight; ~20% slower) in groups twice
+            # as long (the same tokens per group)
+            tight = int(os.environ.get("QWEN35_PREFILL_TIGHT_FROM", "65536") or 0)
+            if tight and segment > 2048 and int(getattr(self, "kv_tokens", 0) or 0) > tight:
+                need = int(os.environ.get("QWEN35_PREFILL_TIGHT_MB", "72")) << 20
+                free = int(
+                    ttnn.get_memory_view(self.mesh_device, ttnn.BufferType.DRAM).largest_contiguous_bytes_free_per_bank
+                )
+                if free < need:
+                    logger.info(
+                        f"prefill: largest free DRAM block {free >> 20} MB per bank < {need >> 20} MB (KV pool "
+                        f"{self.kv_tokens} tokens): 2048-token segments"
+                    )
+                    G = G * (segment // 2048)
+                    segment = 2048
         T = tokens.shape[1]
         # `start` (chunked prefill continuation): ``tokens`` are positions start .. start+T-1 of the request; the GDN
         # state is reset by the bucket only at chunk_start 0, so a continuation runs on the state restored by the caller
@@ -767,7 +790,6 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             vkw = {"rope_staged": True}
         logits, sh = None, None
         starts = list(range(start, start + T, segment))
-        G = int(getattr(self, "prefill_group_size", 1))
         if G > 1 and len(starts) > 1 and vision_tokens is None and hasattr(self.model, "prefill_group"):
             # layer-major over groups of G segments (model.prefill_group); only the last group's logits are read
             for g0 in range(0, len(starts), G):

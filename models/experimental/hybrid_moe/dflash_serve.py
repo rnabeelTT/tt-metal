@@ -174,6 +174,12 @@ class Verify:
         self.trace = tid
 
 
+def _rows_sdpa_shared_from():
+    """QWEN35_ROWS_SDPA_SHARED_FROM: the context position from which the verify uses the shared-KV rows SDPA (default
+    4096; 0 = never)."""
+    return int(os.environ.get("QWEN35_ROWS_SDPA_SHARED_FROM", "4096") or 0)
+
+
 class DFlashServing:
     """Single-user DFlash step with MtpServing's single-user interface (generator_vllm drives it as its `_mtp`)."""
 
@@ -218,8 +224,7 @@ class DFlashServing:
             HYB.elastic = Elastic(HYB, self.gen, self, HYB.elastic_demote)
         # positions far from any real prompt's rows, on the warm-up page table (blocks the warm-up owns)
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), self.gen.page_table[0])
-        self.ver.run()
-        self.ver.run()
+        self._warm_verify()
         self.dr.reset()
         self.dr.stage_pass([], 0)
         self.dr.run("pass", self.dr.pass_body)
@@ -243,9 +248,22 @@ class DFlashServing:
         self.ver = Verify(self.gen, self.dr, self.R)  # the page table's width follows the pool
         row = torch.full_like(self.gen.page_table[0], int(self.gen.kv_scratch_block))
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), row)
-        self.ver.run()
-        self.ver.run()
+        self._warm_verify()
         ttnn.synchronize_device(self.mesh)
+
+    def _warm_verify(self):
+        """Two eager verify passes per SDPA variant a capture can pick (_set_rows_sdpa): every program compiled before
+        any trace capture (the shared-KV op's programs depend on shapes only, not on the positions)."""
+        for shared in (False, True) if _rows_sdpa_shared_from() else (False,):
+            self._set_rows_sdpa(shared)
+            self.ver.run()
+            self.ver.run()
+        self._set_rows_sdpa(False)
+
+    def _set_rows_sdpa(self, shared):
+        for layer in self.model.layers:
+            if hasattr(layer.attention, "paged_k"):
+                layer.attention.rows_sdpa_shared = shared
 
     def warm_prefill_path(self):
         pass  # the served prefill is the generator's eager path (warmed by its own _warm_prefill)
@@ -407,23 +425,21 @@ class DFlashServing:
         self.n_hist = self.hist[0].shape[0]
         self._ctx_ids = self._ids  # the context's ids; the last n_hist have their features in hist
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
-        self._capture()
+        self._capture(P)
         self._pos, self._tok, self._prev_acc = P, int(tok0), []
         self._warned_sampling = False
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
 
-    def _capture(self):
+    def _capture(self, pos):
+        """Capture the drafter and verify traces for decoding from context position `pos`. Traces whose context reaches
+        QWEN35_ROWS_SDPA_SHARED_FROM run the verify's SDPA through the shared-KV rows op (attn_decode/rows_sdpa.py: each
+        K / V chunk read once for all rows; 40K context ~20% faster per token); shorter ones keep the stock decode
+        (cheaper below ~2K positions). Both variants are compiled by _warm_verify."""
         ttnn.synchronize_device(self.mesh)
-        # QWEN35_ROWS_SDPA_SHARED_FROM (default 4096; 0 = off): requests whose context reaches it run the verify's SDPA
-        # through the shared-KV rows op (attn_decode/rows_sdpa.py: each K / V chunk read once for all rows; 40K
-        # context ~20% faster per token); shorter ones keep the stock decode (cheaper below ~2K positions)
-        thr = int(os.environ.get("QWEN35_ROWS_SDPA_SHARED_FROM", "4096") or 0)
-        shared = bool(thr) and int(self._pos or 0) >= thr
-        for layer in self.model.layers:
-            if hasattr(layer.attention, "paged_k"):
-                layer.attention.rows_sdpa_shared = shared
+        thr = _rows_sdpa_shared_from()
+        self._set_rows_sdpa(bool(thr) and int(pos) >= thr)
         self.dr.capture("pass", self.dr.pass_body)
         self.ver.capture()
         ttnn.synchronize_device(self.mesh)
@@ -451,7 +467,7 @@ class DFlashServing:
             HYB.elastic.grow_now(self._pos + self.R + 1)
             if page_table_row is None:  # the runner's row is the generator's table (the plugin passes it every step)
                 self._row = self.gen.page_table[0].clone()
-            self._capture()
+            self._capture(self._pos)
         if page_table_row is not None and HYB.elastic is not None and HYB.elastic.bmap is not None:
             self._row, _ = HYB.elastic.map_row(self._row, self._pos + self.R + 1)  # serving: vLLM ids -> pool blocks
         dr, ver, K, R, W = self.dr, self.ver, self.k, self.R, self.window
@@ -462,7 +478,7 @@ class DFlashServing:
             self.n_hist = self.hist[0].shape[0]
             dr.fill_prompt(self.hist[0], start=p - self.n_hist)
             self._prev_acc = []
-            self._capture()
+            self._capture(p)
             self.stats["refills"] += 1
         s0 = time.perf_counter()
         dr.stage_pass(self._prev_acc, t)  # the previous verify's accepted rows (c_taps[R] filled by the verify)
@@ -570,6 +586,7 @@ class DFlashServing:
                 {
                     "prompt": text[:80],
                     "ids": out[:n_new],
+                    "prompt_ids": list(ids),  # the templated prompt (a reference model can teacher-force the same text)
                     "tgt_lp": torch.cat([x[0] for x in self._lp]),
                     "top_ids": torch.cat([x[1] for x in self._lp]),
                     "top_lp": torch.cat([x[2] for x in self._lp]),
