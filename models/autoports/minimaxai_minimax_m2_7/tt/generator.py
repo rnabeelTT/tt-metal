@@ -39,6 +39,7 @@ except ImportError:  # the serving container ships without the bring-up runtime:
 import ttnn
 from models.autoports.minimaxai_minimax_m2_7.tt.model import create_model
 from models.common.sampling.sampling_params import SamplingParams
+from models.demos.blackhole.qwen36.tt.model import device_zeros
 from models.tt_transformers.tt.generator import Generator as TTGenerator
 
 BLOCK_SIZE = 64
@@ -407,19 +408,20 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                 )
             extra = num_blocks - int(self.kv_cache_shape[0])
             new = []
+            zeros = {}  # one zero block per dtype, shared by every layer's concat
             for k_old, v_old in old:
                 pair = []
                 for t in (k_old, v_old):
                     if extra:
-                        z = ttnn.zeros(
-                            (extra,) + shape[1:], dtype=t.dtype, layout=ttnn.TILE_LAYOUT, device=self.model.mesh_device
-                        )
-                        g = ttnn.concat([t, z], dim=0, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                        ttnn.deallocate(z)
+                        if t.dtype not in zeros:
+                            zeros[t.dtype] = device_zeros((extra,) + shape[1:], t.dtype, self.model.mesh_device)
+                        g = ttnn.concat([t, zeros[t.dtype]], dim=0, memory_config=ttnn.DRAM_MEMORY_CONFIG)
                         ttnn.deallocate(t)
                         t = g
                     pair.append(t)
                 new.append(pair)
+            for z in zeros.values():
+                ttnn.deallocate(z)
             self.model.set_paged_kv_caches(new)
             self.kv_cache = new
         else:
