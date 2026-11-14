@@ -672,8 +672,17 @@ def _log_stats(replays):
     HYB._log_prev = dict(st)
 
 
+def _finalize_fetch_once():
+    """The host libraries resident, then the pinned fetch library (DFlashServing.warm's sequence), for plain decode."""
+    for L in sorted(HYB.slot_of):
+        HYB.lib_layer(L)
+    HYB.fetch.finalize(HYB.loader, HYB.stream)
+
+
 def install():
     from . import hostmem
+
+    HYB.fetch._lazy_finalize = _finalize_fetch_once
 
     # before anything loads: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
     hostmem.check_startup(

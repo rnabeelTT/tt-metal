@@ -705,6 +705,10 @@ class FetchCache:
         """The fetched experts into the staging buffers and their slots into the page table (host -> device copies on
         CQ0, ahead of the segment that runs device_writes)."""
         t0 = time.perf_counter()
+        if self.direct and layer not in self.wdst and getattr(self, "_lazy_finalize", None) is not None:
+            # plain decode (no DFlash warm-up to pin the library first): pin on the first fetch, in the eager warm-up
+            f, self._lazy_finalize = self._lazy_finalize, None
+            f()
         if self.direct:
             if layer not in self.wdst:
                 raise RuntimeError(f"layer {layer}: direct fetch before finalize() (no pinned weight destinations)")
