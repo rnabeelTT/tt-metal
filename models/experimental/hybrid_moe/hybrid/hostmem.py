@@ -5,7 +5,8 @@
 A hybrid layer keeps two host copies of its missable experts: the int4 library rows (HYB_LIB, resident for the CPU
 kernel) and the device-format copies (HYB_DEV_EXPERTS, pinned for PCIe fetch / streaming). Their sizes are read from the
 files themselves, so the estimate follows the library, not a constant. On top: BASE_GIB for everything else (vLLM API
-server, engine process, host embedding table, drafter, staging slots; measured 10.3 GB on MiniMax-M2.7, 32K profile).
+server, engine process, host embedding table, drafter, staging slots; measured 10.3 GB on MiniMax-M2.7, 32K profile;
+13 GiB keeps a margin now that only the missable rows of the library are counted).
 
 needed(layers) = BASE_GIB + sum over hybrid layers of (int4 file + device-format files)
 
@@ -22,7 +23,7 @@ import os
 import sys
 
 GIB = 1 << 30
-BASE_GIB = float(os.environ.get("HYB_RAM_BASE_GIB", "11"))
+BASE_GIB = float(os.environ.get("HYB_RAM_BASE_GIB", "13"))
 _sizes = None
 
 
@@ -43,21 +44,59 @@ def available():
     return avail
 
 
+def _num_experts():
+    """Routed experts per layer from HF_MODEL's config (num_experts / num_local_experts / n_routed_experts), or None."""
+    try:
+        import json
+
+        from . import hfpath
+
+        c = json.load(open(os.path.join(hfpath.snapshot(os.environ["HF_MODEL"]), "config.json")))
+        c = c.get("text_config", c)
+        for k in ("num_experts", "num_local_experts", "n_routed_experts"):
+            if c.get(k):
+                return int(c[k])
+    except Exception:  # noqa: BLE001 - the estimate falls back to the whole library
+        pass
+    return None
+
+
 def layer_bytes(lib_dir, dev_dir):
-    """{layer: host bytes of its missable-expert copies} from the library files (cached)."""
+    """{layer: host bytes the server keeps for that layer's missable experts when it is hybrid} (cached):
+    missable = E - (HYB_SLOTS - 1 - HYB_LRU) per layer (static slots; the fused path's sink and the LRU slots hold no
+    static expert), capped at the library's experts; int4 copies counted when resident (HYB_LIB_RESIDENT, default 1:
+    =0 serves them from the page cache), device-format copies up to HYB_PIN_TOP per layer (0 = all)."""
     global _sizes
     if _sizes is None:
-        sizes = {}
+        lib, dev, n_dev = {}, {}, {}
         if lib_dir and os.path.isdir(lib_dir):
             for e in os.scandir(lib_dir):
                 if e.name.startswith("layer_") and e.name.endswith(".pt"):
                     L = int(e.name[len("layer_") : -len(".pt")])
-                    sizes[L] = sizes.get(L, 0) + e.stat().st_size
+                    lib[L] = lib.get(L, 0) + e.stat().st_size
         if dev_dir and os.path.isdir(dev_dir):
             for e in os.scandir(dev_dir):  # <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin
                 head = e.name.split("_", 1)[0]
                 if head.isdigit() and e.name.endswith(".tensorbin"):
-                    sizes[int(head)] = sizes.get(int(head), 0) + e.stat().st_size
+                    L = int(head)
+                    dev[L] = dev.get(L, 0) + e.stat().st_size
+                    n_dev[L] = n_dev.get(L, 0) + e.name.endswith("_gu.tensorbin")
+        E, C = _num_experts(), int(os.environ.get("HYB_SLOTS", "0") or 0)
+        lru = int(os.environ.get("HYB_LRU", "0") or 0)
+        pin_top = int(os.environ.get("HYB_PIN_TOP", "0") or 0)
+        resident = os.environ.get("HYB_LIB_RESIDENT", "1") == "1"
+        sizes = {}
+        for L in set(lib) | set(dev):
+            n_lib = n_dev.get(L, 0)  # the library and the device copies hold the same experts (one plan, one S)
+            cold = n_lib
+            if E and C and n_lib:
+                cold = min(n_lib, max(0, E - (C - 1 - lru)))
+            b = 0
+            if resident and L in lib:
+                b += lib[L] * cold // n_lib if n_lib else lib[L]
+            if L in dev and n_lib:
+                b += dev[L] * (min(cold, pin_top) if pin_top else cold) // n_lib
+            sizes[L] = b
         _sizes = sizes
     return _sizes
 

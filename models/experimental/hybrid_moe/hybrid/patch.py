@@ -772,8 +772,17 @@ def install():
                 HYB.fetch.init_layer(self)
             if HYB.stream.on:
                 HYB.stream.init(self)
-            missable = np.flatnonzero(HYB.slot_of[layer_num] < 0).tolist()
-            self._fetch_load = HYB.loader.submit(HYB.fetch.load_host, layer_num, missable)
+            missable = np.flatnonzero(HYB.slot_of[layer_num] < 0)
+            # HYB_PIN_TOP=N (0 = all): pin the device-format copies of only the N most-routed missable experts per layer
+            # (plan order); the rest are never fetched / streamed (fetch.has_expert), only computed on the host. Bounds
+            # the pinned host RAM for models whose missable set does not fit (Ornith-1.5-397B: ~117 GB for all).
+            pin_top = int(os.environ.get("HYB_PIN_TOP", "0") or 0)
+            if pin_top and len(missable) > pin_top:
+                f = HYB._freq
+                if f is not None and layer_num < f.shape[0]:
+                    missable = missable[np.argsort(-f[layer_num][missable], kind="stable")]
+                missable = np.sort(missable[:pin_top])
+            self._fetch_load = HYB.loader.submit(HYB.fetch.load_host, layer_num, missable.tolist())
         if HYB.D and HYB.C < E:
             D, tp, H, N, Nl = HYB.D, self.num_devices, self.hidden, self.inter, self.inter_local
             rep = ttnn.ReplicateTensorToMesh(mesh_device)
