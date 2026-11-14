@@ -39,6 +39,10 @@ class DFlashDrafterTT:
         self.cfg = Qwen3Config.from_pretrained(snapshot)
         raw = json.load(open(os.path.join(snapshot, "config.json")))
         self.bs = int(raw.get("block_size") or raw["dflash_config"]["block_size"])  # top level (M2.7) or dflash_config
+        # DFLASH_BLOCK: run with a smaller block than trained (the 122B DFlash: block 8 measured better than its 16); the
+        # per-row K / V shards span one core row, so the block must fit the grid's width (Ornith-1.5-397B: 16 > 11)
+        if os.environ.get("DFLASH_BLOCK"):
+            self.bs = min(self.bs, int(os.environ["DFLASH_BLOCK"]))
         self.mask_id = int(raw["dflash_config"]["mask_token_id"])
         self.taps = [int(t) for t in raw["dflash_config"]["target_layer_ids"]]
         self.NH, self.NKV, self.HD = self.cfg.num_attention_heads, self.cfg.num_key_value_heads, self.cfg.head_dim

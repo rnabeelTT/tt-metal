@@ -111,6 +111,7 @@ serve:
     QWEN35_EXT_SPEC: dflash_serve:build
     QWEN35_EXT_SPEC_K: "3"
     DFLASH_TP: "1"
+    DFLASH_BLOCK: "8"          # the drafter trained at 16; 16 rows exceed the K / V shard row (11 cores)
     DFLASH_WINDOW: "256"
     DFLASH_WARMUP: "384"
 
