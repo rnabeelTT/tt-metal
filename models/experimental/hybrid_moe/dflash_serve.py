@@ -165,10 +165,11 @@ class Verify:
         """Host FP32 log-probs [rows, vocab] of the last run."""
         return torch.log_softmax(self.read_logits_raw(rows, vocab), dim=-1)
 
-    def run_cands(self):
-        """Candidates (dflash_tt.read_cands) of the last run's logits."""
+    def run_cands(self, queued=False):
+        """Candidates (dflash_tt.read_cands) of the last run's logits (queued: run(cands=True) already queued them)."""
         if self.cand_trace is not None:
-            ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
+            if not queued:
+                ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
             outs = self.cand_outs
         else:
             outs = cands_body(self.logits)
@@ -178,11 +179,15 @@ class Verify:
                 ttnn.deallocate(t)
         return got
 
-    def run(self):
+    def run(self, cands=False):
+        """The verify pass; returns the per-row argmax. cands: also queue the candidates trace right behind it (read by
+        run_cands(queued=True)), so it runs while the host waits for the argmax."""
         HYB.fetch.commit(HYB.slot_of)  # async fetch: last pass's CQ1 writes land before this pass reads the slots
         if self.trace is not None:
             ttnn.execute_trace(self.mesh, self.trace, cq_id=0, blocking=False)
             outs = self.outs
+            if cands and self.cand_trace is not None:
+                ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
         else:
             outs = self.body()
         return read_argmax(self.mesh, outs, int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1]))
@@ -590,14 +595,16 @@ class DFlashServing:
         s0 = time.perf_counter()
         dr.stage_pass(self._prev_acc, t)  # the previous verify's accepted rows (c_taps[R] filled by the verify)
         s1 = time.perf_counter()
-        drafts = dr.run("pass", None)[1 : 1 + K]
+        sampled = smp is not None and self._force is None and _SAMPLED_DRAFTS
+        drafts = dr.run("pass", None, then="cands" if sampled else None)[1 : 1 + K]
         qs = None
-        if smp is not None and self._force is None and _SAMPLED_DRAFTS:
+        if sampled:
             # sampled drafts: d_j ~ q_j, the drafter's block row j processed like the target (the block drafter's
             # rows do not depend on each other's tokens, so q_j is the proposal for position j whatever was drafted
             # before it); accepted with min(1, p / q) (SpecSampler.accept): Σ min(p, q) per position instead of p(argmax)
             c0 = time.perf_counter()
-            dc = dr.run_cands()
+            dc = dr.run_cands(queued=True)
+            self.stats["t_dcand"] = self.stats.get("t_dcand", 0.0) + time.perf_counter() - c0
             qs = []
             for j in range(1, 1 + K):
                 q = cand_probs(smp, dc[0][j], dc[1][j], dc[2][j])
@@ -610,7 +617,7 @@ class DFlashServing:
         a1 = time.perf_counter()
         ver.stage([t] + drafts, list(range(p, p + R)), self._row)
         s2 = time.perf_counter()
-        top = ver.run()[:R]
+        top = ver.run(cands=smp is not None and self._force is None)[:R]
         a2 = time.perf_counter()
         if self._force is not None:  # fixed-text benchmark: the recorded continuation replaces the verify's argmax
             i = self._force_i
@@ -623,7 +630,8 @@ class DFlashServing:
                 a += 1
         else:
             c0 = time.perf_counter()
-            cands = self.ver.run_cands()
+            cands = self.ver.run_cands(queued=True)
+            self.stats["t_vcand"] = self.stats.get("t_vcand", 0.0) + time.perf_counter() - c0
             rows_p = {}
 
             def P(i):  # row i's processed target distribution, built when the accept loop reaches it
@@ -707,7 +715,8 @@ class DFlashServing:
                 f"DFLASH_STATS ({why}): {n} passes, {st['tokens'] / n:.2f} tokens per pass, acceptance hist "
                 f"{st['hist']}, draft {1e3 * st['draft'] / n:.1f} + verify {1e3 * st['verify'] / n:.1f} ms per pass, "
                 f"{st['refills']} refills, sampling {1e3 * st.get('sample', 0.0) / n:.1f} ms per pass "
-                f"({st.get('full_rows', 0)} full-row reads), stage {1e3 * st['stage'] / n:.1f} ms -> "
+                f"({st.get('full_rows', 0)} full-row reads; drafter cands {1e3 * st.get('t_dcand', 0.0) / n:.2f}, verify "
+                f"cands {1e3 * st.get('t_vcand', 0.0) / n:.2f} ms), stage {1e3 * st['stage'] / n:.1f} ms -> "
                 f"{st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
             )
 

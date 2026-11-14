@@ -343,12 +343,15 @@ class DFlashDrafterTraced(DFlashDrafterTT):
         m[..., :p] = 0
         self._put(self.d_mask, m)
 
-    def run(self, name, body):
+    def run(self, name, body, then=None):
         """Replay the trace `name` (or run `body` eagerly when not captured); returns the per-row argmax over the
-        vocab-sharded logits when the body returns (argmax, max)."""
+        vocab-sharded logits when the body returns (argmax, max). then: a trace queued right behind it (before the
+        argmax read-back), e.g. the sampled path's "cands"."""
         if name in self.traces:
             ttnn.execute_trace(self.mesh, self.traces[name], cq_id=0, blocking=False)
             outs = self.outs[name]
+            if then is not None and then in self.traces:
+                ttnn.execute_trace(self.mesh, self.traces[then], cq_id=0, blocking=False)
         else:
             outs = body()
         return read_argmax(self.mesh, outs, int(ttnn.get_device_tensors(self.lm_head)[0].shape[-1])) if outs else None
@@ -650,10 +653,12 @@ class DFlashDrafterPaged(DFlashDrafterTraced):
         self.logits = logits  # a trace output: sampled requests take candidates of it (run_cands)
         return argmax_max(logits)
 
-    def run_cands(self):
-        """Candidates of the last pass's logits (the "cands" trace when captured; eager otherwise)."""
+    def run_cands(self, queued=False):
+        """Candidates of the last pass's logits (the "cands" trace when captured, already queued by run(then="cands")
+        when `queued`; eager otherwise)."""
         if "cands" in self.traces:
-            ttnn.execute_trace(self.mesh, self.traces["cands"], cq_id=0, blocking=False)
+            if not queued:
+                ttnn.execute_trace(self.mesh, self.traces["cands"], cq_id=0, blocking=False)
             outs = self.outs["cands"]
         else:
             outs = cands_body(self.logits)
