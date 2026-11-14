@@ -22,6 +22,7 @@ from models.autoports.minimaxai_minimax_m2_7.tt.model import _CacheRoot
 from models.autoports.minimaxai_minimax_m2_7.tt.multichip_decoder import MULTICHIP_SELECTED, MultichipDecoder
 from models.autoports.thinkingmachines_inkling_small.tt.layer import InklingDecoderLayer
 from models.autoports.thinkingmachines_inkling_small.tt.model_config import Qwen35MoeModelArgs, check_mesh_shape
+from models.tt_transformers.tt.common import Mode
 
 ROPE_DUMMY_DIM = 64  # the framework builds RoPE tables at args.rope_head_dim; Inkling's layers never read them
 
@@ -34,6 +35,46 @@ class Qwen35MoeModel(_M27Model):
             args.rope_head_dim = ROPE_DUMMY_DIM
             args.partial_rotary_factor = ROPE_DUMMY_DIM / args.head_dim
         super().__init__(mesh_device, args, state_dict, tensor_cache_path)
+
+    def prefill_tokens(self, ids, page_table_host, start=0, chunk=None, logits_rows="last"):
+        """Eager chunked prefill of token ids [T] (torch) from position `start` (a multiple of 64; the conv states must
+        hold the sequence up to start). Chunks of `chunk` rows (default the layers' prefill_chunk), each padded to a
+        multiple of 64, layer-major. Returns the logits of the last real row ([V] torch fp32) or, logits_rows="all",
+        of every real row ([T, V])."""
+        import torch
+
+        import ttnn
+
+        chunk = chunk or self.layers[0].attention.prefill_chunk
+        rep = ttnn.ReplicateTensorToMesh(self.mesh_device)
+        V = int(getattr(self.args, "unpadded_vocab_size", self.args.vocab_size))
+        T = int(ids.shape[0])
+        out = []
+        for c0 in range(0, T, chunk):
+            n = min(chunk, T - c0)
+            Tp = -(-n // 64) * 64
+            tok = torch.zeros(1, 1, 1, Tp, dtype=torch.int32)
+            tok[0, 0, 0, :n] = ids[c0 : c0 + n].to(torch.int32)
+            tok_tt = ttnn.from_torch(tok.reshape(1, Tp), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                     device=self.mesh_device, mesh_mapper=rep)
+            x = self.embd(tok_tt)
+            x = ttnn.reshape(x, (1, 1, Tp, x.shape[-1]))
+            ttnn.deallocate(tok_tt)
+            for layer in self.layers:
+                x = layer.forward_prefill(x, start + c0, page_table_host)
+            if logits_rows == "all" or c0 + n == T:
+                # rows [r0, r1) of the chunk: everything, or the 32-row tile holding the last real row
+                r0, r1 = (0, Tp) if logits_rows == "all" else (((n - 1) // 32) * 32, ((n - 1) // 32) * 32 + 32)
+                xs = ttnn.slice(x, (0, 0, r0, 0), (1, 1, r1, x.shape[-1]))
+                xn = self.norm(xs, mode=Mode.PREFILL)
+                lg = self._lm_head(xn)
+                t = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])
+                out.append(t[:n, :V] if logits_rows == "all" else t[n - 1 - r0 : n - r0, :V])
+                for z in (xs, xn, lg):
+                    ttnn.deallocate(z)
+            ttnn.deallocate(x)
+        res = torch.cat(out)
+        return res[-1] if logits_rows == "last" else res
 
     def reset_sequence_state(self):
         """Zero every layer's short-conv states (a new sequence)."""

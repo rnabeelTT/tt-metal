@@ -10,6 +10,7 @@ usage (in the image): tools/run_dev.sh python models/autoports/thinkingmachines_
    or with the reference's gold residuals (ref_inkling.py REF_GOLD=1):  .../test_layer_device.py /cache/ref_held/gold.pt 17
 """
 
+import os
 import sys
 
 import torch
@@ -47,7 +48,16 @@ def main():
         pt = ttnn.from_torch(torch.arange(nblk, dtype=torch.int32).reshape(1, -1), dtype=ttnn.int32,
                              layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=rep)
         p_out, p_delta = [], []
-        for t in range(T):
+        if os.environ.get("LAYER_MODE") == "prefill":  # the whole T rows as one prefill chunk (T % 64 == 0)
+            T = T // 64 * 64
+            x = ttnn.from_torch(x_in[:T].reshape(1, 1, T, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
+                                layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1))
+            out = layer.forward_prefill(x, 0, torch.arange(nblk, dtype=torch.int32))
+            got = ttnn.to_torch(out, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=-1)).float().reshape(T, -1)
+            for t in range(T):
+                p_out.append(pcc(got[t], x_out[t]))
+                p_delta.append(pcc(got[t] - x_in[t], x_out[t] - x_in[t]))
+        for t in range(T if os.environ.get("LAYER_MODE") != "prefill" else 0):
             x = ttnn.from_torch(x_in[t].reshape(1, 1, 1, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
                                 layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1))
             cur = ttnn.from_torch(torch.tensor([t], dtype=torch.int32), dtype=ttnn.int32,

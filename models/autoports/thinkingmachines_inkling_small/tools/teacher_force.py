@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Teacher-forced quality of the Inkling TT model against the BF16 CPU reference (ref_inkling.py): the quality gate.
 
-Runs each text of a texts.json through the device model in rows mode (groups of R <= 8 consecutive tokens: every layer,
-causal, the same code as spec verify), reads the logits of every position and compares them with the reference's
+Runs each text of a texts.json through the device model (EVAL_PATH=prefill, the default: the chunked prefill path, one
+attention launch per chunk; EVAL_PATH=rows: groups of R <= 8 consecutive tokens, the spec-verify code), reads the logits
+of every position and compares them with the reference's
 ref_<name>.npz (top-32 log-probs):
   top1      device argmax == reference argmax
   top1_conf the same on positions where the reference is confident (p > 0.5)
@@ -60,7 +61,8 @@ def main():
         print(f"model built in {time.time() - t0:.0f}s", flush=True)
         rep = ttnn.ReplicateTensorToMesh(mesh)
         nblk = model.layers[0].attention.max_blocks
-        pt = ttnn.from_torch(torch.arange(nblk, dtype=torch.int32).reshape(1, -1), dtype=ttnn.int32,
+        pt_host = torch.arange(nblk, dtype=torch.int32)
+        pt = ttnn.from_torch(pt_host.reshape(1, -1), dtype=ttnn.int32,
                              layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=rep)
         V = int(args.unpadded_vocab_size)
         for name in names:
@@ -70,7 +72,9 @@ def main():
             model.reset_sequence_state()
             lps = []
             t1 = time.time()
-            for g in range(0, T, RW):
+            if os.environ.get("EVAL_PATH", "prefill") == "prefill":  # chunked prefill, logits of every row
+                lps.append(torch.log_softmax(model.prefill_tokens(ids, pt_host, logits_rows="all"), -1))
+            for g in range(0, T if os.environ.get("EVAL_PATH", "prefill") == "rows" else 0, RW):
                 R = min(RW, T - g)
                 tok = torch.zeros(1, 1, 1, 32, dtype=torch.int32)
                 tok[0, 0, 0, :R] = ids[g : g + R].to(torch.int32)

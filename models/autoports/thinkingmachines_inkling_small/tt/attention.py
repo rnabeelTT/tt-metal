@@ -39,7 +39,8 @@ DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 class InklingAttention:
     def __init__(self, mesh, cfg, sd: dict, layer_idx: int, tt_ccl=None, block_size: int = 64, max_seq_len: int = 32768,
-                 weight_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat8_b, own_global_cache: bool = True):
+                 weight_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat8_b, own_global_cache: bool = True,
+                 prefill_chunk: int = 2048):
         """cfg: the HF text config (InklingTextConfig or a namespace with the same fields). sd: this layer's attention
         weights under the HF module names (q_proj.weight, ..., k_sconv.conv1d.weight, rel_logits_proj.proj)."""
         self.mesh = mesh
@@ -101,8 +102,11 @@ class InklingAttention:
 
         # KV caches
         self.max_blocks = math.ceil(max_seq_len / block_size)
+        self.prefill_chunk = prefill_chunk
         if self.sliding:
-            self.n_ring = self.W // block_size + 1
+            # the ring holds the window + one prefill chunk + a block: a chunk's attention launch needs every row's
+            # window live at once (decode alone would need only W + one block)
+            self.n_ring = (self.W + prefill_chunk) // block_size + 1
             self.k_cache, self.v_cache = self._alloc_cache(self.n_ring)
             ring = (torch.arange(self.max_blocks) % self.n_ring).to(torch.int32).reshape(1, -1)
             self.ring_table = ttnn.from_torch(  # read side: logical block b -> physical b mod n_ring (the SDPA op)
@@ -250,6 +254,85 @@ class InklingAttention:
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, R, NH * HD))
+        part = ttnn.linear(o, self.w_o, memory_config=DRAM)
+        ttnn.deallocate(o)
+        if not reduce or self.N == 1:
+            return part
+        from models.tt_transformers.tt.ccl import tt_all_reduce
+
+        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
+                             memory_config=DRAM)
+
+    def forward_prefill(self, x, p0: int, page_table_host: torch.Tensor | None = None, reduce=True):
+        """A prefill chunk in ONE attention launch: x [1, 1, T, H] replicated (normed) at positions p0 .. p0 + T - 1,
+        p0 a multiple of the block size, T a multiple of 64 (pad the chunk; padded rows write KV past the prompt, which
+        decode overwrites before any row can attend to it) and <= prefill_chunk. page_table_host [max_blocks] int32:
+        the sequence's logical -> physical blocks (global layers). The k/v conv states advance past all T rows.
+        -> [1, 1, T, H/N] fractured (reduce) or the [1, 1, T, H] partial."""
+        NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
+        T = int(x.shape[2])
+        bs = self.block
+        assert p0 % bs == 0 and T % 64 == 0 and T <= self.prefill_chunk, (p0, T, self.prefill_chunk)
+        mc = DRAM
+        p = ttnn.linear(x, self.w_qkvr, memory_config=mc)  # [1, 1, T, fd]
+        qd, kd, rd = self.qd, self.kd, self.rd
+        q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, T, qd), memory_config=mc)
+        k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, T, qd + kd), memory_config=mc)
+        v = ttnn.slice(p, (0, 0, 0, qd + kd), (1, 1, T, qd + 2 * kd), memory_config=mc)
+        r = ttnn.slice(p, (0, 0, 0, qd + 2 * kd), (1, 1, T, self.fd), memory_config=mc)
+        ttnn.deallocate(p)
+        k = self.k_sconv.rows(k, commit_all=True)
+        v = self.v_sconv.rows(v, commit_all=True)
+        q = ttnn.reshape(q, (1, T, NH, HD))
+        q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
+        k = ttnn.reshape(k, (1, T, NKV, HD))
+        k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=mc), self.k_norm, memory_config=mc)
+        v = ttnn.reshape(v, (1, T, NKV, HD))
+        r = ttnn.reshape(r, (1, T, NH, DR))
+        if self.log_scaling and p0 + T > 128000:  # tau per row (exact host values; a no-op below 128K)
+            pos = torch.arange(p0, p0 + T, dtype=torch.float64) + 1.0
+            tau = (1.0 + 0.1 * torch.log(torch.clamp(pos / 128000.0, min=1.0))).float().reshape(1, T, 1, 1)
+            tau_t = ttnn.from_torch(tau, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+            q = ttnn.multiply(q, tau_t, memory_config=mc)
+            r = ttnn.multiply(r, tau_t, memory_config=mc)
+            ttnn.deallocate(tau_t)
+        # KV fill of the chunk: [1, NKV, T, HD] in the cache dtype, through this chunk's blocks
+        b0, nb = p0 // bs, T // bs
+        if self.sliding:
+            blocks = (torch.arange(b0, b0 + nb) % self.n_ring).to(torch.int32)
+        else:
+            blocks = page_table_host.reshape(-1)[b0 : b0 + nb].to(torch.int32)
+        fill_pt = ttnn.from_torch(blocks.reshape(1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                  device=self.mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        for cache, t in ((self.k_cache, k), (self.v_cache, v)):
+            tt_ = ttnn.transpose(t, 1, 2, memory_config=mc)  # [1, NKV, T, HD]
+            t8 = ttnn.typecast(tt_, self.kv_dtype) if self.kv_dtype != tt_.dtype else tt_
+            ttnn.experimental.paged_fill_cache(cache, t8, fill_pt, batch_idx=0)
+            if t8 is not tt_:
+                ttnn.deallocate(t8)
+            ttnn.deallocate(tt_)
+        ttnn.deallocate(fill_pt)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
+        rq = ttnn.pad(r, [1, T, NH, 32], [0, 0, 0, 0], 0.0, memory_config=mc)
+        ttnn.deallocate(r)
+        positions = ttnn.from_torch(torch.arange(p0, p0 + T, dtype=torch.int32).reshape(-1, 8), dtype=ttnn.int32,
+                                    layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
+                                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        if self.sliding:
+            pt = self.ring_table
+        else:
+            pt = ttnn.from_torch(page_table_host.reshape(1, -1).to(torch.int32), dtype=ttnn.int32,
+                                 layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
+                                 mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        o = inkling_sdpa_decode(q, self.k_cache, self.v_cache, positions, pt, rq, self.table, self.scale, self.W,
+                                self.E)
+        for z in (q, rq, positions):
+            ttnn.deallocate(z)
+        if not self.sliding:
+            ttnn.deallocate(pt)
+        o = ttnn.reshape(o, (1, 1, T, NH * HD))
         part = ttnn.linear(o, self.w_o, memory_config=DRAM)
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
