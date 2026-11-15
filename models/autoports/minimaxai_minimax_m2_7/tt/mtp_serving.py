@@ -780,7 +780,11 @@ class MtpServing:
         key = tuple(sampling)
         cur = getattr(self, "_sampler", None)
         if cur is None or cur[0] != key:  # a new request (end_prefill clears it) or changed params: fresh RNG
-            t, k, p, seed = sampling
+            t, k, p, seed = sampling[:4]
+            pen = tuple(sampling[4:7])
+            if pen and (abs(pen[0]) > 1e-6 or abs(pen[1]) > 1e-6 or abs(pen[2] - 1.0) > 1e-6):
+                # the adaptive server routes penalized requests to the plain decode (_mtp_eligible)
+                raise ValueError(f"the MTP step does not apply penalties (presence, frequency, repetition = {pen})")
             cur = (key, SpecSampler(t, k, p, seed))
             self._sampler = cur
         return cur[1]

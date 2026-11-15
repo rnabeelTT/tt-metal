@@ -1,5 +1,14 @@
 # GLM-4.5-Air on Blackhole
 
+> **MiniMax-M2.7 (this directory's served model): Built with MiniMax M2.7.** The model weights are Copyright (c) 2026
+> MiniMax and licensed under the [MiniMax non-commercial license](https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE):
+> free for personal use and non-commercial research / education; commercial use needs prior written authorization
+> from MiniMax (api@minimax.io, subject "M2.7 licensing") and must display "Built with MiniMax M2.7"; the license's
+> appendix lists prohibited uses. The DFlash drafter (nvidia/MiniMax-M2.7-DFlash) is under the NVIDIA Software and
+> Model Evaluation License. This directory contains no MiniMax files: the weights are downloaded from MiniMax's
+> repository, which carries the license. The code here is Apache-2.0. (The text below predates the M2.7 port: this
+> directory started as a copy of the GLM-4.5-Air port.)
+
 `zai-org/GLM-4.5-Air` (HF `glm4_moe`, `Glm4MoeForCausalLM`; 106B total / 12B active) served through vLLM on 4 Blackhole
 dies (p300x2 / p150x4) or 2 dies (p300 / p150x2).
 

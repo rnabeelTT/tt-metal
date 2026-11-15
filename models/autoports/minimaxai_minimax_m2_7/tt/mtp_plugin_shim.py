@@ -195,8 +195,9 @@ def _shim_get_output_tokens(
         )
     if not perform_device_sampling:
         # a host-sampled decode step (logprobs, structured outputs, min_p / bad_words / logit_bias / allowed_token_ids /
-        # min_tokens): the model ran the PLAIN decode and returned logits (the adaptive MTP step is never taken for
-        # host-logits steps, generator_vllm._mtp_eligible), so the original one-token read-back applies
+        # min_tokens): the model returned logits [B, 1, V] - the plain decode (the adaptive MTP step is never taken for
+        # host-logits steps, generator_vllm._mtp_eligible) or a single-user step's host_logits mode (DFlash) - so the
+        # original one-token read-back applies
         return _delegate_original_decode(
             self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling
         )
@@ -215,7 +216,7 @@ def _shim_get_output_tokens(
         if grammar_bitmask is not None or (
             isinstance(enable_lp, torch.Tensor) and bool(enable_lp[start : start + sz].any())
         ):
-            # structured outputs / logprobs: such requests run the plain one-token decode (never the MTP step), so
+            # structured outputs / logprobs: such requests decode one token per step (never a multi-token step), so
             # the original read-back (which applies the bitmask and gathers the logprobs) handles the whole batch
             return _delegate_original_decode(
                 self, tt_out, tt_log_probs, sampling_params, model_input, batch_size_per_dp, perform_device_sampling

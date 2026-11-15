@@ -4,7 +4,10 @@
 sampled from the drafter's rows) emits tokens distributed exactly as plain sampling from the target: Monte Carlo over a small vocab with row-dependent targets (row
 i's distribution depends on whether the drafts before it were accepted, as in a real verify), compared with the exact
 joint distribution of the first two emitted tokens; (2) the device-candidate distribution (cand_probs) equals
-SpecSampler.probs on the full logits, and declines (None) when a chunk may hide part of the top-k.
+SpecSampler.probs on the full logits, and declines (None) when a chunk may hide part of the top-k; (3) penalties: a row's
+distribution with presence / frequency / repetition penalties (DFlashServing._dist, from the candidates or the full row,
+greedy or sampled, the history = emitted tokens + the drafts before the row) equals the request's processing of vLLM's
+penalized logits (an independent dense implementation of vllm apply_penalties).
 usage: ./run_in_image.sh test_dflash_sampling.py   (no device needed)"""
 import itertools
 import sys
@@ -12,7 +15,9 @@ import sys
 import torch
 
 sys.path.insert(0, ".")
-from dflash_serve import accept_sparse, cand_probs, sparse  # noqa: E402
+import collections  # noqa: E402
+
+from dflash_serve import DFlashServing, accept_sparse, cand_probs, sparse  # noqa: E402
 from models.autoports.minimaxai_minimax_m2_7.tt.mtp_sampling import SpecSampler  # noqa: E402
 
 V, N = 6, 200_000
@@ -114,6 +119,69 @@ for trial in range(200):
                 f"FAIL: cand_probs != SpecSampler.probs (trial {trial}, max diff {float((got - ref).abs().max())})"
             )
 print("candidates: exact where accepted, declined where a chunk may hide the top-k")
+
+
+# (3) penalties
+def vllm_penalties(logits, prompt, output, pres, freq, rep):
+    """vllm/model_executor/layers/utils.py apply_penalties for one row (dense masks and bin counts)."""
+    n = logits.numel()
+    prompt_mask = torch.zeros(n, dtype=torch.bool)
+    prompt_mask[torch.tensor(prompt, dtype=torch.long)] = True
+    counts = torch.bincount(torch.tensor(output, dtype=torch.long), minlength=n).float()
+    output_mask = counts > 0
+    penalties = torch.where(prompt_mask | output_mask, torch.tensor(rep), torch.tensor(1.0))
+    scaling = torch.where(logits > 0, 1.0 / penalties, penalties)
+    out = logits * scaling
+    out = out - freq * counts
+    return out - pres * output_mask.float()
+
+
+srv = object.__new__(DFlashServing)
+n_cand = n_full = 0
+for trial in range(300):
+    lg = torch.randn(VV, generator=g) * 3
+    prompt = torch.randint(0, VV, (int(torch.randint(1, 40, (1,), generator=g)),), generator=g).tolist()
+    emitted = torch.randint(0, VV, (int(torch.randint(1, 30, (1,), generator=g)),), generator=g).tolist()
+    drafts = torch.randint(0, VV, (trial % 4,), generator=g).tolist()
+    if trial % 3 == 0:  # make the penalties matter: the history holds the row's top tokens
+        emitted += torch.topk(lg, 6).indices.tolist()
+    vals, ids, mins = [], [], []
+    for d in range(D):
+        for c in range(C):
+            lo = d * W + c * (W // C)
+            v, i = torch.topk(lg[lo : lo + W // C], KC)
+            vals.append(v)
+            ids.append(i + lo)
+            mins.append(v.min())
+    vals, ids, mins = torch.cat(vals), torch.cat(ids), torch.stack(mins)
+    for pen in [(0.5, 0.3, 1.3), (0.0, 0.0, 2.0), (1.5, 0.0, 1.0), (0.0, 0.0, 0.8), (-0.5, 0.0, 1.0)]:
+        for t, k, p in [(0.0, 0, 1.0), (1.0, 10, 0.95), (0.7, 4, 1.0)]:
+            smp = SpecSampler(t, k, p, seed=0)
+            srv._pen, srv._pen_prompt, srv._P, srv._ctx_ids = pen, None, len(prompt), prompt + emitted[1:]
+            srv._out_counts, srv.stats = collections.Counter(emitted), {}
+            got = srv._dist(smp, vals, ids, mins, drafts, lambda: lg.clone())
+            used_full = srv.stats.get("full_rows", 0) == 1
+            n_full += used_full
+            n_cand += not used_full
+            if pen[2] < 1.0 or pen[0] < 0.0:
+                if not used_full:
+                    raise SystemExit(f"FAIL: penalties that raise logits used the candidates (trial {trial}, {pen})")
+            ref = vllm_penalties(lg, prompt, emitted + drafts, *pen)
+            if smp.greedy:
+                want = torch.zeros(VV)
+                want[int(torch.argmax(ref))] = 1.0
+            else:
+                want = smp.probs(ref)
+            dense = torch.zeros(VV)
+            dense[got[0]] = got[1]
+            if not torch.allclose(dense, want, atol=1e-6):
+                raise SystemExit(
+                    f"FAIL: penalized row != vLLM's penalties (trial {trial}, pen {pen}, t {t} k {k} p {p}, "
+                    f"{'full row' if used_full else 'candidates'}, max diff {float((dense - want).abs().max())})"
+                )
+if n_cand == 0 or n_full == 0:
+    raise SystemExit(f"FAIL: penalty test did not exercise both paths (candidates {n_cand}, full rows {n_full})")
+print(f"penalties: equal to vLLM's apply_penalties ({n_cand} rows from candidates, {n_full} from the full row)")
 if worst > 0.012:
     raise SystemExit(f"FAIL: sampled DFlash accept rule deviates from the target (TV {worst:.4f})")
 print("PASS")

@@ -13,7 +13,7 @@ an interrupted first boot continues where it stopped. A `.complete` marker recor
 revision, plan hash, static count, layers); a marker that does not match the current settings is an error: delete
 the directory to rebuild. Runs in the first process only (the vLLM API server, before the EngineCore starts), like
 the RAM check. Not configured (HYB_BUILD_LAYERS unset) = the directories are expected to exist already (dev serving).
-A local build is byte-identical to the published library (layer 0: every tensor equal, 2026-11-14).
+A first boot's build is byte-identical to the copies v1.4 published (all 42 + 8736 files, 2026-11-15).
 """
 
 import glob

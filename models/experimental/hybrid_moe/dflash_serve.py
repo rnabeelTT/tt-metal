@@ -27,14 +27,18 @@ the request's temperature / top-k / top-p (the port's SpecSampler). The emitted 
 from the target. Logits stay on the device: small traces (dflash_tt.cands_body, replayed for sampled requests only)
 take per-chunk top-64 candidates, exact for any top-k <= 64 (cand_probs checks it per row; otherwise the row's logits
 are read). Recommended M2.7 settings on the 32K profile: ~52 tok/s vs ~64 greedy (2.07 vs 2.26 tokens per pass, ~3 ms
-of sampling per pass). Penalties are not applied. The first token comes from the prefill's device sampler, which caps
-top-k at 32. DFLASH_SAMPLE_DEBUG=N logs the first N sampled passes' distributions.
+of sampling per pass). Presence / frequency / repetition penalties are applied exactly as vLLM does (penalize) to
+both the drafter's rows and the verify rows, on the host: row i's output history is the request's emitted tokens plus
+the drafts before it; a penalized greedy request takes the candidate path too (argmax of the penalized row). Penalties
+that only lower logits keep the candidates exact (same per-row check); ones that can raise them read the row. The
+first token comes from the prefill's device sampler, which caps top-k at 32. DFLASH_SAMPLE_DEBUG=N logs the first N sampled passes' distributions.
 env: DFLASH_SNAPSHOT, DFLASH_CMAX (drafter cache, default 2048), DFLASH_WINDOW, DFLASH_TP (drafter split over the mesh,
 default 1), DFLASH_WARMUP (serving: tokens of the startup warm-up generation, default 64, 0 = off).
 """
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import time
@@ -274,6 +278,48 @@ def cand_probs(smp, vals, ids, chunk_min):
     return ids[j][keep], p[keep]
 
 
+NO_PENALTIES = (0.0, 0.0, 1.0)  # (presence, frequency, repetition)
+
+
+def penalize(x, ids, pen, prompt_ids, counts):
+    """vLLM's penalties (model_executor/layers/utils.py apply_penalties) on logits `x` of the vocab ids `ids`:
+    repetition r scales the logit of every token seen in the prompt or the output (x / r when x > 0, else x * r), then
+    frequency f and presence p subtract f * count and p * (count > 0), count = the token's occurrences in the output.
+    pen = (presence, frequency, repetition); prompt_ids: the prompt's distinct ids; counts: the output counts of `ids`.
+    """
+    pres, freq, rep = pen
+    x = x.float()
+    if rep != 1.0:
+        seen = torch.isin(ids, prompt_ids.to(ids.dtype)) | (counts > 0)
+        x = torch.where(seen, torch.where(x > 0, x / rep, x * rep), x)
+    if freq != 0.0 or pres != 0.0:
+        c = counts.float()
+        x = x - freq * c - pres * (c > 0).float()
+    return x
+
+
+def lowers_only(pen):
+    """True when the penalties can only lower logits (repetition >= 1, frequency and presence >= 0): a token outside a
+    row's device candidates then stays at or below its chunk's smallest kept value, so the candidates' check holds."""
+    pres, freq, rep = pen
+    return rep >= 1.0 and freq >= 0.0 and pres >= 0.0
+
+
+def row_dist(smp, x, ids, chunk_min=None):
+    """The request's processed distribution of one row of (penalized) logits `x` over the vocab ids `ids`, as (ids,
+    probs): the argmax as a point mass for a greedy request (temperature 0 or top_k 1), else top-k / temperature /
+    top-p (SpecSampler). chunk_min None: `x` is the full row (ids = 0..V-1); otherwise `x` are the row's device
+    candidates, and the result is None when they may not decide it (a chunk may hide a larger value)."""
+    if smp.greedy:
+        m = int(torch.argmax(x))
+        if chunk_min is not None and bool((chunk_min >= x[m]).any()):
+            return None
+        return ids[m : m + 1], torch.ones(1)
+    if chunk_min is None:
+        return sparse(smp.probs(x))
+    return cand_probs(smp, x, ids, chunk_min)
+
+
 def _rows_sdpa_shared_from():
     """QWEN35_ROWS_SDPA_SHARED_FROM: the context position from which the verify uses the shared-KV rows SDPA (default
     4096; 0 = never)."""
@@ -284,6 +330,7 @@ class DFlashServing:
     """Single-user DFlash step with MtpServing's single-user interface (generator_vllm drives it as its `_mtp`)."""
 
     adaptive = multi = per_slot = in_trace = False
+    host_logits = True  # step(host_logits=True): one verified position's logits for vLLM's host sampler
 
     def __init__(self, gen, k: int = 3, drafter=None):
         self.gen, self.k, self.R = gen, int(k), int(k) + 1
@@ -299,7 +346,7 @@ class DFlashServing:
         self._hooks = None
         self._pos = self._tok = None
         self.stats = None
-        self._sampler, self._sampling = None, None
+        self._sampler, self._sampling, self._pen = None, None, None
 
     # ------------------------------------------------------------------ startup (before any capture)
     def allocate_kv(self, kv_shape, dtype):
@@ -528,8 +575,11 @@ class DFlashServing:
         self._ctx_ids = self._ids  # the context's ids; the last n_hist have their features in hist
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
         self._capture(P)
-        self._pos, self._tok, self._prev_acc = P, int(tok0), []
+        # tok0 None: vLLM's host sampler picks the first token; the plugin hands it to the first decode step
+        self._pos, self._tok, self._prev_acc = P, (None if tok0 is None else int(tok0)), []
         self._sampler, self._sampling = None, None  # the request's SpecSampler (created by its first sampled step)
+        self._out_counts = collections.Counter([] if tok0 is None else [int(tok0)])  # emitted tokens (penalties)
+        self._pen_prompt = None  # the prompt's distinct ids, built by the request's first penalized row
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
@@ -548,18 +598,28 @@ class DFlashServing:
         ttnn.synchronize_device(self.mesh)
 
     # ------------------------------------------------------------------ decode
-    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None) -> list[int]:
+    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None, host_logits=False):
         """Returns the accepted drafts followed by the verified next token (1..R ids). The step owns the continuation
         (as MtpServing.step: on the plugin's steady async path its host token can lag by a step); the plugin's tok / pos
-        are checked when it flags the host inputs authoritative (the first decode after a prefill)."""
+        are checked when it flags the host inputs authoritative (the first decode after a prefill).
+
+        host_logits: a step for vLLM's host sampler (logprobs, structured outputs, logit bias, min_p, ...; the plugin
+        then passes no device sampling params): the same verify pass, no drafts accepted, and the step returns row 0's
+        logits [V] (the next position's distribution); vLLM samples the token and the plugin hands it to the next step
+        (its tok at the step's position)."""
         if self._pos is None:
             raise RuntimeError("DFlash step before any prefill")
-        if host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
+        if self._tok is None:  # the previous token was sampled on the host: the plugin's token continues the request
+            if int(pos) != self._pos:
+                raise RuntimeError(f"DFlash step at plugin pos {pos} after a host-sampled token at pos {self._pos}")
+            self._tok = int(tok)
+            self._out_counts.update([self._tok])
+        elif host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
             raise RuntimeError(
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
                 f"(tok {self._tok}, pos {self._pos})"
             )
-        smp = self._sampler_for(sampling)
+        smp = None if host_logits else self._sampler_for(sampling)
         if page_table_row is not None:
             self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
             # every block the verify window [pos, pos + R) writes must be allocated: vLLM pads a row with block 0 (its
@@ -595,24 +655,22 @@ class DFlashServing:
         s0 = time.perf_counter()
         dr.stage_pass(self._prev_acc, t)  # the previous verify's accepted rows (c_taps[R] filled by the verify)
         s1 = time.perf_counter()
-        sampled = smp is not None and self._force is None and _SAMPLED_DRAFTS
+        sampled = smp is not None and not smp.greedy and self._force is None and _SAMPLED_DRAFTS
         drafts = dr.run("pass", None, then="cands" if sampled else None)[1 : 1 + K]
         qs = None
         if sampled:
             # sampled drafts: d_j ~ q_j, the drafter's block row j processed like the target (the block drafter's
-            # rows do not depend on each other's tokens, so q_j is the proposal for position j whatever was drafted
-            # before it); accepted with min(1, p / q) (SpecSampler.accept): Σ min(p, q) per position instead of p(argmax)
+            # rows do not depend on each other's tokens; with penalties q_j also counts the drafts before it, a
+            # proposal conditioned on them as the accept rule allows); accepted with min(1, p / q): Σ min(p, q) per
+            # position instead of p(argmax)
             c0 = time.perf_counter()
             dc = dr.run_cands(queued=True)
             self.stats["t_dcand"] = self.stats.get("t_dcand", 0.0) + time.perf_counter() - c0
-            qs = []
+            qs, drafts = [], []
             for j in range(1, 1 + K):
-                q = cand_probs(smp, dc[0][j], dc[1][j], dc[2][j])
-                if q is None:
-                    self.stats["full_rows"] = self.stats.get("full_rows", 0) + 1
-                    q = sparse(smp.probs(read_logits(self.mesh, dr.logits, j + 1, self.V)[j]))
-                qs.append(q)
-            drafts = [_draw(smp, q) for q in qs]
+                full = lambda j=j: read_logits(self.mesh, dr.logits, j + 1, self.V)[j]  # noqa: E731
+                qs.append(self._dist(smp, dc[0][j], dc[1][j], dc[2][j], drafts, full))
+                drafts.append(_draw(smp, qs[-1]))
             self.stats["sample"] = self.stats.get("sample", 0.0) + time.perf_counter() - c0
         a1 = time.perf_counter()
         ver.stage([t] + drafts, list(range(p, p + R)), self._row)
@@ -624,7 +682,10 @@ class DFlashServing:
             top = self._force[i + 1 : i + 1 + R]
             if len(top) < R:
                 raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
-        if smp is None or self._force is not None:
+        if host_logits:
+            a = 0
+            logits = self.ver.read_logits_raw(1, self.V)[0]
+        elif smp is None or self._force is not None:
             a = 0
             while a < K and drafts[a] == top[a]:
                 a += 1
@@ -644,10 +705,8 @@ class DFlashServing:
                             f"DFlash sampling: row {i} device argmax {top[i]} is not the candidates' maximum "
                             f"(candidate argmax {int(ci[cv.argmax()])}, value {float(cv.max())})"
                         )
-                    rows_p[i] = cand_probs(smp, cands[0][i], cands[1][i], cands[2][i])
-                    if rows_p[i] is None:  # the candidates may miss part of the request's top-k: the exact row
-                        self.stats["full_rows"] = self.stats.get("full_rows", 0) + 1
-                        rows_p[i] = sparse(smp.probs(self.ver.read_logits_raw(i + 1, self.V)[i]))
+                    full = lambda: self.ver.read_logits_raw(i + 1, self.V)[i]  # noqa: E731
+                    rows_p[i] = self._dist(smp, cv, ci, cands[2][i], drafts[:i], full)
                 return rows_p[i]
 
             a, nxt = accept_sparse(smp, P, drafts, qs)
@@ -682,7 +741,12 @@ class DFlashServing:
             self.n_hist = W
         out = drafts[:a] + [top[a]]
         self._prev_acc = list(range(p, p + a + 1))
-        self._tok, self._pos = top[a], p + a + 1
+        if host_logits:
+            self._tok, self._pos = None, p + 1  # vLLM samples it; the plugin passes it to the next step
+            out = [None]
+        else:
+            self._out_counts.update(out)
+            self._tok, self._pos = top[a], p + a + 1
         st = self.stats
         st["passes"] += 1
         st["tokens"] += len(out)
@@ -693,19 +757,64 @@ class DFlashServing:
         st["wall"] += time.perf_counter() - a0
         if st["passes"] % 64 == 0:
             self._log_stats("running")
-        return out
+        return logits if host_logits else out
 
     def _sampler_for(self, sampling):
-        """The request's SpecSampler, or None for greedy decoding. Created on the request's first step (end_prefill
-        clears it) so its generator (seeded by the request's seed) runs across the whole request."""
+        """The request's SpecSampler, or None for greedy decoding without penalties (the device argmax decides).
+        sampling = (temperature, top_k, top_p, seed[, presence, frequency, repetition]). Created on the request's first
+        step (end_prefill clears it) so its generator (seeded by the request's seed) runs across the whole request."""
         if sampling is None:
+            self._pen = None
             return None
         if self._sampler is None or self._sampling != tuple(sampling):
-            t, k, p, seed = sampling
+            t, k, p, seed = sampling[:4]
+            pen = tuple(float(v) for v in sampling[4:7]) if len(sampling) > 4 else NO_PENALTIES
             self._sampler = _port("mtp_sampling").SpecSampler(t, k, p, seed)
             self._sampling = tuple(sampling)
-            logger.info(f"DFlash request sampling: temperature {t} top_k {k} top_p {p} seed {seed}")
-        return None if self._sampler.greedy else self._sampler
+            self._pen = pen if any(abs(a - b) > 1e-6 for a, b in zip(pen, NO_PENALTIES)) else None
+            logger.info(
+                f"DFlash request sampling: temperature {t} top_k {k} top_p {p} seed {seed}"
+                + (f" presence {pen[0]} frequency {pen[1]} repetition {pen[2]}" if self._pen else "")
+            )
+        return None if self._sampler.greedy and self._pen is None else self._sampler
+
+    def _dist(self, smp, vals, ids, chunk_min, extra, full_row):
+        """One row's processed distribution (ids, probs): from its device candidates (vals / ids / chunk_min) when
+        they decide it, else from the full logits row (full_row() reads it). With penalties the row's output history is
+        the request's emitted tokens plus `extra` (the drafts before the row)."""
+        pen = self._pen
+        if pen is None:
+            d = row_dist(smp, vals, ids, chunk_min)
+        elif lowers_only(pen):
+            d = row_dist(smp, penalize(vals, ids, pen, self._prompt_ids(), self._counts(ids, extra)), ids, chunk_min)
+        else:
+            d = None  # a raised logit outside the candidates could overtake them
+        if d is None:
+            self.stats["full_rows"] = self.stats.get("full_rows", 0) + 1
+            x = full_row()
+            ids = torch.arange(x.numel())
+            if pen is not None:
+                x = penalize(x, ids, pen, self._prompt_ids(), self._counts(ids, extra))
+            d = row_dist(smp, x, ids)
+        return d
+
+    def _prompt_ids(self):
+        if self._pen_prompt is None:
+            self._pen_prompt = torch.unique(torch.tensor(self._ctx_ids[: self._P], dtype=torch.int64))
+        return self._pen_prompt
+
+    def _counts(self, ids, extra):
+        """Output occurrences of each of `ids`: the request's emitted tokens plus `extra`."""
+        c = self._out_counts
+        if extra:
+            c = c.copy()
+            c.update(int(v) for v in extra)
+        if ids.numel() > 4096:  # a full row (ids = 0..V-1): scatter
+            out = torch.zeros(ids.numel(), dtype=torch.float32)
+            if c:
+                out[torch.tensor(list(c.keys()))] = torch.tensor(list(c.values()), dtype=torch.float32)
+            return out
+        return torch.tensor([c.get(j, 0) for j in ids.tolist()], dtype=torch.float32)
 
     def _log_stats(self, why):
         st = self.stats
