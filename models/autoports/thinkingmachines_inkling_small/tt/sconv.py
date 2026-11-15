@@ -86,8 +86,8 @@ class ShortConv:
     def reset(self):
         ttnn.copy(self._zero, self.st)
 
-    def _conv(self, x):
-        """x [1, 1, R, C] (tile, any float dtype) -> (y fp32 tile [1, 1, R, C], seq = [s0, s1, s2, x_0 .. x_{R-1}]
+    def _conv(self, x, out_dtype=ttnn.float32):
+        """x [1, 1, R, C] (tile, any float dtype) -> (y tile [1, 1, R, C] in out_dtype, seq = [s0, s1, s2, x_0 .. x_{R-1}]
         row-major fp32). The tap arithmetic runs on row-major rows, in the host reference's order
         (y = x + w0 seq[0:R] + w1 seq[1:R+1] + w2 seq[2:R+2] + w3 x), and only y is tilized: a tilize of a one-row fp32
         tile runs on one core (~65 us at C = 1024 per die); slicing each shifted tap and tilizing it cost three per
@@ -100,22 +100,24 @@ class ShortConv:
         for j in range(K - 1):
             y = ttnn.add(y, ttnn.multiply(ttnn.slice(seq, [0, 0, j, 0], [1, 1, j + R, self.C]), self.taps_rm[j]))
         y = ttnn.add(y, ttnn.multiply(xr, self.taps_rm[K - 1]))  # rows K-1.. of seq are x itself
+        if out_dtype != ttnn.float32:  # cast before the tilize: same values, half the bytes (~80 -> ~42 us at 1024)
+            y = ttnn.typecast(y, out_dtype)
         return ttnn.to_layout(y, ttnn.TILE_LAYOUT), seq
 
     def decode(self, x):
         """x [1, 1, 1, C] (bf16 or fp32) -> y same dtype; advances the state by one token (in place: trace-safe)."""
-        y, seq = self._conv(x)
+        y, seq = self._conv(x, x.dtype)
         ttnn.copy(ttnn.slice(seq, [0, 0, 1, 0], [1, 1, K, self.C]), self.st)
-        return ttnn.typecast(y, x.dtype) if x.dtype != ttnn.float32 else y
+        return y
 
     def rows(self, x, commit_all: bool = True):
         """x [1, 1, R, C] at R consecutive positions -> y [1, 1, R, C]. With commit_all the state advances past all R
         rows (prefill segments); otherwise the caller commits the accepted prefix with commit_rows()."""
-        y, seq = self._conv(x)
+        y, seq = self._conv(x, x.dtype)
         self._last_seq = seq
         if commit_all:
             self.commit_rows(int(x.shape[2]))
-        return ttnn.typecast(y, x.dtype) if x.dtype != ttnn.float32 else y
+        return y
 
     def commit_rows(self, n: int):
         """State := the 3 inputs ending at row n-1 of the last rows() call (host-known n: eager paths)."""

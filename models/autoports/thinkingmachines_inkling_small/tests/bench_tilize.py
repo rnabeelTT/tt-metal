@@ -25,16 +25,23 @@ def timed(f, n=100):
 
 
 try:
-    for C in (4096, 1024):
-        for r in (1, 2, 4, 8):
-            src = ttnn.from_torch(torch.randn(1, 1, r + 3, C), dtype=f32, layout=RM, device=dev)
+    import os
+
+    dts = {"f32": f32, "bf16": ttnn.bfloat16}
+    for C in (1024, 256):
+      for dn, dt in dts.items():
+        for r in (1, 2, 4):
+            src = ttnn.from_torch(torch.randn(1, 1, r + 3, C), dtype=dt, layout=RM, device=dev)
+            print(f"-- dtype {dn}")
             v = {
                 "slice+to_layout": lambda: ttnn.to_layout(ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]), TL),
                 "slice+tilize_wvp": lambda: ttnn.tilize_with_val_padding(
                     ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]), [1, 1, 32, C], 0.0, use_multicore=True),
                 "slice only": lambda: ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]),
-                "slice+reshape32+to_layout": lambda: ttnn.to_layout(
-                    ttnn.reshape(ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]), (1, r, 32, C // 32)), TL),
+                "slice+typecast_bf16+to_layout": lambda: ttnn.to_layout(
+                    ttnn.typecast(ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]), ttnn.bfloat16), TL),
+                "slice+tilize_wvp+typecast_out": lambda: ttnn.tilize_with_val_padding(
+                    ttnn.slice(src, [0, 0, 0, 0], [1, 1, r, C]), [1, 1, 32, C], 0.0, dtype=ttnn.bfloat16),
             }
             for name, f in v.items():
                 try:
