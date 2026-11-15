@@ -242,7 +242,17 @@ card:
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
+    | GPQA-Diamond, thinking | 86.7% (52/60) | 87.4-89.8 | 60 random of 198 |
+    | AIME 2026, thinking | 86.7% (13/15; 1 hit the 60K-token cap) | 94.2 | 15 random of 30 |
+    | IFEval, prompt-level strict / loose | 87.3% / 90.7% (instruction-level strict 90.1%) | — | 150 random of 541 |
     | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.848 (confident tokens 0.933) | — | 8 x 1000 tokens, held out |
+
+    Evals ran on this package (`p300x2-64k`) with MiniMax's recommended settings (temperature 1.0, top_p 0.95, top_k
+    40, MiniMax's default system prompt), randomly sampled questions with a per-question seed
+    (`serve/evalq.py`, SAMPLE_SEED 0), 2026-11-15. References are MiniMax's published M2.7 scores. 95% intervals are
+    wide at these sizes (about +/-9 points for GPQA, +/-17 for AIME): the scores are consistent with the references,
+    and cannot resolve a difference of a few points. The AIME miss besides the capped one is a reasoning slip with a well-formed answer; the 3 IFEval
+    answers that hit the 16K cap are letter-count puzzles.
 
     | profile | decoding | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
