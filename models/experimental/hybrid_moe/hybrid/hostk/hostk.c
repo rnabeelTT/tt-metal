@@ -1147,3 +1147,50 @@ int hostk_moe_csr(
     pthread_mutex_unlock(&g_mu);
     return 0;
 }
+
+// Inkling routing (prefill host selection, patch._select_host): per row, sigmoid of the E logits; the top kr of the
+// first R (routed) experts by sigmoid + bias, then the E - R shared experts (always picked); weights = the picked
+// sigmoids normalized over all kr + E - R picks. ids [m, kr + E - R] int64, sc same shape fp32.
+int hostk_route_inkling(
+    const float* lg, int m, int ld, int E, int R, int kr, const float* bias, int64_t* ids, float* sc) {
+    if (kr <= 0 || kr > 64 || R > E || E > 4096) {
+        return -1;
+    }
+    const int k = kr + (E - R);
+    float sg[4096], key[4096];
+    for (int r = 0; r < m; r++) {
+        const float* z = lg + (int64_t)r * ld;
+        for (int e = 0; e < E; e++) {
+            sg[e] = 1.0f / (1.0f + expf(-z[e]));
+        }
+        for (int e = 0; e < R; e++) {
+            key[e] = sg[e] + bias[e];
+        }
+        int64_t* id = ids + (int64_t)r * k;
+        float* s = sc + (int64_t)r * k;
+        for (int j = 0; j < kr; j++) {
+            int b = 0;
+            float bv = -INFINITY;
+            for (int e = 0; e < R; e++) {
+                if (key[e] > bv) {
+                    bv = key[e];
+                    b = e;
+                }
+            }
+            id[j] = b;
+            key[b] = -INFINITY;
+        }
+        for (int e = R; e < E; e++) {
+            id[kr + e - R] = e;
+        }
+        float tot = 0.0f;
+        for (int j = 0; j < k; j++) {
+            s[j] = sg[id[j]];
+            tot += s[j];
+        }
+        for (int j = 0; j < k; j++) {
+            s[j] /= tot;
+        }
+    }
+    return 0;
+}

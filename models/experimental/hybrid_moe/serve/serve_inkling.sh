@@ -3,11 +3,10 @@
 # user) on the QB2, through vLLM + the TT plugin (OpenAI-compatible API on PORT, model name inkling-small-hybrid).
 #
 # usage: serve/serve_inkling.sh ; logs -> serve/server_inkling.log
-# env:   PROFILE  fast (default: routed bfp4 with layers 2-17 gate/up bfp4 + down bfp8, 192 device slots per layer, fused
+# env:   the configuration: routed bfp4 with layers 2-17 gate/up bfp4 + down bfp8, 192 device slots per layer, fused
 #                 decode kernels, host <-> device sockets, MTP k=2; the int4 host library of the 67 experts per layer
 #                 outside the device's 191 built on first use, plans/inkling_plan.npz)
-#                 quality (all routed experts bfp8, 106 slots, unfused decode, host routing; MTP k=1)
-#        CTX (max model len, default 32768), K (MTP drafts per verify pass; fast 2, quality 1), PORT (8000),
+#        CTX (max model len, default 32768), K (MTP drafts per verify pass, 2), PORT (8000),
 #        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400; fast 320), HYB_IMAGE, WCACHE, LIB, FP32ACC (1), PREFETCH (1), STREAM (1: prefill
 #                 streaming; 0 = the CPU computes every missed expert), NS (staging slots: 32 at CTX > 32768, else 128), PGROUP (16),
 #        EXTRA (more docker -e flags)
@@ -18,8 +17,6 @@ PROFILE=${PROFILE:-fast}
 CTX=${CTX:-32768}
 PLAN=/opt/tt-metal/models/experimental/hybrid_moe/plans/inkling_plan.npz
 case $PROFILE in
-  quality) K=${K:-1}; POLICY=all_bfp8; S=106; LIB=/hyblib/inkling_int4_s106
-           PENV="-e HYB_FUSED=0 -e HYB_HOST_ROUTE=1 -e HYB_PLAN=$PLAN -e HYB_PLAN_WEIGHT=mass" ;;
   # fast: little DRAM beside the experts -> 1024-row prefill launches (half the 2048-row transients)
   fast) K=${K:-2}; POLICY=early_gu4dn8; S=192; LIB=${LIB:-/hyblib/inkling_int4_fb191}
         PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024} -e HYB_SOCKET=1"
@@ -47,7 +44,7 @@ case $PROFILE in
           PENV="$PENV -e HYB_PF_SPLIT=${PFSPLIT:-1} -e HYB_PF_COPY_MS=0.65 -e HYB_PF_CPU_MS=0.5,0.05 -e HYB_HOSTK_THREADS=${HK_THREADS:-8}"
         fi
         TRACE_MIB=${TRACE_MIB:-320} ;;
-  *) echo "PROFILE=$PROFILE: fast | quality"; exit 1 ;;
+  *) echo "PROFILE=$PROFILE: only fast (the one configuration)"; exit 1 ;;
 esac
 IMG=${HYB_IMAGE:-tt-model/minimax-m2.7-hybrid-qb2:0c9857a46f16}
 HF_HOST=${HF_HOST:-${HF_HOME:-/opt/tenstorrent/models}}

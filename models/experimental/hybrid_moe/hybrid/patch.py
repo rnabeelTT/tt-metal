@@ -2436,6 +2436,10 @@ def _select_host(self, lg):
     (the selection rules of _route_host)."""
     E, k, L = HYB.E, self.top_k, self.layer_num
     z = lg[:, :E].astype(np.float32)
+    if HYB.router_kind == "inkling" and HYB.hostk:
+        # the C selection (hostk_route_inkling: same picks and weights, ~3x faster than the NumPy below)
+        return hostk.route_inkling(np.ascontiguousarray(z), HYB.n_routed, HYB.top_k_routed,
+                                   np.ascontiguousarray(HYB.sel_bias[L], dtype=np.float32))
     if HYB.router_kind == "inkling":
         sg = 1.0 / (1.0 + np.exp(-z))
         R, kr = HYB.n_routed, HYB.top_k_routed

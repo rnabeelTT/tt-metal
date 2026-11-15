@@ -24,7 +24,7 @@ Running log, measurements and open items: `models/experimental/hybrid_moe/HANDOF
 ## Serving
 
 ```
-models/experimental/hybrid_moe/serve/serve_inkling.sh            # PROFILE=fast (default), CTX=32768, PORT=8000
+models/experimental/hybrid_moe/serve/serve_inkling.sh            # CTX=32768, PORT=8000, STREAM=1
 python models/experimental/hybrid_moe/serve/inkling_features.py  # reasoning / tools / streaming / sampling checks
 python models/experimental/hybrid_moe/serve/inkling_long.py 8000 1000,32000,120000   # needle at N tokens
 ```
@@ -37,23 +37,36 @@ python models/experimental/hybrid_moe/serve/inkling_long.py 8000 1000,32000,1200
   decoding; sampling is exact speculative sampling.
 - Reasoning effort is a chat-template kwarg (`"chat_template_kwargs": {"reasoning_effort": "none" .. "max"}`,
   default high); vLLM's `inkling` reasoning and tool parsers.
+- Sampling: temperature / top-k / top-p / seed and the presence / frequency / repetition penalties run inside the
+  speculative step (`tt/sampling.py`: exact speculative sampling, the penalties applied to every verify row with the
+  drafts before it counted). Requests the plugin samples on the host (min_p, logit_bias, bad words, allowed token ids,
+  min_tokens, logprobs, structured outputs) take a one-token step that returns the logits (`_host_sampled_decode`):
+  every parameter works, at ~23-26 tok/s instead of ~35-45.
+- Structured outputs (`response_format` json_schema / json_object) work. `tool_choice: "required"` produces a valid
+  JSON list of calls, but vLLM's `inkling` tool parser does not convert it, so it arrives as message content
+  (`tool_choice: "auto"`, the usual path, returns proper `tool_calls`).
+- Every prefill program is compiled in the warm-up, before the decode traces are captured (a program first compiled
+  after them can have its kernels overwritten by the replays and hang the device); the engine re-captures if the
+  program cache grows anyway (`_new_programs`, logged).
 - Package: `tt-model-hybrid.yaml` (`tt-model package --container ...`); the first boot builds the host expert copies
   from the official checkpoint.
 
-## Profiles
+## Configuration (one: quality at parity, then speed)
 
-| profile | experts on device | decode path | prefill |
-|---|---|---|---|
-| `fast` (default) | 191 / layer: gate/up bfp4, down bfp4 (bfp8 in layers 2-17) | fused kernels, sockets, MTP k=2 | missed experts streamed (gu4/dn8) |
-| `quality` | 106 / layer, bfp8 | unfused, host routing, MTP k=1 | CPU int4 |
+- Experts on the device: 191 per layer, gate/up bfp4, down bfp4 (bfp8 in layers 2-17); the other 67 on the host CPU
+  (int4).
+- Decode: fused kernels, host <-> device sockets, MTP k=2.
+- Prefill: missed experts streamed over PCIe (gate/up bfp4, down bfp8 copies), the fewest-token ones on the CPU (bf16
+  int4 kernel); `STREAM=0` puts them all on the CPU.
 
 ## Quality (teacher-forced vs the BF16 CPU reference, 8 held-out 1000-token texts)
 
 | configuration | top-1 | top-1 (confident) | KL (top-32) |
 |---|---|---|---|
-| `fast`, prefill path | 0.866 | 0.947 | 0.213 |
-| `fast`, decode path (verify rows of 3) | 0.870 | 0.951 | 0.203 |
-| `quality` | 0.862 | 0.945 | 0.218 |
+| prefill path (CPU experts) | 0.866 | 0.947 | 0.213 |
+| prefill path, bf16 CPU kernel (`hostk_moe_csr`) | 0.868 | 0.950 | 0.209 |
+| decode path (verify rows of 3) | 0.870 | 0.951 | 0.203 |
+| the first parity configuration (106 bfp8 experts on device, ~3x slower; retired) | 0.862 | 0.945 | 0.218 |
 | MiniMax-M2.7 package, same measurement | 0.848 | 0.933 | 0.196 |
 | two valid CPU references against each other (noise floor) | 0.925 | 0.978 | 0.081 |
 

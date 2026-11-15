@@ -42,6 +42,7 @@ def load(nthreads, so=_SO):
         lib.hostk_moe_csr.argtypes = [ctypes.c_int] * 4 + [ctypes.c_void_p, ctypes.c_int] + [ctypes.c_void_p] * 9
         vp, ci = ctypes.c_void_p, ctypes.c_int
         lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
+        lib.hostk_route_inkling.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
         lib.hostk_set_active.argtypes = [ctypes.c_int]
         lib.hostk_touch_init.argtypes = [ctypes.c_int]
@@ -242,6 +243,23 @@ def route(lg, k, bias):
     rc = _lib.hostk_route(lg.ctypes.data, m, ld, E, k, 1, bias.ctypes.data, ids.ctypes.data, sc.ctypes.data)
     if rc != 0:
         raise RuntimeError(f"hostk_route returned {rc} (m {m}, E {E}, k {k})")
+    return ids, sc
+
+
+def route_inkling(lg, R, kr, bias):
+    """Inkling's routing of lg [m, >= E] float32 (C-contiguous; E = len(bias) + shared): the top kr of the first R by
+    sigmoid + bias, then the shared experts R..E-1; weights the picked sigmoids normalized. E = lg columns used: pass
+    lg[:, :E] contiguous. Returns ids [m, kr + E - R] int64, sc fp32."""
+    import numpy as np
+
+    m, ld = lg.shape
+    E = ld
+    k = kr + E - R
+    ids = np.empty((m, k), dtype=np.int64)
+    sc = np.empty((m, k), dtype=np.float32)
+    rc = _lib.hostk_route_inkling(lg.ctypes.data, m, ld, E, R, kr, bias.ctypes.data, ids.ctypes.data, sc.ctypes.data)
+    if rc != 0:
+        raise RuntimeError(f"hostk_route_inkling returned {rc} (m {m}, E {E}, R {R}, kr {kr})")
     return ids, sc
 
 

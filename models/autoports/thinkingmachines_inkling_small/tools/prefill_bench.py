@@ -4,7 +4,8 @@
 the hybrid overlay's host counters per chunk (t_* keys of HYB.st). Dev signal.
 
 usage (hybrid env as tools/eval_hybrid.sh, TOOL=prefill_bench.py): prefill_bench.py [N=8192]
-env: PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures)
+env: PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures),
+     PF_TEXT (a json of token-id documents: real text instead of spread synthetic ids)
 """
 
 import os
@@ -42,7 +43,20 @@ def main():
         args, model = create_model(mesh, max_seq_len=int(os.environ.get("ENGINE_CTX", "32768")))
         cap = os.environ.get("PF_CAPTURE") == "1"  # as served: traces captured and replayed before the timed prefill
         eng = InklingSpecServing(model, args, mesh, int(os.environ.get("INKLING_SPEC_K", "2")), trace=cap)
-        ids = (torch.arange(N + 1) * 7919 % 150000 + 1000).tolist()
+        text = None
+        if os.environ.get("PF_TEXT"):  # real text: the held-out documents (token ids) concatenated, repeated to length
+            import json
+
+            docs = json.load(open(os.environ["PF_TEXT"]))
+            text = [t for d in (docs.values() if isinstance(docs, dict) else docs) for t in d]
+
+        def prompt(n, salt):
+            if text is None:
+                return (torch.arange(n + 1) * salt % 150000 + 1000).tolist()
+            off = (salt * 37) % len(text)
+            return [text[(off + i) % len(text)] for i in range(n + 1)]
+
+        ids = prompt(N, 7919)
         eng.warm()  # compiles every prefill bucket; pins the device-format copies when streaming (HYB_DEV_EXPERTS)
         pre = int(os.environ.get("PF_PRE", "0"))  # a long prefill before the captures (lazy device caches then exist)
         if pre:
@@ -56,10 +70,10 @@ def main():
         ttnn.synchronize_device(mesh)
         for n_prev in Ns[:-1]:  # earlier requests: a prefill of n_prev tokens, then 32 generated (PF_CAPTURE: traced)
             t0 = time.time()
-            out = eng.generate((torch.arange(n_prev + 1) * 104729 % 150000 + 1000).tolist(), 32) if cap else None
+            out = eng.generate(prompt(n_prev, 104729), 32) if cap else None
             if not cap:
                 eng._reset()
-                eng._prefill((torch.arange(n_prev + 1) * 104729 % 150000 + 1000).tolist())
+                eng._prefill(prompt(n_prev, 104729))
             ttnn.synchronize_device(mesh)
             print(f"earlier request: {n_prev} prompt tokens in {time.time() - t0:.1f} s", flush=True)
         st0 = dict(HYB.st) if HYB is not None else {}
