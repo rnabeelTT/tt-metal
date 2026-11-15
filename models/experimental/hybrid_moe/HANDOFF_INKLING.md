@@ -178,3 +178,17 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
     experts per step, ~30 GB/s: bandwidth-bound, 8 host threads = 6), uploads ~9. Host experts grow with verify rows
     (80 / 138 / 186 / 228 per pass at k=0..3), which is why k>1 loses: the next lever is host-expert cost per verify row,
     then device time per layer (device profile with a 170 GB container cap: the first profiler run hit host OOM).
+- **2026-11-15, decode optimisation round 1** (same benchmark; every change byte-identical across k within a run, quality
+  gate re-run where numerics could move).
+  - **Short conv** (`tt/sconv.py`): the device profile showed each conv's three shifted taps being tilized from one
+    row-major row; a one-row fp32 tilize runs on ONE core (~65 us at the 1024-wide per-die shard). Taps now computed on
+    row-major rows in the reference summation order, one tilize per conv: device wait per token 58 -> 44 ms. Gate after:
+    0.865 / 0.947 / 0.219 (before 0.862 / 0.945 / 0.218, noise level). One prompt's greedy text flipped at a near-tie
+    ("To manage this" -> "To resolve this"): fp32 summation order.
+  - **MTP drafter traced** (`SPEC_DTRACE`, default on with `SPEC_TRACE`): draft 14.8 -> 8.3 ms per step at k=1.
+  - **Logits untilized on the device before readback**: a host readback of a tile tensor moves all 32 padded rows
+    (~4 ms per 201K-vocab bf16 row vs ~0.2 ms row-major). Draft 8.3 -> 5.3 ms, verify -3 ms.
+  - **Greedy tok/s now:** k=0 11.17; k=1 **14.76** (1.72 tokens per pass); k=2 14.10; k=3 12.95.
+  - **Host side is bandwidth-capped:** hostk int4 runs at ~36 GB/s, the box reads at ~46 GB/s max (4x64 GB DIMMs run
+    at 3600 MT/s, rated 5600). 15.7 MB per int4 expert (20% of it scales / zeros). At k=1 host experts are ~55 of
+    ~116 ms per step.

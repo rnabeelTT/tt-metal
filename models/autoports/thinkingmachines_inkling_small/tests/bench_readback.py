@@ -7,7 +7,8 @@ import torch
 import ttnn
 
 dev = ttnn.open_device(device_id=0)
-V = 201024
+import os
+V = int(os.environ.get('BENCH_V', '201024'))
 try:
     for R in (1, 4):
         for dt in (ttnn.bfloat16, ttnn.float32):
