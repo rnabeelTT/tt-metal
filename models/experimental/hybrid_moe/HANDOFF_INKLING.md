@@ -395,3 +395,19 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     Exact against a float64 reference with the same bf16 rounding (1.3e-5); 0.33% from the fp32 kernel (bf16 weights
     and down-projection input, as on the device). Layer step 70 -> 31 ms (tests/bench_hostk_csr.py); quality gate
     0.868 / 0.950 / 0.209 (fp32 kernel 0.866 / 0.947 / 0.213). Falls back to the fp32 tiles without AVX512-BF16.
+  - **Streamed prefill tuned on real text** (prefill_bench PF_TEXT = the held-out documents; synthetic ids
+    concentrate the misses on a few experts and overstated it): a 1024-token chunk misses ~840 experts with few tokens
+    each. CQ1 copies + prefetch banks (copying a layer's whole non-resident set) 478 tok/s -> CQ0, no banks 693 ->
+    split cost HYB_PF_COPY_MS 0.65 -> 4 (more few-token experts on the bf16 CPU kernel, in parallel with the device)
+    892 (6: 910, the device starts waiting on the CPU). Quality of the served setting 0.866 / 0.948 / 0.199 (tools/eval_hybrid.sh with the served env). C routing selection (hostk_route_inkling) in
+    prefill.
+  - **Published again** (`raahemnabeel/inkling-small-hybrid-qb2`, tt-metal 2e8209529fd), measured through `tt-model
+    serve`: prefill 507 tok/s at 914 tokens, ~930-980 tok/s from 14K to 104K (104K: 112 s; the previous package ~300 s);
+    chat decode 35.3 tok/s greedy / 33.9 sampled, TTFT 0.64 s; every sampling parameter, json_schema, needles to 104K.
+    First boot builds the 46 GB of streaming copies in ~7 min (10 s per layer).
+  - The retired "quality" profile (106 bfp8 slots) is gone from the README / serve script: the one configuration is at
+    parity and ~3x faster.
+  - **Open:** DSpark (DFlash-style drafter) vs MTP on generated text (the CPU comparison so far was teacher-forced on
+    human text, 1.31 vs 1.42; DSpark's card claims 3.35 at block 7 on generation). Short-prompt TTFT 0.53 -> 0.64 s with
+    streaming on (a streaming threshold by prompt length would recover it). tool_choice "required" (vLLM's inkling
+    parser leaves the JSON calls in content).
