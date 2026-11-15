@@ -8,7 +8,7 @@
 #                 outside the device's 191 built on first use, plans/inkling_plan.npz)
 #                 quality (all routed experts bfp8, 106 slots, unfused decode, host routing; MTP k=1)
 #        CTX (max model len, default 32768), K (MTP drafts per verify pass; fast 2, quality 1), PORT (8000),
-#        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400; fast 320), HYB_IMAGE, WCACHE, LIB, FP32ACC (1), PREFETCH (1), STREAM (1), NS (128), PGROUP (16),
+#        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400; fast 320), HYB_IMAGE, WCACHE, LIB, FP32ACC (1), PREFETCH (1), STREAM (0; 1 = experimental prefill streaming), NS (128), PGROUP (16),
 #        EXTRA (more docker -e flags)
 # Code: this checkout's Inkling port, the M2.7 port, qwen36 and hybrid_moe are mounted over the image's copies.
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)   # models/experimental/hybrid_moe
@@ -29,7 +29,9 @@ case $PROFILE in
         # first use: build the int4 library of every expert outside each layer's 191 device slots (hybrid/firstboot.py)
         PENV="$PENV -e HYB_LIB_KEYS=port:thinkingmachines_inkling_small -e HYB_BUILD_STATIC=191"
         PENV="$PENV -e HYB_BUILD_LAYERS=$(seq -s, 2 41) -e QWEN35_MOE_FP32_ACC=${FP32ACC:-1}"
-        if [ "${STREAM:-1}" = 1 ]; then
+        # STREAM=1: experimental (a streamed long prefill, traced decode, then another streamed long prefill hangs the
+        # device: HANDOFF_INKLING.md); off by default: the CPU int4 prefill is stable at every length
+        if [ "${STREAM:-0}" = 1 ]; then
           # prefill streaming: missed experts copied over PCIe into 128 staging slots and computed on the device
           # (gate/up bfp4, down bfp8 copies of the 67 cold experts per layer, built on first use), the prefill
           # layer-major in groups of 16 chunks so a staged expert serves 16K tokens (tools/prefill_bench.py: 340 ->

@@ -87,32 +87,18 @@ serve:
     HYB_DECODE_ROWS: "8"
     HYB_SKIP: "0"
     HYB_LOWBIT: "0"
-    # prefill streaming: missed experts copied over PCIe into 128 staging slots and computed on the device, the prefill
-    # layer-major in groups of 16 chunks of 1024 tokens (a staged expert serves 16K tokens)
-    HYB_STREAM_ROUNDS: "3"
-    HYB_STREAM_MIN: "4"
-    HYB_STREAM_MIN_LONG: "1"
-    HYB_STREAM_LONG_FROM: "1024"
-    HYB_STREAM_CQ1: "1"
-    HYB_PF_PREFETCH_MIN: "1024"
-    HYB_LRU: "0"
-    INKLING_PREFILL_GROUP: "16"
-    # the fewest-token missed experts of a prefill step on the CPU while the rest stream; the host kernel runs its
-    # whole 8-thread pool in prefill and 6 threads in decode (bandwidth-bound there)
-    HYB_PF_SPLIT: "1"
-    HYB_PF_COPY_MS: "0.65"
-    HYB_PF_CPU_MS: "0.5,0.05"
-    INKLING_DECODE_HOSTK_THREADS: "6"
+    # prefill: the CPU computes the missed experts (int4, the whole 8-thread pool); PCIe streaming of missed experts is
+    # implemented (serve_inkling.sh STREAM=1, ~3x faster prefill) but not shipped: it can hang the device on a second long
+    # prompt after decoding (HANDOFF_INKLING.md)
+    HYB_STREAM_SLOTS: "0"
+    INKLING_DECODE_HOSTK_THREADS: "6"   # decode is bandwidth-bound: 6 of the 8 threads
     HYB_SOCKET: "1"
     HYB_SOCKET_H2D_DEPTH: "4"
     HYB_PREFETCH: "1"
     HYB_HOSTK_THREADS: "8"
     # the 67 experts per layer the device does not hold are copied from the checkpoint on the first boot into the weight
-    # cache (hybrid/firstboot.py; ~15 min): int4 for the CPU (decode misses), and gate/up bfp4 + down bfp8 device
-    # copies for prefill streaming; only the official weights download
+    # cache as int4 for the CPU (hybrid/firstboot.py; ~9 min); only the official weights download
     HYB_LIB: /weight-cache/int4_s191
-    HYB_DEV_EXPERTS: /weight-cache/dev_gu4dn8_s191
-    HYB_DEV_POLICY: /opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/all_gu4dn8.json
     HYB_LIB_KEYS: port:thinkingmachines_inkling_small
     HYB_BUILD_STATIC: "191"
     HYB_BUILD_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41"
@@ -125,25 +111,13 @@ serve:
     INKLING_PREFILL_CHUNK: "1024"
     INKLING_SPEC_K: "2"
 
-# Two profiles share the downloads and the caches: the KV caches of a 128K context leave room for 32 prefill staging
-# slots, a 32K context for 128 (faster long prompts).
 serve_profiles:
   - name: p300x2-128k
     description: >
-      Up to 128K tokens of context (the default).
+      Up to 128K tokens of context.
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 131072
-    env:
-      HYB_STREAM_SLOTS: "32"
-  - name: p300x2-32k
-    description: >
-      Up to 32K tokens; more prefill staging slots (faster prompts of several thousand tokens).
-    hardware: p300x2
-    mesh_device: P300x2
-    max_model_len: 32768
-    env:
-      HYB_STREAM_SLOTS: "128"
 default_profile: p300x2-128k
 
 card:

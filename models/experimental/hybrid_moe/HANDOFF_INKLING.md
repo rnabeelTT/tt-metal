@@ -325,3 +325,23 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     0.98968 -> 0.99249 (gu4dn8 0.99435). Not needed after the FP32-accumulation fix; kept as the next precision lever.
   - Not done: PCIe fetch / prompt streaming for the mixed-dtype profile (fetch.py keeps one dtype for all layers);
     long-context profiles beyond the tests below; multimodal.
+
+- **2026-11-15, session 2 (cont.): prefill, the production server, and the open streaming hang.**
+  - **Prefill is CPU compute-bound** (tools/prefill_bench.py): a 1024-token chunk sends ~40K token-expert pairs (12% of
+    picks) to the int4 kernel, ~2 TFLOP, ~2.2 s of ~3.0 s per chunk; 8 or 16 kernel threads gain only 7%. Shipped:
+    ~340-400 tok/s (the engine runs the 8-thread pool in prefill, 6 in decode).
+  - **PCIe streaming of the missed experts** (implemented, opt-in `STREAM=1` / `HYB_STREAM_SLOTS`): the staging takes the
+    first hybrid layer's format, so the device copies are gate/up bfp4 + down bfp8 in every layer
+    (`HYB_DEV_POLICY=all_gu4dn8.json`); the prefill runs layer-major in groups of chunks (`INKLING_PREFILL_GROUP`) so a
+    staged expert serves the group: 16K 1037 tok/s (128 slots), 32K 1001 tok/s (32 slots, 128K context); quality
+    0.867 / 0.949 / 0.211. **Open bug, why it is not shipped:** a streamed long prefill (>= 1024 tokens), then traced
+    decode, then a second streamed long prefill hangs the device in the second prefill (the host waits in
+    `_route_prefill_host`'s readback). Reproduce outside vLLM: `PF_CAPTURE=1 tools/prefill_bench.py 4096,16384,32768`
+    with the stream env of `~/inkling-work/jobs/pf9.sh`. Not the cause: HYB_STREAM_CQ1 (0 hangs too), prefetch
+    banking, HYB_PINX_BGWRITE, the split. Never hangs: streaming without traces, one long prefill after traces, CPU
+    prefill after traces (the server ran 1K .. 104K back to back).
+  - **DRAM leak fixed:** each short conv kept its last prefill chunk's sequence (~10 MB per layer, 420 MB per die).
+  - **Next steps:** (1) the streaming hang (likely an interaction between the socket decode traces and the staging
+    path's programs; try HYB_SOCKET=0 with streaming, then a device-side hang dump); (2) a faster CPU expert kernel
+    (AVX512-BF16 dot products: the activations are bf16 and int4 values are exact in bf16; ~1.5-2x on prefill);
+    (3) the prefill short convs through a multi-tile fused kernel; (4) multimodal.

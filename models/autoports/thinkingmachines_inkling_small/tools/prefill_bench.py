@@ -29,16 +29,30 @@ from models.autoports.thinkingmachines_inkling_small.tt.model import create_mode
 
 
 def main():
-    N = int(sys.argv[1]) if len(sys.argv) > 1 else 8192
+    Ns = [int(v) for v in (sys.argv[1] if len(sys.argv) > 1 else "8192").split(",")]
+    N = Ns[-1]
     os.environ.setdefault("INKLING_MTP_PROMPT", os.environ.get("PF_MTP_PROMPT", "1"))
     ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576, trace_region_size=64_000_000)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 4), l1_small_size=24576,
+                                 trace_region_size=int(os.environ.get("SPEC_TRACE_REGION", "335544320")))
     try:
         args, model = create_model(mesh, max_seq_len=int(os.environ.get("ENGINE_CTX", "32768")))
-        eng = InklingSpecServing(model, args, mesh, int(os.environ.get("INKLING_SPEC_K", "2")), trace=False)
+        cap = os.environ.get("PF_CAPTURE") == "1"  # as served: traces captured and replayed before the timed prefill
+        eng = InklingSpecServing(model, args, mesh, int(os.environ.get("INKLING_SPEC_K", "2")), trace=cap)
         ids = (torch.arange(N + 1) * 7919 % 150000 + 1000).tolist()
         eng.warm()  # compiles every prefill bucket; pins the device-format copies when streaming (HYB_DEV_EXPERTS)
+        if cap:
+            eng.capture()
+            print("generated before the prefill:", len(eng.generate(ids[:300], 64)), "tokens", flush=True)
         ttnn.synchronize_device(mesh)
+        for n_prev in Ns[:-1]:  # earlier requests: a prefill of n_prev tokens, then 32 generated (PF_CAPTURE: traced)
+            t0 = time.time()
+            out = eng.generate((torch.arange(n_prev + 1) * 104729 % 150000 + 1000).tolist(), 32) if cap else None
+            if not cap:
+                eng._reset()
+                eng._prefill((torch.arange(n_prev + 1) * 104729 % 150000 + 1000).tolist())
+            ttnn.synchronize_device(mesh)
+            print(f"earlier request: {n_prev} prompt tokens in {time.time() - t0:.1f} s", flush=True)
         st0 = dict(HYB.st) if HYB is not None else {}
         eng._reset()
         t0 = time.time()
