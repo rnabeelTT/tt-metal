@@ -39,6 +39,13 @@ from models.autoports.thinkingmachines_inkling_small.tt.inkling_mtp import Inkli
 
 
 
+def _hyb():
+    """The hybrid overlay's state when it is installed (models/experimental/hybrid_moe), else None."""
+    import sys
+
+    return getattr(sys.modules.get("hybrid.patch"), "HYB", None)
+
+
 def prefill_buckets(chunk: int):
     """Row counts a (last) prefill chunk is padded to: 128, 256, ... up to the chunk."""
     out, b = [], 128
@@ -356,6 +363,9 @@ class InklingSpecServing:
 
     def _prefill(self, ids):
         """The target's prefill of ids[:-1] (+ the drafter's prompt pass)."""
+        hyb = _hyb()
+        if hyb is not None and hyb.enabled:
+            hyb.stream.begin_prefill(len(ids) - 1)  # the streaming threshold / prefetch banking by prompt length
         hook = self._mtp_prompt_hook(ids) if self.mtp_prompt else None
         self.model.prefill_tokens(torch.as_tensor(ids[:-1]), self.pt_host, buckets=self.buckets, on_chunk=hook)
 
@@ -369,6 +379,12 @@ class InklingSpecServing:
         `prompt_len` tokens covers the full chunks too), the verify rows at every width 1..8, the drafter at every
         accepted-row width and depth. Then the sequence state is reset."""
         t0 = time.time()
+        hyb = _hyb()
+        if hyb is not None and hyb.enabled:
+            for li in list(hyb.lib):  # the hybrid layers' host library RAM copies (loading since the build)
+                hyb.lib_layer(li)
+            if hyb.fetch.dir:  # HYB_DEV_EXPERTS: the pinned device-format copies for prefill streaming / fetch
+                hyb.fetch.finalize(hyb.loader, hyb.stream)
         ids = torch.arange(1000, 1000 + max(self.buckets) + 64, dtype=torch.int64) % 200000
         for b in self.buckets:  # one prefill per bucket size (a b-row prompt pads to bucket b)
             self._reset()

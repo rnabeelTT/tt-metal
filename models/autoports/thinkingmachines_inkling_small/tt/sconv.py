@@ -226,7 +226,13 @@ class ShortConv:
         self._last_seq, self._seq_tile = seq, False
         if commit_all:
             self.commit_rows(int(x.shape[2]))
+            self._last_seq = None  # committed: do not keep a prefill chunk's sequence (~4 MB per conv) alive
         return y
+
+    def commit_final(self, n: int):
+        """commit_rows(n), then release the sequence (a prefill chunk's: nothing commits from it again)."""
+        self.commit_rows(n)
+        self._last_seq = None
 
     def commit_rows(self, n: int):
         """State := the 3 inputs ending at row n-1 of the last rows() call (host-known n: eager paths)."""

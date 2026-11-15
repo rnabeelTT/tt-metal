@@ -301,8 +301,8 @@ class InklingAttention:
         k = self.k_sconv.rows(k, commit_all=valid is None)
         v = self.v_sconv.rows(v, commit_all=valid is None)
         if valid is not None:
-            self.k_sconv.commit_rows(int(valid))
-            self.v_sconv.commit_rows(int(valid))
+            self.k_sconv.commit_final(int(valid))
+            self.v_sconv.commit_final(int(valid))
         q = ttnn.reshape(q, (1, T, NH, HD))
         q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
         k = ttnn.reshape(k, (1, T, NKV, HD))

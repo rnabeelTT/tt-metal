@@ -24,6 +24,7 @@ source:
     - models/autoports/thinkingmachines_inkling_small/vllm_bundle
     - models/autoports/thinkingmachines_inkling_small/doc/precision/early_gu4dn8.json
     - models/autoports/thinkingmachines_inkling_small/doc/precision/all_bfp8.json
+    - models/autoports/thinkingmachines_inkling_small/doc/precision/all_gu4dn8.json
     # the shared qwen35-lineage code the Inkling port builds on (the M2.7 port's model / MoE / generator / vLLM adapter)
     - models/autoports/minimaxai_minimax_m2_7/__init__.py
     - models/autoports/minimaxai_minimax_m2_7/tt
@@ -86,13 +87,27 @@ serve:
     HYB_DECODE_ROWS: "8"
     HYB_SKIP: "0"
     HYB_LOWBIT: "0"
-    HYB_STREAM_SLOTS: "0"
+    # prefill streaming: missed experts copied over PCIe into 128 staging slots and computed on the device, the prefill
+    # layer-major in groups of 16 chunks of 1024 tokens (a staged expert serves 16K tokens)
+    HYB_STREAM_SLOTS: "128"
+    HYB_STREAM_ROUNDS: "3"
+    HYB_STREAM_MIN: "4"
+    HYB_STREAM_MIN_LONG: "1"
+    HYB_STREAM_LONG_FROM: "1024"
+    HYB_STREAM_CQ1: "1"
+    HYB_PF_PREFETCH_MIN: "1024"
+    HYB_LRU: "0"
+    INKLING_PREFILL_GROUP: "16"
     HYB_SOCKET: "1"
+    HYB_SOCKET_H2D_DEPTH: "4"
     HYB_PREFETCH: "1"
     HYB_HOSTK_THREADS: "6"
     # the 67 experts per layer the device does not hold are copied from the checkpoint on the first boot into the weight
-    # cache as int4 for the CPU (hybrid/firstboot.py, ~15 min); only the official weights download
+    # cache (hybrid/firstboot.py; ~15 min): int4 for the CPU (decode misses), and gate/up bfp4 + down bfp8 device
+    # copies for prefill streaming; only the official weights download
     HYB_LIB: /weight-cache/int4_s191
+    HYB_DEV_EXPERTS: /weight-cache/dev_gu4dn8_s191
+    HYB_DEV_POLICY: /opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/all_gu4dn8.json
     HYB_LIB_KEYS: port:thinkingmachines_inkling_small
     HYB_BUILD_STATIC: "191"
     HYB_BUILD_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41"

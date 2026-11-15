@@ -63,7 +63,11 @@ def main():
     # per-layer dtypes from the served precision policy (QWEN35_PRECISION_CONFIG: weight_groups.routed_moe gate_up /
     # down, layer_exceptions): a fetched copy must be byte-compatible with the slot it lands in (e.g. Inkling's fast
     # profile: bfp8 down projections in layers 2-17). Without a policy: bfp4 everywhere (the M2.7 package).
-    pol = json.load(open(os.environ["QWEN35_PRECISION_CONFIG"])) if os.environ.get("QWEN35_PRECISION_CONFIG") else {}
+    # HYB_DEV_POLICY (else QWEN35_PRECISION_CONFIG): the copies' format. Prefill streaming stages every layer's experts in
+    # one model-wide staging tensor in the first hybrid layer's format, so a mixed-dtype profile builds its copies in
+    # that one format (Inkling's fast profile: all_gu4dn8.json); the decode fetch writes into the layers' own slots
+    pp = os.environ.get("HYB_DEV_POLICY") or os.environ.get("QWEN35_PRECISION_CONFIG")
+    pol = json.load(open(pp)) if pp else {}
     DT = {"bfp4": ttnn.bfloat4_b, "bfp8": ttnn.bfloat8_b}
 
     def layer_dtype(L, which):

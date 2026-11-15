@@ -199,7 +199,7 @@ class InklingDecoderLayer(_M27Layer):
         ttnn.deallocate(attn_in)
         a2 = self.attn_sconv.rows(a, commit_all=valid is None)
         if valid is not None:
-            self.attn_sconv.commit_rows(int(valid))
+            self.attn_sconv.commit_final(int(valid))
         ttnn.deallocate(a)
         h = ttnn.add(x, a2)
         ttnn.deallocate(a2)
@@ -211,7 +211,7 @@ class InklingDecoderLayer(_M27Layer):
         ttnn.deallocate(ff_in)
         f2 = self.mlp_sconv.rows(f, commit_all=valid is None)
         if valid is not None:
-            self.mlp_sconv.commit_rows(int(valid))
+            self.mlp_sconv.commit_final(int(valid))
         ttnn.deallocate(f)
         out = ttnn.add(h, f2)
         ttnn.deallocate(h)

@@ -2155,9 +2155,15 @@ def _route_prefill_host(self, x4, T):
     """-> (scores bf16 [1, 1, T, k], ids uint16 [1, 1, T, k]) as self._route returns them, selected on the host."""
     t0 = time.perf_counter()
     lg_t = self._router_logits(x4, ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.float32)
-    lg = ttnn.to_torch(_die0(lg_t)).float().reshape(T, -1)
+    # row-major on the device first: a host readback of a tile tensor untilizes [T, 320] fp32 on the host (~10 ms)
+    lg_rm = ttnn.to_layout(lg_t, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
     ttnn.deallocate(lg_t)
+    lg = ttnn.to_torch(_die0(lg_rm)).reshape(T, -1)
+    ttnn.deallocate(lg_rm)
+    t1 = time.perf_counter()
     ids, sc = _select_host(self, lg.numpy())
+    HYB.st["t_pf_route_sel"] = HYB.st.get("t_pf_route_sel", 0.0) + time.perf_counter() - t1
+    HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + t1 - t0
     k = ids.shape[1]
     kw = dict(layout=ttnn.TILE_LAYOUT, device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
               memory_config=ttnn.DRAM_MEMORY_CONFIG)

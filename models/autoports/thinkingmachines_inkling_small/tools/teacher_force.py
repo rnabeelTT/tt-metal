@@ -58,6 +58,13 @@ def main():
     try:
         t0 = time.time()
         args, model = create_model(mesh, max_seq_len=max(4096, min(T_all, T_max) + 64), layer_indices=layers)
+        if os.environ.get("HYB_ENABLE") == "1":
+            from hybrid.patch import HYB
+
+            if HYB.fetch.dir:  # HYB_DEV_EXPERTS: pin the device-format copies (prefill streaming), as the server does
+                for li in list(HYB.lib):
+                    HYB.lib_layer(li)
+                HYB.fetch.finalize(HYB.loader, HYB.stream)
         print(f"model built in {time.time() - t0:.0f}s", flush=True)
         try:  # the per-die DRAM budget left (mesh allocation is in lockstep across the dies)
             mv = ttnn.device.get_memory_view(mesh, ttnn.BufferType.DRAM)
