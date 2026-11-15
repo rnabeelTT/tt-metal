@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 
 import torch
@@ -293,13 +294,64 @@ class Verify:
     def release(self):
         if self.trace is not None:
             ttnn.release_trace(self.mesh, self.trace)
-        self.trace, self.outs = None, None
+        if getattr(self, "ctrace", None) is not None:
+            ttnn.release_trace(self.mesh, self.ctrace)
+        self.trace, self.outs, self.ctrace, self.couts = None, None, None, None
 
     def capture(self):
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.outs = self.body()
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
         self.trace = tid
+        # the sampled path's candidates: a separate trace over the persistent logits (greedy passes never run it)
+        tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+        self.couts = self._cands_body(self.logits)
+        ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+        self.ctrace = tid
+
+    # per-shard candidates of the device top-k (two halves x 32, as the port's mtp_traced.py): a request with
+    # 0 < top_k <= 32 is exactly determined by them (its top_k survivors lie inside every shard's top-32)
+    CAND_K = 32
+
+    def _cands_body(self, logits):
+        """Per-die top-32 of each <= 32768-wide half of the TILE logits [1, 1, BW, W] -> (values, local ids) x halves."""
+        W = int(logits.shape[-1])
+        Wp = 1 << (W - 1).bit_length()
+        x = logits
+        if Wp != W:
+            x = ttnn.pad(logits, [(0, 0), (0, 0), (0, 0), (0, Wp - W)], value=-sys.float_info.max)
+        halves = ttnn.split(x, Wp // 2, dim=3) if Wp > 32768 else [x]
+        outs = []
+        for h in halves:
+            v, i = ttnn.topk(h, k=self.CAND_K, dim=-1)
+            outs += [v, i]
+            if h is not logits and h is not x:
+                ttnn.deallocate(h)
+        if x is not logits:
+            ttnn.deallocate(x)
+        self._cand_half = Wp // 2 if Wp > 32768 else Wp
+        return tuple(outs)
+
+    def read_cands(self, rows, vocab):
+        """(values [rows, n] float, global ids [rows, n] long) of the last run's logits; ids past the vocab masked."""
+        if self.ctrace is not None:
+            ttnn.execute_trace(self.mesh, self.ctrace, cq_id=0, blocking=False)
+            outs = self.couts
+        else:
+            outs = self._cands_body(self.logits)
+        comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
+        per_die = int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1])
+        TP = len(self.mesh.get_device_ids())
+        vals, ids = [], []
+        for hi in range(len(outs) // 2):
+            v = ttnn.to_torch(outs[2 * hi], mesh_composer=comp).float().reshape(TP, -1, self.CAND_K)[:, :rows]
+            i = ttnn.to_torch(outs[2 * hi + 1], mesh_composer=comp).long().reshape(TP, -1, self.CAND_K)[:, :rows]
+            vals.append(v)
+            ids.append(i + hi * self._cand_half + torch.arange(TP).view(TP, 1, 1) * per_die)
+        v = torch.cat(vals, dim=-1).permute(1, 0, 2).reshape(rows, -1)
+        i = torch.cat(ids, dim=-1).permute(1, 0, 2).reshape(rows, -1)
+        v[i >= vocab] = -float("inf")
+        return v, i
 
 
 _TOP_P_CAND = 1024  # top-p candidates read exactly from the top 1024 tokens when they cover top_p (else a full sort)
@@ -324,6 +376,18 @@ def _target_dist(logits, temperature, top_k, top_p):
     probs = torch.exp(vals - lse)
     if top_p < 1.0:
         keep = (torch.cumsum(probs, dim=-1) - probs) < top_p  # tokens whose preceding mass is below top_p (>= 1 kept)
+        probs, ids = probs[keep], ids[keep]
+    return ids, probs / probs.sum()
+
+
+def _target_dist_cands(vals, ids, temperature, top_k, top_p):
+    """_target_dist from the device top-k candidates of one row (0 < top_k <= Verify.CAND_K)."""
+    x = vals.float() / max(float(temperature), 1e-5)
+    tv, ti = x.topk(min(top_k, x.shape[-1]))
+    probs = torch.softmax(tv, dim=-1)
+    ids = ids[ti]
+    if top_p < 1.0:
+        keep = (torch.cumsum(probs, dim=-1) - probs) < top_p
         probs, ids = probs[keep], ids[keep]
     return ids, probs / probs.sum()
 
@@ -667,18 +731,23 @@ class DFlashServing:
                 raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
         if sampled:  # speculative sampling against the point-mass drafts, row by row until the first rejection
             t_s = time.perf_counter()
-            lg = ver.read_raw_logits(R, self.V)
             T, tk, tp, _ = sampling
+            if 0 < tk <= Verify.CAND_K:  # the device candidates (~1 KB per row) instead of the full logits
+                cv, ci = ver.read_cands(R, self.V)
+                row_dist = lambda r: _target_dist_cands(cv[r], ci[r], T, tk, tp)  # noqa: E731
+            else:
+                lg = ver.read_raw_logits(R, self.V)
+                row_dist = lambda r: _target_dist(lg[r], T, tk, tp)  # noqa: E731
             a, nxt = 0, None
             while a < K:
-                dist = _target_dist(lg[a], T, tk, tp)
+                dist = row_dist(a)
                 if float(torch.rand(1, generator=self._rng)) < _p_of(dist, drafts[a]):
                     a += 1
                     continue
                 nxt = _sample(dist, self._rng, exclude=drafts[a])
                 break
             if nxt is None:
-                nxt = _sample(_target_dist(lg[K], T, tk, tp), self._rng)
+                nxt = _sample(row_dist(K), self._rng)
             top = list(top)
             top[a] = nxt
             self.stats["sample"] += time.perf_counter() - t_s
