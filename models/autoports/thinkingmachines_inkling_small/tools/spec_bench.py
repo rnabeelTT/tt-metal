@@ -61,6 +61,7 @@ PROMPTS = [
 def main():
     K = int(sys.argv[1]) if len(sys.argv) > 1 else 4
     NEW = int(sys.argv[2]) if len(sys.argv) > 2 else 128
+    NPROMPTS = int(os.environ.get("SPEC_NPROMPTS", "0"))  # only the first N prompts (0 = all; device-profiler runs)
     WARM = int(os.environ.get("SPEC_WARM", "48"))  # untimed warm-up tokens per k (0 = none)
     TEMP = float(os.environ.get("SPEC_TEMP", "0"))
     TOP_P = float(os.environ.get("SPEC_TOP_P", "1.0"))
@@ -244,7 +245,7 @@ def main():
             tm = {"verify": 0.0, "accept": 0.0, "commit": 0.0, "draft": 0.0}
             hst = None
             # an untimed warm-up generation first: JIT kernel compiles for this k's row counts stay out of the timing
-            runs = ([(PROMPTS[0], WARM, False)] if WARM else []) + [(m, NEW, True) for m in PROMPTS]
+            runs = ([(PROMPTS[0], WARM, False)] if WARM else []) + [(m, NEW, True) for m in (PROMPTS[:NPROMPTS] if NPROMPTS else PROMPTS)]
             for msgs, limit, timed in runs:
                 prompt = tok.encode(tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True,
                                                             reasoning_effort="none"), add_special_tokens=False)
