@@ -156,14 +156,91 @@ card:
   attribution: >
     Serves [ornith-ai/Ornith-1.5-397B-FP8](https://huggingface.co/ornith-ai/Ornith-1.5-397B-FP8) with
     [ornith-ai/Ornith-1.5-397B-DFlash](https://huggingface.co/ornith-ai/Ornith-1.5-397B-DFlash) as the speculative
-    drafter.
+    drafter. Only the official checkpoints are downloaded: the expert copies the hybrid needs are built from them on
+    the first start.
   description: >
-    Ornith-1.5-397B (Qwen3.5-MoE: 60 layers, 512 experts per layer, top-10, gated-delta-net linear attention with gated
-    full attention every 4th layer) served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so
-    each layer's most-used experts stay on the device and the rest are computed on the host CPU from int4 copies or
-    streamed over PCIe. Bring-up: the performance and limitations sections are filled in after measurement.
+    Ornith-1.5-397B (Qwen3.5-MoE: 397B parameters, 60 layers x 512 experts, top-10, gated-delta-net linear attention
+    with gated full attention every 4th layer) on one QB2. The model does not fit in the 4 dies' DRAM, so it runs
+    through a hybrid-MoE overlay: each layer keeps its 255 most-used experts on the device (bfp4), the CPU computes the
+    rest from int4 copies (AVX-512) while the device runs, and recently missed experts are copied over PCIe into 32
+    spare device slots per layer. Decoding is speculative (DFlash, 3 drafts per pass) for greedy and sampled requests
+    alike (exact speculative sampling).
+  intended_use: >
+    Single-user chat, reasoning and coding (tool calls through the qwen3_xml parser, reasoning split into
+    reasoning_content) on one QB2.
+  prerequisites: |
+    - A host CPU with AVX-512 (the host expert kernel); measured on an 8-core Ryzen 7 9700X with 2-channel DDR5. Host
+      memory bandwidth bounds the CPU half of every token: faster memory is faster decode.
+    - Free host RAM for the profile:
+
+      | profile | free host RAM |
+      | --- | --- |
+      | `p300x2-128k` (default) | ~205 GB (int4 library resident + pinned device-format copies) |
+      | `p300x2-128k-lowmem` | ~135 GB (int4 library only) |
+
+      The server checks this at startup against the RAM free right now (other jobs count) and refuses to start if
+      the profile does not fit; `HYB_RAM_CHECK=warn` starts anyway (swapped expert pages make decode several times
+      slower).
+    - About 900 GB of disk: the FP8 checkpoint (397 GB) and drafter (2.5 GB), and in the weight cache the int4
+      library (141 GB), the device-format copies (51 GB, default profile only) and the device images the first boot
+      writes (~300 GB).
+  quickstart: |
+    ```
+    tt-model serve raahemnabeel/ornith-1.5-397b-hybrid-qb2            # default profile
+    tt-model serve raahemnabeel/ornith-1.5-397b-hybrid-qb2 --profile p300x2-128k-lowmem
+    ```
+
+    ### First start
+
+    After downloading the checkpoint, the server builds the hybrid's expert copies from it into the weight cache
+    (logged as `[hybrid build]`): the host int4 library (~20 minutes on 16 threads) and, for the default profile, the
+    device-format copies of the fetchable experts (~11 minutes). An interrupted build resumes where it stopped. The
+    first boot then converts the device experts into device images (written once). Later starts skip all of this and
+    are ready in about 15 minutes (kernel warm-up, pinning the host copies, loading the images).
+  usage: |
+    One request at a time (max_num_seqs 1). Greedy and sampled decoding are both speculative: sampled requests
+    (temperature, top_k, top_p, seed) use exact speculative sampling against the drafter's drafts, so the output
+    follows the requested distribution. A top_k of 32 or less (the model's default is 20) reads only the device's
+    top-k candidates; other settings read the verify's full logits (a little slower). Presence / frequency /
+    repetition penalties are not applied in decode. The model's recommended sampling: temperature 0.6, top_p 0.95,
+    top_k 20.
+  performance: |
+    | eval | this package | prompts |
+    | --- | --- | --- |
+    | GSM8K accuracy, greedy | 56 / 60 (0.93) | first 60 test questions |
+
+    | profile | sampling | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2-128k | greedy | ~50 | 256 | 1 | 16 | 1.12 s | — | 18.6 | — |
+    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.08 s | — | 18.4 | — |
+    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.09 s | — | 18.1 | — |
+    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 46.3 s | 98 | 16.9 | 53.9 s |
+    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 184.9 s | 97 | 16.9 | 192.4 s |
+    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 381.7 s | 95 | 15.8 | 389.8 s |
+
+    Measured on one QB2 (Ryzen 7 9700X, 2-channel DDR5 at 3600 MT/s) through the OpenAI endpoint with `tt-model
+    serve`, warm caches, 2026-11-15; the ~50-token rows are the 8 held-out chat prompts (thinking on) per run, the long
+    rows GSM8K questions concatenated (thinking off). Prefill tok/s = prompt tokens / TTFT. Per-prompt decode spans
+    ~15-21 tok/s with the text (speculative acceptance and how many experts miss the device). GSM8K from the same
+    configuration in development (2026-11-14; 57 / 60 without speculation or the fetch). The `p300x2-128k-lowmem`
+    profile decoded ~13.6 tok/s on short prompts in development (not re-measured on this package).
   limitations: |
-    - Bring-up build: not yet measured.
+    - One user at a time; the hybrid path does not batch.
+    - Decode speed depends on the text: the more of a token's experts are off the device, the more the CPU does
+      (the per-prompt spread in the table). Unusual domains route to more host experts and decode slower.
+    - Outputs are close to but not identical to the reference model (bfp4 device experts, int4 host experts, 2-bit
+      reads of low-weight host experts). They are not bit-reproducible between requests either: which copy of an
+      expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text.
+    - Penalties (presence / frequency / repetition) are ignored in decode.
+    - Prefill is slow: ~95-100 tok/s (a 4K-token prompt waits ~46 s, 32K ~6 minutes). The Qwen3.5 port does not
+      stream experts to the device in prefill yet, so the CPU computes every off-device expert for every prompt
+      token. Decode is not affected.
+    - Prefix caching is off (a resent prompt is prefilled again).
+    - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
+  licensing: >
+    Ornith-1.5-397B and its DFlash drafter are MIT-licensed by ornith-ai; the expert copies the server builds are
+    derived from the checkpoint under the same terms. The serving code is Apache-2.0.
+  license: {id: mit}
 
 verify:
   - "import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"
