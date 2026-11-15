@@ -40,7 +40,11 @@ def _done(path):
 def _run(script, args, env, what, out):
     t0 = time.time()
     _log(f"{what}: building into {out} (first start only; resumes if interrupted)")
-    r = subprocess.run([sys.executable, os.path.join(_HERE, script)] + args, env={**os.environ, **env})
+    # HYB_AUTOBUILD=0: the builder's own imports install the overlay too; it must not re-enter ensure() (it would
+    # wait forever on the lock this process holds)
+    r = subprocess.run(
+        [sys.executable, os.path.join(_HERE, script)] + args, env={**os.environ, **env, "HYB_AUTOBUILD": "0"}
+    )
     if r.returncode != 0:
         raise RuntimeError(f"[hybrid build] {what} failed (exit {r.returncode}); restart to resume")
     with open(os.path.join(out, ".complete"), "w") as f:
