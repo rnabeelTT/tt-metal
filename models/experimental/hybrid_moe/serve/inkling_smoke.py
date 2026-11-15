@@ -50,7 +50,7 @@ for i, p in enumerate(PROMPTS):
     dec = (n - 1) / (dt - ttft) if ttft and n > 1 and dt > ttft else 0.0
     tot_tok += n
     tot_dec += dec
-    print(f"--- prompt {i}: {usage['prompt_tokens'] if usage else '?'} prompt tokens, {n} generated, TTFT {ttft:.2f}s, "
+    print(f"--- prompt {i}: {usage['prompt_tokens'] if usage else '?'} prompt tokens, {n} generated, TTFT {(ttft or 0):.2f}s, "
           f"decode {dec:.2f} tok/s")
     if reason:
         print(f"[reasoning] {reason[:300]!r}")

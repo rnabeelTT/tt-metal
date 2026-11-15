@@ -296,6 +296,11 @@ class HybridState:
             if self.plan_weight != "mass":
                 raise ValueError(f"{self.plan_path} carries routed mass only: HYB_PLAN_WEIGHT must be mass")
             self._freq = z["freq"].astype(np.float64)
+            # a plan flagged rank_by_order ranks the resident set by its explicit build order (as a routing plan with an
+            # order does, below): Inkling pins its shared experts 256, 257 first, which a ranking by mass does not
+            # guarantee. Unflagged (M2.7's plan): ranked by mass, its `order` is the library's build order only.
+            if "rank_by_order" in z.files and bool(z["rank_by_order"]):
+                self._order = z["order"]
         elif self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             layers = [int(v) for v in z["layers"]]
             f = np.zeros((max(layers) + 1, E))

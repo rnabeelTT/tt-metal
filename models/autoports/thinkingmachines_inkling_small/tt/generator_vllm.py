@@ -43,6 +43,26 @@ if SPEC_K > 0:
     mtp_plugin_shim.apply(SPEC_K + 1)
 
 
+def _register_processor(cls):
+    """vLLM resolves InklingForConditionalGeneration as a multimodal architecture and builds the processor registered
+    on the model class: the qwen36 base's (Qwen3.5) rejects Inkling's config. Use vLLM's own Inkling processor (text
+    requests pass through it unchanged; image / audio inputs are refused in prefill_forward until the towers run)."""
+    try:
+        from vllm.models.inkling.common.mm_preprocess import (
+            InklingDummyInputsBuilder,
+            InklingMultiModalProcessor,
+            InklingProcessingInfo,
+        )
+        from vllm.multimodal import MULTIMODAL_REGISTRY
+    except ImportError as e:  # standalone tools without vLLM
+        logger.debug(f"vLLM Inkling processor not registered: {e}")
+        return cls
+    return MULTIMODAL_REGISTRY.register_processor(
+        InklingMultiModalProcessor, info=InklingProcessingInfo, dummy_inputs=InklingDummyInputsBuilder
+    )(cls)
+
+
+@_register_processor
 class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
     """vLLM bridge for Inkling-Small (HF arch InklingForConditionalGeneration; text only for now)."""
 
@@ -134,7 +154,15 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         start_pos = kwargs.get("start_pos")
         if start_pos is not None and any(int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()):
             raise NotImplementedError("prefix caching / chunked prefill are off for Inkling (start_pos must be 0)")
-        if kwargs.get("pixel_values") is not None or kwargs.get("pixel_values_videos") is not None:
+        def present(v):  # the plugin passes the multimodal kwargs on every prefill (None / empty lists for text)
+            if v is None:
+                return False
+            if isinstance(v, (list, tuple)):
+                return any(present(x) for x in v)
+            return not (hasattr(v, "numel") and v.numel() == 0)
+
+        if any(present(kwargs.get(k)) for k in ("pixel_values", "pixel_values_videos", "input_features",
+                                                 "audio_features")):
             raise NotImplementedError("Inkling serving is text only for now")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         sp = kwargs.get("sampling_params")

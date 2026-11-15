@@ -16,7 +16,9 @@ CTX=${CTX:-32768}
 K=${K:-1}
 case $PROFILE in
   quality) POLICY=all_bfp8; S=106; PENV="-e HYB_FUSED=0 -e HYB_HOST_ROUTE=1" ;;
-  fast) POLICY=early_gu4dn8; S=192; PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1))" ;;
+  # fast: little DRAM beside the experts -> 1024-row prefill launches (half the 2048-row transients)
+  fast) POLICY=early_gu4dn8; S=192; PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024}"
+        TRACE_MIB=${TRACE_MIB:-320} ;;
   *) echo "PROFILE=$PROFILE: quality | fast"; exit 1 ;;
 esac
 IMG=${HYB_IMAGE:-tt-model/minimax-m2.7-hybrid-qb2:0c9857a46f16}
@@ -24,6 +26,7 @@ HF_HOST=${HF_HOST:-${HF_HOME:-/opt/tenstorrent/models}}
 CACHE=${INKLING_CACHE:-$HOME/.cache/inkling}
 TR_MIB=${TRACE_MIB:-400}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'
+MM_LIMIT='{"image": 0, "audio": 0}'  # text only (the towers are not served yet)
 PORT_DIR=$REPO/models/autoports/thinkingmachines_inkling_small
 (cd "$P" && python3 -m hybrid.hostk >/dev/null)
 mkdir -p "$CACHE/tt" "$CACHE/logs" "$HOME/.cache/hybrid-moe"
@@ -53,6 +56,7 @@ docker run -d --name inkling-serve \
   -e PYTHONPATH=/opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve thinkingmachines/Inkling-Small --max-model-len $CTX \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name inkling-small-hybrid \
-    --enable-auto-tool-choice --tool-call-parser inkling --reasoning-parser inkling --port 8000" \
+    --enable-auto-tool-choice --tool-call-parser inkling --reasoning-parser inkling --port 8000 \
+    --limit-mm-per-prompt '$MM_LIMIT'" \
   && (docker logs -f inkling-serve > "$P/serve/server_inkling.log" 2>&1 &)
 echo "started (PROFILE $PROFILE, CTX $CTX, K $K); tail -f $P/serve/server_inkling.log"

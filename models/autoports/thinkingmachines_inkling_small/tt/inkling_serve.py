@@ -73,6 +73,17 @@ class InklingSpecServing:
         self.mtp = InklingMtp(model, self.k) if self.k else None
         self.sconvs = [c for layer in model.layers
                        for c in (layer.attention.k_sconv, layer.attention.v_sconv, layer.attn_sconv, layer.mlp_sconv)]
+        # global layers scale q / the relative bias by tau(pos) = 1 + alpha log(max(pos / n_floor, 1)) past n_floor
+        # positions (128000): with a context beyond it, every verify pass carries a per-row tau tensor (ones below)
+        self.n_floor = args.inkling.get("log_scaling_n_floor")
+        self.alpha = float(args.inkling.get("log_scaling_alpha") or 0.0)
+        self.long = self.n_floor is not None and self.max_seq_len > int(self.n_floor)
+        # Inkling's block markers (<|end_message|>, <|message_model|>, <|content_text|>, ...): one step emits either text
+        # tokens or one marker, never both -- vLLM's streaming Inkling parser misses a marker that arrives in the same
+        # delta as text (it leaked "<|end_message|>" into content). INKLING_SPLIT_MARKERS=0: off.
+        self.split_markers = os.environ.get("INKLING_SPLIT_MARKERS", "1") == "1"
+        self.markers = self._marker_ids(args)
+        self.end_message = self._token_id(args, "<|end_message|>")
         eos = args.inkling.get("eos_token_id", 200006)
         self.eos = set(eos) if isinstance(eos, (list, tuple)) else {int(eos)}
         # verify traces: R -> persistent inputs (ids, positions, kv index), trace id, outputs; commits (R, n) -> id
@@ -81,13 +92,34 @@ class InklingSpecServing:
         self.last_traced = False
         # drafter traces
         self.t0, self.tj = {}, {}
+        self.tc = {}  # greedy draft chains: (verify width, accepted rows) -> (trace, ids [1, k])
+        self.chain = os.environ.get("INKLING_DRAFT_CHAIN", "1") == "1"
         self.d_ids = self.d_pos = self.prev = None
         self.captured = False
         # the continuation: the next token to verify, its position, the pending drafts (+ their q when sampling)
         self._tok = self._pos = None
         self._drafts, self._qs = [], None
+        self._pending = []
         self._smp = SpecSampler(0.0)
         self.stats = {"steps": 0, "emitted": 0, "t_verify": 0.0, "t_draft": 0.0, "t_prefill": 0.0, "prefills": 0}
+
+    @staticmethod
+    def _token_id(args, text):
+        try:
+            return int(args.tokenizer.convert_tokens_to_ids(text))
+        except Exception:  # noqa: BLE001
+            return -1
+
+    @staticmethod
+    def _marker_ids(args):
+        tok = getattr(args, "tokenizer", None)
+        try:
+            ids = set(int(i) for i in tok.all_special_ids)
+            dec = getattr(tok, "added_tokens_decoder", {}) or {}
+            ids |= {int(i) for i, t in dec.items() if getattr(t, "special", False)}
+            return ids
+        except Exception:  # noqa: BLE001 - no tokenizer: every id at or past the first special token (200000)
+            return set(range(200000, 201088))
 
     # ------------------------------------------------------------------ device inputs
     def _ids_host(self, ids):
@@ -109,6 +141,12 @@ class InklingSpecServing:
         return ttnn.from_torch(self._idx_torch(p0, n), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
                                mesh_mapper=self.rep)
 
+    def _tau_host(self, p0, n):
+        pos = torch.arange(p0, p0 + n, dtype=torch.float64) + 1.0
+        tau = (1.0 + self.alpha * torch.log(torch.clamp(pos / float(self.n_floor), min=1.0))).float()
+        return ttnn.from_torch(tau.reshape(1, n, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT,
+                               mesh_mapper=self.rep)
+
     def _dev(self, host_t):
         return ttnn.to_device(host_t, self.mesh)
 
@@ -123,12 +161,12 @@ class InklingSpecServing:
         return ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:R, : self.V]
 
     # ------------------------------------------------------------------ target: verify rows + commits
-    def _body(self, di, dp, dk, R):
+    def _body(self, di, dp, dk, R, dt=None):
         model = self.model
         x = model.embd(di)
         x = ttnn.reshape(x, (1, 1, R, x.shape[-1]))
         for layer in model.layers:
-            x = layer.forward_rows(x, dp, self.pt, commit_all=False, kv_idx=dk)
+            x = layer.forward_rows(x, dp, self.pt, commit_all=False, kv_idx=dk, tau=dt)
         h = model._final_norm_decode(x)  # replicated, normed (the model's 1/16 folded into the norm weight)
         # the drafter wants final_norm(h) without that 1/16: x16
         return self._rm_logits(model._lm_head(h)), ttnn.multiply(h, self.mup)
@@ -137,7 +175,7 @@ class InklingSpecServing:
         """Eager rows pass: -> (logits [R, V] fp32 host, normed hidden x mup [1, 1, R, H] device)."""
         R = len(ids)
         lg, h = self._body(self._dev(self._ids_host(ids)), self._dev(self._pos_host(p0, R)),
-                           self._dev(self._idx_host(p0, R)), R)
+                           self._dev(self._idx_host(p0, R)), R, self._dev(self._tau_host(p0, R)) if self.long else None)
         self.last_traced = False
         return self._read(lg, R), h
 
@@ -146,9 +184,9 @@ class InklingSpecServing:
             layer.commit_rows(n)
 
     def _capture_verify(self, R):
-        di, dp, dk = self.bufs[R]
+        di, dp, dk, dt = self.bufs[R]
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        out = self._body(di, dp, dk, R)
+        out = self._body(di, dp, dk, R, dt)
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
         self.tid[R], self.out[R] = tid, out
         self.keep[R] = [c._last_seq for c in self.sconvs]  # trace-owned conv history the commit traces read
@@ -163,10 +201,12 @@ class InklingSpecServing:
         R = len(ids)
         if R not in self.tid:
             return self._rows_eager(ids, p0)
-        di, dp, dk = self.bufs[R]
+        di, dp, dk, dt = self.bufs[R]
         ttnn.copy_host_to_device_tensor(self._idx_host(p0, R), dk)
         ttnn.copy_host_to_device_tensor(self._ids_host(ids), di)
         ttnn.copy_host_to_device_tensor(self._pos_host(p0, R), dp)
+        if dt is not None:
+            ttnn.copy_host_to_device_tensor(self._tau_host(p0, R), dt)
         ttnn.execute_trace(self.mesh, self.tid[R], cq_id=0, blocking=False)
         self.last_R, self.last_traced = R, True
         lg, hm = self.out[R]
@@ -228,6 +268,22 @@ class InklingSpecServing:
         ttnn.copy(ttnn.typecast(full, ttnn.bfloat16) if full.dtype != ttnn.bfloat16 else full, self.prev)
         return self._rm_logits(lg)
 
+    def _argmax_dev(self, lg_rm):
+        """Greedy pick on the device: the real-vocab argmax of a row-major [1, 1, 1, Vp] logits row -> [1, 1] uint32."""
+        v = ttnn.slice(lg_rm, (0, 0, 0, 0), (1, 1, 1, self.V))
+        return ttnn.reshape(ttnn.argmax(v, dim=-1), (1, 1))
+
+    def _d_chain(self, R_src, w):
+        """Greedy drafts without host round trips: depth 0, then each deeper depth fed the previous depth's device
+        argmax; -> the k draft ids [1, k] uint32 (one readback per step instead of one per depth)."""
+        toks = [self._argmax_dev(self._d_depth0(R_src, w))]
+        prev = self.prev
+        for j in range(1, self.k):
+            lg, full = self.mtp.step(j, prev, toks[-1], self.c_pos[j], self.pt)
+            prev = ttnn.typecast(full, ttnn.bfloat16) if full.dtype != ttnn.bfloat16 else full
+            toks.append(self._argmax_dev(self._rm_logits(lg)))
+        return ttnn.concat(toks, dim=-1) if len(toks) > 1 else toks[0]
+
     def _d_capture(self, f):
         f()  # eager first: compiles every program (a capture cannot)
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
@@ -238,6 +294,15 @@ class InklingSpecServing:
     def _draft(self, R_src, toks, p0, k, smp):
         """k drafts after the accepted rows toks (the tokens following verify rows 0 .. w - 1 of the last pass)."""
         w = len(toks)
+        if smp.greedy and self.last_traced and (R_src, w) in self.tc:
+            ttnn.copy_host_to_device_tensor(self._ids_host(toks), self.d_ids[w])
+            ttnn.copy_host_to_device_tensor(self._pos_host(p0, w), self.d_pos[w])
+            for j in range(1, self.k):
+                ttnn.copy_host_to_device_tensor(self._pos_host(p0 + w - 1 + j, 1), self.c_pos[j])
+            tid, ids = self.tc[(R_src, w)]
+            ttnn.execute_trace(self.mesh, tid, cq_id=0, blocking=False)
+            got = ttnn.to_torch(ttnn.get_device_tensors(ids)[0]).reshape(-1)[: self.k].tolist()
+            return [int(v) for v in got][:k], None
         if not self.t0 or not self.last_traced or (R_src, w) not in self.t0:
             hrows = ttnn.slice(self._last_h, (0, 0, 0, 0), (1, 1, w, self._last_h.shape[-1]))
             return self._draft_eager(hrows, toks, p0, k, smp)
@@ -282,6 +347,7 @@ class InklingSpecServing:
             for n in range(1, R + 1):  # the commit programs (state restored by the reset below)
                 self._commit_eager(n)
         self._reset()
+        self.log_memory("after the warm-up")
         logger.info(f"Inkling engine warm-up: {time.time() - t0:.1f}s (prefill buckets {self.buckets}, "
                     f"rows 1..{ROWS_WARM}, drafter k={self.k})")
 
@@ -294,19 +360,26 @@ class InklingSpecServing:
         p = self.buckets[-1]
         for R in range(1, self.k + 2):
             self.bufs[R] = (self._dev(self._ids_host([0] * R)), self._dev(self._pos_host(0, R)),
-                            self._dev(self._idx_host(0, R)))
+                            self._dev(self._idx_host(0, R)), self._dev(self._tau_host(0, R)) if self.long else None)
         if self.mtp is not None:
             H = int(self.args.dim)
             self.prev = ttnn.from_torch(torch.zeros(1, 1, 1, H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                         device=self.mesh, mesh_mapper=self.rep)
             self.d_ids = {w: self._dev(self._ids_host([0] * w)) for w in range(1, self.k + 2)}
             self.d_pos = {w: self._dev(self._pos_host(0, w)) for w in range(1, self.k + 2)}
+            self.c_pos = {j: self._dev(self._pos_host(0, 1)) for j in range(1, self.k)}  # (before any capture)
         for R in range(1, self.k + 2):
-            di, dp, dk = self.bufs[R]
+            di, dp, dk, dt = self.bufs[R]
             ttnn.copy_host_to_device_tensor(self._idx_host(p, R), dk)
             ttnn.copy_host_to_device_tensor(self._pos_host(p, R), dp)
-            self._body(di, dp, dk, R)  # eager once more right before the capture (programs cached, buffers warm)
+            self._body(di, dp, dk, R, dt)  # eager once more right before the capture (programs cached, buffers warm)
             self._capture_verify(R)
+        if self.mtp is not None and self.chain:
+            with self.mtp.own_ccl():
+                self.tc[(1, 1)] = self._d_capture(lambda: self._d_chain(1, 1))
+                for kk in range(1, self.k + 1):
+                    for w in range(1, kk + 2):
+                        self.tc[(kk + 1, w)] = self._d_capture(lambda kk=kk, w=w: self._d_chain(kk + 1, w))
         if self.mtp is not None:
             with self.mtp.own_ccl():
                 self.t0[(1, 1)] = self._d_capture(lambda: self._d_depth0(1, 1))
@@ -317,8 +390,21 @@ class InklingSpecServing:
                     self.tj[j] = self._d_capture(lambda j=j: self._d_depth(j))
         self.captured = True
         self._reset()
+        self.log_memory("after the captures")
         logger.info(f"Inkling engine captures: {time.time() - t0:.1f}s (verify widths 1..{self.k + 1}, "
                     f"{len(self.ctid)} commits, {len(self.t0) + len(self.tj)} drafter traces)")
+
+    def log_memory(self, where):
+        """DRAM and trace-region use per bank (die 0's view; every die holds the same layout)."""
+        try:
+            d = ttnn.get_memory_view(self.mesh, ttnn.BufferType.DRAM)
+            t = ttnn.get_memory_view(self.mesh, ttnn.BufferType.TRACE)
+            logger.info(f"Inkling memory {where}: DRAM free {d.total_bytes_free_per_bank * d.num_banks / 2**30:.2f} GiB "
+                        f"(largest block {d.largest_contiguous_bytes_free_per_bank / 2**20:.0f} MiB per bank), trace "
+                        f"region used {t.total_bytes_allocated_per_bank * t.num_banks / 2**20:.0f} of "
+                        f"{t.total_bytes_per_bank * t.num_banks / 2**20:.0f} MiB")
+        except Exception as e:  # noqa: BLE001 - diagnostics only
+            logger.warning(f"memory view unavailable: {e!r}")
 
     # ------------------------------------------------------------------ serving
     def allocate_kv(self, kv_shape, dtype):
@@ -351,6 +437,7 @@ class InklingSpecServing:
         if P + self.k + 1 > self.max_seq_len:
             raise ValueError(f"prompt of {P} tokens + the verify window exceeds the context ({self.max_seq_len})")
         self._smp = self._sampler(sampling, P)
+        self._pending = []
         self._reset()
         if P > 1:
             self.model.prefill_tokens(torch.as_tensor(prompt_ids[:-1]), self.pt_host, buckets=self.buckets)
@@ -369,18 +456,28 @@ class InklingSpecServing:
 
     def step(self, tok: int = None, pos: int = None, page_table_row=None, host_authoritative=False,
              sampling=None) -> list[int]:
-        """One verify pass: -> the accepted drafts followed by the verified next token (1 .. k + 1 ids). The engine
-        owns the continuation (on the plugin's async path its host token can lag a step); the plugin's tok / pos are
-        checked when it flags them authoritative."""
+        """-> the next tokens for vLLM (1 .. k + 1 ids: the accepted drafts and the verified next token of a verify
+        pass, staged by _emit). The engine owns the continuation (on the plugin's async path its host token can lag a
+        step); the plugin's tok / pos are checked when it flags them authoritative."""
         if self._pos is None:
             raise RuntimeError("Inkling step before any prefill")
-        if host_authoritative and tok is not None and (int(tok), int(pos)) != (self._tok, self._pos):
+        buf, self._pending = self._pending, []
+        if not buf and host_authoritative and tok is not None and (int(tok), int(pos)) != (self._tok, self._pos):
             if int(pos) != self._pos:
                 raise RuntimeError(f"Inkling step input (tok {tok}, pos {pos}) differs from the engine's continuation "
                                    f"(tok {self._tok}, pos {self._pos})")
             # the plugin sampled the token itself (host sampling after a logits prefill): adopt it, drop the drafts
             self._tok, self._drafts, self._qs = int(tok), [], None
             self.stats["reanchors"] = self.stats.get("reanchors", 0) + 1
+        while True:
+            if buf:
+                out = self._emit(buf)
+                if out is not None:
+                    return out
+            buf = buf + self._device_step()
+
+    def _device_step(self) -> list[int]:
+        """One verify pass (+ commit, + the next drafts): -> the new tokens (ends at the end of turn)."""
         x, p, drafts, qs, smp = self._tok, self._pos, self._drafts, self._qs, self._smp
         if p + len(drafts) + 1 > self.max_seq_len:  # the context's last positions: no drafts past it
             drafts = drafts[: max(0, self.max_seq_len - p - 1)]
@@ -418,6 +515,27 @@ class InklingSpecServing:
                         f"verify {1e3 * st['t_verify'] / st['steps']:.1f} ms, draft "
                         f"{1e3 * st['t_draft'] / st['steps']:.1f} ms per step")
         return new
+
+    def _emit(self, toks):
+        """The part of `toks` handed to vLLM now (the rest waits in self._pending), or None when nothing can be
+        handed over yet. With INKLING_SPLIT_MARKERS (default): a text run up to the next block marker, or one marker
+        alone; and an <|end_message|> directly before the end of turn is dropped (it closes the last block and
+        carries nothing: vLLM's streamed content path, which no longer runs the parser, leaked it), so a trailing
+        <|end_message|> waits for its successor. Only the hand-over is staged: the device state already covers every
+        token, so greedy and sampled output are unchanged."""
+        if not self.split_markers:
+            self._pending = []
+            return list(toks)
+        mk = self.markers
+        if toks[0] == self.end_message:
+            if len(toks) == 1:
+                self._pending = list(toks)
+                return None
+            if toks[1] in self.eos:
+                toks = toks[1:]
+        cut = 1 if toks[0] in mk else next((i for i, t in enumerate(toks) if t in mk), len(toks))
+        self._pending = list(toks[cut:])
+        return list(toks[:cut])
 
     def generate(self, prompt_ids, max_new: int, sampling=None):
         """Standalone use: -> generated ids (stops at the end of turn)."""

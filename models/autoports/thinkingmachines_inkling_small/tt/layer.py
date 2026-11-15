@@ -14,6 +14,8 @@ Implemented: one-row decode. Prefill / spec-verify rows come next.
 
 from __future__ import annotations
 
+import os
+
 import torch
 
 import ttnn
@@ -100,6 +102,9 @@ class InklingDecoderLayer(_M27Layer):
             weight_dtype=getattr(args, "attn_weight_dtype", None) or ttnn.bfloat8_b,
             kv_dtype=getattr(args, "inkling_kv_dtype", None) or getattr(args, "kv_dtype", None) or ttnn.bfloat8_b,
             own_global_cache=bool(getattr(args, "inkling_own_kv", True)),
+            # INKLING_PREFILL_CHUNK: rows per prefill launch (default 2048); 1024 halves the prefill transients (the
+            # MoE's dispatch buffers) for profiles whose experts leave little DRAM
+            prefill_chunk=int(os.environ.get("INKLING_PREFILL_CHUNK", "2048")),
         )
         H, N = args.dim, self.num_devices
         shard = ttnn.ShardTensorToMesh(mesh_device, dim=-1) if N > 1 else None
