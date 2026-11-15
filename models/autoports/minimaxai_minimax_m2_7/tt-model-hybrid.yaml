@@ -1,7 +1,8 @@
-# tt-model container (v5.1) manifest for MiniMax-M2.7 (230B MoE, FP8 checkpoint) on one QB2 (2 x p300 = 4 Blackhole
-# dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
+# tt-model container (v5.1) manifest for MiniMax-M2.7 (230B MoE, FP8 checkpoint) on 4 Blackhole dies (one QB2 = 2 x
+# p300, or 4 x p150) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
 # device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe), DFlash speculative decoding,
-# elastic 128K context. Single user (max_num_seqs 1); greedy or sampled (exact speculative sampling).
+# elastic 128K context. Single user (max_num_seqs 1); greedy or sampled (exact speculative sampling), sampled with
+# MiniMax's recommended settings when a request sets none.
 # Build: tt-model package --container models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml
 schema: "5.1"
 
@@ -61,6 +62,11 @@ serve:
   capabilities:
     tool_parser: minimax_m2
     reasoning_parser: minimax_m2
+  # Requests that set no sampling parameters get MiniMax's recommended ones (the model's generation_config.json). The
+  # TT plugin drops generation_config defaults for block-output models (--generation-config auto -> vllm), so they are
+  # passed explicitly; without this a bare request samples at temperature 1.0 over the full vocabulary.
+  args:
+    - ["--override-generation-config", '{"temperature": 1.0, "top_p": 0.95, "top_k": 40}']
   additional_config:
     tt:
       trace_mode: all
@@ -135,7 +141,7 @@ serve:
     DFLASH_WINDOW: "256"
     DFLASH_WARMUP: "384"
 
-# One QB2 (two p300 boards, 4 dies), single user, DFlash speculative decoding. The profiles trade context for host RAM
+# 4 Blackhole dies, single user, DFlash speculative decoding. The profiles trade context for host RAM
 # and speed: a layer that keeps all 256 experts on the device ("full") leaves less DRAM for the KV cache; the others
 # ("hybrid") hold their 192 most-used experts on the device and the rest on the host (int4 for the CPU, a bfp4 copy for
 # PCIe), ~1.75 GB of host RAM each. Full-layer sets: sim_full_layers.py <n> on plans/plan_m27.npz (serve_m27.sh FULL).
@@ -173,6 +179,36 @@ serve_profiles:
     env:
       HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
       QWEN35_MAX_TOKENS_ALL_USERS: "32768"
+  # The same three layouts on 4 x p150 (a (1, 4) mesh like P300x2, same DRAM per die). Not measured on p150 hardware.
+  - name: p150x4-128k
+    description: >
+      p300x2-128k on 4 x p150: up to 128K tokens, elastic. Needs ~85 GB of free host RAM.
+    hardware: p150x4
+    mesh_device: P150x4
+    max_model_len: 131072
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
+      HYB_ELASTIC_DEMOTE: "34,27,32,38,53,40,36,21,37,30,48,55,41,54,52,47,46,3,33,51,29,42,19,50"
+      QWEN35_KV_TOKENS: "32768"
+      QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+  - name: p150x4-64k
+    description: >
+      p300x2-64k on 4 x p150: up to 64K tokens, fixed layout (36 full layers, 26 hybrid). Needs ~57 GB of free host RAM.
+    hardware: p150x4
+    mesh_device: P150x4
+    max_model_len: 65536
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,29,30,33,37,39,41,42,46,47,48,49,50,51,52,54,55"
+      QWEN35_MAX_TOKENS_ALL_USERS: "65536"
+  - name: p150x4-32k
+    description: >
+      p300x2-32k on 4 x p150: up to 32K tokens, fixed layout (44 full layers, 18 hybrid). Needs ~43 GB of free host RAM.
+    hardware: p150x4
+    mesh_device: P150x4
+    max_model_len: 32768
+    env:
+      HYB_FULL_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,27,29,30,32,33,34,36,37,38,39,40,41,42,46,47,48,49,50,51,52,53,54,55"
+      QWEN35_MAX_TOKENS_ALL_USERS: "32768"
 default_profile: p300x2-128k
 
 card:
@@ -199,9 +235,9 @@ card:
 
       | profile | context | hybrid layers | free host RAM |
       | --- | --- | --- | --- |
-      | `p300x2-32k` | 32K | 18 | ~43 GB |
-      | `p300x2-64k` | 64K | 26 | ~57 GB |
-      | `p300x2-128k` (default, elastic) | 128K | 18, up to 42 | ~85 GB |
+      | `p300x2-32k` / `p150x4-32k` | 32K | 18 | ~43 GB |
+      | `p300x2-64k` / `p150x4-64k` | 64K | 26 | ~57 GB |
+      | `p300x2-128k` (default, elastic) / `p150x4-128k` | 128K | 18, up to 42 | ~85 GB |
 
       The server checks this at startup against the RAM free right now (other jobs on the machine count) and refuses
       to start if the profile does not fit, naming how much to free or which profile to pick; set the env
@@ -213,14 +249,16 @@ card:
   quickstart: |
     ### Choosing a profile
 
-    | profile | max context | layout | free host RAM | short decode | when to pick it |
+    | profile (QB2 / 4 x p150) | max context | layout | free host RAM | short decode, sampled / greedy | when to pick it |
     | --- | --- | --- | --- | --- | --- |
-    | `p300x2-128k` (default) | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~59 tok/s | long documents / agent sessions now and then |
-    | `p300x2-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~59 tok/s | steady long contexts without switch pauses |
-    | `p300x2-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~62 tok/s | fastest; a machine with other jobs running |
+    | `p300x2-128k` (default) / `p150x4-128k` | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~54 / ~69 tok/s | the default: short chats at full speed, long documents / agent sessions when they come |
+    | `p300x2-64k` / `p150x4-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~51 / ~62 tok/s | steady long contexts without switch pauses |
+    | `p300x2-32k` / `p150x4-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~54 / ~67 tok/s | less host RAM; a machine with other jobs running |
 
     `tt-model serve raahemnabeel/minimax-m2.7-hybrid-qb2 --profile p300x2-32k` picks one (`tt-model profiles
-    raahemnabeel/minimax-m2.7-hybrid-qb2` lists them). The profiles share the downloads and caches.
+    raahemnabeel/minimax-m2.7-hybrid-qb2` lists them). The default is the QB2's; on 4 x p150 pass a `p150x4-*` profile.
+    The profiles share the downloads and caches. The p150x4 profiles run the same code and layouts on the same (1, 4)
+    mesh and DRAM per die; their speeds have not been measured on p150 hardware (the numbers here are the QB2's).
 
     ### First boot
 
@@ -233,9 +271,10 @@ card:
     device memory is too fragmented for that does it load a device image, which a fresh install converts once (~20 s
     per layer).
   usage: |
-    Greedy (temperature 0) and sampled decoding both work. MiniMax recommends temperature 1.0, top_p 0.95, top_k 40;
-    sampling is exact (speculative sampling: the output is distributed as sampling from the model itself) and runs
-    about 15-20% slower than greedy, because fewer drafted tokens are accepted. top_k up to 64 is sampled from on-device
+    A request that sets no sampling parameters is sampled with MiniMax's recommended settings, temperature 1.0, top_p
+    0.95, top_k 40 (the settings of the evals under Performance). Sampling is exact (speculative sampling: the output
+    is distributed as sampling from the model itself). Greedy (temperature 0) also works and is ~15-20% faster on short
+    chats (~5-10% at long context), because more drafted tokens are accepted. top_k up to 64 is sampled from on-device
     candidates; larger or unset top_k reads the full logits and is slower. Presence / frequency / repetition penalties
     are not applied. The same seed does not reproduce identical text across requests (the experts' device / host
     placement, which follows recent requests, shifts the logits slightly). One request at a time (max_num_seqs 1);
@@ -299,7 +338,8 @@ card:
     - Expert placement was planned from routing statistics on general text and code; unusual domains route to more
       host experts and decode slower.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 device experts).
-    - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
+    - Needs 4 Blackhole dies, a QB2 (2 x p300) or 4 x p150 (p150 untested), and a host as described under
+      Prerequisites.
   licensing: |
     **MiniMax-M2.7** — Copyright (c) 2026 MiniMax. Licensed under the
     [MiniMax non-commercial license](https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE); the full text,
