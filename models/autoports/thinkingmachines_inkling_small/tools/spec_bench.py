@@ -71,6 +71,7 @@ def main():
     PROF = os.environ.get("SPEC_PROF") == "1"  # synchronize after the commit so the per-phase times are exact
     KVROWS = os.environ.get("SPEC_KVROWS", "1") == "1"  # all verify rows' K / V in one program per layer (qwen36)
     FAKE_DRAFT = os.environ.get("SPEC_FAKE_DRAFT") == "1"  # debug: drafts = the last token repeated, no MTP device work
+    DTRACE = os.environ.get("SPEC_DTRACE", "1") == "1"  # with SPEC_TRACE: the MTP drafter traced too
     PROF_DRAIN = os.environ.get("SPEC_PROF_DRAIN") == "1"  # device profiler: drain after every timed verify pass
     print(f"sampling: temperature {TEMP} top_p {TOP_P} top_k {TOP_K} seed {SEED}"
           f"{' (greedy)' if TEMP <= 0 or TOP_K == 1 else ' (exact speculative sampling)'}", flush=True)
@@ -108,6 +109,13 @@ def main():
             return ttnn.from_torch(idx_host(p0, n), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,
                                    mesh_mapper=rep) if KVROWS else None
 
+        def rm_logits(lg):
+            """Logits untilized on the device (same values): a host readback of a tile tensor moves and untilizes every
+            32-row tile (~4 ms for one bf16 row of a 201K vocab), a row-major one only the logical rows (~0.2 ms)."""
+            if lg.is_sharded():
+                lg = ttnn.sharded_to_interleaved(lg, ttnn.DRAM_MEMORY_CONFIG)
+            return ttnn.untilize_with_unpadding(lg, [int(d) - 1 for d in lg.shape])
+
         def target_rows(ids, p0):
             """Rows mode over ids at positions p0..: -> (argmax per row [R], normed hidden [1,1,R,H] replicated,
             fp32 logits [R, V] on the host)."""
@@ -119,7 +127,7 @@ def main():
             for layer in model.layers:
                 x = layer.forward_rows(x, pos, pt, commit_all=False, kv_idx=kvi)
             h = model._final_norm_decode(x)  # replicated, normed (the model's 1/16 folded in)
-            lg = model._lm_head(h)
+            lg = rm_logits(model._lm_head(h))
             L = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:R, :V]
             # MTP wants final_norm(h) without the 1/16 the state dict folded into the norm weight: x16
             return L.argmax(-1).tolist(), ttnn.multiply(h, float(args.logits_mup_width_multiplier)), L
@@ -165,7 +173,7 @@ def main():
                 for layer in model.layers:
                     x = layer.forward_rows(x, dp, pt, commit_all=False, kv_idx=dk)
                 h = model._final_norm_decode(x)
-                return model._lm_head(h), ttnn.multiply(h, mup)
+                return rm_logits(model._lm_head(h)), ttnn.multiply(h, mup)
 
             def rows(self, ids, p0):
                 R = len(ids)
@@ -239,6 +247,92 @@ def main():
                 drafts.append(d)
             return drafts, (None if sampler.greedy else qs)
 
+        class DraftTraced:
+            """mtp_draft as traces: depth 0 per (verify width R_src, accepted rows w) -- it reads rows 0..w-1 of that
+            verify trace's hidden output in place -- and one trace per depth j >= 1. Token / position inputs go through
+            persistent buffers; the hidden row chained between depths lives in one persistent buffer (self.prev) that
+            each trace overwrites at its end. Sampling stays on the host between depths (one logits readback each)."""
+
+            def __init__(self):
+                self.t0, self.tj = {}, {}
+                H = int(args.dim)
+                self.prev = ttnn.from_torch(torch.zeros(1, 1, 1, H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                            device=mesh, mesh_mapper=rep)
+                self.ids = {w: dev_ids([0] * w) for w in range(1, K + 2)}
+                self.pos = {w: dev_pos(0, w) for w in range(1, K + 2)}
+
+            def _depth0(self, R_src, w):
+                dp = mtp.depths[0]
+                h = tr.out[R_src][1]
+                hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, w, h.shape[-1]))
+                e = model.embd(self.ids[w])
+                e = mtp._gather(ttnn.reshape(e, (1, 1, w, e.shape[-1])))
+                x_in = ttnn.concat([mtp._norm(hrows, dp.hn), mtp._norm(e, dp.en)], dim=-1)
+                out = dp.block.forward_rows(ttnn.linear(x_in, dp.w_in), self.pos[w], pt, commit_all=True)
+                full = mtp._gather(out)
+                last = ttnn.slice(full, (0, 0, w - 1, 0), (1, 1, w, full.shape[-1]))
+                lg = rm_logits(model._lm_head(ttnn.multiply(last, mtp.inv_mup)))
+                ttnn.copy(ttnn.typecast(last, ttnn.bfloat16) if last.dtype != ttnn.bfloat16 else last, self.prev)
+                return lg
+
+            def _depth(self, j):
+                lg, full = mtp.step(j, self.prev, self.ids[1], self.pos[1], pt)
+                ttnn.copy(ttnn.typecast(full, ttnn.bfloat16) if full.dtype != ttnn.bfloat16 else full, self.prev)
+                return rm_logits(lg)
+
+            def _capture(self, f):
+                f()  # eager first: compiles every program (a capture cannot)
+                tid = ttnn.begin_trace_capture(mesh, cq_id=0)
+                out = f()
+                ttnn.end_trace_capture(mesh, tid, cq_id=0)
+                return tid, out
+
+            def capture_all(self):
+                """Every key a K run can use, before generation: (1, 1) and (R_src = k + 1, w = 1..k + 1) for k = 1..K and depths
+                1..K-1. The eager warm-ups advance the drafter's state: the caller resets it after."""
+                with mtp.own_ccl():
+                    self.t0[(1, 1)] = self._capture(lambda: self._depth0(1, 1))  # a generation's first step: no drafts
+                    for k in range(1, K + 1):
+                        for w in range(1, k + 2):
+                            self.t0[(k + 1, w)] = self._capture(lambda: self._depth0(k + 1, w))
+                    for j in range(1, K):
+                        self.tj[j] = self._capture(lambda: self._depth(j))
+
+            def _write(self, w, ids, p0):
+                ttnn.copy_host_to_device_tensor(
+                    ttnn.from_torch(torch.tensor(ids, dtype=torch.int32).reshape(1, w), dtype=ttnn.uint32,
+                                    layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), self.ids[w])
+                ttnn.copy_host_to_device_tensor(
+                    ttnn.from_torch(torch.arange(p0, p0 + w, dtype=torch.int32), dtype=ttnn.int32,
+                                    layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=rep), self.pos[w])
+
+            def draft(self, R_src, tokens_after, p0, k, sampler):
+                w = len(tokens_after)
+                drafts, qs = [], []
+
+                def pick(lg):
+                    row = ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[0, :V]
+                    if sampler.greedy:
+                        return int(row.argmax())
+                    q = sampler.probs(row)
+                    qs.append(q)
+                    return sampler.sample(q)
+
+                self._write(w, tokens_after, p0)
+                tid, lg = self.t0[(R_src, w)]
+                ttnn.execute_trace(mesh, tid, cq_id=0, blocking=False)
+                d = pick(lg)
+                drafts.append(d)
+                for j in range(1, k):
+                    self._write(1, [d], p0 + w - 1 + j)
+                    tid, lg = self.tj[j]
+                    ttnn.execute_trace(mesh, tid, cq_id=0, blocking=False)
+                    d = pick(lg)
+                    drafts.append(d)
+                return drafts, (None if sampler.greedy else qs)
+
+        dtr = DraftTraced() if TRACE and DTRACE and K else None
+
         texts = {}
         for k in [0] + list(range(1, K + 1)):
             tot_new, tot_steps, tot_t = 0, 0, 0.0
@@ -282,6 +376,10 @@ def main():
                     for R in range(1, K + 2):
                         print(f"  precapture R={R}", flush=True)
                         tr.rows([x] * R, p)
+                    if dtr is not None:
+                        print("  precapture drafter", flush=True)
+                        dtr.capture_all()
+                        mtp.reset()
                 drafts, qs = [], []
                 sampler = SpecSampler(TEMP, TOP_K, TOP_P, seed=SEED + len(prompt))  # reproducible per prompt
                 t0 = time.time()
@@ -316,9 +414,12 @@ def main():
                     if k and FAKE_DRAFT:
                         drafts, qs = [nxt] * k, None
                     elif k:
-                        hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
                         with mtp.own_ccl():  # the drafter's collectives never touch the target traces' semaphores
-                            drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
+                            if dtr is not None:
+                                drafts, qs = dtr.draft(len(rows), rows[1 : n + 1] + [nxt], p, k, sampler)
+                            else:
+                                hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, n + 1, h.shape[-1]))
+                                drafts, qs = mtp_draft(hrows, rows[1 : n + 1] + [nxt], p, k, sampler)
                     t_d = time.time()
                     if timed:
                         tm["verify"] += t_b - t_a
