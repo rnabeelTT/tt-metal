@@ -74,8 +74,9 @@ Pieces (all traced, per-prompt re-capture):
   Without a memlock limit (tt-model's container, Docker's default 8 MiB) the lock is best-effort: one warning, the
   pages are pre-faulted instead (HYB_MLOCK=strict fails instead). pinx pinning goes through the KMD and needs no
   memlock. Paths: HYB_LIB / HYB_DEV_EXPERTS / HYB_PLAN take hf://<org>/<repo>/<path> (hybrid/hfpath.py, pinned by
-  TT_AUXILIARY_WEIGHTS); the package (autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml) reads them from
-  raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
+  TT_AUXILIARY_WEIGHTS). The package (autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml, v1.5+) downloads only
+  the official checkpoint and builds both copies on its first boot (hybrid/firstboot.py, ROUND 9); v1.4 read them from
+  the derived repo raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
 - OPEN (2026-11-14, tt-model package e.g. 5e77f21b0271): after a deep elastic round trip (all 24 layers to hybrid and
   back, HYB_ELASTIC_PREWARM=1) short decode stays ~12% slower until restart (bench 49.3 / 51.9 vs 59.2 / 58.2 after a
   restart without it; a 45K request's 4-layer round trip leaves it at 58.6 / 56.2). The engine also keeps ~7 GB more
@@ -148,6 +149,22 @@ Pieces (all traced, per-prompt re-capture):
     ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
     old package images + `docker builder prune -af` freed ~130 GB.
   - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
+- ROUND 9 (2026-11-15): v1.5 package, evals, first boot, license.
+  - Accuracy (package image e2c3eb6fe803, p300x2-64k, T 1.0 / top-p 0.95 / top-k 40, MiniMax system prompt,
+    serve/evalq.py SAMPLE_SEED 0, runs/eval/m27_v15/rec_*.jsonl): GPQA-Diamond 52/60 = 86.7% (ref 87.4-89.8, ~10K
+    tokens per answer, none capped); AIME 2026 13/15 = 86.7% (ref 94.2; doc 27 hit the 60K cap while thinking, doc 22
+    a well-formed wrong answer); IFEval 150: prompt strict 0.873 / loose 0.907, instruction strict 0.901 (3 capped at
+    16K, letter-count puzzles). 95% CI ~+/-9 (GPQA) / +/-17 (AIME): consistent with the references.
+  - First boot (hybrid/firstboot.py, called from patch.install in the API server process): builds HYB_LIB (int4,
+    build_int4_library.py) and HYB_DEV_EXPERTS (bfp4, build_dev_experts.py in a subprocess that releases the device)
+    from the HF_MODEL snapshot for the experts outside the top HYB_BUILD_STATIC of plans/m27_plan.npz `order`, layers
+    HYB_BUILD_LAYERS; `.complete` marker {checkpoint@rev, plan sha16, static, layers, keys}, a mismatch raises.
+    Fresh first boot of the v1.5 image (32K profile, empty int4_s152 / dev_s152, wcache kept): int4 6.2 min, bfp4 6.7
+    min, server ready 17 min after launch; all 42 + 8736 files byte-identical to the v1.4 experts repo; short decode
+    67-69 tok/s warm. The experts repo is no longer needed (deleted after v1.5 was published).
+  - License: MiniMax M2.7 is non-commercial (commercial use needs written authorization from MiniMax and "Built with
+    MiniMax M2.7" display); attribution on the card and autoport README, LICENSE-MiniMax-M2.7 in the HF repo. The
+    DFlash drafter is under the NVIDIA Software and Model Evaluation License.
 - FUTURE SCOPE (2026-11-14, not started):
   - Host-tier prefix cache (vLLM CPU KV offload / LMCache-style): copy a finished or evicted request's KV blocks to host
     RAM and copy them back when the conversation returns. M2.7 KV is ~135 KB per token (62 layers): a 45K-token

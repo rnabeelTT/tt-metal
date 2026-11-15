@@ -225,7 +225,8 @@ card:
     ### First boot
 
     The first boot downloads ~235 GB (MiniMax-M2.7 and the drafter), builds the host copies of the experts that can miss
-    (69 GB, FIRSTBOOT_BUILD_TIME) and converts the experts into device images (about an hour); later boots load
+    from it (69 GB: int4 for the CPU and bfp4 for streaming to the chips, ~13 minutes on the QB2; byte-identical to
+    the copies earlier versions downloaded) and converts the experts into device images (about an hour); later boots load
     them in ~40 s and are ready in 3-7 minutes. With the elastic profile, a request that needs more than 32K tokens of
     context waits for a switch first: ~2-5 s up to ~50K tokens, ~7-9 s at ~85K, and the next short request switches
     back (~3 s from 50K, ~9 s from 85K). A layer moving to hybrid is gathered from its on-device experts; only when the
