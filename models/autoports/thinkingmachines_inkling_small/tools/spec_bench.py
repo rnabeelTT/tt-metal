@@ -270,7 +270,14 @@ def main():
                     # traced k > 0 hang (a 2-row replay after 1-row replays). Then capture every verify width up
                     # front. Rows at p.. are uncommitted: the generation overwrites them.
                     for R in range(1, 9):
-                        target_rows([x] * R, p)
+                        _, hw, _ = target_rows([x] * R, p)
+                        if K and not FAKE_DRAFT and R <= K + 1:
+                            # the drafter too, at every accepted-row width and every depth: its lazily cached
+                            # tensors allocated after the captures were overwritten by replays of the widest verify
+                            # trace (R = K + 1, replayed only at k = K) -- acceptance at k = K fell (1.77 vs 2.29)
+                            with mtp.own_ccl():
+                                mtp_draft(hw, [x] * R, p, K, SpecSampler(TEMP, TOP_K, TOP_P, seed=SEED))
+                    mtp.reset()  # the drafter's conv states; its KV rows at p.. are rewritten by the generation
                     for R in range(1, K + 2):
                         print(f"  precapture R={R}", flush=True)
                         tr.rows([x] * R, p)
