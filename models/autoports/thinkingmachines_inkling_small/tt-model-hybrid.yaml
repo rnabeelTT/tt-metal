@@ -164,3 +164,6 @@ card:
 
 verify:
   - "import models.autoports.thinkingmachines_inkling_small.tt.generator_vllm as g; assert g.InklingForConditionalGeneration"
+  # the host expert kernel is a build artifact (git-ignored): build it in the source tree before packaging
+  # (cd models/experimental/hybrid_moe && python -m hybrid.hostk)
+  - "import os; assert os.path.exists('/opt/tt-metal/models/experimental/hybrid_moe/hybrid/hostk/libhostk.so'), 'libhostk.so missing'"

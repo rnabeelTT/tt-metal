@@ -25,7 +25,10 @@ URL = f"http://localhost:{os.environ.get('PORT', '8000')}/v1/chat/completions"
 
 
 def snap(repo, pat):
-    return sorted(glob.glob(f"{HUB}/datasets--{repo}/snapshots/*/{pat}"))[0]
+    hits = sorted(glob.glob(f"{HUB}/datasets--{repo}/snapshots/*/{pat}"))
+    if not hits and "--" not in repo:  # the hub may hold it under its org (gsm8k -> openai/gsm8k)
+        hits = sorted(glob.glob(f"{HUB}/datasets--*--{repo}/snapshots/*/{pat}"))
+    return hits[0]
 
 
 MODEL = None

@@ -57,6 +57,9 @@ python models/experimental/hybrid_moe/serve/inkling_long.py 8000 1000,32000,1200
 | MiniMax-M2.7 package, same measurement | 0.848 | 0.933 | 0.196 |
 | two valid CPU references against each other (noise floor) | 0.925 | 0.978 | 0.081 |
 
+Task evals through the vLLM server (`serve/evalq.py`, greedy, reasoning effort none): GSM8K 97.0% (200 problems),
+IFEval 88.0% strict / 90.0% loose prompt-level, 91.5% strict instruction-level (200 prompts).
+
 ## Tests and tools
 
 - `tests/`: device / host unit tests (attention, sconv incl. `test_sconv_kernel.py`, router, MoE, layers) against
