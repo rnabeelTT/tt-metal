@@ -309,6 +309,9 @@ class Verify:
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
         self.ctrace = tid
 
+    ctrace = couts = None  # the candidate trace (captured with the verify) and its outputs
+    _cand_half = None
+
     # per-shard candidates of the device top-k (two halves x 32, as the port's mtp_traced.py): a request with
     # 0 < top_k <= 32 is exactly determined by them (its top_k survivors lie inside every shard's top-32)
     CAND_K = 32
