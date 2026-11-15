@@ -17,6 +17,9 @@ Env (read at install):
                    router logits without blocking and routes / computes the misses while the device runs the experts
                    (one host round trip per layer on the device's critical path instead of two)
   HYB_OVERLAP      1 (default): traced decode splits after the resident experts, so the host experts overlap them
+  HYB_HOST_ROUTE   1: unfused decode reads the router's fp32 logits and selects / weights on the host (the same rule
+                   as the fused path's _route_host); the device router's top-k / gather / normalize / concat programs
+                   (~150 us per layer, only ever read by the host step) are skipped. Default 0.
   HYB_PROFILE      1: synchronize before each readback to time the device segment wait separately (t_sync)
   HYB_PLAN         .npz with routing (routing.npz layout) -> static set = the C most-routed experts per layer
   HYB_LIB          int4 host expert library dir (build_int4_library.py); otherwise bf16 dequant from the checkpoint
@@ -99,6 +102,7 @@ class HybridState:
         self.promote = int(os.environ.get("HYB_PROMOTE", "2"))
         self.profile = os.environ.get("HYB_PROFILE") == "1"
         self.overlap = os.environ.get("HYB_OVERLAP", "1") == "1"
+        self.host_route = os.environ.get("HYB_HOST_ROUTE", "0") == "1"
         self.devcraft = os.environ.get("HYB_DEVCRAFT", "0") == "1"
         self.single_via_rows = os.environ.get("HYB_SINGLE_ROWS", "1") == "1"
         self.filler = float(os.environ.get("HYB_FILLER", "-1000"))  # crafted logit of unselected slots
@@ -1844,6 +1848,39 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         return _forward_fused(self, x4, orig, partial, logits)
     if partial and HYB.enabled and HYB.C < HYB.E and T == 1:
         raise RuntimeError(f"layer {self.layer_num}: one-row decode boundary (partial={partial!r}) needs HYB_FUSED=1")
+    host_route = (HYB.host_route and mode != "prefill" and HYB.enabled and HYB.C < HYB.E
+                  and hasattr(self, "_router_logits"))
+    if host_route:
+        # selection on the host: only the fp32 logits leave the device
+        B = self._hyb_bufs.get(T)
+        if B is None and not SEG.capturing:  # first eager step at this width: the device route only as templates
+            t_sc, t_ids = self._route(x4)
+            t_sc, t_ids = _to_dram(t_sc, free=True), _to_dram(t_ids, free=True)
+            B = _bufs(self, T, t_sc, t_ids, x4)
+        lg_t = self._router_logits(x4, ttnn.L1_MEMORY_CONFIG if T <= 32 else ttnn.DRAM_MEMORY_CONFIG,
+                                   dtype=ttnn.float32)
+        h_x, h_lg = _to_dram(x4, free=False), _to_dram(lg_t, free=True)
+        if B is None:
+            raise RuntimeError(f"layer {self.layer_num}: no hybrid buffers for T={T}; run one eager decode step first")
+        if SEG.capturing:
+            SEG.split(lambda: _host_step_lg(self, h_x, h_lg, T, "decode", B))
+        else:
+            dec = _decide_lg(self, h_x, h_lg, T, mode)
+            _write_bufs(self, B, dec)
+        routed = _routed(self, x4, B["sc"], B["ids"], T, mode)
+        if self._dyn_attrs is not None:
+            routed = ttnn.add(
+                routed, _routed_dyn(self, x4, B["dsc"], B["dids"], T, mode), memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
+        out = _plus_shared(self, routed, x4, free=False)
+        if SEG.capturing and HYB.overlap:
+            SEG.split(lambda: _host_step2(self, B))
+        out = ttnn.add(out, B["host"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if not SEG.capturing:
+            if h_x is not x4:
+                ttnn.deallocate(h_x)
+            ttnn.deallocate(h_lg)
+        return _finish(self, out, orig, partial)
     scores, ids = self._route(x4)
     if not (HYB.enabled and HYB.C < HYB.E):
         routed = _routed(self, x4, scores, ids, T, mode)
@@ -2256,6 +2293,51 @@ def _apply_promotions(self, L, protect):
         n += 1
     HYB.st["promoted"] += n
     HYB.st["t_promote"] += time.perf_counter() - t0
+
+
+def _select_host(self, lg):
+    """Routing from the logits rows lg [m, >= E] (numpy fp32), no counters: -> ids int64 [m, k], scores fp32 [m, k]
+    (the selection rules of _route_host)."""
+    E, k, L = HYB.E, self.top_k, self.layer_num
+    z = lg[:, :E].astype(np.float32)
+    if HYB.router_kind == "inkling":
+        sg = 1.0 / (1.0 + np.exp(-z))
+        R, kr = HYB.n_routed, HYB.top_k_routed
+        picks = np.argpartition(-(sg[:, :R] + HYB.sel_bias[L]), kr, axis=1)[:, :kr]
+        ids = np.concatenate([picks, np.broadcast_to(np.arange(R, E), (z.shape[0], E - R))], axis=1)
+        sw = np.take_along_axis(sg, ids, 1)
+        sc = sw / sw.sum(1, keepdims=True)
+    elif HYB.router_kind == "sigmoid_bias":
+        sg = 1.0 / (1.0 + np.exp(-z))
+        ids = np.argpartition(-(sg + HYB.sel_bias[L]), k, axis=1)[:, :k]
+        sw = np.take_along_axis(sg, ids, 1)
+        sc = sw / sw.sum(1, keepdims=True)
+    else:
+        ids = np.argpartition(-z, k, axis=1)[:, :k]
+        zs = np.take_along_axis(z, ids, 1)
+        e = np.exp(zs - zs.max(1, keepdims=True))
+        sc = e / e.sum(1, keepdims=True)
+    return ids.astype(np.int64), sc.astype(np.float32)
+
+
+def _decide_lg(self, x4, lg_t, T, mode, defer_host=False):
+    """HYB_HOST_ROUTE: _decide from the router logits (selection on the host) instead of the device's ids / scores."""
+    if HYB.profile:
+        t0 = time.perf_counter()
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_sync"] += time.perf_counter() - t0
+    t0 = time.perf_counter()
+    lg = ttnn.to_torch(_die0(lg_t)).float()
+    lg = lg.reshape(-1, lg.shape[-1]).numpy()
+    HYB.st["t_read"] += time.perf_counter() - t0
+    ids, sc = _select_host(self, lg)
+    return _decide_core(self, x4, torch.from_numpy(ids), torch.from_numpy(sc), mode, defer_host)
+
+
+def _host_step_lg(self, x4, lg_t, T, mode, B):
+    dec = _decide_lg(self, x4, lg_t, T, mode, defer_host=HYB.overlap)
+    _write_bufs(self, B, dec)
+    B["job"] = dec["job"] if dec["host"] is None else False
 
 
 def _decide(self, x4, scores, ids, T, mode, defer_host=False):
