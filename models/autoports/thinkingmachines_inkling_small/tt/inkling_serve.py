@@ -71,6 +71,9 @@ class InklingSpecServing:
         self.pt = ttnn.from_torch(self.pt_host.reshape(1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
                                   device=mesh, mesh_mapper=self.rep)
         self.mtp = InklingMtp(model, self.k) if self.k else None
+        # INKLING_MTP_PROMPT (default 1): drafter depth 0 also runs over the prompt in prefill (its KV / conv state then
+        # holds the prompt, as vLLM's MTP does), instead of starting each request from an empty cache
+        self.mtp_prompt = self.mtp is not None and os.environ.get("INKLING_MTP_PROMPT", "1") == "1"
         self.sconvs = [c for layer in model.layers
                        for c in (layer.attention.k_sconv, layer.attention.v_sconv, layer.attn_sconv, layer.mlp_sconv)]
         # global layers scale q / the relative bias by tau(pos) = 1 + alpha log(max(pos / n_floor, 1)) past n_floor
@@ -323,6 +326,40 @@ class InklingSpecServing:
         return drafts, (None if smp.greedy else qs)
 
     # ------------------------------------------------------------------ warm-up / capture
+    def _mtp_prompt_hook(self, ids):
+        """on_chunk for prefill_tokens: drafter depth 0 over the chunk's rows t (the target's normed hidden of t, the
+        token at t + 1), committed past the real rows; ids = every prompt token (the one after the prefilled part too)."""
+        from models.tt_transformers.tt.common import Mode
+
+        mtp, model = self.mtp, self.model
+        dp = mtp.depths[0]
+
+        def hook(c0, n, Tp, x):
+            with mtp.own_ccl():
+                h = ttnn.multiply(model.norm(x, mode=Mode.PREFILL), self.mup)
+                if h.is_sharded():
+                    h = ttnn.sharded_to_interleaved(h, ttnn.DRAM_MEMORY_CONFIG)
+                nxt = torch.zeros(Tp, dtype=torch.int32)
+                tail = torch.as_tensor(ids[c0 + 1 : c0 + 1 + n]).to(torch.int32)
+                nxt[: tail.numel()] = tail
+                e = model.embd(self._dev(self._ids_host(nxt.tolist())))
+                e = mtp._gather(ttnn.reshape(e, (1, 1, Tp, e.shape[-1])))
+                x_in = ttnn.concat([mtp._norm(h, dp.hn), mtp._norm(e, dp.en)], dim=-1)
+                for t in (h, e):
+                    ttnn.deallocate(t)
+                xm = ttnn.linear(x_in, dp.w_in)
+                ttnn.deallocate(x_in)
+                out = dp.block.forward_prefill(xm, c0, self.pt_host, valid=(n if n < Tp else None))
+                for t in (xm, out):
+                    ttnn.deallocate(t)
+
+        return hook
+
+    def _prefill(self, ids):
+        """The target's prefill of ids[:-1] (+ the drafter's prompt pass)."""
+        hook = self._mtp_prompt_hook(ids) if self.mtp_prompt else None
+        self.model.prefill_tokens(torch.as_tensor(ids[:-1]), self.pt_host, buckets=self.buckets, on_chunk=hook)
+
     def _reset(self):
         self.model.reset_sequence_state()
         if self.mtp is not None:
@@ -336,7 +373,7 @@ class InklingSpecServing:
         ids = torch.arange(1000, 1000 + max(self.buckets) + 64, dtype=torch.int64) % 200000
         for b in self.buckets:  # one prefill per bucket size (a b-row prompt pads to bucket b)
             self._reset()
-            self.model.prefill_tokens(ids[:b], self.pt_host, buckets=self.buckets)
+            self._prefill(ids[: b + 1].tolist())
         p = self.buckets[-1]
         smp = SpecSampler(0.0)
         for R in range(1, ROWS_WARM + 1):
@@ -440,7 +477,7 @@ class InklingSpecServing:
         self._pending = []
         self._reset()
         if P > 1:
-            self.model.prefill_tokens(torch.as_tensor(prompt_ids[:-1]), self.pt_host, buckets=self.buckets)
+            self._prefill(list(prompt_ids))
         nxt = self._first(int(prompt_ids[-1]), P - 1, self._smp)
         self.stats["t_prefill"] += time.time() - t0
         self.stats["prefills"] += 1

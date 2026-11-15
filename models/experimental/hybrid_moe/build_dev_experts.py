@@ -60,10 +60,21 @@ def main():
         t = h(key)
         return dequant(t, h(key + "_scale_inv")) if key + "_scale_inv" in wm else t.float()
 
-    def dump(path, full, dim):
+    # per-layer dtypes from the served precision policy (QWEN35_PRECISION_CONFIG: weight_groups.routed_moe gate_up /
+    # down, layer_exceptions): a fetched copy must be byte-compatible with the slot it lands in (e.g. Inkling's fast
+    # profile: bfp8 down projections in layers 2-17). Without a policy: bfp4 everywhere (the M2.7 package).
+    pol = json.load(open(os.environ["QWEN35_PRECISION_CONFIG"])) if os.environ.get("QWEN35_PRECISION_CONFIG") else {}
+    DT = {"bfp4": ttnn.bfloat4_b, "bfp8": ttnn.bfloat8_b}
+
+    def layer_dtype(L, which):
+        r = pol.get("weight_groups", {}).get("routed_moe", {})
+        r = {**r, **pol.get("layer_exceptions", {}).get(str(L), {}).get("routed_moe", {})}
+        return DT[r.get(which, "bfp4")]
+
+    def dump(path, full, dim, dtype=ttnn.bfloat4_b):
         n = full.shape[dim] // TP
         shards = [
-            ttnn.from_torch(full.narrow(dim, d * n, n).contiguous(), dtype=ttnn.bfloat4_b, layout=ttnn.TILE_LAYOUT)
+            ttnn.from_torch(full.narrow(dim, d * n, n).contiguous(), dtype=dtype, layout=ttnn.TILE_LAYOUT)
             for d in range(TP)
         ]
         tmp = path[: -len(".tensorbin")] + ".tmp.tensorbin"  # ttnn insists on the extension
@@ -100,8 +111,8 @@ def main():
                 [torch.cat([up_t[:, d * Nl : (d + 1) * Nl], gate_t[:, d * Nl : (d + 1) * Nl]], -1) for d in range(TP)],
                 -1,
             )  # [H, TP * 2 Nl]
-            dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1)
-            dump(p + "_dn.tensorbin", round_sig(down.T.contiguous()).reshape(1, 1, N, H), -2)
+            dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1, layer_dtype(L, "gate_up"))
+            dump(p + "_dn.tensorbin", round_sig(down.T.contiguous()).reshape(1, 1, N, H), -2, layer_dtype(L, "down"))
             done += 1
         handles.clear()
         print(f"layer {L}: {done} of {len(ids)} experts in {time.time() - t0:.0f}s", flush=True)

@@ -17,7 +17,8 @@ the HF model itself does chunked prefill (sliding-window + full KV, the 4 sconv 
 REF_CHUNK=0 runs each layer over the whole sequence at once (used to cross-check the chunked path).
 
 usage (host venv with torch cpu + transformers>=5.17, no device): python ref_inkling.py <texts.json> <out dir>
-env: REF_LAYERS (default all 42), REF_THREADS (default 16), HF_HUB, REF_TAPS, REF_GOLD, REF_CHUNK
+env: REF_LAYERS (default all 42), REF_THREADS (default 16), HF_HUB, REF_TAPS, REF_GOLD, REF_CHUNK,
+     REF_MLPIN (dir: every MoE layer's input [B, T, H] bf16 as mlpin_L<li>.pt: GPTQ calibration)
 """
 
 import glob
@@ -237,11 +238,15 @@ def main():
             j = moe_layers.index(li)
             gate_fwd = layer.mlp.gate.forward
 
-            def rec(h, j=j, gate_fwd=gate_fwd):
+            mlp_in = torch.empty(B, T, cfg.hidden_size, dtype=torch.bfloat16) if os.environ.get("REF_MLPIN") else None
+
+            def rec(h, j=j, gate_fwd=gate_fwd, mlp_in=mlp_in):
                 logits, w, idx, sh = gate_fwd(h)
                 # rec runs once per query chunk: positions are filled chunk by chunk
                 n = idx.shape[0] // B
                 s = rec.pos
+                if mlp_in is not None:  # REF_MLPIN: the MoE input (the router's input) of every token
+                    mlp_in[:, s : s + n] = h.reshape(B, n, -1).to(torch.bfloat16)
                 r_ids[:, j, s : s + n] = idx.reshape(B, n, K).numpy().astype(np.uint8)
                 r_w[:, j, s : s + n] = w.reshape(B, n, K).float().numpy().astype(np.float16)
                 r_sh[:, j, s : s + n] = sh.reshape(B, n, NS).float().numpy().astype(np.float16)
@@ -251,6 +256,9 @@ def main():
             rec.pos = 0
             layer.mlp.gate.forward = rec
         x = run_layer(cfg, layer, x, chunk)
+        if li in moe_layers and os.environ.get("REF_MLPIN"):
+            os.makedirs(os.environ["REF_MLPIN"], exist_ok=True)
+            torch.save(rec.__defaults__[-1], os.path.join(os.environ["REF_MLPIN"], f"mlpin_L{li}.pt"))
         if li in taps:
             tap_out[:, :, taps.index(li)] = x
         print(

@@ -42,7 +42,10 @@ def chat(prompt, think, idx):
         "messages": msgs,
         "temperature": float(os.environ.get("TEMPERATURE", "0")),
         "max_tokens": int(os.environ.get("MAX_TOKENS", 32768 if think else 4096)),
-        "chat_template_kwargs": {"enable_thinking": think},
+        # enable_thinking (Qwen-style templates) and reasoning_effort (Inkling: none / low / medium / high / max; env
+        # REASONING_EFFORT, default high with :think, none without); a template ignores the kwarg it does not use
+        "chat_template_kwargs": {"enable_thinking": think,
+                                 "reasoning_effort": os.environ.get("REASONING_EFFORT", "high" if think else "none")},
     }
     if body["temperature"] > 0:
         body.update(top_p=float(os.environ.get("TOP_P", "1")), seed=int(os.environ.get("SEED", "0")) + idx)

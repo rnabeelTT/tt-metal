@@ -36,14 +36,17 @@ class Qwen35MoeModel(_M27Model):
             args.partial_rotary_factor = ROPE_DUMMY_DIM / args.head_dim
         super().__init__(mesh_device, args, state_dict, tensor_cache_path)
 
-    def prefill_tokens(self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None):
+    def prefill_tokens(self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None,
+                       on_chunk=None):
         """Eager chunked prefill of token ids [T] (torch) from position `start` (a multiple of the chunk; the conv
         states must hold the sequence up to start). Chunks of `chunk` rows (default the layers' prefill_chunk),
         layer-major. A shorter (last) chunk is padded to the smallest of `buckets` (row counts, multiples of 64) that
         holds it, else to the next multiple of 64: only its real rows advance the conv states, and the hybrid MoE
         computes no host experts for the padding rows (HYB.pf_valid). Bucketing bounds the set of prefill programs, so a
         server can compile them all before its trace captures. Returns the logits of the last real row ([V] torch fp32)
-        or, logits_rows="all", of every real row ([T, V])."""
+        or, logits_rows="all", of every real row ([T, V]). on_chunk(c0, n, Tp, x): called after each chunk's layers with
+        the chunk's final hidden x [1, 1, Tp, H/N] (fractured, before the final norm; e.g. the MTP drafter's prompt
+        pass), n real rows of Tp."""
         import sys
 
         import torch
@@ -77,6 +80,8 @@ class Qwen35MoeModel(_M27Model):
             finally:
                 if hyb is not None:
                     hyb.pf_valid = None
+            if on_chunk is not None:
+                on_chunk(c0, n, Tp, x)
             if logits_rows == "all" or c0 + n == T:
                 # rows [r0, r1) of the chunk: everything, or the 32-row tile holding the last real row
                 r0, r1 = (0, Tp) if logits_rows == "all" else (((n - 1) // 32) * 32, ((n - 1) // 32) * 32 + 32)

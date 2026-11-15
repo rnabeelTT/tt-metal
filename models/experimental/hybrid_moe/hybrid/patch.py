@@ -647,6 +647,13 @@ def _mlock(t):
 
 
 TILE_W = 32
+
+
+def _lgw(E):
+    """Width of the fused router's logits rows: the E logits, the shared-gate / padding column(s), rounded up to whole
+    tiles (E = 256: 288, as before; Inkling's 258 router rows: 320 -- 290 was neither tile- nor PCIe-aligned, and the
+    socket's 1160-byte pages failed the device-to-host socket's alignment check)."""
+    return -(-(E + TILE_W) // TILE_W) * TILE_W
 HYB = HybridState()
 _orig_forward = None  # Qwen35MoE.forward before install() (the MTP head's MoE keeps it)
 
@@ -782,6 +789,9 @@ def install():
             HYB.sel_bias[layer_num] = state_dict["gate.e_score_correction_bias"].float().numpy()
             HYB.n_routed = int(args.n_routed_experts)
             HYB.top_k_routed = int(args.top_k_routed)
+            if HYB.prefetch:  # the prefetch predicts on the routed rows only (the shared experts are always resident)
+                w = state_dict["gate.weight"][: HYB.n_routed].to(torch.bfloat16).contiguous()
+                HYB.gate_wT[layer_num] = w.view(torch.int16).numpy().view(np.uint16)
         elif HYB.router_kind != "softmax":
             raise ValueError(f"router_kind {HYB.router_kind!r}: the hybrid routes softmax, sigmoid_bias or inkling")
         if int(self.router_w.shape[-1]) != E:
@@ -894,7 +904,7 @@ def install():
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
         ttnn.deallocate(fself.router_w)
-        rw = torch.zeros(hidden, E_true + TILE_W)
+        rw = torch.zeros(hidden, _lgw(E_true))
         rw[:, :E_true] = router_weight.T.float()
         if shared_gate_weight is not None:  # no shared expert (MiniMax-M2): column E stays 0, never read
             rw[:, E_true] = shared_gate_weight.reshape(-1).float()
@@ -909,8 +919,8 @@ def install():
         fself.router_pc = tpc.create_matmul_1d_decode_progcfg(
             TILE_W,
             hidden,
-            E_true + TILE_W,
-            (E_true + TILE_W) // TILE_W,
+            _lgw(E_true),
+            _lgw(E_true) // TILE_W,
             fp32_acc=True,
             grid_w=mesh_device.compute_with_storage_grid_size().x,
             in0_block_w=16 if (hidden // TILE_W) % 16 == 0 else None,
@@ -1103,7 +1113,7 @@ class _HybSockets:
             return s
 
         E, C = HYB.E, HYB.C
-        self.lg = d2h(0, (E + TILE_W) * 4)
+        self.lg = d2h(0, _lgw(E) * 4)
         self.x = d2h(1, H * 2)
         self.rows = [h2d(d, 2, (C + TILE_W) * 2) for d in range(ndev)]
         self.part = h2d(0, 3, H * 2)
@@ -1113,7 +1123,7 @@ class _HybSockets:
     def read_lg(self, m):
         b = self.lg_buf.get(m)
         if b is None:
-            b = self.lg_buf[m] = torch.empty(m, HYB.E + TILE_W, dtype=torch.float32)
+            b = self.lg_buf[m] = torch.empty(m, _lgw(HYB.E), dtype=torch.float32)
         self.lg.read_tensor(b)
         return b.numpy()
 
@@ -1503,7 +1513,7 @@ def _dc_consts(self):
         return c
     if SEG.capturing:
         raise RuntimeError(f"layer {self.layer_num}: HYB_DEVCRAFT constants not built; run an eager step first")
-    E, C, L, W = HYB.E, HYB.C, self.layer_num, HYB.E + TILE_W
+    E, C, L, W = HYB.E, HYB.C, self.layer_num, _lgw(HYB.E)
     so = HYB.slot_of[L]
     res = np.flatnonzero(so >= 0)
     if (so[res] >= C - 1).any():
@@ -1639,7 +1649,7 @@ def _dc_craft_sigmoid(self, c, logits, m, mk):
     zm = ttnn.where(cond, lsg, HYB.filler)
     ttnn.deallocate(cond)
     ttnn.deallocate(lsg)
-    pad = ttnn.slice(logits, [0, 0, 0, E], [1, 1, m, E + TILE_W])
+    pad = ttnn.slice(logits, [0, 0, 0, E], [1, 1, m, _lgw(E)])
     full = ttnn.typecast(ttnn.concat([zm, pad], dim=-1), ttnn.bfloat16)
     ttnn.deallocate(zm)
     ttnn.deallocate(pad)
@@ -1743,8 +1753,9 @@ def _forward_fused(self, x4, orig, partial, logits=None):
         _sock_warm(self, logits, h_x, B, m, mk)
     sock = SEG.capturing and HYB.sock
     if sock:
-        if HYB.devcraft or not HYB.overlap or not HYB.fetch.direct:
-            raise ValueError("HYB_SOCKET needs the two-step host path with the direct fetch (HYB_DEVCRAFT=0)")
+        if HYB.devcraft or not HYB.overlap or (HYB.fetch.on and not HYB.fetch.direct):
+            raise ValueError("HYB_SOCKET needs the two-step host path (HYB_DEVCRAFT=0), and the direct fetch when the "
+                             "fetch is on")
         S = HYB.socks
         ttnn.experimental.send_async_d2h(logits, S.lg)
         ttnn.experimental.send_async_d2h(h_x, S.x)
@@ -1896,7 +1907,10 @@ def _forward(self, x, mode=None, partial=False, logits=None):
                 ttnn.deallocate(h_x)
             ttnn.deallocate(h_lg)
         return _finish(self, out, orig, partial)
-    scores, ids = self._route(x4)
+    if mode == "prefill" and _prefill_host_route(self):
+        scores, ids = _route_prefill_host(self, x4, T)
+    else:
+        scores, ids = self._route(x4)
     if not (HYB.enabled and HYB.C < HYB.E):
         routed = _routed(self, x4, scores, ids, T, mode)
         ttnn.deallocate(scores)
@@ -2125,6 +2139,32 @@ def _pf_mark(self, key):
     now = time.perf_counter()
     HYB.st[key] = HYB.st.get(key, 0.0) + now - HYB._pf_t
     HYB._pf_t = now
+
+
+def _prefill_host_route(self):
+    """HYB_PREFILL_HOST_ROUTE (default: on for the Inkling router, off otherwise): prefill selects the experts on the
+    host from the router's fp32 logits (_select_host, the decode host route's rules) instead of the device's top-k.
+    Inkling's selection compares sigmoid + bias values ~1e-3 apart: the device route's near-tie flips cost the prefill
+    path ~0.03 teacher-forced top-1 against the host-routed decode path (0.838 vs 0.869, early gu4/dn8, 192 slots)."""
+    v = os.environ.get("HYB_PREFILL_HOST_ROUTE", "auto")
+    on = (HYB.router_kind == "inkling") if v == "auto" else v == "1"
+    return on and HYB.enabled and HYB.C < HYB.E and hasattr(self, "_router_logits")
+
+
+def _route_prefill_host(self, x4, T):
+    """-> (scores bf16 [1, 1, T, k], ids uint16 [1, 1, T, k]) as self._route returns them, selected on the host."""
+    t0 = time.perf_counter()
+    lg_t = self._router_logits(x4, ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.float32)
+    lg = ttnn.to_torch(_die0(lg_t)).float().reshape(T, -1)
+    ttnn.deallocate(lg_t)
+    ids, sc = _select_host(self, lg.numpy())
+    k = ids.shape[1]
+    kw = dict(layout=ttnn.TILE_LAYOUT, device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+              memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    scores = ttnn.from_torch(torch.from_numpy(sc).reshape(1, 1, T, k).to(torch.bfloat16), dtype=ttnn.bfloat16, **kw)
+    ids_t = ttnn.from_torch(torch.from_numpy(ids).reshape(1, 1, T, k).to(torch.int32), dtype=ttnn.uint16, **kw)
+    HYB.st["t_pf_route"] = HYB.st.get("t_pf_route", 0.0) + time.perf_counter() - t0
+    return scores, ids_t
 
 
 def _upload_like(self, t_host, ref, dtype_torch):
