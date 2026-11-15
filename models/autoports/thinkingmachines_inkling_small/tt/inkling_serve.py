@@ -37,7 +37,6 @@ import ttnn
 from models.autoports.minimaxai_minimax_m2_7.tt.mtp_sampling import SpecSampler
 from models.autoports.thinkingmachines_inkling_small.tt.inkling_mtp import InklingMtp
 
-ROWS_WARM = 8  # widest row group warmed eagerly (hybrid per-width buffers exist for 1..8 before any capture)
 
 
 def prefill_buckets(chunk: int):
@@ -376,7 +375,9 @@ class InklingSpecServing:
             self._prefill(ids[: b + 1].tolist())
         p = self.buckets[-1]
         smp = SpecSampler(0.0)
-        for R in range(1, ROWS_WARM + 1):
+        # the verify widths only (1 .. k + 1): every prompt token goes through prefill, and wider eager rows would take
+        # the unfused path (its FP32-accumulation matmuls do not fit the L1 beside the socket FIFOs)
+        for R in range(1, self.k + 2):
             _, h = self._rows_eager([7] * R, p)
             if self.mtp is not None and R <= self.k + 1:
                 with self.mtp.own_ccl():
@@ -386,7 +387,7 @@ class InklingSpecServing:
         self._reset()
         self.log_memory("after the warm-up")
         logger.info(f"Inkling engine warm-up: {time.time() - t0:.1f}s (prefill buckets {self.buckets}, "
-                    f"rows 1..{ROWS_WARM}, drafter k={self.k})")
+                    f"rows 1..{self.k + 1}, drafter k={self.k})")
 
     def capture(self):
         """Every verify width 1 .. k + 1 with its commits, then the drafter (depth 0 per (width, accepted rows), each

@@ -162,8 +162,9 @@ class ShortConv:
         mesh = self.mesh
         if x.is_sharded():
             x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
+        # DRAM, not L1: a trace-owned L1 output would lower every core's L1 ceiling for the programs after the capture
         y = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, R, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
-                                           ttnn.L1_MEMORY_CONFIG)
+                                           ttnn.DRAM_MEMORY_CONFIG)
         seq = None if commit_all else ttnn.allocate_tensor_on_device(
             ttnn.Shape([1, 1, 32, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG)
         cores, cr, cols = self.cores, _range_set(self.cores), self.cols

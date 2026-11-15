@@ -713,7 +713,9 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 # TT_THROW; a resident block that does not fit makes the factory fall back to streaming).
                 m_tiles = gs // 32
                 budget = 1_300_000
-                fixed = m_tiles * n_tiles * (2048 + 2048)  # bf16 output block + bf16 partials block
+                # bf16 output block + the partials block (fp32 tiles with FP32 accumulation: QWEN35_MOE_FP32_ACC)
+                part = 4096 if getattr(self.routed_ckc, "fp32_dest_acc_en", False) else 2048
+                fixed = m_tiles * n_tiles * (2048 + part)
                 resident = os.environ.get("TT_SPARSE_GROUPED_RESIDENT_IN1", "1") != "0"
                 # the resident block must fit with the smallest in0 double buffer, else the factory streams in1
                 resident = resident and 2 * m_tiles * 2048 + k_tiles * n_tiles * w_tile_bytes + fixed <= budget

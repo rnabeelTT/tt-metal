@@ -22,6 +22,9 @@ case $PROFILE in
   # fast: little DRAM beside the experts -> 1024-row prefill launches (half the 2048-row transients)
   fast) K=${K:-2}; POLICY=early_gu4dn8; S=192; LIB=${LIB:-/hyblib/inkling_int4_fb191}
         PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024} -e HYB_SOCKET=1"
+        # 4-page host -> device socket FIFOs (L1 on the socket cores): 8 left the FP32-accumulation prefill matmuls' circular
+        # buffers 32 KB short (TT_THROW static CB clash at warm-up)
+        PENV="$PENV -e HYB_SOCKET_H2D_DEPTH=${H2D_DEPTH:-4}"
         PENV="$PENV -e HYB_PREFETCH=${PREFETCH:-1} -e HYB_PLAN=$PLAN -e HYB_PLAN_WEIGHT=mass"
         # first use: build the int4 library of every expert outside each layer's 191 device slots (hybrid/firstboot.py)
         PENV="$PENV -e HYB_LIB_KEYS=port:thinkingmachines_inkling_small -e HYB_BUILD_STATIC=191"

@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
 | 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **in progress** (2026-11-15 second session): see Plan to completion. |
+| 6. vLLM serving, package, multimodal | **serving done** (fast profile, see Log 2026-11-15 session 2); package build in progress; multimodal not started. |
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -288,3 +288,40 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     DDR-bandwidth-bound (hostk ~36 GB/s of ~46 GB/s measured). A BIOS memory-profile change is the owner's call.
   - Handoff to vLLM: see **vLLM serving plan**. Open decision for the owner: which plugin revision production serves
     on (the M2.7 spec shim matches `8b1f8b1`, not fork `main`).
+
+- **2026-11-15, session 2: served through vLLM; the fast profile; 15.9 -> 45.5 tok/s (engine bench), quality at parity.**
+  - **Profile change (the main speed lever).** Host int4 bandwidth decides decode: all-bfp8 C=106 misses ~80 experts per
+    token, bfp4 C=192 ~17. Fast profile = routed bfp4, layers 2-17 gate/up bfp4 + down bfp8 (`early_gu4dn8`), 192
+    slots (fused kernels need a multiple of 32: 2 shared + 189 routed + the zero sink), fused decode, sockets.
+  - **Quality (teacher-forced, 8 held-out texts; M2.7 0.848 / 0.933 / 0.196):**
+
+    | path | top-1 | conf | kl32 |
+    |---|---|---|---|
+    | fused prefill, device route, bf16 expert accumulation | 0.826 | 0.924 | 0.348 |
+    | + host fp32 routing (`HYB_PREFILL_HOST_ROUTE`, auto for Inkling) | 0.836 | 0.926 | 0.285 |
+    | + FP32 accumulation in the expert matmuls (`QWEN35_MOE_FP32_ACC=1`) | **0.866** | **0.947** | **0.213** |
+    | fused decode path (rows of 3, host route) | 0.869 | 0.947 | 0.205 |
+    | (all-bfp8 C=106, for reference) | 0.862 | 0.945 | 0.218 |
+
+    The device top-k flips Inkling's near-tied selections (sigmoid + bias ~1e-3 apart); the routed expert matmuls
+    accumulated in bf16 (tt-metal #49068 workaround: FP32 DST halves the tiles; the fix caps sub-blocks at 4).
+    `QWEN35_MOE_DECODE_FIDELITY=hifi2` made no difference (0.827).
+  - **vLLM serving** (plugin 23b0736, same as M2.7 production): `tt/generator_vllm.py` (engine-owned caches, vLLM's
+    own Inkling multimodal processor registered on the class, text-only guard), `tt/inkling_serve.py` (the engine),
+    `serve/serve_inkling.sh` (PROFILE=fast default), `serve/inkling_{smoke,features,long}.py`. Reasoning split, tool
+    calls, clean streaming (block markers staged so vLLM's streamed content path does not leak `<|end_message|>`),
+    exact sampling: all pass.
+  - **Speed, engine bench (tools/engine_bench.py, 3 short prompts x 128, greedy; dev signal):** traced fused k=2 29.6
+    -> sockets 36.1 -> + drafter prompt pass 36.7 -> + fused short-conv kernels **45.5 tok/s** (verify 39.5 ms, draft
+    6.8 ms at k=2; k=3 40.3). TTFT ~0.5 s on short prompts. Served (before the conv kernels): ~31-33 tok/s.
+  - **Device profile** (tools/layer_prof.py): elementwise / data-movement ops were ~35 of ~40 ms of a 4-row pass; the
+    4 short convs per layer were ~15 ops each (75-130 us traced). `tt/sconv_kernels` (one generic_op program for
+    rows, one for the commit): 19 / 16 us, state bit-exact, outputs within 1 bf16 ulp.
+  - Other fixes: socket logits rows padded to whole tiles (258 + 32 = 290 failed the D2H PCIe alignment); the socket
+    path without the PCIe fetch; prefetch for Inkling's router; prefill buckets + valid-row conv commits (no tail row
+    groups); log-scaling tau in verify past 128000 positions; `INKLING_PREFILL_CHUNK=1024` (2048-row transients OOMed
+    next to 192 slots + MTP).
+  - GPTQ into the bfp4 grid (gptq_bfp_proto.py, calibration: ref_inkling REF_MLPIN, 21K tokens): layer 12 MoE PCC
+    0.98968 -> 0.99249 (gu4dn8 0.99435). Not needed after the FP32-accumulation fix; kept as the next precision lever.
+  - Not done: PCIe fetch / prompt streaming for the mixed-dtype profile (fetch.py keeps one dtype for all layers);
+    long-context profiles beyond the tests below; multimodal.
