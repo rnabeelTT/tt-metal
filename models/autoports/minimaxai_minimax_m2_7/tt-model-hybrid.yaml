@@ -217,10 +217,12 @@ card:
     MiniMax-M2.7, a 230B-parameter mixture-of-experts model (10B active, 62 layers x 256 experts, FP8 checkpoint),
     served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so each layer's most-used experts
     stay on the device (bfp4) and the rest are computed on the host CPU from int4 copies or streamed over PCIe when a
-    request needs them. Decoding is speculative (DFlash, 3 drafts per pass). Three serving profiles trade context
-    length for host RAM: 32K and 64K with a fixed layout, and the default 128K, which is elastic: it serves short
-    requests with the 32K layout (44 all-on-device layers) and moves layers to hybrid only while a longer request needs
-    the KV room.
+    request needs them. Precision: the routed experts are quantized from the FP8 checkpoint to 4 bits (bfp4 on the
+    device, group-wise int4 with a scale and zero point per 32 values on the host); attention, the LM head and the KV
+    cache are bfp8; the router and the embeddings bf16. Decoding is speculative (DFlash, 3 drafts per pass). Three
+    serving profiles per board (QB2 = 2 x p300, or 4 x p150) trade context length for host RAM: 32K and 64K with a
+    fixed layout, and the default 128K, which is elastic: it serves short requests with the 32K layout (44
+    all-on-device layers) and moves layers to hybrid only while a longer request needs the KV room.
   intended_use: >
     Single-user chat, coding and agent use (tool calls through the minimax_m2 parser, reasoning split into
     reasoning_content) on one QB2. Non-commercial use only (see Licensing).
@@ -282,7 +284,7 @@ card:
     | GPQA-Diamond, thinking | 86.7% (52/60) | 87.4-89.8 | 60 random of 198 |
     | AIME 2026, thinking | 86.7% (13/15; 1 hit the 60K-token cap) | 94.2 | 15 random of 30 |
     | IFEval, prompt-level strict / loose | 87.3% / 90.7% (instruction-level strict 90.1%) | — | 150 random of 541 |
-    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.848 (confident tokens 0.933) | — | 8 x 1000 tokens, held out |
+    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.847 (confident tokens 0.935) | — | 8 x 1000 tokens, held out |
 
     Evals ran on this package (`p300x2-64k`) with MiniMax's recommended settings (temperature 1.0, top_p 0.95, top_k
     40, MiniMax's default system prompt), randomly sampled questions with a per-question seed
