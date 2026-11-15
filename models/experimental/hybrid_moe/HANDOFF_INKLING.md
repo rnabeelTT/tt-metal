@@ -12,15 +12,14 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 1. CPU reference + routing | done. fp32 router as vLLM computes it. Noise floor between two valid references: top-1 0.925 / conf 0.978 / kl32 0.081 (`compare_refs.py`). |
 | 2. TT port | done for text: decode, 8-row verify and chunked prefill all match the fixtures per layer (prefill PCC = decode; 1000-token prefill ≈ 4 s warm). |
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
-| 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality check pending). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
+| 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
 | 6. vLLM serving, package, multimodal | **next**: vLLM integration (plan below). Packaging and multimodal not started. |
 
 **Next steps, in order:**
 1. **vLLM serving** (all serving AND all reported measurements go through the vLLM server + the TT plugin, like every
    other model; `tools/spec_bench.py` numbers are dev signals only). Plan: **vLLM serving plan** below.
-2. Decide `HYB_HOST_ROUTE` from `eval_q106_rows3_hr` (decode-path quality vs `eval_s106_all_bfp8_rows3`: 0.865 / 0.947 /
-   0.220); if at noise level, set it in Inkling's serve env.
+2. `HYB_HOST_ROUTE=1` is decided: keep it in Inkling's serve env (decode-path quality at noise level, see Log).
 3. Free-running task evals (GSM8K / IFEval) through the vLLM server, TTFT / decode via `vllm bench serve`.
 4. Long-context profiles (128K / 256K / 1M; only 8K exercised so far) and the >128K log-scaling path.
 5. Package (`templates/tt-model-hybrid.yaml`), expert artifacts to HF, model card; then multimodal (host encoders).
@@ -70,7 +69,7 @@ Inkling-specific work:
    `reasoning_effort`; vocab padded to 201024 (unpadded 200058): mask the tail in device sampling.
 6. Serve env for the chosen profile: `HYB_PORT=thinkingmachines_inkling_small HYB_SLOTS=106
    HYB_LIB=.../inkling_int4_s106 HYB_FUSED=0 HYB_DECODE_ROWS=8 HYB_HOSTK_THREADS=6 HYB_WCACHE=...` (same as
-   `tools/eval_hybrid.sh`), plus `HYB_HOST_ROUTE=1` if step 2 above passes.
+   `tools/eval_hybrid.sh`), plus `HYB_HOST_ROUTE=1` (decided 2026-11-15).
 
 Dev-harness invariants a vLLM port must keep (each was a real bug, see Log 2026-11-14/15): run one eager pass at every
 row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, then capture every width up front
@@ -248,3 +247,19 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
   - **Host side is bandwidth-capped:** hostk int4 runs at ~36 GB/s, the box reads at ~46 GB/s max (4x64 GB DIMMs run
     at 3600 MT/s, rated 5600). 15.7 MB per int4 expert (20% of it scales / zeros). At k=1 host experts are ~55 of
     ~116 ms per step.
+- **2026-11-15, decode optimisation round 2** (dev harness `tools/spec_bench.py 3 128`, traced, greedy; texts
+  byte-identical across k within every run).
+  - **Short-conv output cast before its tilize** (same values): k=1 14.76 -> **15.34** tok/s, texts identical to round 1.
+  - **`HYB_HOST_ROUTE=1`** (hybrid, opt-in): host routing from the fp32 router logits; device wait 44 -> 33.5 ms per
+    token. k=0 12.24, k=1 **15.93** (1.74 tokens per pass), k=2 14.97, k=3 13.97. Routing weights now fp32 on the host
+    instead of bf16 on the device, so texts differ from device routing (2 of 3 prompts). Decode-path gate
+    (`EVAL_PATH=rows EVAL_ROWS=3`, 8 texts): host route 0.862 / 0.947 / 0.215 vs device route 0.865 / 0.948 / 0.220
+    (top-1 -0.003 at run-to-run noise, kl32 better): **kept**.
+  - Device profile after round 1 (`spec_q106_devprof3`, die 0): ~1.12 ms per MoE layer (was ~1.48). Remaining big
+    items per layer: the resident-expert sparse matmuls (~130 + ~50 us, real work), the attention kernel pair
+    (~70 us), CCL all-gather / reduce-scatter groups (~15-20 us each, several), the router tail (now skipped by
+    `HYB_HOST_ROUTE`). ~20 ms per token is still host round trips between trace segments (2 splits per MoE layer).
+  - **Memory note:** the DIMMs run at 3600 MT/s (rated 5600, 4 x 64 GB); the host-expert half of a step is
+    DDR-bandwidth-bound (hostk ~36 GB/s of ~46 GB/s measured). A BIOS memory-profile change is the owner's call.
+  - Handoff to vLLM: see **vLLM serving plan**. Open decision for the owner: which plugin revision production serves
+    on (the M2.7 spec shim matches `8b1f8b1`, not fork `main`).
