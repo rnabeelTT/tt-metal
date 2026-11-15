@@ -137,23 +137,47 @@ card:
     Single-user chat, coding and agent use (tool calls through vLLM's inkling parser, reasoning split into
     reasoning_content; the reasoning effort is a chat-template kwarg) on one QB2.
   prerequisites: |
-    - A host CPU with AVX-512 (the host expert kernel); 16 or more cores recommended
-    - About 60 GB of free host RAM (the int4 copies of the experts the device does not hold, ~42 GB, plus the server)
+    - A host CPU with AVX-512 (the host expert kernel); 8 or more cores
+    - About 60 GB of free host RAM (the int4 copies of the experts the device does not hold, ~42 GB, plus the server);
+      the server checks this at startup (`HYB_RAM_CHECK=warn` to start anyway)
     - About 720 GB of disk: the BF16 checkpoint (~550 GB), ~42 GB of int4 expert copies and ~110 GB of device images
       the first boot writes to the weight cache
   quickstart: |
     ### First boot
 
-    The first boot downloads the checkpoint, builds the int4 host copies of the experts (~15 min on 8 cores) and
-    converts the resident experts into device images (~25 min); later boots load them in a couple of minutes.
+    The first boot builds the int4 host copies of the experts the device does not hold (~6 min on 8 cores) and
+    converts the resident experts into device images (~25 min); later boots load them and are ready in a few minutes.
+    The first few requests after a fresh install can take longer while kernels compile once.
   usage: |
     One request at a time (max_num_seqs 1). The reasoning effort is a chat-template kwarg:
     `"chat_template_kwargs": {"reasoning_effort": "none" | "minimal" | "low" | "medium" | "high" | "max"}` (default
-    high, 0.9). Greedy and sampled decoding (temperature / top-p / top-k / seed) are both exact.
+    high). Greedy and sampled decoding (temperature / top-p / top-k / seed) are both exact with respect to the target
+    model: the MTP drafter only proposes tokens.
   performance: |
-    _to be measured_
+    | eval | this package | reference | prompts |
+    | --- | --- | --- | --- |
+    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.866 (confident tokens 0.947, KL 0.213) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
+    | GSM8K, greedy, reasoning effort none | 97.0% | — | 200 |
+    | IFEval, greedy, reasoning effort none (prompt strict / loose) | 88.0% / 90.0% | — | 200 |
+
+    | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2-128k | ~50 | 128 | 1 | 8 | 0.53 s | — | 39.8 | 3.7 s |
+    | p300x2-128k, reasoning effort none | ~40 | 130-190 | 1 | 3 | 0.55 s | — | 45.5 | 4.0 s |
+    | p300x2-128k | 914 | ~10 | 1 | 1 | 2.5 s | 361 | 40.2 | 2.8 s |
+    | p300x2-128k | 6,979 | ~10 | 1 | 1 | 19.0 s | 367 | 38.0 | 19.3 s |
+    | p300x2-128k | 27,815 | ~10 | 1 | 1 | 78.6 s | 354 | 38.2 | 78.9 s |
+    | p300x2-128k (6 prefill threads) | 104,192 | ~10 | 1 | 1 | 331 s | 315 | 38.5 | 331 s |
+
+    Measured on one QB2 through the OpenAI endpoint with `tt-model serve`, greedy, warm caches, 2026-11-15; the ~50-token
+    rows are short chat prompts (8 held-out prompts at the default reasoning effort; 3 code / math / prose prompts at
+    effort none); the long rows are a needle in a long document (found at every length). Decode varies with the text
+    (speculative acceptance, how many of a token's experts are on the device). The 104K row is from the development
+    server with the same code (6 host threads in prefill instead of the package's 8).
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
+    - Long prompts are prefilled at ~350 tok/s (the CPU computes the experts the device does not hold): a 28K-token
+      prompt takes ~80 s. Streaming those experts to the device is implemented but not enabled yet.
     - Text only: image and audio inputs are refused.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 / bfp8 device experts).
