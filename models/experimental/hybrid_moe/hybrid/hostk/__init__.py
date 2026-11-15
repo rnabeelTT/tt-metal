@@ -10,7 +10,7 @@ import subprocess
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _SO = os.path.join(_DIR, "libhostk.so")
 _lib = None
-MAXR = 16  # hostk.c MAXR
+MAXR = 64  # hostk.c MAXR
 
 
 def build(so=_SO):
@@ -43,12 +43,20 @@ def load(nthreads, so=_SO):
         lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
         lib.hostk_set_active.argtypes = [ctypes.c_int]
+        lib.hostk_set_bf16.argtypes = [ctypes.c_int]
         lib.hostk_touch_init.argtypes = [ctypes.c_int]
         lib.hostk_touch.argtypes = [ci, vp, vp]
         lib.hostk_touch_predict.argtypes = [vp, ci, ci, ci, ci, vp, vp, vp, vp, ctypes.c_int64, vp]
         lib.hostk_init(int(nthreads))
         _lib = lib
     return _lib
+
+
+def set_bf16(on):
+    """1: the kernel's many-row path (experts with more than 4 rows in a call: prefill tiles) uses AVX512-BF16 dot
+    products (two products per lane per instruction; the activations into the down projection rounded to bf16, as on
+    the device). Decode-sized calls are unchanged. Returns the previous setting."""
+    return _lib.hostk_set_bf16(int(on))
 
 
 def set_active(n):

@@ -537,13 +537,16 @@ class Qwen35MoeModel(Qwen36Model):
     # can be captured once and replayed for any real length / chunk start (capture_prefill_bucket_traces).
     _BUCKET_INPUTS_ATTR = "_bucket_inputs_store"
 
-    def _bucket_inputs(self, bucket, max_blocks=None):
+    def _bucket_inputs(self, bucket, max_blocks=None, slot=0):
         """Persistent device inputs of one bucket (allocated on first use; call before any trace capture).
-        ``max_blocks`` = width of the page-table rows this model is driven with (fixed after the first call)."""
+        ``max_blocks`` = width of the page-table rows this model is driven with (fixed after the first call).
+        ``slot`` > 0: another input set of the same bucket (the layer-major prefill stages one per segment of a group).
+        """
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.prefill_len import PrefillLen
 
         store = self.__dict__.setdefault(self._BUCKET_INPUTS_ATTR, {})
-        bi = store.get(bucket)
+        key = bucket if slot == 0 else (bucket, slot)
+        bi = store.get(key)
         if bi is not None:
             return bi
         dev = self.device
@@ -626,7 +629,7 @@ class Qwen35MoeModel(Qwen36Model):
             "len": PrefillLen(dev, bucket, conv_k),
             "staged": None,  # (tokens tuple, actual_len, chunk_start, page-table row tuple) last staged
         }
-        store[bucket] = bi
+        store[key] = bi
         return bi
 
     def _prefill_block_size(self):
@@ -813,6 +816,44 @@ class Qwen35MoeModel(Qwen36Model):
             ttnn.from_torch(mask, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=None, mesh_mapper=mask_map),
             self._vis_mask_buf,
         )
+
+    def prefill_group(self, segments, page_table, chunk_starts, return_sharded=False):
+        """Layer-major masked-bucket prefill of consecutive segments of one request (from the MiniMax-M2.7 port): every
+        layer runs over all the segments before the next layer starts (each segment on its own staged input set and
+        hidden buffer), so a layer's per-call costs that do not depend on the rows (the hybrid overlay's expert copies
+        into its staging) are paid once per group, not once per segment. Causal attention is unchanged: segment s of
+        layer L reads the KV that segments < s wrote into layer L just before; a GDN layer's recurrent and conv state
+        are its own, carried from segment to segment in order as in the segment-major path. ``segments`` [1, n_i] host
+        token ids at ``chunk_starts``; text only, eager (no bucket traces); the request's RoPE table is staged by the
+        caller. Returns the last segment's logits as :meth:`prefill_masked_bucket` does."""
+        if getattr(self, "_kv_scratch_block", None) is None:
+            raise RuntimeError("prefill_group needs the persistent-input bucket path (KV scratch block)")
+        if self.__dict__.get("_mtp_bucket_hook") is not None or self.__dict__.get("_mtp_stage_hook") is not None:
+            raise RuntimeError("prefill_group does not run the MTP head's prompt rows; use prefill_masked_bucket")
+        pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+        if chunk_starts[0] == 0:
+            self._reset_gdn_state_for_new_sequence()
+        if getattr(self, "_vis_buf", None) is not None:
+            self._set_vision_merge(segments[0], None, 0)  # text: clears the image-row mask
+        staged = []
+        for i, (toks, cs) in enumerate(zip(segments, chunk_starts)):
+            n = int(toks.shape[1])
+            bucket = self._mask_bucket_for(n)
+            bi = self._bucket_inputs(bucket, max_blocks=pt.shape[-1], slot=i)
+            self._stage_bucket_inputs(bi, toks, pt, n, cs, bucket)
+            staged.append((bi, bucket, cs))
+        xs = [self._bucket_embed(bi, bucket) for bi, bucket, _ in staged]
+        layer_hook = self.__dict__.get("_dflash_layer_hook")
+        for li, layer in enumerate(self.layers):
+            for i, (bi, bucket, cs) in enumerate(staged):
+                xs[i] = self._bucket_layer(layer, xs[i], bi, cs)
+                if layer_hook is not None:
+                    layer_hook(bi, bucket, li, xs[i])
+        for x in xs[:-1]:
+            ttnn.deallocate(x)
+        out, out_sh = self._bucket_logits(staged[-1][0], xs[-1])
+        ttnn.synchronize_device(self.device)
+        return (out, out_sh) if return_sharded else out
 
     def prefill_masked_bucket(
         self,

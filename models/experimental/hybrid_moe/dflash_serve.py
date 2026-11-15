@@ -588,6 +588,7 @@ class DFlashServing:
             self.ver.set_base(None)
         self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32).clone()
         self._P = len(prompt_ids)
+        self._pf_t0, self._pf_st0 = time.time(), {k: v for k, v in HYB.st.items() if isinstance(v, (int, float))}
         # per tap: [first row, host rows]; only the rows from P - window on are kept (end_prefill reads no more), and a
         # segment that ends before them is not read back. The mesh concat's first H columns are the layer output (prefill
         # outputs are width-sharded over the dies; a replicated output holds tp copies side by side).
@@ -601,6 +602,7 @@ class DFlashServing:
                     f"prefill start {start} skips features of the last {self.window} rows of a {self._P}-token prompt "
                     f"that the previous request's context does not hold"
                 )
+        HYB.pf_no_defer = set(self.dr.taps)  # their outputs are read as produced: no deferred CPU experts (patch.py)
         captured = {li: [0, []] for li in self.dr.taps}
         seen = {li: int(start) for li in self.dr.taps}
         orig = {}
@@ -639,6 +641,7 @@ class DFlashServing:
         captured = self._unhook()
         if captured is None:
             raise RuntimeError("end_prefill without begin_prefill")
+        self._log_prefill()
         P = int(P)
         if P != self._P:
             raise ValueError(f"end_prefill P={P} but begin_prefill saw {self._P} prompt tokens")
@@ -792,6 +795,23 @@ class DFlashServing:
         if st["passes"] % 64 == 0:
             self._log_stats("running")
         return out
+
+    _pf_st0 = None
+
+    def _log_prefill(self):
+        """One line per prompt: where the prefill's missed expert picks ran (device staging vs CPU) and the time."""
+        st0, self._pf_st0 = self._pf_st0, None
+        if st0 is None:
+            return
+        d = {k: v - st0.get(k, 0) for k, v in HYB.st.items() if isinstance(v, (int, float))}
+        logger.info(
+            f"PREFILL_STATS {self._P} tokens in {time.time() - self._pf_t0:.2f} s: {int(d.get('prefill_miss_pairs', 0))} "
+            f"missed picks of {int(d.get('prefill_rows', 0)) * 10} (all rows x 10), {int(d.get('streamed', 0))} experts "
+            f"streamed in {int(d.get('stream_rounds', 0))} rounds ({1e3 * d.get('t_stream', 0.0):.0f} ms enqueue), "
+            f"CPU wait {1e3 * d.get('t_host_wait', 0.0):.0f} ms, host experts {int(d.get('host_experts', 0))}"
+        )
+        if os.environ.get("HYB_PF_LOG_ALL") == "1":
+            logger.info(f"PREFILL_STATS all: { {k: round(v, 3) for k, v in d.items() if v} }")
 
     def _log_stats(self, why):
         st = self.stats

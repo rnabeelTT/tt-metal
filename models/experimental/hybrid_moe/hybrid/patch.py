@@ -36,6 +36,7 @@ Env (read at install):
 from __future__ import annotations
 
 import gc
+import contextlib
 import math
 import os
 import sys
@@ -60,6 +61,14 @@ def _port(mod):
     import importlib
 
     return importlib.import_module(f"models.autoports.{PORT}.tt.{mod}")
+
+
+def _cpu_has(flag):
+    try:
+        with open("/proc/cpuinfo") as f:
+            return any(line.startswith("flags") and flag in line.split() for line in f)
+    except OSError:
+        return False
 
 
 class HybridState:
@@ -151,6 +160,16 @@ class HybridState:
         # on the full model it gains nothing at 512-2K (runs/m27/split_full: the device waits on the CPU).
         self.pf_split = os.environ.get("HYB_PF_SPLIT", "0") == "1"
         self.pf_host_async = os.environ.get("HYB_PF_HOST_ASYNC", "1") == "1"  # prefill host experts on HYB.pool
+        # HYB_PF_DEFER (default 1): in a layer-major prefill group (the port's prefill_group), a segment's CPU experts
+        # are added to its layer output after the layer's LAST segment instead of blocking that segment's MoE, so they
+        # run while the device computes the layer's next segments (which do not read this segment's MoE output). The
+        # layers in pf_no_defer (DFlash's tap layers: their outputs are read as they are produced) never defer.
+        self.pf_defer = os.environ.get("HYB_PF_DEFER", "1") == "1"
+        self.pf_no_defer = set()
+        self.pf_group_bis = None  # the staged inputs of the running prefill group, in segment order
+        self.pf_defer_now = False  # the running bucket layer step may defer its CPU experts
+        self.pf_deferred = None  # (future, MoE module) deferred by the running step
+        self.pf_pending = []  # [(layer output, (future, MoE module))] of the running layer
         self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
         self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
         self.pf_cpu_fixed_ms = [
@@ -165,7 +184,20 @@ class HybridState:
         # of a Python thread-pool worker, whose GIL hand-offs stalled the main thread's device calls (bench_pinx.py)
         self.hostk_async = self.hostk and os.environ.get("HYB_HOSTK_ASYNC", "1") == "1"
         if self.hostk:
-            hostk.load(int(os.environ.get("HYB_HOSTK_THREADS", "3")))  # 3: fixed-text A/B runs/m27/fb_thr, +2-3% over 4
+            n_dec = int(os.environ.get("HYB_HOSTK_THREADS", "3"))  # 3: fixed-text A/B runs/m27/fb_thr, +2-3% over 4
+            # HYB_HOSTK_THREADS_PREFILL (0 = as decode): a prefill's CPU experts are compute bound (16-row tiles over
+            # many tokens), not host-DRAM bound like decode's: the pool holds the larger count and decode runs on the
+            # first HYB_HOSTK_THREADS of it (hostk.set_active), prefill on all of it (_prefill_threads)
+            self.pf_threads = int(os.environ.get("HYB_HOSTK_THREADS_PREFILL", "0") or 0)
+            hostk.load(max(n_dec, self.pf_threads))
+            # HYB_HOSTK_BF16 (default 1 where the CPU has AVX512-BF16): the kernel's many-row path (prefill tiles) uses
+            # bf16 dot products (~1.4x; the down projection's input rounded to bf16 as on the device); decode unchanged
+            if os.environ.get("HYB_HOSTK_BF16", "1") == "1" and _cpu_has("avx512_bf16"):
+                hostk.set_bf16(1)
+            if self.pf_threads > n_dec:
+                self.hostk_threads = n_dec
+            else:
+                self.pf_threads = 0
             if os.environ.get("HYB_PREFETCH", "0") == "1":
                 hostk.touch_init(int(os.environ.get("HYB_PF_THREADS", "2")))
         if self.lowbit > 0 and not self.hostk:
@@ -920,8 +952,10 @@ def install():
 
     def prefill_single(self, tokens, *a, **kw):
         HYB.stream.begin_prefill(int(tokens.shape[1]))
+        _dev_tune()
         _begin_replan(int(tokens.shape[1]))
-        return single(self, tokens, *a, **kw)
+        with _prefill_threads():
+            return single(self, tokens, *a, **kw)
 
     gen_mod.Qwen35MoeGenerator._prefill_single = prefill_single
     model_cls = _port("model").Qwen35MoeModel
@@ -929,27 +963,97 @@ def install():
 
     def prefill_all_logits(self, token_ids, *a, **kw):
         HYB.stream.begin_prefill(int(token_ids.shape[-1]))
+        _dev_tune()
         _begin_replan(int(token_ids.shape[-1]))
-        return all_logits(self, token_ids, *a, **kw)
+        with _prefill_threads():
+            return all_logits(self, token_ids, *a, **kw)
 
     model_cls.prefill_all_logits = prefill_all_logits
     stage_inputs, bucket_layer = model_cls._stage_bucket_inputs, model_cls._bucket_layer
 
     def stage_bucket_inputs(self, bi, token_ids, page_table, actual_len, *a, **kw):
         bi["hyb_valid"] = int(actual_len)
+        if HYB.pf_group_bis is not None:
+            HYB.pf_group_bis.append(bi)
         return stage_inputs(self, bi, token_ids, page_table, actual_len, *a, **kw)
 
     def bucket_layer_(self, layer, x, bi, chunk_start):
         HYB.pf_valid = bi.get("hyb_valid")
+        grp = HYB.pf_group_bis
+        idx = next((i for i, b in enumerate(grp) if b is bi), None) if (grp and HYB.pf_defer) else None
+        # every segment of the group defers (the last one too: its CPU part is then added after the all-reduce, to the
+        # layer output's per-die shard, instead of replicated before it)
+        HYB.pf_defer_now = idx is not None
+        HYB.pf_deferred = None
         try:
-            return bucket_layer(self, layer, x, bi, chunk_start)
+            y = bucket_layer(self, layer, x, bi, chunk_start)
+        except BaseException:
+            HYB.pf_pending = []
+            raise
         finally:
             HYB.pf_valid = None
+            HYB.pf_defer_now = False
+        if HYB.pf_deferred is not None:
+            HYB.pf_pending.append((y, HYB.pf_deferred))
+            HYB.pf_deferred = None
+        if idx is not None and idx == len(grp) - 1 and HYB.pf_pending:
+            _resolve_deferred()  # the layer's last segment: every segment's output is complete before the next layer
+        return y
+
+    if hasattr(model_cls, "prefill_group"):
+        group = model_cls.prefill_group
+
+        def prefill_group(self, *a, **kw):
+            HYB.pf_group_bis, HYB.pf_pending = [], []
+            try:
+                return group(self, *a, **kw)
+            finally:
+                HYB.pf_group_bis = None
+                if HYB.pf_pending:
+                    HYB.pf_pending = []
+                    raise RuntimeError("prefill group ended with deferred CPU experts not added")
+
+        model_cls.prefill_group = prefill_group
 
     model_cls._stage_bucket_inputs = stage_bucket_inputs
     model_cls._bucket_layer = bucket_layer_
     if HYB.defer_lib:
         _install_mtp_head()
+
+
+def _dev_tune():
+    """HYB_TUNE_FILE (development A/B only): key=value lines applied before each prefill: pf_defer, bf16, pf_threads."""
+    path = os.environ.get("HYB_TUNE_FILE")
+    if not path or not os.path.exists(path):
+        return
+    for line in open(path):
+        k, _, v = line.strip().partition("=")
+        if k == "pf_defer":
+            HYB.pf_defer = v == "1"
+        elif k == "bf16":
+            hostk.set_bf16(int(v))
+        elif k == "pf_threads":
+            HYB.pf_threads = int(v)
+        elif k == "pf_drop_host":  # timing only: the prefill's CPU experts are dropped (wrong outputs)
+            HYB.pf_drop_host = v == "1"
+        elif k == "stream":
+            HYB.stream.on = v == "1"
+    print(f"HYB_TUNE {open(path).read().split()}", flush=True)
+
+
+@contextlib.contextmanager
+def _prefill_threads():
+    """HYB_HOSTK_THREADS_PREFILL: the whole host-kernel pool for a prefill, decode's count restored after."""
+    n = getattr(HYB, "pf_threads", 0)
+    if not n:
+        yield
+        return
+    prev = HYB.hostk_threads
+    HYB.hostk_threads = n
+    try:
+        yield
+    finally:
+        HYB.hostk_threads = prev
 
 
 def _install_mtp_head():
@@ -1963,6 +2067,13 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     HYB.stream.mark_read(self.layer_num, self.device)
     HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + len(rounds)
     out = _plus_shared(self, routed, x4)
+    if host_fut is not None and HYB.pf_defer_now and self.layer_num not in HYB.pf_no_defer:
+        # added to the layer output after the layer's last segment (_resolve_deferred): runs during the next segments
+        HYB.pf_deferred = (host_fut, self)
+        HYB.st["pf_deferred"] = HYB.st.get("pf_deferred", 0) + 1
+        out = _finish(self, out, orig, partial)
+        _pf_mark(self, "t_pf_reduce")
+        return out
     if host_fut is not None:
         t0 = time.perf_counter()
         dec["host"] = host_fut.result()
@@ -1976,6 +2087,53 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     out = _finish(self, out, orig, partial)
     _pf_mark(self, "t_pf_reduce")
     return out
+
+
+def _resolve_deferred():
+    """The deferred CPU experts of the running layer's segments, added in place to each segment's layer output
+    (output = h + MoE(h'): the CPU part of the MoE added after the residual add is the same sum). The output is per die
+    either replicated (width H) or width-sharded (H / tp); the CPU rows go up as a matching table + embedding lookup."""
+    pend, HYB.pf_pending = HYB.pf_pending, []
+    for y, (fut, mod) in pend:
+        t0 = time.perf_counter()
+        host = fut.result()
+        HYB.st["t_host_wait"] = HYB.st.get("t_host_wait", 0.0) + time.perf_counter() - t0
+        rows_nz = (host != 0).any(1).nonzero().reshape(-1)
+        if not rows_nz.numel():
+            continue
+        t0 = time.perf_counter()
+        R, H = host.shape
+        tp, w = mod.num_devices, int(y.shape[-1])
+        if w == H:
+            mapper = ttnn.ReplicateTensorToMesh(mod.device)
+            HYB.st["pf_defer_repl"] = HYB.st.get("pf_defer_repl", 0) + 1
+        elif w * tp == H:
+            mapper = ttnn.ShardTensorToMesh(mod.device, dim=-1)
+            HYB.st["pf_defer_shard"] = HYB.st.get("pf_defer_shard", 0) + 1
+        else:
+            raise RuntimeError(f"layer {mod.layer_num}: layer output width {w} is neither H {H} nor H / {tp}")
+        shp = [int(v) for v in y.shape]
+        rows = math.prod(shp[:-1])
+        if rows < R:
+            raise RuntimeError(f"layer {mod.layer_num}: layer output has {rows} rows, the CPU experts {R}")
+        n = int(rows_nz.numel())
+        table = torch.zeros(n + 1, H, dtype=torch.bfloat16)
+        table[:n] = host[rows_nz].to(torch.bfloat16)
+        idx = torch.full((1, rows), n, dtype=torch.int32)
+        idx[0, rows_nz] = torch.arange(n, dtype=torch.int32)
+        kw = dict(device=mod.device, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        t_dev = ttnn.from_torch(table, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=mapper, **kw)
+        i_dev = ttnn.from_torch(
+            idx, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=ttnn.ReplicateTensorToMesh(mod.device), **kw
+        )
+        dense = ttnn.embedding(i_dev, t_dev, layout=ttnn.TILE_LAYOUT, dtype=y.dtype, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(t_dev)
+        ttnn.deallocate(i_dev)
+        if list(dense.shape) != shp:
+            dense = ttnn.reshape(dense, shp)
+        ttnn.add(y, dense, output_tensor=y)
+        ttnn.deallocate(dense)
+        HYB.st["t_up"] += time.perf_counter() - t0
 
 
 def _nonresident_hot_first(layer):
@@ -2390,7 +2548,12 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
             stream = []
             for rmask, sidx, writes in rounds:
                 v_miss = v_miss & ~rmask
+                HYB.st["pf_stream_pairs"] = HYB.st.get("pf_stream_pairs", 0) + int(rmask.sum())
                 stream.append((writes, sidx, torch.where(rmask, sch[:valid], torch.zeros_like(sch[:valid]))))
+    if mode == "prefill":
+        HYB.st["pf_host_pairs"] = HYB.st.get("pf_host_pairs", 0) + int(v_miss.sum())
+        if getattr(HYB, "pf_drop_host", False):
+            v_miss = torch.zeros_like(v_miss)
     if bool(v_miss.any()):
         t1 = time.perf_counter()
         xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)

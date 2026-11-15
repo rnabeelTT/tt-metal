@@ -27,7 +27,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define MAXR 16
+#define MAXR 64  // rows per hostk_moe call (decode: 1-4; prefill: 64-row tiles of (row, expert) pairs)
+#define TMAXM 16  // rows of the predict-then-touch router scoring (hostk_touch_predict)
 #define MAXE 640
 #define MAXT 32
 #ifndef HOSTK_PF
@@ -55,10 +56,16 @@ typedef struct {
     float* xs_gu;  // [E][MAXR][H/gs]  group sums of the active x rows
     float* A;      // [E][MAXR][I]     activations
     float* xs_dn;  // [E][MAXR][I/gs]  group sums of A
+    // bf (hostk_set_bf16): experts with more than 4 rows in a call take the AVX512-BF16 dot products, on bf16 copies
+    // of their inputs (X: exact, the host rows come from bf16; A: rounded, as the device path's activations)
+    int bf;
+    uint16_t* Xb;  // [R][H]         bf16 copy of X
+    uint16_t* Ab;  // [E][MAXR][I]   bf16 copy of A
     int phase, units;
 } job_t;
 
 static job_t J;
+static int g_bf = 0;  // hostk_set_bf16
 static int g_nt = 0;
 static _Atomic int g_active = 0;  // workers with an index >= this skip the phases (hostk_set_active); 0 = all
 static pthread_t g_th[MAXT];
@@ -77,6 +84,29 @@ static inline float bf16f(uint16_t v) {
 
 // acc[r][0..63] += sum_k w[n0+.., k] x_r[k] over K for one 64-row block; rows in chunks of 4 (x rows beyond nr = 0).
 // xs[r][g] = sum of x_r over group g. w: the block's K*32 bytes; sz: scales_and_zeros + n0*2 ([K/gs, N, 2]).
+static void gemv_block_many(
+    const uint8_t* w, const uint16_t* sz, int N, int K, int gs, const float* const* x, const float* const* xs, int nr,
+    int layout, float out[][64]);
+#define BF16_FN __attribute__((target("avx512bf16")))  // the BF16 path only runs when hostk_set_bf16(1) (CPU checked)
+BF16_FN static void gemv_block_bf(
+    const uint8_t* w, const uint16_t* sz, int N, int K, int gs, const uint16_t* const* xb, const float* const* xs,
+    int nr, int layout, float out[][64]);
+BF16_FN static void to_bf16(const float* x, uint16_t* y, size_t n);
+
+static inline uint16_t f2bf(float f) {  // round to nearest even (finite inputs)
+    uint32_t u;
+    memcpy(&u, &f, 4);
+    u += 0x7FFFu + ((u >> 16) & 1u);
+    return (uint16_t)(u >> 16);
+}
+
+static inline float bf2f(uint16_t h) {
+    uint32_t u = (uint32_t)h << 16;
+    float f;
+    memcpy(&f, &u, 4);
+    return f;
+}
+
 static void gemv_block(
     const uint8_t* w,
     const uint16_t* sz,
@@ -87,7 +117,16 @@ static void gemv_block(
     const float* const* xs,
     int nr,
     int layout,  // 0: torch pack, 1: bit planes (full), 2: hi plane only
-    float out[][64]) {
+    float out[][64],
+    const uint16_t* const* xb) {  // bf16 rows (J.bf, nr > 4) or NULL
+    if (nr > 4 && xb) {  // prefill tiles: AVX512-BF16 dot products over the bf16 rows
+        gemv_block_bf(w, sz, N, K, gs, xb, xs, nr, layout, out);
+        return;
+    }
+    if (nr > 4) {  // prefill tiles: each group's weights decoded once (gemv_block_many), not once per 4 rows
+        gemv_block_many(w, sz, N, K, gs, x, xs, nr, layout, out);
+        return;
+    }
     const int G = K / gs;
     for (int r0 = 0; r0 < nr; r0 += 4) {
         const int rc = nr - r0 < 4 ? nr - r0 : 4;
@@ -171,6 +210,217 @@ static void gemv_block(
     }
 }
 
+// gemv_block for many rows: per group, the gs x 64 weights are decoded once into an L1 buffer (fp32, q - as stored)
+// and every 4-row chunk FMAs from it; the per-group scale / zero step is the same as gemv_block's, in the same order,
+// so the result is bit-identical to gemv_block's.
+static void gemv_block_many(
+    const uint8_t* w,
+    const uint16_t* sz,
+    int N,
+    int K,
+    int gs,
+    const float* const* x,
+    const float* const* xs,
+    int nr,
+    int layout,
+    float out[][64]) {
+    const int G = K / gs;
+    float wf[64 * 64] __attribute__((aligned(64)));  // gs <= 64
+    for (int r = 0; r < nr; r++) {
+        memset(out[r], 0, 64 * sizeof(float));
+    }
+    const __m512i m15 = _mm512_set1_epi32(15), m3 = _mm512_set1_epi32(3);
+    for (int g = 0; g < G; g++) {
+        const uint8_t* p = w + (size_t)g * gs * (layout ? 16 : 32);
+        const uint8_t* pl = w + (size_t)K * 16 + (size_t)g * gs * 16;
+        for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
+            __m512 f[4];
+            if (layout == 0) {
+                __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                __m512i v1 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(p + 16)));
+                f[0] = _mm512_cvtepi32_ps(_mm512_and_si512(v0, m15));
+                f[1] = _mm512_cvtepi32_ps(_mm512_and_si512(v1, m15));
+                f[2] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v0, 4));
+                f[3] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v1, 4));
+            } else if (layout == 1) {
+                __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                __m512i vl = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)pl));
+                for (int i = 0; i < 4; i++) {
+                    __m512i h = _mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3);
+                    __m512i l = _mm512_and_si512(_mm512_srli_epi32(vl, 2 * i), m3);
+                    f[i] = _mm512_cvtepi32_ps(_mm512_or_si512(_mm512_slli_epi32(h, 2), l));
+                }
+            } else {
+                __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                for (int i = 0; i < 4; i++) {
+                    f[i] = _mm512_cvtepi32_ps(_mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3));
+                }
+            }
+            for (int i = 0; i < 4; i++) {
+                _mm512_store_ps(wf + k * 64 + i * 16, f[i]);
+            }
+        }
+        const uint32_t* s32 = (const uint32_t*)(sz + (size_t)g * N * 2);
+        __m512 sv[4], zv[4];
+        for (int i = 0; i < 4; i++) {
+            __m512i u = _mm512_loadu_si512((const void*)(s32 + i * 16));
+            __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
+            __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
+            zv[i] = _mm512_fnmadd_ps(_mm512_set1_ps(layout == 2 ? 6.5f : 8.0f), s, z);
+            sv[i] = layout == 2 ? _mm512_mul_ps(s, _mm512_set1_ps(4.0f)) : s;
+        }
+        for (int r0 = 0; r0 < nr; r0 += 4) {
+            const int rc = nr - r0 < 4 ? nr - r0 : 4;
+            __m512 acc[4][4];
+            for (int r = 0; r < 4; r++) {
+                for (int i = 0; i < 4; i++) {
+                    acc[r][i] = _mm512_setzero_ps();
+                }
+            }
+            for (int k = 0; k < gs; k++) {
+                const int kk = g * gs + k;
+                const float* wk = wf + k * 64;
+                __m512 f0 = _mm512_load_ps(wk), f1 = _mm512_load_ps(wk + 16), f2 = _mm512_load_ps(wk + 32),
+                       f3 = _mm512_load_ps(wk + 48);
+#define ROWM(r)                                         \
+    if (rc > r) {                                       \
+        __m512 xb = _mm512_set1_ps(x[r0 + r][kk]);      \
+        acc[r][0] = _mm512_fmadd_ps(f0, xb, acc[r][0]); \
+        acc[r][1] = _mm512_fmadd_ps(f1, xb, acc[r][1]); \
+        acc[r][2] = _mm512_fmadd_ps(f2, xb, acc[r][2]); \
+        acc[r][3] = _mm512_fmadd_ps(f3, xb, acc[r][3]); \
+    }
+                ROWM(0) ROWM(1) ROWM(2) ROWM(3)
+#undef ROWM
+            }
+            for (int r = 0; r < rc; r++) {
+                for (int i = 0; i < 4; i++) {
+                    __m512 o = _mm512_loadu_ps(out[r0 + r] + i * 16);
+                    o = _mm512_fmadd_ps(sv[i], acc[r][i], o);
+                    o = _mm512_fmadd_ps(zv[i], _mm512_set1_ps(xs[r0 + r][g]), o);
+                    _mm512_storeu_ps(out[r0 + r] + i * 16, o);
+                }
+            }
+        }
+    }
+}
+
+BF16_FN static void to_bf16(const float* x, uint16_t* y, size_t n) {  // n % 16 == 0, round to nearest even
+    for (size_t i = 0; i < n; i += 16) {
+        _mm256_storeu_si256((__m256i*)(y + i), (__m256i)_mm512_cvtneps_pbh(_mm512_loadu_ps(x + i)));
+    }
+}
+
+// gemv_block_many with AVX512-BF16: per group, the gs x 64 weights (q, exact in bf16) are decoded once into an L1 buffer
+// of (k, k+1) pairs per column, and each row's (x_k, x_k+1) bf16 pair is broadcast into vdpbf16ps (two products per lane
+// per instruction, fp32 accumulation). The scale / zero step is gemv_block's.
+BF16_FN static void gemv_block_bf(
+    const uint8_t* w,
+    const uint16_t* sz,
+    int N,
+    int K,
+    int gs,
+    const uint16_t* const* xb,
+    const float* const* xs,
+    int nr,
+    int layout,
+    float out[][64]) {
+    const int G = K / gs;
+    __m512i wb[32 * 4] __attribute__((aligned(64)));  // [gs / 2][4]: 32 bf16 = 16 columns x (k, k+1)
+    for (int r = 0; r < nr; r++) {
+        memset(out[r], 0, 64 * sizeof(float));
+    }
+    const __m512i m15 = _mm512_set1_epi32(15), m3 = _mm512_set1_epi32(3);
+    // lanes 2c, 2c+1 <- column c of k (lo half) and of k+1 (hi half)
+    const __m512i pidx = _mm512_set_epi16(
+        31, 15, 30, 14, 29, 13, 28, 12, 27, 11, 26, 10, 25, 9, 24, 8, 23, 7, 22, 6, 21, 5, 20, 4, 19, 3, 18, 2, 17, 1, 16, 0);
+    for (int g = 0; g < G; g++) {
+        const uint8_t* p = w + (size_t)g * gs * (layout ? 16 : 32);
+        const uint8_t* pl = w + (size_t)K * 16 + (size_t)g * gs * 16;
+        __m512 prev[4];
+        for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
+            __m512 f[4];
+            if (layout == 0) {
+                __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                __m512i v1 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(p + 16)));
+                f[0] = _mm512_cvtepi32_ps(_mm512_and_si512(v0, m15));
+                f[1] = _mm512_cvtepi32_ps(_mm512_and_si512(v1, m15));
+                f[2] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v0, 4));
+                f[3] = _mm512_cvtepi32_ps(_mm512_srli_epi32(v1, 4));
+            } else if (layout == 1) {
+                __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                __m512i vl = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)pl));
+                for (int i = 0; i < 4; i++) {
+                    __m512i h = _mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3);
+                    __m512i l = _mm512_and_si512(_mm512_srli_epi32(vl, 2 * i), m3);
+                    f[i] = _mm512_cvtepi32_ps(_mm512_or_si512(_mm512_slli_epi32(h, 2), l));
+                }
+            } else {
+                __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
+                for (int i = 0; i < 4; i++) {
+                    f[i] = _mm512_cvtepi32_ps(_mm512_and_si512(_mm512_srli_epi32(vh, 2 * i), m3));
+                }
+            }
+            if (k & 1) {
+                for (int i = 0; i < 4; i++) {
+                    __m256i lo = (__m256i)_mm512_cvtneps_pbh(prev[i]);
+                    __m256i hi = (__m256i)_mm512_cvtneps_pbh(f[i]);
+                    __m512i both = _mm512_inserti64x4(_mm512_castsi256_si512(lo), hi, 1);
+                    _mm512_store_si512(wb + (k >> 1) * 4 + i, _mm512_permutexvar_epi16(pidx, both));
+                }
+            } else {
+                for (int i = 0; i < 4; i++) {
+                    prev[i] = f[i];
+                }
+            }
+        }
+        const uint32_t* s32 = (const uint32_t*)(sz + (size_t)g * N * 2);
+        __m512 sv[4], zv[4];
+        for (int i = 0; i < 4; i++) {
+            __m512i u = _mm512_loadu_si512((const void*)(s32 + i * 16));
+            __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
+            __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
+            zv[i] = _mm512_fnmadd_ps(_mm512_set1_ps(layout == 2 ? 6.5f : 8.0f), s, z);
+            sv[i] = layout == 2 ? _mm512_mul_ps(s, _mm512_set1_ps(4.0f)) : s;
+        }
+        for (int r0 = 0; r0 < nr; r0 += 4) {
+            const int rc = nr - r0 < 4 ? nr - r0 : 4;
+            __m512 acc[4][4];
+            for (int r = 0; r < 4; r++) {
+                for (int i = 0; i < 4; i++) {
+                    acc[r][i] = _mm512_setzero_ps();
+                }
+            }
+            for (int kp = 0; kp < gs / 2; kp++) {
+                const int kk = g * gs + 2 * kp;
+                const __m512i* wk = wb + kp * 4;
+                __m512bh f0 = (__m512bh)_mm512_load_si512(wk), f1 = (__m512bh)_mm512_load_si512(wk + 1),
+                         f2 = (__m512bh)_mm512_load_si512(wk + 2), f3 = (__m512bh)_mm512_load_si512(wk + 3);
+#define ROWB(r)                                                                         \
+    if (rc > r) {                                                                       \
+        uint32_t pr;                                                                    \
+        memcpy(&pr, xb[r0 + r] + kk, 4);                                                \
+        __m512bh xp = (__m512bh)_mm512_set1_epi32((int)pr);                             \
+        acc[r][0] = _mm512_dpbf16_ps(acc[r][0], f0, xp);                                \
+        acc[r][1] = _mm512_dpbf16_ps(acc[r][1], f1, xp);                                \
+        acc[r][2] = _mm512_dpbf16_ps(acc[r][2], f2, xp);                                \
+        acc[r][3] = _mm512_dpbf16_ps(acc[r][3], f3, xp);                                \
+    }
+                ROWB(0) ROWB(1) ROWB(2) ROWB(3)
+#undef ROWB
+            }
+            for (int r = 0; r < rc; r++) {
+                for (int i = 0; i < 4; i++) {
+                    __m512 o = _mm512_loadu_ps(out[r0 + r] + i * 16);
+                    o = _mm512_fmadd_ps(sv[i], acc[r][i], o);
+                    o = _mm512_fmadd_ps(zv[i], _mm512_set1_ps(xs[r0 + r][g]), o);
+                    _mm512_storeu_ps(out[r0 + r] + i * 16, o);
+                }
+            }
+        }
+    }
+}
+
 static void unit(int u) {
     const int H = J.H, I = J.I, gs = J.gs;
     const size_t gu_bytes = (size_t)2 * I * H / 2, dn_bytes = (size_t)H * I / 2;
@@ -181,18 +431,30 @@ static void unit(int u) {
         const uint8_t* wb = J.gu_p + row * gu_bytes;
         const uint16_t* sb = J.gu_sz + row * gu_sz_n;
         const float *x[MAXR], *xs[MAXR];
+        const uint16_t* xbr[MAXR];
+        const int bf = J.bf && nr > 4;
         for (int r = 0; r < nr; r++) {
             x[r] = J.X + (size_t)J.er[e][r] * H;
+            xbr[r] = bf ? J.Xb + (size_t)J.er[e][r] * H : NULL;
             xs[r] = J.xs_gu + ((size_t)e * MAXR + r) * (H / gs);
         }
         const int lay = J.planar ? (J.lo && J.lo[e] ? 2 : 1) : 0;
         float g[MAXR][64], up[MAXR][64];
-        gemv_block(wb + (size_t)j * H * 32, sb + (size_t)j * 64 * 2, 2 * I, H, gs, x, xs, nr, lay, g);
-        gemv_block(wb + (size_t)(nb + j) * H * 32, sb + (size_t)(I + j * 64) * 2, 2 * I, H, gs, x, xs, nr, lay, up);
+        gemv_block(wb + (size_t)j * H * 32, sb + (size_t)j * 64 * 2, 2 * I, H, gs, x, xs, nr, lay, g, bf ? xbr : NULL);
+        gemv_block(
+            wb + (size_t)(nb + j) * H * 32, sb + (size_t)(I + j * 64) * 2, 2 * I, H, gs, x, xs, nr, lay, up,
+            bf ? xbr : NULL);
         for (int r = 0; r < nr; r++) {
             float* a = J.A + ((size_t)e * MAXR + r) * I + j * 64;
             for (int t = 0; t < 64; t++) {
                 a[t] = g[r][t] / (1.0f + expf(-g[r][t])) * up[r][t];
+            }
+            if (bf) {  // the down projection reads A in bf16: its group sums are of the rounded values
+                uint16_t* ab = J.Ab + ((size_t)e * MAXR + r) * I + j * 64;
+                for (int t = 0; t < 64; t++) {
+                    ab[t] = f2bf(a[t]);
+                    a[t] = bf2f(ab[t]);
+                }
             }
             float* xd = J.xs_dn + ((size_t)e * MAXR + r) * (I / gs) + j * 64 / gs;
             for (int q = 0; q < 64 / gs; q++) {
@@ -210,8 +472,11 @@ static void unit(int u) {
             const int nr = J.ne[e];
             const int64_t row = J.rows[e];
             const float *x[MAXR], *xs[MAXR];
+            const uint16_t* xbr[MAXR];
+            const int bf = J.bf && nr > 4;
             for (int r = 0; r < nr; r++) {
                 x[r] = J.A + ((size_t)e * MAXR + r) * I;
+                xbr[r] = bf ? J.Ab + ((size_t)e * MAXR + r) * I : NULL;
                 xs[r] = J.xs_dn + ((size_t)e * MAXR + r) * (I / gs);
             }
             gemv_block(
@@ -224,7 +489,8 @@ static void unit(int u) {
                 xs,
                 nr,
                 J.planar ? (J.lo && J.lo[e] ? 2 : 1) : 0,
-                y);
+                y,
+                bf ? xbr : NULL);
             for (int r = 0; r < nr; r++) {
                 const int rr = J.er[e][r];
                 const float wv = J.W[(size_t)e * J.R + rr];
@@ -285,6 +551,13 @@ static void run_phase(int phase, int units) {
 // Threads that run the kernel's phases from now on (1..nthreads of hostk_init; 0 = all): the others still wake and
 // report done, so a phase never waits on them. Returns the previous setting.
 int hostk_set_active(int n) { return atomic_exchange(&g_active, n < 0 ? 0 : n); }
+
+// 1: experts with more than 4 rows in a call use the AVX512-BF16 path (gemv_block_bf); returns the previous setting.
+int hostk_set_bf16(int on) {
+    int prev = g_bf;
+    g_bf = on ? 1 : 0;
+    return prev;
+}
 
 int hostk_init(int nthreads) {
     if (g_nt) {
@@ -362,7 +635,7 @@ typedef struct {
 static pred_t g_p;
 static int g_tmode = 0;  // 0: ranges, 1: predict then touch
 static _Atomic int g_tunit = 0, g_tgated = 0, g_tready = 0;
-static float g_z[MAXR * 1024];
+static float g_z[TMAXM * 1024];
 
 static void gate_units(void) {
     const int H = g_p.H, m = g_p.m, nu = (g_p.E + 7) / 8;
@@ -376,7 +649,7 @@ static void gate_units(void) {
         }
         for (int e = u * 8; e < u * 8 + 8 && e < g_p.E; e++) {
             const uint16_t* w = g_p.W + (size_t)e * H;
-            __m512 acc[MAXR];
+            __m512 acc[TMAXM];
             for (int r = 0; r < m; r++) {
                 acc[r] = _mm512_setzero_ps();
             }
@@ -529,7 +802,7 @@ int hostk_touch_predict(
     if (!g_tn) {
         return -4;
     }
-    if (m > MAXR || E > 1024 || H % 16 || k > E) {
+    if (m > TMAXM || E > 1024 || H % 16 || k > E) {
         return -1;
     }
     atomic_store(&g_tabort, 1);
@@ -585,6 +858,7 @@ int hostk_moe(
     atomic_store(&g_tabort, 1);  // a running prefetch (hostk_touch) yields the DRAM to the experts
     pthread_mutex_lock(&g_mu);
     size_t need = (size_t)E * MAXR * ((size_t)H / gs + I + (size_t)I / gs);
+    need += ((size_t)R * H + (size_t)E * MAXR * I) / 2 + 32;  // Xb, Ab (bf16), alignment slack
     if (need > g_scratch_sz) {
         free(g_scratch);
         g_scratch = malloc(need * sizeof(float));
@@ -599,6 +873,12 @@ int hostk_moe(
     J.xs_gu = g_scratch;
     J.A = J.xs_gu + (size_t)E * MAXR * (H / gs);
     J.xs_dn = J.A + (size_t)E * MAXR * I;
+    J.bf = g_bf;
+    J.Xb = (uint16_t*)(J.xs_dn + (size_t)E * MAXR * (I / gs));
+    J.Ab = J.Xb + (size_t)R * H;
+    if (J.bf) {  // H % 64 == 0: whole vectors
+        to_bf16(X, J.Xb, (size_t)R * H);
+    }
     const int G = H / gs;
     for (int e = 0; e < E; e++) {
         int n = 0;

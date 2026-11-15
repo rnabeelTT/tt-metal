@@ -98,6 +98,8 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         self.max_batch_size = int(max_batch_size)
         self.max_seq_len = int(self.args.max_seq_len)
         self.block_size = int(block_size)
+        # QWEN35_PREFILL_GROUP: segments per layer-major prefill group (model.prefill_group; 1 = segment by segment)
+        self.prefill_group_size = int(os.environ.get("QWEN35_PREFILL_GROUP", "1"))
         self._tt = tt_generator if tt_generator is not None else TTGenerator([self.model], [self.args], mesh_device)
         if tt_generator is not None:
             assert self._tt.model[0] is self.model, "tt_generator must wrap this generator's model"
@@ -733,6 +735,23 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             # chunked prefill) would otherwise slice the M-RoPE table an earlier image request left staged
             self.model._build_request_rope(tokens, None)
         logits, sh = None, None
+        G = int(getattr(self, "prefill_group_size", 1))
+        if G > 1 and len(bounds) > 2 and vision_tokens is None and not cuts and hasattr(self.model, "prefill_group"):
+            # layer-major over groups of G segments (model.prefill_group); only the last group's logits are read
+            spans = list(zip(bounds[:-1], bounds[1:]))
+            for g0 in range(0, len(spans), G):
+                grp = spans[g0 : g0 + G]
+                segs = [tokens[:, cs - start : ce - start] for cs, ce in grp]
+                starts = [cs for cs, _ in grp]
+                if g0 + G < len(spans):
+                    self.model.prefill_group(segs, page_table, starts)
+                elif want_sharded:
+                    lg, sh = self.model.prefill_group(segs, page_table, starts, return_sharded=True)
+                else:
+                    lg = self.model.prefill_group(segs, page_table, starts)
+            if host_logits:
+                logits = self._host_logits(lg)
+            return (logits, sh) if want_sharded else logits
         for cs, ce in zip(bounds[:-1], bounds[1:]):
             seg = tokens[:, cs - start : ce - start]
             last = ce == start + T
