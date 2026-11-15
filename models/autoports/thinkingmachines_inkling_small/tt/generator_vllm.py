@@ -27,7 +27,6 @@ import os
 import torch
 from loguru import logger
 
-import ttnn
 from models.autoports.minimaxai_minimax_m2_7.tt.generator_vllm import MiniMaxM2ForCausalLM
 from models.autoports.thinkingmachines_inkling_small.tt.model import create_model
 
@@ -41,6 +40,47 @@ if SPEC_K > 0:
     from models.autoports.minimaxai_minimax_m2_7.tt import mtp_plugin_shim
 
     mtp_plugin_shim.apply(SPEC_K + 1)
+
+
+def _xgrammar_stop_ids(stop_ids):
+    """Structured outputs: Inkling's tokenizer has no eos_token, so xgrammar guessed its stop token (200028, not the
+    end of turn 200006): after a complete JSON value the grammar then allowed only 200028, which vLLM does not stop on,
+    and the request failed ("grammar rejected tokens [200028]"). Every TokenizerInfo built in this process without
+    stop ids gets the model's end-of-turn ids. Never fatal: on any surprise it logs and leaves xgrammar alone."""
+    try:
+        import xgrammar
+
+        ti = xgrammar.TokenizerInfo
+        raw = ti.__dict__.get("from_huggingface")
+        if getattr(getattr(raw, "__func__", None), "_inkling_stop", False):
+            return
+        ids = [int(i) for i in stop_ids]
+
+        def fill(tokenizer, kw):
+            if kw.get("stop_token_ids") is None and getattr(tokenizer, "eos_token_id", None) is None:
+                kw["stop_token_ids"] = list(ids)
+            return kw
+
+        if isinstance(raw, staticmethod):
+            f = raw.__func__
+
+            def from_huggingface(tokenizer, *a, **kw):
+                return f(tokenizer, *a, **fill(tokenizer, kw))
+
+            from_huggingface._inkling_stop = True
+            ti.from_huggingface = staticmethod(from_huggingface)
+        elif isinstance(raw, classmethod):
+            f = raw.__func__
+
+            def from_huggingface(klass, tokenizer, *a, **kw):
+                return f(klass, tokenizer, *a, **fill(tokenizer, kw))
+
+            from_huggingface._inkling_stop = True
+            ti.from_huggingface = classmethod(from_huggingface)
+        else:
+            logger.warning(f"xgrammar TokenizerInfo.from_huggingface is a {type(raw).__name__}: stop ids not set")
+    except Exception as e:  # noqa: BLE001 - structured outputs keep xgrammar's own guess
+        logger.warning(f"xgrammar stop ids not set: {e!r}")
 
 
 def _register_processor(cls):
@@ -78,24 +118,29 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
     decode_input_update_contract = 1
 
     @classmethod
-    def initialize_vllm_model(cls, hf_config, mesh_device, max_batch_size, max_seq_len=None, tt_data_parallel=1,
-                              optimizations=None, **kwargs):
+    def initialize_vllm_model(
+        cls, hf_config, mesh_device, max_batch_size, max_seq_len=None, tt_data_parallel=1, optimizations=None, **kwargs
+    ):
         if int(tt_data_parallel) != 1 or int(max_batch_size) != 1:
-            raise ValueError(f"{cls.__name__} serves one user on one (1,4) mesh (--max-num-seqs 1); got "
-                             f"max_batch_size={max_batch_size} tt_data_parallel={tt_data_parallel}")
+            raise ValueError(
+                f"{cls.__name__} serves one user on one (1,4) mesh (--max-num-seqs 1); got "
+                f"max_batch_size={max_batch_size} tt_data_parallel={tt_data_parallel}"
+            )
         max_seq_len = int(max_seq_len or 131072)
         os.environ.setdefault("HF_MODEL", HF_MODEL)
         # the engine's rows: verify width k + 1 <= the hybrid overlay's host-expert rows
         hyb_rows = int(os.environ.get("HYB_DECODE_ROWS", "1"))
         if os.environ.get("HYB_ENABLE") == "1" and hyb_rows < SPEC_K + 1:
-            raise ValueError(f"HYB_DECODE_ROWS={hyb_rows} < the verify width {SPEC_K + 1}: rows past it would get no "
-                             "host experts")
+            raise ValueError(
+                f"HYB_DECODE_ROWS={hyb_rows} < the verify width {SPEC_K + 1}: rows past it would get no " "host experts"
+            )
         # the context plus the verify window (positions past max_model_len are written, never read)
         args, model = create_model(mesh_device, max_batch_size=1, max_seq_len=max_seq_len + 2 * (SPEC_K + 1) + 64)
         self = cls([model], [args], mesh_device)
         from models.autoports.thinkingmachines_inkling_small.tt.inkling_serve import InklingSpecServing
 
         self._engine = InklingSpecServing(model, args, mesh_device, SPEC_K, trace=TRACE)
+        _xgrammar_stop_ids(sorted(self._engine.eos))
         self._mtp = self._engine  # the inherited _mtp_decode drives it
         self._gen = None
         self._context = max_seq_len
@@ -107,27 +152,34 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
             import signal
 
             faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
-        logger.info(f"{cls.__name__}: max_model_len={max_seq_len} layers={len(model.layers)} policy="
-                    f"{getattr(model, 'precision_policy', {}).get('config_id')} MTP k={SPEC_K} trace={TRACE} "
-                    "(engine-owned caches)")
+        logger.info(
+            f"{cls.__name__}: max_model_len={max_seq_len} layers={len(model.layers)} policy="
+            f"{getattr(model, 'precision_policy', {}).get('config_id')} MTP k={SPEC_K} trace={TRACE} "
+            "(engine-owned caches)"
+        )
         return self
 
     # ------------------------------------------------------------------ KV: a token budget only
     @classmethod
-    def get_max_tokens_all_users(cls, model_name="", num_devices=1, tt_data_parallel=1, max_model_len=None,
-                                 max_num_seqs=None, **kwargs):
+    def get_max_tokens_all_users(
+        cls, model_name="", num_devices=1, tt_data_parallel=1, max_model_len=None, max_num_seqs=None, **kwargs
+    ):
         """One user's context plus the verify lookahead, in blocks. The engine's caches hold it (module doc)."""
         n = int(max_model_len or 131072) + 2 * (SPEC_K + 1) + BLOCK_SIZE
         return math.ceil(n / BLOCK_SIZE) * BLOCK_SIZE
 
     def allocate_kv_cache(self, kv_cache_shape, dtype, num_layers):
-        logger.info(f"KV: vLLM asked for {num_layers} layers of {tuple(kv_cache_shape)}; the engine keeps its own "
-                    "caches (nothing allocated)")
+        logger.info(
+            f"KV: vLLM asked for {num_layers} layers of {tuple(kv_cache_shape)}; the engine keeps its own "
+            "caches (nothing allocated)"
+        )
         return [(None, None)] * int(num_layers)
 
     def allocate_kv_cache_per_layer(self, per_layer_specs):
-        logger.info(f"KV: vLLM asked for {len(per_layer_specs)} per-layer caches; the engine keeps its own caches "
-                    "(nothing allocated)")
+        logger.info(
+            f"KV: vLLM asked for {len(per_layer_specs)} per-layer caches; the engine keeps its own caches "
+            "(nothing allocated)"
+        )
         return [(None, None)] * len(per_layer_specs)
 
     # ------------------------------------------------------------------ warm-up (plugin phases)
@@ -154,6 +206,7 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         start_pos = kwargs.get("start_pos")
         if start_pos is not None and any(int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()):
             raise NotImplementedError("prefix caching / chunked prefill are off for Inkling (start_pos must be 0)")
+
         def present(v):  # the plugin passes the multimodal kwargs on every prefill (None / empty lists for text)
             if v is None:
                 return False
@@ -161,8 +214,9 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
                 return any(present(x) for x in v)
             return not (hasattr(v, "numel") and v.numel() == 0)
 
-        if any(present(kwargs.get(k)) for k in ("pixel_values", "pixel_values_videos", "input_features",
-                                                 "audio_features")):
+        if any(
+            present(kwargs.get(k)) for k in ("pixel_values", "pixel_values_videos", "input_features", "audio_features")
+        ):
             raise NotImplementedError("Inkling serving is text only for now")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         sp = kwargs.get("sampling_params")
@@ -176,17 +230,62 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
         # host sampling (the plugin sends no device params, e.g. logprobs): the real first-token logits (padded vocab
         # rows masked); a host pick that differs from the engine's re-anchors its continuation at the next decode
+        self._engine.adopt_next = True  # the plugin samples the first token: its pick is the continuation
         V = int(getattr(self.model_args[0], "vocab_size", 201024))
         logits = torch.full((N, 1, V), float("-inf"), dtype=torch.float32)
         lg = self._engine.last_logits
         logits[:, 0, : lg.numel()] = lg
         return logits
 
+    @staticmethod
+    def _mtp_sampling(sp, row):
+        """(temperature, top_k, top_p, seed, presence, frequency, repetition) of request `row`: the engine applies the
+        penalties itself (tt/sampling.py), inside the speculative step."""
+        base = MiniMaxM2ForCausalLM._mtp_sampling(sp, row)
+        if base is None:
+            return None
+
+        def pick(name, default):
+            v = getattr(sp, name, None)
+            if v is None:
+                return default
+            if isinstance(v, (int, float)):
+                return float(v)
+            try:
+                x = v[row]
+            except (IndexError, TypeError):
+                return default
+            x = x.item() if isinstance(x, torch.Tensor) else x
+            return default if x is None else float(x)
+
+        return (*base, pick("presence_penalty", 0.0), pick("frequency_penalty", 0.0), pick("repetition_penalty", 1.0))
+
     def _mtp_decode(self, args, kwargs):
+        sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
+        if sp is None:
+            return self._host_sampled_decode(args, kwargs)
         out = super()._mtp_decode(args, kwargs)
         if self._decode_steps % 4096 == 0 and self._decode_steps:
             logger.info(f"Inkling engine stats: {self._engine.stats}")
         return out
+
+    def _host_sampled_decode(self, args, kwargs):
+        """The plugin samples on the host (logprobs, min_p, logit_bias, bad words, allowed ids, min_tokens, structured
+        outputs): one plain decode step per call, the next-token logits [B_pad, 1, V] (the MTP shim hands host-sampled
+        steps to the plugin's one-token read-back)."""
+        tokens = torch.as_tensor(kwargs.get("tokens", args[0] if args else None)).reshape(-1)
+        pos = torch.as_tensor(kwargs.get("start_pos", args[1] if len(args) > 1 else None)).reshape(-1)
+        live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
+        assert len(live) <= 1, "single-user Inkling step got several live rows"
+        V = int(getattr(self.model_args[0], "vocab_size", 201024))
+        logits = torch.full((tokens.numel(), 1, V), float("-inf"), dtype=torch.float32)
+        for i in live:
+            lg = self._engine.step_logits(int(tokens[i]), int(pos[i]))
+            n = min(V, lg.numel(), self._engine.V)
+            logits[i, 0, :n] = lg[:n].float()
+        self._live_slots = set(live)
+        self._decode_steps += 1
+        return logits
 
 
 __all__ = ["InklingForConditionalGeneration", "HF_MODEL"]

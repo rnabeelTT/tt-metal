@@ -171,7 +171,13 @@ static void gemv_block(
     }
 }
 
+__attribute__((target("avx512f,avx512bw,avx512vbmi,avx512bf16"))) static void csr_unit(int u);
+
 static void unit(int u) {
+    if (J.phase >= 3) {
+        csr_unit(u);
+        return;
+    }
     const int H = J.H, I = J.I, gs = J.gs;
     const size_t gu_bytes = (size_t)2 * I * H / 2, dn_bytes = (size_t)H * I / 2;
     const size_t gu_sz_n = (size_t)(H / gs) * 2 * I * 2, dn_sz_n = (size_t)(I / gs) * H * 2;
@@ -850,4 +856,294 @@ int hostk_moe_wait(void) {
     int rc = g_rc;
     pthread_mutex_unlock(&g_am);
     return rc;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// hostk_moe_csr (prefill): one layer's missed (row, expert) pairs in one call, any number of rows per expert, with
+// AVX512-BF16 dot products. Each unit dequantizes one 64-output block of one expert ONCE into a per-thread bf16 buffer
+// (w = (q - 8) s + z, rounded to bf16: the checkpoint's own precision; the buffer, <= 64 x 4096 x 2 B, stays in L2),
+// then runs every row of that expert against it (vdpbf16ps, 4 rows x 64 outputs in registers over the whole K).
+// Activations are bf16 (the hidden rows arrive as bf16; the down projection's input is rounded to bf16 as on the
+// device). Phase 3: units (expert, 64-block of I) -> A = silu(gate) * up (bf16, per pair); phase 4: units (64-block of
+// H) over every expert -> out[row] += w * down(A). Torch pack layout only (not the bit planes).
+typedef struct {
+    int R, H, I, gs, E, nnz;
+    const uint16_t* Xb;   // [R, H] bf16
+    const int64_t* rows;  // [E] library rows
+    const int32_t* off;   // [E + 1] pair offsets per expert
+    const int32_t* ridx;  // [nnz] input row of each pair
+    const float* wts;     // [nnz] routing weight of each pair
+    const uint8_t *gu_p, *dn_p;
+    const uint16_t *gu_sz, *dn_sz;
+    float* out;       // [R, H] (+=)
+    uint16_t* A;      // [nnz, I] bf16 activations
+    int order[MAXE];  // experts by descending pair count (phase 3 schedules big experts first)
+} csr_t;
+
+static csr_t CJ;
+static uint16_t* g_csr_A = NULL;
+static size_t g_csr_A_sz = 0;
+static __thread uint16_t* t_wbuf = NULL;  // dequantized block [K/2][64][2] bf16
+static __thread size_t t_wbuf_sz = 0;
+static __thread float* t_ybuf = NULL;  // [2][rows][64] fp32
+static __thread size_t t_ybuf_sz = 0;
+
+static int ensure_tls(int K, int nr) {
+    size_t wn = (size_t)K * 64;
+    if (wn > t_wbuf_sz) {
+        free(t_wbuf);
+        t_wbuf = aligned_alloc(64, wn * sizeof(uint16_t));
+        t_wbuf_sz = t_wbuf ? wn : 0;
+    }
+    size_t yn = (size_t)2 * (nr + 4) * 64;
+    if (yn > t_ybuf_sz) {
+        free(t_ybuf);
+        t_ybuf = aligned_alloc(64, yn * sizeof(float));
+        t_ybuf_sz = t_ybuf ? yn : 0;
+    }
+    return t_wbuf && t_ybuf ? 0 : -3;
+}
+
+// One 64-row block of a torch-packed int4 weight (K*32 bytes; byte k*32 + j: rows j (low nibble), 32 + j (high)) with
+// its scales_and_zeros (sz: [K/gs, N, 2] bf16, already offset to the block's first row) -> wb [K/2][64][2] bf16: for
+// each column pair (k, k+1) and each of the 64 rows, the two weights (the operand layout of vdpbf16ps).
+__attribute__((target("avx512f,avx512bw,avx512vbmi,avx512bf16"))) static void dequant_block_bf16(
+    const uint8_t* w, const uint16_t* sz, int N, int K, int gs, uint16_t* wb) {
+    // byte i of a pair's 64 bytes -> (row i / 2, column k + i % 2): interleave the two columns' 32 bytes
+    static __m512i perm;
+    static int perm_init = 0;
+    if (!perm_init) {
+        uint8_t idx[64];
+        for (int i = 0; i < 64; i++) {
+            idx[i] = (uint8_t)((i & 1) * 32 + (i >> 1));
+        }
+        perm = _mm512_loadu_si512((const void*)idx);
+        perm_init = 1;
+    }
+    const __m512i m0f = _mm512_set1_epi8(0x0F);
+    // lane l of quarter q (16 lanes) is row 8q + l / 2 within its 32-row half
+    const __m512i dup_lo = _mm512_set_epi32(7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1, 0, 0);
+    const __m512i dup_hi = _mm512_set_epi32(15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10, 9, 9, 8, 8);
+    for (int g = 0; g < K / gs; g++) {
+        // the group's scale / (zero - 8 scale) per output lane: 8 quarter vectors for the low rows 0..31, 8 high
+        __m512 S[8], Z[8];
+        const uint32_t* s32 = (const uint32_t*)(sz + (size_t)g * N * 2);
+        for (int b = 0; b < 4; b++) {  // rows 16b .. 16b + 15
+            __m512i u = _mm512_loadu_si512((const void*)(s32 + b * 16));
+            __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
+            __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
+            __m512 zz = _mm512_fnmadd_ps(_mm512_set1_ps(8.0f), s, z);
+            // rows 16b..16b+7 -> quarter 2b, rows 16b+8.. -> quarter 2b+1 (quarters 0-3: rows 0-31, 4-7: rows 32-63)
+            S[2 * b] = _mm512_permutexvar_ps(dup_lo, s);
+            S[2 * b + 1] = _mm512_permutexvar_ps(dup_hi, s);
+            Z[2 * b] = _mm512_permutexvar_ps(dup_lo, zz);
+            Z[2 * b + 1] = _mm512_permutexvar_ps(dup_hi, zz);
+        }
+        for (int k = g * gs; k < (g + 1) * gs; k += 2) {
+            __m512i v = _mm512_loadu_si512((const void*)(w + (size_t)k * 32));
+            __m512i lo = _mm512_permutexvar_epi8(perm, _mm512_and_si512(v, m0f));
+            __m512i hi = _mm512_permutexvar_epi8(perm, _mm512_and_si512(_mm512_srli_epi16(v, 4), m0f));
+            uint16_t* o = wb + (size_t)(k >> 1) * 128;
+            for (int h = 0; h < 2; h++) {  // h 0: rows 0..31 (low nibbles), 1: rows 32..63
+                const __m512i src = h ? hi : lo;
+                __m512 f[4];
+                for (int q = 0; q < 4; q++) {
+                    __m128i b16 = _mm512_extracti32x4_epi32(src, 0);
+                    switch (q) {
+                        case 1: b16 = _mm512_extracti32x4_epi32(src, 1); break;
+                        case 2: b16 = _mm512_extracti32x4_epi32(src, 2); break;
+                        case 3: b16 = _mm512_extracti32x4_epi32(src, 3); break;
+                        default: break;
+                    }
+                    f[q] = _mm512_fmadd_ps(_mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(b16)), S[4 * h + q], Z[4 * h + q]);
+                }
+                // 2 fp32 vectors -> 1 bf16 vector (second operand in the low half), round to nearest even
+                _mm512_storeu_si512((void*)(o + h * 64), (__m512i)_mm512_cvtne2ps_pbh(f[1], f[0]));
+                _mm512_storeu_si512((void*)(o + h * 64 + 32), (__m512i)_mm512_cvtne2ps_pbh(f[3], f[2]));
+            }
+        }
+    }
+}
+
+// y[r][0..63] = sum_k wb[k][n] x_r[k] for nr rows (x: bf16 rows, pointers), K columns.
+__attribute__((target("avx512f,avx512bw,avx512vbmi,avx512bf16"))) static void dot_rows_bf16(
+    const uint16_t* wb, int K, const uint16_t* const* x, int nr, float* y) {
+    for (int r0 = 0; r0 < nr; r0 += 4) {
+        const int rc = nr - r0 < 4 ? nr - r0 : 4;
+        __m512 acc[4][4];
+        for (int r = 0; r < 4; r++) {
+            for (int i = 0; i < 4; i++) {
+                acc[r][i] = _mm512_setzero_ps();
+            }
+        }
+        const uint32_t* xp[4];
+        for (int r = 0; r < 4; r++) {
+            xp[r] = (const uint32_t*)x[r0 + (r < rc ? r : 0)];
+        }
+        const __m512i* wp = (const __m512i*)wb;
+        for (int kp = 0; kp < K / 2; kp++, wp += 4) {
+            const __m512bh w0 = (__m512bh)_mm512_load_si512(wp), w1 = (__m512bh)_mm512_load_si512(wp + 1);
+            const __m512bh w2 = (__m512bh)_mm512_load_si512(wp + 2), w3 = (__m512bh)_mm512_load_si512(wp + 3);
+#define DROW(r)                                                          \
+    {                                                                    \
+        const __m512bh xb = (__m512bh)_mm512_set1_epi32((int)xp[r][kp]); \
+        acc[r][0] = _mm512_dpbf16_ps(acc[r][0], w0, xb);                 \
+        acc[r][1] = _mm512_dpbf16_ps(acc[r][1], w1, xb);                 \
+        acc[r][2] = _mm512_dpbf16_ps(acc[r][2], w2, xb);                 \
+        acc[r][3] = _mm512_dpbf16_ps(acc[r][3], w3, xb);                 \
+    }
+            if (rc == 4) {
+                DROW(0) DROW(1) DROW(2) DROW(3)
+            } else {
+                for (int r = 0; r < rc; r++) {
+                    DROW(r)
+                }
+            }
+#undef DROW
+        }
+        // vector i = words 32i .. 32i + 31 of each column pair = output rows 16i .. 16i + 15
+        for (int r = 0; r < rc; r++) {
+            for (int i = 0; i < 4; i++) {
+                _mm512_storeu_ps(y + (size_t)(r0 + r) * 64 + i * 16, acc[r][i]);
+            }
+        }
+    }
+}
+
+static inline uint16_t f2bf(float f) {  // round to nearest even
+    union {
+        float f;
+        uint32_t u;
+    } c = {.f = f};
+    uint32_t u = c.u;
+    if ((u & 0x7F800000u) == 0x7F800000u) {
+        return (uint16_t)(u >> 16);
+    }
+    u += 0x7FFFu + ((u >> 16) & 1u);
+    return (uint16_t)(u >> 16);
+}
+
+__attribute__((target("avx512f,avx512bw,avx512vbmi,avx512bf16"))) static void csr_unit(int u) {
+    const int H = CJ.H, I = CJ.I, gs = CJ.gs;
+    const size_t gu_bytes = (size_t)2 * I * H / 2, dn_bytes = (size_t)H * I / 2;
+    const size_t gu_sz_n = (size_t)(H / gs) * 2 * I * 2, dn_sz_n = (size_t)(I / gs) * H * 2;
+    if (J.phase == 3) {
+        const int nb = I / 64, e = CJ.order[u / nb], j = u % nb;
+        const int p0 = CJ.off[e], nr = CJ.off[e + 1] - p0;
+        if (nr <= 0 || ensure_tls(H, nr)) {
+            return;
+        }
+        const uint16_t** xr = (const uint16_t**)alloca(sizeof(uint16_t*) * (nr + 4));
+        for (int r = 0; r < nr; r++) {
+            xr[r] = CJ.Xb + (size_t)CJ.ridx[p0 + r] * H;
+        }
+        const int64_t row = CJ.rows[e];
+        const uint8_t* wb = CJ.gu_p + row * gu_bytes;
+        const uint16_t* sb = CJ.gu_sz + row * gu_sz_n;
+        float* g = t_ybuf;
+        float* up = t_ybuf + (size_t)(nr + 4) * 64;
+        dequant_block_bf16(wb + (size_t)j * H * 32, sb + (size_t)j * 64 * 2, 2 * I, H, gs, t_wbuf);
+        dot_rows_bf16(t_wbuf, H, xr, nr, g);
+        dequant_block_bf16(wb + (size_t)(nb + j) * H * 32, sb + (size_t)(I + j * 64) * 2, 2 * I, H, gs, t_wbuf);
+        dot_rows_bf16(t_wbuf, H, xr, nr, up);
+        for (int r = 0; r < nr; r++) {
+            uint16_t* a = CJ.A + (size_t)(p0 + r) * I + j * 64;
+            const float* gr = g + (size_t)r * 64;
+            const float* ur = up + (size_t)r * 64;
+            for (int t = 0; t < 64; t++) {
+                a[t] = f2bf(gr[t] / (1.0f + expf(-gr[t])) * ur[t]);
+            }
+        }
+    } else {
+        const int hb = u;
+        for (int e = 0; e < CJ.E; e++) {
+            const int p0 = CJ.off[e], nr = CJ.off[e + 1] - p0;
+            if (nr <= 0 || ensure_tls(I, nr)) {
+                continue;
+            }
+            const uint16_t** xr = (const uint16_t**)alloca(sizeof(uint16_t*) * (nr + 4));
+            for (int r = 0; r < nr; r++) {
+                xr[r] = CJ.A + (size_t)(p0 + r) * I;
+            }
+            const int64_t row = CJ.rows[e];
+            dequant_block_bf16(
+                CJ.dn_p + row * dn_bytes + (size_t)hb * I * 32,
+                CJ.dn_sz + row * dn_sz_n + (size_t)hb * 64 * 2,
+                H,
+                I,
+                gs,
+                t_wbuf);
+            float* y = t_ybuf;
+            dot_rows_bf16(t_wbuf, I, xr, nr, y);
+            for (int r = 0; r < nr; r++) {
+                const float wv = CJ.wts[p0 + r];
+                float* o = CJ.out + (size_t)CJ.ridx[p0 + r] * H + hb * 64;
+                const float* yr = y + (size_t)r * 64;
+                for (int t = 0; t < 64; t++) {
+                    o[t] += wv * yr[t];
+                }
+            }
+        }
+    }
+}
+
+int hostk_moe_csr(
+    int R,
+    int H,
+    int I,
+    int gs,
+    const uint16_t* Xb,
+    int E,
+    const int64_t* rows,
+    const int32_t* off,
+    const int32_t* ridx,
+    const float* wts,
+    const uint8_t* gu_p,
+    const uint16_t* gu_sz,
+    const uint8_t* dn_p,
+    const uint16_t* dn_sz,
+    float* out) {
+    if (!g_nt) {
+        return -4;
+    }
+    if (!__builtin_cpu_supports("avx512bf16") || !__builtin_cpu_supports("avx512vbmi")) {
+        return -5;  // the caller falls back to hostk_moe
+    }
+    if (H % 64 || I % 64 || gs % 2 || H % gs || I % gs) {
+        return -1;
+    }
+    if (E > MAXE) {
+        return -2;
+    }
+    if (E == 0 || off[E] == 0) {
+        return 0;
+    }
+    atomic_store(&g_tabort, 1);
+    pthread_mutex_lock(&g_mu);
+    const int nnz = off[E];
+    size_t need = (size_t)nnz * I;
+    if (need > g_csr_A_sz) {
+        free(g_csr_A);
+        g_csr_A = malloc(need * sizeof(uint16_t));
+        g_csr_A_sz = g_csr_A ? need : 0;
+        if (!g_csr_A) {
+            pthread_mutex_unlock(&g_mu);
+            return -3;
+        }
+    }
+    CJ.R = R, CJ.H = H, CJ.I = I, CJ.gs = gs, CJ.E = E, CJ.nnz = nnz, CJ.Xb = Xb, CJ.rows = rows, CJ.off = off;
+    CJ.ridx = ridx, CJ.wts = wts, CJ.gu_p = gu_p, CJ.gu_sz = gu_sz, CJ.dn_p = dn_p, CJ.dn_sz = dn_sz, CJ.out = out;
+    CJ.A = g_csr_A;
+    for (int e = 0; e < E; e++) {  // descending pair count (insertion sort: E <= MAXE, once per call)
+        int c = off[e + 1] - off[e], i = e;
+        while (i > 0 && off[CJ.order[i - 1] + 1] - off[CJ.order[i - 1]] < c) {
+            CJ.order[i] = CJ.order[i - 1];
+            i--;
+        }
+        CJ.order[i] = e;
+    }
+    run_phase(3, E * (I / 64));
+    run_phase(4, H / 64);
+    pthread_mutex_unlock(&g_mu);
+    return 0;
 }

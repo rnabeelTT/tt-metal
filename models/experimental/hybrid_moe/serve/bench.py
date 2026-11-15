@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
-"""Serving benchmark: the held-out prompts (prompts_v2.HELDOUT) through the chat API, greedy, N tokens each; prints
+"""Serving benchmark: the held-out prompts (prompts_v2.HELDOUT) through the chat API, greedy (BENCH_TEMP / BENCH_TOP_P: sampled), N tokens each; prints
 per-prompt TTFT / decode tok/s and the mean. usage: python serve/bench.py [max_tokens] [port] [label]"""
 import json
 import os
@@ -15,6 +15,9 @@ from prompts_v2 import HELDOUT  # noqa: E402
 max_tokens = int(sys.argv[1]) if len(sys.argv) > 1 else 128
 port = sys.argv[2] if len(sys.argv) > 2 else "8000"
 label = sys.argv[3] if len(sys.argv) > 3 else ""
+# BENCH_TEMP / BENCH_TOP_P: sampled decoding (default greedy)
+temp = float(os.environ.get("BENCH_TEMP", "0"))
+top_p = float(os.environ.get("BENCH_TOP_P", "1"))
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=60) as r:
     model = json.load(r)["data"][0]["id"]  # the served model name
 rows = []
@@ -23,7 +26,8 @@ for p in HELDOUT:
         "model": model,
         "messages": [{"role": "user", "content": p}],
         "max_tokens": max_tokens,
-        "temperature": 0,
+        "temperature": temp,
+        "top_p": top_p,
         "stream": True,
         "stream_options": {"include_usage": True},
     }

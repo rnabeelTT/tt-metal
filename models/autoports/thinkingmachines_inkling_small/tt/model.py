@@ -36,8 +36,9 @@ class Qwen35MoeModel(_M27Model):
             args.partial_rotary_factor = ROPE_DUMMY_DIM / args.head_dim
         super().__init__(mesh_device, args, state_dict, tensor_cache_path)
 
-    def prefill_tokens(self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None,
-                       on_chunk=None, group=None):
+    def prefill_tokens(
+        self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None, on_chunk=None, group=None
+    ):
         """Eager chunked prefill of token ids [T] (torch) from position `start` (a multiple of the chunk; the conv
         states must hold the sequence up to start). Chunks of `chunk` rows (default the layers' prefill_chunk). A
         shorter (last) chunk is padded to the smallest of `buckets` (row counts, multiples of 64) that holds it, else to
@@ -56,7 +57,6 @@ class Qwen35MoeModel(_M27Model):
         import sys
 
         import torch
-
         import ttnn
 
         chunk = chunk or self.layers[0].attention.prefill_chunk
@@ -79,8 +79,13 @@ class Qwen35MoeModel(_M27Model):
             for c0, n, Tp, _ in grp:
                 tok = torch.zeros(1, 1, 1, Tp, dtype=torch.int32)
                 tok[0, 0, 0, :n] = ids[c0 : c0 + n].to(torch.int32)
-                tok_tt = ttnn.from_torch(tok.reshape(1, Tp), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
-                                         device=self.mesh_device, mesh_mapper=rep)
+                tok_tt = ttnn.from_torch(
+                    tok.reshape(1, Tp),
+                    dtype=ttnn.uint32,
+                    layout=ttnn.ROW_MAJOR_LAYOUT,
+                    device=self.mesh_device,
+                    mesh_mapper=rep,
+                )
                 x = self.embd(tok_tt)
                 xs.append(ttnn.reshape(x, (1, 1, Tp, x.shape[-1])))
                 ttnn.deallocate(tok_tt)
@@ -88,9 +93,11 @@ class Qwen35MoeModel(_M27Model):
             for li, layer in enumerate(self.layers):
                 if memlog:
                     mv = ttnn.get_memory_view(self.mesh_device, ttnn.BufferType.DRAM)
-                    print(f"prefill memlog layer {li}: DRAM free {mv.total_bytes_free_per_bank * mv.num_banks / 2**20:.0f}"
-                          f" MiB, largest block {mv.largest_contiguous_bytes_free_per_bank / 2**20:.0f} MiB/bank",
-                          flush=True)
+                    print(
+                        f"prefill memlog layer {li}: DRAM free {mv.total_bytes_free_per_bank * mv.num_banks / 2**20:.0f}"
+                        f" MiB, largest block {mv.largest_contiguous_bytes_free_per_bank / 2**20:.0f} MiB/bank",
+                        flush=True,
+                    )
                 for i, (c0, n, Tp, valid) in enumerate(grp):
                     if hyb is not None:
                         hyb.pf_valid = valid
@@ -112,7 +119,9 @@ class Qwen35MoeModel(_M27Model):
                         xsl = ttnn.slice(x, (0, 0, s0, 0), (1, 1, min(s0 + 128, r1), x.shape[-1]))
                         xn = self.norm(xsl, mode=Mode.PREFILL)
                         lg = self._lm_head(xn)
-                        ts.append(ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:, :V])
+                        ts.append(
+                            ttnn.to_torch(ttnn.get_device_tensors(lg)[0]).float().reshape(-1, lg.shape[-1])[:, :V]
+                        )
                         for z in (xsl, xn, lg):
                             ttnn.deallocate(z)
                     t = torch.cat(ts)
@@ -120,6 +129,26 @@ class Qwen35MoeModel(_M27Model):
                 ttnn.deallocate(x)
         res = torch.cat(out)
         return res[-1] if logits_rows == "last" else res
+
+    def warm_last_row_slices(self, buckets):
+        """Compile prefill_tokens' last-row logits slice at every 32-row offset of every bucket (its offset follows the
+        prompt length, and a slice program first compiled after the decode trace captures can have its kernels
+        overwritten by the replays)."""
+        import torch
+        import ttnn
+
+        H = int(self.args.dim) // int(self.mesh_device.get_num_devices())  # the fractured hidden of a chunk's output
+        for Tp in buckets:
+            x = ttnn.from_torch(
+                torch.zeros(1, 1, int(Tp), H, dtype=torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh_device,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh_device),
+            )
+            for s0 in range(0, int(Tp), 32):
+                ttnn.deallocate(ttnn.slice(x, (0, 0, s0, 0), (1, 1, s0 + 32, H)))
+            ttnn.deallocate(x)
 
     def reset_sequence_state(self):
         """Zero every layer's short-conv states (a new sequence)."""
@@ -132,8 +161,10 @@ def create_model(mesh_device, *, max_batch_size=1, max_seq_len=None, n_layers=No
     mc = mc or MULTICHIP_SELECTED
     policy, policy_path = precision.load_policy(num_devices=mesh_device.get_num_devices())
     mc = precision.apply_policy(mc, policy)
-    logger.info(f"precision policy {policy.get('config_id')} ({policy_path or 'code defaults'}): "
-                f"{json.dumps(precision.describe_config(mc), sort_keys=True)}")
+    logger.info(
+        f"precision policy {policy.get('config_id')} ({policy_path or 'code defaults'}): "
+        f"{json.dumps(precision.describe_config(mc), sort_keys=True)}"
+    )
     check_mesh_shape(mesh_device)
     args = Qwen35MoeModelArgs(mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len or 32768)
     MultichipDecoder._args_hook(args, mc, mc.to_optimization_config(), mesh_device)

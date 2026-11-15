@@ -39,6 +39,7 @@ def load(nthreads, so=_SO):
         )
         lib.hostk_planarize.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_int]
         lib.hostk_moe_async.argtypes = lib.hostk_moe.argtypes
+        lib.hostk_moe_csr.argtypes = [ctypes.c_int] * 4 + [ctypes.c_void_p, ctypes.c_int] + [ctypes.c_void_p] * 9
         vp, ci = ctypes.c_void_p, ctypes.c_int
         lib.hostk_route.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
@@ -186,6 +187,47 @@ def _moe_args(lib_t, X, rows, W, out, lo=None):
         lib_t["dn_sz"].data_ptr(),
         out.data_ptr(),
     )
+
+
+def moe_csr(lib_t, Xb, rows, off, ridx, wts, out):
+    """Prefill: out [R, H] fp32 += sum over pairs p of wts[p] * expert(e_p)(Xb[ridx[p]]), one call per layer, any rows
+    per expert, AVX512-BF16 (hostk.c hostk_moe_csr). Xb [R, H] bf16; rows [E] int64 (library rows); off [E + 1] int32
+    (pairs of expert e: off[e] .. off[e + 1] - 1); ridx [nnz] int32; wts [nnz] fp32. Torch pack layout only."""
+    import torch
+
+    if lib_t.get("planar"):
+        raise ValueError("hostk.moe_csr: the bit-plane layout is not supported")
+    if (
+        Xb.dtype != torch.bfloat16
+        or off.dtype != torch.int32
+        or ridx.dtype != torch.int32
+        or wts.dtype != torch.float32
+    ):
+        raise ValueError(f"hostk.moe_csr: dtypes Xb {Xb.dtype} off {off.dtype} ridx {ridx.dtype} wts {wts.dtype}")
+    for t in (Xb, rows, off, ridx, wts, out):
+        if not t.is_contiguous():
+            raise ValueError("hostk.moe_csr: non-contiguous input")
+    R, H = Xb.shape
+    I = lib_t["dn_p"].shape[2] * 2
+    rc = _lib.hostk_moe_csr(
+        R,
+        H,
+        I,
+        int(lib_t["gs"]),
+        Xb.data_ptr(),
+        rows.numel(),
+        rows.data_ptr(),
+        off.data_ptr(),
+        ridx.data_ptr(),
+        wts.data_ptr(),
+        lib_t["gu_p"].data_ptr(),
+        lib_t["gu_sz"].data_ptr(),
+        lib_t["dn_p"].data_ptr(),
+        lib_t["dn_sz"].data_ptr(),
+        out.data_ptr(),
+    )
+    if rc != 0:
+        raise RuntimeError(f"hostk_moe_csr returned {rc} (R, H = {R}, {H}, E={rows.numel()}, pairs={ridx.numel()})")
 
 
 def route(lg, k, bias):

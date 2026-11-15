@@ -353,3 +353,45 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
   on chat prompts; prefill ~350 tok/s (28K: 79 s); needle found to 104K. Quality: teacher-forced 0.866 / 0.947 /
   0.213; GSM8K-200 97.0%; IFEval-200 88.0 / 90.0 (effort none). Two first-request stalls (75-85 s) after the fresh
   install did not reproduce on a warm server (likely one-time kernel compiles); worth a check on the next install.
+
+- **2026-11-15, session 3: sampling, the streaming hang (root cause), faster CPU prefill kernel.**
+  - **Host-sampled requests killed the server.** Requests the plugin samples on the host (min_p, logit_bias, bad
+    words, allowed ids, min_tokens, logprobs, structured outputs) made it index the MTP step's token block as logits:
+    `IndexError` in `_get_output_tokens`, EngineCore dead, every later request 500. Now `_host_sampled_decode`
+    (tt/generator_vllm.py) runs one width-1 verify per step and returns the logits row; the engine adopts the plugin's
+    token on the next step (`engine.step_logits`, `adopt_next`). Served: 23-26 tok/s on that path.
+  - **Penalties were silently ignored** in the MTP step. tt/sampling.py (`InklingSampler`): presence / frequency /
+    repetition penalties on the host, vLLM's formulas, inside exact speculative sampling (row i of a verify pass counts
+    the drafts before it; the drafter's q is penalized the same way). tests/test_sampling_host.py checks the formula
+    and the emitted distribution against plain penalized sampling.
+  - **Structured outputs**: Inkling's tokenizer has no eos_token, so xgrammar guessed its stop token (200028); after a
+    complete JSON value the grammar allowed only that, vLLM does not stop on it -> "grammar rejected tokens [200028]".
+    The adapter gives xgrammar the model's end-of-turn ids (`_xgrammar_stop_ids`).
+  - **The streamed-prefill hang, root cause:** a program compiled after the decode trace captures gets its kernel
+    binaries allocated in DRAM while the traces exist, possibly inside a trace's freed intermediates; the replays then
+    overwrite the kernels and the next launch of that program hangs. A long streamed prompt compiled the streaming
+    path's programs (merged resident + staging call, rounds) after the captures; the second one ran them corrupted.
+    Proof: one long streamed prefill BEFORE the captures (prefill_bench PF_PRE=4096) and the sequence that hung
+    (4K -> 16K -> 32K with traced decode between) completes. The same hazard existed in the shipped CPU prefill: per
+    prompt length, programs with data-dependent shapes compiled after the captures (found with INKLING_PROGLOG=1, a
+    ttnn op wrapper that logs every compile after the captures):
+    - the host experts' partial expanded with ttnn.embedding over a table of (rows with host results + 1) rows ->
+      tables padded to powers of two, every size compiled in the warm-up (`warm_host_rows_dense`);
+    - the short conv's prefill commit sliced the 3 state rows at the valid-row offset -> `sconv_kernels/commit_rm.cpp`
+      (offset as a runtime argument: generic_op hashes only the runtime-argument count);
+    - the last real row's logits slice (offset follows the prompt length) -> every 32-row offset compiled in warm-up;
+    - streaming: the merged call / rounds / resident-only calls per bucket and layer dtype only run for some routings
+      -> the warm-up runs prompts with every miss streamed and with none streamed, short (single staging) and long
+      (prefetch banks), per bucket.
+    Safety nets: after every prefill the engine compares the program cache with the count at the captures; if it grew
+    it releases the traces, re-captures and re-runs the prompt (`_new_programs`, logged as a warning, capped by
+    INKLING_MAX_RECAPTURES); tt/lazy_guard.py frees the prefill's lazily built device caches (dispatch constants, pairs
+    masks) built after the captures. Validation (prefill_bench, PF_CAPTURE=1, INKLING_PROGLOG=1, prompts 300 / 777 /
+    4097 / 9000 / 16384 with traced decode between): zero programs after the captures, no re-capture, no hang.
+    Warm-up 74 s (was 9 s).
+  - **CPU prefill kernel** (`hostk_moe_csr`, HYB_HOSTK_CSR=1 default): one call per layer step instead of ~60 16-row
+    tiles; each 64-output block of an expert is dequantized once into a bf16 L2 buffer (scale and zero folded in),
+    then every row of that expert runs against it with AVX512-BF16 dot products (4 rows x 64 outputs in registers).
+    Exact against a float64 reference with the same bf16 rounding (1.3e-5); 0.33% from the fp32 kernel (bf16 weights
+    and down-projection input, as on the device). Layer step 70 -> 31 ms (tests/bench_hostk_csr.py); quality gate
+    0.868 / 0.950 / 0.209 (fp32 kernel 0.866 / 0.947 / 0.213). Falls back to the fp32 tiles without AVX512-BF16.

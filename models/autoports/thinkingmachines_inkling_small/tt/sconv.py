@@ -27,7 +27,6 @@ import os
 from pathlib import Path
 
 import torch
-
 import ttnn
 
 K = 4  # sconv_kernel_size
@@ -37,6 +36,8 @@ KERNELS = Path(__file__).parent / "sconv_kernels"
 # more; longer row sets (prefill chunks) keep the ttnn ops
 FUSED = os.environ.get("INKLING_SCONV_KERNEL", "1") == "1"
 FUSED_MAX_ROWS = 29  # 3 carried rows + R rows in one tile
+# INKLING_SCONV_COMMIT_RM (default 1): a prefill chunk's commit through sconv_kernels/commit_rm.cpp (offset at run time)
+COMMIT_RM = os.environ.get("INKLING_SCONV_COMMIT_RM", "1") == "1"
 
 
 def _range_set(cores):
@@ -65,9 +66,13 @@ def _rt(cores, args):
 
 
 def _dm(source, cores, ct, rt, riscv, noc):
-    return ttnn.KernelDescriptor(kernel_source=str(KERNELS / source), core_ranges=_range_set(cores),
-                                 compile_time_args=ct, runtime_args=_rt(cores, rt),
-                                 config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
+    return ttnn.KernelDescriptor(
+        kernel_source=str(KERNELS / source),
+        core_ranges=_range_set(cores),
+        compile_time_args=ct,
+        runtime_args=_rt(cores, rt),
+        config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc),
+    )
 
 
 def host_reference(x: torch.Tensor, w: torch.Tensor, state: torch.Tensor | None = None):
@@ -125,8 +130,13 @@ class ShortConv:
         self.fused = FUSED and c_local % 32 == 0
         if self.fused:  # the taps as full bf16 tiles per die, [4, 1, 32, C]: every row of tap j's tile holds tap row j
             tf = w.float().T.reshape(K, 1, 1, -1).expand(K, 1, 32, -1).contiguous()
-            self.taps_tiles = ttnn.from_torch(tf.to(torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-                                              device=mesh, mesh_mapper=mesh_mapper)
+            self.taps_tiles = ttnn.from_torch(
+                tf.to(torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=mesh,
+                mesh_mapper=mesh_mapper,
+            )
             self.cols = c_local // 32
             self.cores = _cores(mesh, self.cols)
         self._seq_tile = None
@@ -163,32 +173,47 @@ class ShortConv:
         if x.is_sharded():
             x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
         # DRAM, not L1: a trace-owned L1 output would lower every core's L1 ceiling for the programs after the capture
-        y = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, R, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
-                                           ttnn.DRAM_MEMORY_CONFIG)
-        seq = None if commit_all else ttnn.allocate_tensor_on_device(
-            ttnn.Shape([1, 1, 32, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG)
+        y = ttnn.allocate_tensor_on_device(
+            ttnn.Shape([1, 1, R, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG
+        )
+        seq = (
+            None
+            if commit_all
+            else ttnn.allocate_tensor_on_device(
+                ttnn.Shape([1, 1, 32, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG
+            )
+        )
         cores, cr, cols = self.cores, _range_set(self.cores), self.cols
         cb_x, cb_s, cb_t, cb_scr, cb_o = 0, 1, 2, 3, 16
-        cbs = [_cb(cr, cb_x, ttnn.bfloat16, 2048, 2), _cb(cr, cb_s, ttnn.bfloat16, 2048, 6),
-               _cb(cr, cb_t, ttnn.bfloat16, 2048, 8), _cb(cr, cb_scr, ttnn.float32, 768, 1),
-               _cb(cr, cb_o, ttnn.bfloat16, 2048, 2)]
+        cbs = [
+            _cb(cr, cb_x, ttnn.bfloat16, 2048, 2),
+            _cb(cr, cb_s, ttnn.bfloat16, 2048, 6),
+            _cb(cr, cb_t, ttnn.bfloat16, 2048, 8),
+            _cb(cr, cb_scr, ttnn.float32, 768, 1),
+            _cb(cr, cb_o, ttnn.bfloat16, 2048, 2),
+        ]
         seq_t = seq if seq is not None else y  # the accessor needs a tensor; seq_addr 0 disables the write
         rd_ct = [cb_x, cb_s, cb_t, cb_scr, cols, R, int(commit_all)]
         for t in (x, self.st, self.taps_tiles, seq_t):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         seq_addr = seq.buffer_address() if seq is not None else 0
-        rd_rt = [[x.buffer_address(), self.st.buffer_address(), self.taps_tiles.buffer_address(), seq_addr, i, 1]
-                 for i in range(cols)]
+        rd_rt = [
+            [x.buffer_address(), self.st.buffer_address(), self.taps_tiles.buffer_address(), seq_addr, i, 1]
+            for i in range(cols)
+        ]
         wr_ct = [cb_o] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
         wr_rt = [[y.buffer_address(), i, 1] for i in range(cols)]
         kernels = [
             _dm("reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             _dm("writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNELS / "compute.cpp"), core_ranges=cr, compile_time_args=[cb_x, cb_s, cb_t, cb_o],
+                kernel_source=str(KERNELS / "compute.cpp"),
+                core_ranges=cr,
+                compile_time_args=[cb_x, cb_s, cb_t, cb_o],
                 runtime_args=_rt(cores, [[1]] * cols),
-                config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                                    math_approx_mode=False),
+                config=ttnn.ComputeConfigDescriptor(
+                    math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+                ),
             ),
         ]
         io = [x, self.st, self.taps_tiles] + ([seq] if seq is not None else []) + [y]
@@ -203,8 +228,10 @@ class ShortConv:
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         rt = [[seq.buffer_address(), self.st.buffer_address(), i, 1] for i in range(cols)]
         k = _dm("commit.cpp", cores, ct, rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)
-        ttnn.generic_op([seq, self.st], ttnn.ProgramDescriptor(kernels=[k], semaphores=[],
-                                                               cbs=[_cb(cr, cb_scr, ttnn.float32, 2048 + 384, 1)]))
+        ttnn.generic_op(
+            [seq, self.st],
+            ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(cr, cb_scr, ttnn.float32, 2048 + 384, 1)]),
+        )
 
     def decode(self, x):
         """x [1, 1, 1, C] (bf16 or fp32) -> y same dtype; advances the state by one token (in place: trace-safe)."""
@@ -240,4 +267,30 @@ class ShortConv:
         if self._seq_tile:
             self._commit_kernel(seq, n)
             return
+        if COMMIT_RM and seq.layout == ttnn.ROW_MAJOR_LAYOUT and seq.dtype == ttnn.float32:
+            self._commit_rm(seq, n)
+            return
         ttnn.copy(ttnn.slice(seq, [0, 0, n, 0], [1, 1, n + K - 1, self.C]), self.st)
+
+    def _commit_rm(self, seq, n):
+        """commit_rows for a prefill chunk's row-major fp32 seq: one single-core program, n a runtime argument
+        (sconv_kernels/commit_rm.cpp)."""
+        core = ttnn.CoreCoord(0, 0)
+        rowb = self.C * 4
+        ct = [0, rowb]
+        for t in (seq, self.st):
+            ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        k = _dm(
+            "commit_rm.cpp",
+            [core],
+            ct,
+            [[seq.buffer_address(), self.st.buffer_address(), int(n)]],
+            ttnn.DataMovementProcessor.RISCV_1,
+            ttnn.NOC.NOC_0,
+        )
+        ttnn.generic_op(
+            [seq, self.st],
+            ttnn.ProgramDescriptor(
+                kernels=[k], semaphores=[], cbs=[_cb(_range_set([core]), 0, ttnn.float32, rowb, K - 1)]
+            ),
+        )

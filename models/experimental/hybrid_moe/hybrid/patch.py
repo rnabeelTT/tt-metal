@@ -145,6 +145,9 @@ class HybridState:
         # _hostk_packed (pairs sorted by expert, each expert's weights read about once). Default 16: a 64-token prompt's
         # 128-row bucket packed instead of tiled, 0.79 -> 0.72 s prefill (runs/m27/pf_pad).
         self.prefill_hostk_rows = int(os.environ.get("HYB_PREFILL_HOSTK_ROWS", "16"))
+        # HYB_HOSTK_CSR (default 1): _hostk_packed as ONE bf16 call per layer step (hostk_moe_csr: each expert block
+        # dequantized once, every row against it; ~2x the tiled fp32 path); 0 = the tiled fp32 path
+        self.hostk_csr = os.environ.get("HYB_HOSTK_CSR", "1") == "1"
         self.pf_mask_pad = os.environ.get("HYB_PF_MASK_PAD", "1") == "1"  # _decide_core: skip the padding rows' misses
         # sorted prefill MoE calls: picks outside the call get a sentinel id (no dispatched row) instead of a
         # zero-weight row of a real slot
@@ -511,6 +514,35 @@ class HybridState:
         e_all = ids[r_all, j_all]
         order = torch.argsort(e_all, stable=True)
         r_all, e_all, w_all = r_all[order], e_all[order], sc[r_all, j_all][order].float()
+        if self.hostk_csr and not lib.get("planar"):
+            # one call for the layer step: every expert's rows against its weights dequantized once (bf16 dot
+            # products, hostk_moe_csr); the tiled fp32 path below when the CPU lacks AVX512-BF16 / VBMI
+            ex, cnt = torch.unique_consecutive(e_all, return_counts=True)
+            rows = torch.from_numpy(lib["row"][ex.numpy()])
+            if (rows < 0).any():
+                raise RuntimeError(
+                    f"layer {layer}: experts {ex[rows < 0].tolist()} missed on the device but are static"
+                )
+            off = torch.zeros(len(ex) + 1, dtype=torch.int32)
+            off[1:] = torch.cumsum(cnt, 0).to(torch.int32)
+            Xb = X if X.dtype == torch.bfloat16 else X.to(torch.bfloat16)
+            try:
+                hostk.moe_csr(
+                    lib,
+                    Xb.contiguous(),
+                    rows.contiguous(),
+                    off,
+                    r_all.to(torch.int32).contiguous(),
+                    w_all.contiguous(),
+                    out,
+                )
+                self.st["host_experts"] += len(ex)
+                self.st["csr_calls"] = self.st.get("csr_calls", 0) + 1
+                return
+            except RuntimeError as e:
+                if "returned -5" not in str(e):
+                    raise
+                self.hostk_csr = False  # no AVX512-BF16 on this CPU
         Xf = X.float()
         M = hostk.MAXR
         for c0 in range(0, len(e_all), M):
@@ -654,6 +686,8 @@ def _lgw(E):
     tiles (E = 256: 288, as before; Inkling's 258 router rows: 320 -- 290 was neither tile- nor PCIe-aligned, and the
     socket's 1160-byte pages failed the device-to-host socket's alignment check)."""
     return -(-(E + TILE_W) // TILE_W) * TILE_W
+
+
 HYB = HybridState()
 _orig_forward = None  # Qwen35MoE.forward before install() (the MTP head's MoE keeps it)
 
@@ -1754,8 +1788,9 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     sock = SEG.capturing and HYB.sock
     if sock:
         if HYB.devcraft or not HYB.overlap or (HYB.fetch.on and not HYB.fetch.direct):
-            raise ValueError("HYB_SOCKET needs the two-step host path (HYB_DEVCRAFT=0), and the direct fetch when the "
-                             "fetch is on")
+            raise ValueError(
+                "HYB_SOCKET needs the two-step host path (HYB_DEVCRAFT=0), and the direct fetch when the " "fetch is on"
+            )
         S = HYB.socks
         ttnn.experimental.send_async_d2h(logits, S.lg)
         ttnn.experimental.send_async_d2h(h_x, S.x)
@@ -1874,8 +1909,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         return _forward_fused(self, x4, orig, partial, logits)
     if partial and HYB.enabled and HYB.C < HYB.E and T == 1:
         raise RuntimeError(f"layer {self.layer_num}: one-row decode boundary (partial={partial!r}) needs HYB_FUSED=1")
-    host_route = (HYB.host_route and mode != "prefill" and HYB.enabled and HYB.C < HYB.E
-                  and hasattr(self, "_router_logits"))
+    host_route = (
+        HYB.host_route and mode != "prefill" and HYB.enabled and HYB.C < HYB.E and hasattr(self, "_router_logits")
+    )
     if host_route:
         # selection on the host: only the fp32 logits leave the device
         B = self._hyb_bufs.get(T)
@@ -1883,8 +1919,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
             t_sc, t_ids = self._route(x4)
             t_sc, t_ids = _to_dram(t_sc, free=True), _to_dram(t_ids, free=True)
             B = _bufs(self, T, t_sc, t_ids, x4)
-        lg_t = self._router_logits(x4, ttnn.L1_MEMORY_CONFIG if T <= 32 else ttnn.DRAM_MEMORY_CONFIG,
-                                   dtype=ttnn.float32)
+        lg_t = self._router_logits(
+            x4, ttnn.L1_MEMORY_CONFIG if T <= 32 else ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.float32
+        )
         h_x, h_lg = _to_dram(x4, free=False), _to_dram(lg_t, free=True)
         if B is None:
             raise RuntimeError(f"layer {self.layer_num}: no hybrid buffers for T={T}; run one eager decode step first")
@@ -2047,6 +2084,35 @@ def _nonresident_hot_first(layer):
     return miss.tolist()
 
 
+def _table_rows(need, cap):
+    """Row count of a _host_rows_dense table: the next power of two >= need (at least 32), at most max(cap, need)."""
+    p = 32
+    while p < need:
+        p *= 2
+    return max(need, min(p, cap))
+
+
+def warm_host_rows_dense(mesh, rows_list, H, dtype=None):
+    """Compile _host_rows_dense's expansion for every table size it can use with `rows` output rows (the warm-up,
+    before any trace capture)."""
+    dtype = dtype or ttnn.bfloat16
+    kw = dict(device=mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    for rows in rows_list:
+        sizes = sorted({_table_rows(need, rows + 1) for need in range(1, rows + 2)})
+        for nt in sizes:
+            t_dev = ttnn.from_torch(
+                torch.zeros(nt, H, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
+            )
+            i_dev = ttnn.from_torch(
+                torch.zeros(1, rows, dtype=torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
+            )
+            d = ttnn.embedding(
+                i_dev, t_dev, layout=ttnn.TILE_LAYOUT, dtype=dtype, memory_config=ttnn.DRAM_MEMORY_CONFIG
+            )
+            for t in (t_dev, i_dev, d):
+                ttnn.deallocate(t)
+
+
 def _host_rows_dense(self, host, rows_nz, shp, dtype):
     """The host experts' partial [R, H] fp32 (nonzero on rows_nz only) as a replicated device tensor of shape shp
     (tiled): the nonzero rows go up as a small bf16 table with one trailing zero row, and an embedding lookup of
@@ -2054,9 +2120,13 @@ def _host_rows_dense(self, host, rows_nz, shp, dtype):
     caller's all-reduce sums the dies)."""
     R, H = host.shape
     n = int(rows_nz.numel())
-    table = torch.zeros(n + 1, H, dtype=torch.bfloat16)
-    table[:n] = (host[rows_nz] / self.num_devices).to(torch.bfloat16)
     rows = math.prod(shp[:-1])
+    # the table padded to a power of two (>= 32 rows): the embedding program depends on the table's row count, and a
+    # program compiled after the decode trace captures can have its kernels overwritten by the replays
+    # (inkling_serve._new_programs) -- a bounded set of sizes is compiled in the warm-up (warm_host_rows_dense)
+    nt = _table_rows(n + 1, rows + 1)
+    table = torch.zeros(nt, H, dtype=torch.bfloat16)
+    table[:n] = (host[rows_nz] / self.num_devices).to(torch.bfloat16)
     idx = torch.full((1, rows), n, dtype=torch.int32)
     idx[0, rows_nz] = torch.arange(n, dtype=torch.int32)
     kw = dict(
@@ -2165,8 +2235,12 @@ def _route_prefill_host(self, x4, T):
     HYB.st["t_pf_route_sel"] = HYB.st.get("t_pf_route_sel", 0.0) + time.perf_counter() - t1
     HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + t1 - t0
     k = ids.shape[1]
-    kw = dict(layout=ttnn.TILE_LAYOUT, device=self.device, mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
-              memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    kw = dict(
+        layout=ttnn.TILE_LAYOUT,
+        device=self.device,
+        mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
     scores = ttnn.from_torch(torch.from_numpy(sc).reshape(1, 1, T, k).to(torch.bfloat16), dtype=ttnn.bfloat16, **kw)
     ids_t = ttnn.from_torch(torch.from_numpy(ids).reshape(1, 1, T, k).to(torch.int32), dtype=ttnn.uint16, **kw)
     HYB.st["t_pf_route"] = HYB.st.get("t_pf_route", 0.0) + time.perf_counter() - t0
@@ -2476,8 +2550,11 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         # rows past HYB_DECODE_ROWS get no host experts: right for padded batch rows, silently wrong for spec-verify
         # rows (all real: Inkling's eager verify lost every missed expert of rows 1.. this way)
         HYB._warned_rows = True
-        print(f"[hybrid] WARNING: decode step of {rows} rows computes host experts for the first {valid} only "
-              f"(HYB_DECODE_ROWS={HYB.decode_rows}); spec verify needs HYB_DECODE_ROWS >= its row count", flush=True)
+        print(
+            f"[hybrid] WARNING: decode step of {rows} rows computes host experts for the first {valid} only "
+            f"(HYB_DECODE_ROWS={HYB.decode_rows}); spec verify needs HYB_DECODE_ROWS >= its row count",
+            flush=True,
+        )
     HYB.st["t_read"] += time.perf_counter() - t0
     use_dyn = self._dyn_attrs is not None
     if use_dyn and mode != "prefill":
