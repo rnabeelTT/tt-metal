@@ -19,7 +19,10 @@ The drafter sees the last DFLASH_WINDOW (default 1024) context tokens: its accep
 (window_oracle.py on an 8K prompt: 2.03 tokens per pass at 1024, 1.47 at 4096, 1.10 with the whole context). When the
 window is full, the drafter cache is refilled from host copies of the last window's features and the traces re-captured.
 
-Greedy only: requests with temperature > 0 are decoded greedily (logged once per request).
+Sampling (temperature > 0, top_k, top_p, seed): exact speculative sampling against the drafter's argmax drafts (a
+point-mass draft distribution): draft d_i is accepted with probability p_i(d_i) under the target's processed
+distribution, a rejection samples from p_i with d_i removed, and a fully accepted block samples its last row. The
+verify's logits stay a trace output and are read to the host only for sampled requests. Penalties are not applied.
 env: DFLASH_SNAPSHOT, DFLASH_CMAX (drafter cache, default 2048), DFLASH_WINDOW, DFLASH_TP (drafter split over the mesh,
 default 1), DFLASH_WARMUP (serving: tokens of the startup warm-up generation, default 64, 0 = off).
 """
@@ -252,10 +255,7 @@ class Verify:
         for t in (h, x):
             ttnn.deallocate(t)
         out = argmax_max(logits)
-        if LP_DIR:  # quality capture: keep the logits (a trace output) for read_logits
-            self.logits = logits
-        else:
-            ttnn.deallocate(logits)
+        self.logits = logits  # a trace output: read_logits (sampled requests, DFLASH_LP_DIR quality capture)
         return out
 
     def _gdn_layer_rows(self, layer, x, gi):
@@ -272,10 +272,14 @@ class Verify:
             ff.rows_sorted = False
             ff.mtp_rows_mode = False
 
+    def read_raw_logits(self, rows, vocab):
+        """Host FP32 logits [rows, vocab] of the last run."""
+        lg = ttnn.to_torch(self.logits, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1))
+        return lg.reshape(-1, lg.shape[-1])[:rows, :vocab].float()
+
     def read_logits(self, rows, vocab):
-        """Host FP32 log-probs [rows, vocab] of the last run (DFLASH_LP_DIR only)."""
-        lg = ttnn.to_torch(self.logits, mesh_composer=ttnn.ConcatMeshToTensor(self.mesh, dim=-1)).float()
-        return torch.log_softmax(lg.reshape(-1, lg.shape[-1])[:rows, :vocab], dim=-1)
+        """Host FP32 log-probs [rows, vocab] of the last run."""
+        return torch.log_softmax(self.read_raw_logits(rows, vocab), dim=-1)
 
     def run(self):
         HYB.fetch.commit(HYB.slot_of)  # async fetch: last pass's CQ1 writes land before this pass reads the slots
@@ -298,6 +302,54 @@ class Verify:
         self.trace = tid
 
 
+_TOP_P_CAND = 1024  # top-p candidates read exactly from the top 1024 tokens when they cover top_p (else a full sort)
+
+
+def _target_dist(logits, temperature, top_k, top_p):
+    """The processed target distribution of one row as (token ids, probabilities): temperature, then top_k, then top_p
+    over the tempered full distribution (the smallest prefix of the sorted tokens whose mass reaches top_p)."""
+    x = logits.float() / max(float(temperature), 1e-5)
+    V = x.shape[-1]
+    if top_k <= 0 and top_p >= 1.0:
+        return None, torch.softmax(x, dim=-1)  # the full distribution (ids = positions)
+    if top_k > 0:
+        vals, ids = x.topk(min(top_k, V))
+        lse = torch.logsumexp(vals, dim=-1)  # top_k first: top_p applies to the top-k renormalized mass
+    else:
+        lse = torch.logsumexp(x, dim=-1)
+        for c in (_TOP_P_CAND, 16 * _TOP_P_CAND, V):  # the smallest candidate set that holds the nucleus
+            vals, ids = x.topk(min(c, V)) if c < V else x.sort(descending=True)
+            if c >= V or float(torch.exp(torch.logsumexp(vals, dim=-1) - lse)) >= top_p:
+                break
+    probs = torch.exp(vals - lse)
+    if top_p < 1.0:
+        keep = (torch.cumsum(probs, dim=-1) - probs) < top_p  # tokens whose preceding mass is below top_p (>= 1 kept)
+        probs, ids = probs[keep], ids[keep]
+    return ids, probs / probs.sum()
+
+
+def _p_of(dist, tok):
+    ids, probs = dist
+    if ids is None:
+        return float(probs[tok])
+    hit = (ids == tok).nonzero()
+    return float(probs[hit[0, 0]]) if hit.numel() else 0.0
+
+
+def _sample(dist, gen, exclude=None):
+    ids, probs = dist
+    if exclude is not None:  # the residual of a point-mass draft: p with the rejected token removed
+        probs = probs.clone()
+        if ids is None:
+            probs[exclude] = 0.0
+        else:
+            probs[ids == exclude] = 0.0
+        if float(probs.sum()) <= 0.0:
+            probs = dist[1]
+    j = int(torch.multinomial(probs, 1, generator=gen))
+    return j if ids is None else int(ids[j])
+
+
 class DFlashServing:
     """Single-user DFlash step with MtpServing's single-user interface (generator_vllm drives it as its `_mtp`)."""
 
@@ -318,7 +370,7 @@ class DFlashServing:
         self._hooks = None
         self._pos = self._tok = None
         self.stats = None
-        self._warned_sampling = False
+        self._rng = None  # the sampled request's generator (created at its first step)
 
     # ------------------------------------------------------------------ startup (before any capture)
     def allocate_kv(self, kv_shape, dtype):
@@ -539,8 +591,9 @@ class DFlashServing:
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
         self._capture()
         self._pos, self._tok, self._prev_acc = P, int(tok0), []
-        self._warned_sampling = False
+        self._rng = None  # the sampled request's generator (created at its first step)
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
+        self.stats["sample"] = 0.0
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
 
@@ -570,9 +623,13 @@ class DFlashServing:
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
                 f"(tok {self._tok}, pos {self._pos})"
             )
-        if sampling is not None and sampling[0] > 0 and not self._warned_sampling:
-            logger.warning(f"DFlash serving is greedy: request sampling {sampling} decoded with argmax")
-            self._warned_sampling = True
+        sampled = sampling is not None and sampling[0] > 0 and self._force is None
+        if sampled and self._rng is None:  # a new sampled request: its seed, or a fresh random one
+            self._rng = torch.Generator()
+            if sampling[3] is not None:
+                self._rng.manual_seed(int(sampling[3]))
+            else:
+                self._rng.seed()
         if page_table_row is not None:
             self._row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
         a0 = time.perf_counter()
@@ -608,9 +665,27 @@ class DFlashServing:
             top = self._force[i + 1 : i + 1 + R]
             if len(top) < R:
                 raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
-        a = 0
-        while a < K and drafts[a] == top[a]:
-            a += 1
+        if sampled:  # speculative sampling against the point-mass drafts, row by row until the first rejection
+            t_s = time.perf_counter()
+            lg = ver.read_raw_logits(R, self.V)
+            T, tk, tp, _ = sampling
+            a, nxt = 0, None
+            while a < K:
+                dist = _target_dist(lg[a], T, tk, tp)
+                if float(torch.rand(1, generator=self._rng)) < _p_of(dist, drafts[a]):
+                    a += 1
+                    continue
+                nxt = _sample(dist, self._rng, exclude=drafts[a])
+                break
+            if nxt is None:
+                nxt = _sample(_target_dist(lg[K], T, tk, tp), self._rng)
+            top = list(top)
+            top[a] = nxt
+            self.stats["sample"] += time.perf_counter() - t_s
+        else:
+            a = 0
+            while a < K and drafts[a] == top[a]:
+                a += 1
         cap = _accept_cap()
         if cap is not None:  # debug: accept at most `cap` drafts (exercises the verify state paths row by row)
             a = min(a, cap)
@@ -651,7 +726,8 @@ class DFlashServing:
             logger.info(
                 f"DFLASH_STATS ({why}): {n} passes, {st['tokens'] / n:.2f} tokens per pass, acceptance hist "
                 f"{st['hist']}, draft {1e3 * st['draft'] / n:.1f} + verify {1e3 * st['verify'] / n:.1f} ms per pass, "
-                f"{st['refills']} refills -> {st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
+                f"sampling {1e3 * st.get('sample', 0.0) / n:.1f} ms, {st['refills']} refills -> "
+                f"{st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
             )
 
     # ------------------------------------------------------------------ standalone generation
