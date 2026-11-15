@@ -12,14 +12,70 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 1. CPU reference + routing | done. fp32 router as vLLM computes it. Noise floor between two valid references: top-1 0.925 / conf 0.978 / kl32 0.081 (`compare_refs.py`). |
 | 2. TT port | done for text: decode, 8-row verify and chunked prefill all match the fixtures per layer (prefill PCC = decode; 1000-token prefill ≈ 4 s warm). |
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
-| 4. spec decode | native MTP, traced, exact (greedy and exact speculative sampling). Best k=1: 12.4 tok/s greedy and sampled (plain traced 9.4). DSpark CPU reference only. |
-| 5. optimisation | chunked prefill done. Decode: traced verify + commit, one-program KV row update, single-tensor conv state. Bottlenecks: host int4 experts (bandwidth) and ~1.45 ms device time per layer. |
-| 6. multimodal, package | not started |
+| 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality check pending). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
+| 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
+| 6. vLLM serving, package, multimodal | **next**: vLLM integration (plan below). Packaging and multimodal not started. |
 
 **Next steps, in order:**
-1. Device profile per layer (find the slow ops); cut host-expert cost per verify row.
-2. Free-running task evals (GSM8K / IFEval) for absolute quality; the 8 raw texts are a relative measure.
-3. Serving package (tt-model-hybrid.yaml, serve script), then multimodal.
+1. **vLLM serving** (all serving AND all reported measurements go through the vLLM server + the TT plugin, like every
+   other model; `tools/spec_bench.py` numbers are dev signals only). Plan: **vLLM serving plan** below.
+2. Decide `HYB_HOST_ROUTE` from `eval_q106_rows3_hr` (decode-path quality vs `eval_s106_all_bfp8_rows3`: 0.865 / 0.947 /
+   0.220); if at noise level, set it in Inkling's serve env.
+3. Free-running task evals (GSM8K / IFEval) through the vLLM server, TTFT / decode via `vllm bench serve`.
+4. Long-context profiles (128K / 256K / 1M; only 8K exercised so far) and the >128K log-scaling path.
+5. Package (`templates/tt-model-hybrid.yaml`), expert artifacts to HF, model card; then multimodal (host encoders).
+
+## vLLM serving plan (mapped 2026-11-15 from the M2.7 hybrid port; plugin fork `~/fork-vllm-tt-plugin`)
+
+How M2.7 is served (copy this shape):
+- **Registration:** `EXTRA_MODELS_DIR` bundle: a folder with `vllm_metadata.json` `{"arch", "main_class"}`
+  (`models/autoports/minimaxai_minimax_m2_7/vllm_metadata.json`, `vllm_bundle/`); plugin `platform.py:1292-1369`
+  registers `"TT"+arch`. Inkling's arch is **`InklingForConditionalGeneration`** (`model_type inkling_mm_model`).
+- **Adapter:** `MiniMaxM2ForCausalLM` (`minimaxai_minimax_m2_7/tt/generator_vllm.py:181`) <- `Qwen36ForCausalLM`
+  (`models/demos/blackhole/qwen36/tt/qwen36_vllm.py:48`) <- `Generator`. Inkling's `tt/generator.py` already re-exports
+  M2.7's `Qwen35MoeGenerator` and `tt/model.py` subclasses M2.7's model, so a copied adapter mostly needs the imports,
+  `HF_MODEL`, `_KV_LAYERS` / DRAM constants, `context_contract.json` and vision code replaced.
+- **Hooks the plugin calls:** `initialize_vllm_model` (classmethod), `allocate_kv_cache`, `prefill_forward`,
+  `decode_forward`, `warmup_model_prefill`, `warmup_model_decode` (all captures happen in decode warm-up phase 2),
+  `model_capabilities`, optional `get_max_tokens_all_users`, `read_decode_output` / `process_decode_output_host`,
+  `decode_input_update_contract = 1`. Plugin docs: `docs/MODEL_INTERFACE.md`, `MODEL_CAPABILITIES.md`.
+- **Hybrid overlay:** `models/experimental/hybrid_moe/serve/sitecustomize.py` runs `hybrid.install()` in every vLLM
+  process (serve/ first on `PYTHONPATH`); `templates/serve_model.sh` has the docker + `vllm serve` command
+  (`--max-num-seqs 1 --block-size 64`, `trace_mode all`, `sample_on_device_mode all`, `fabric_config FABRIC_1D`).
+
+Inkling-specific work:
+1. **HF config registration in every vLLM process before `ModelConfig`:** transformers in the image cannot load
+   `inkling_mm_model`; call `tt/hf_config_inkling.py register()` from `serve/sitecustomize.py` (or a plugin hook like
+   `_register_kolibri1_hf_config`, `platform.py:638-651`). Importing it from generator_vllm is too late.
+2. **`tt/generator_vllm.py` + `vllm_metadata.json` + `vllm_bundle/`**, `supports_multimodal = False` (text first).
+3. **KV:** only the 7 global layers (5, 11, ..., 41) take vLLM's paged cache (`InklingAttention.bind_cache`,
+   `args.inkling_own_kv=False`); sliding layers keep their own ring cache (`tt/attention.py`). Every layer sets
+   `is_full_attention=True` (`tt/layer.py:87`), so the inherited `allocate_kv_caches` must NOT be used as is.
+   Conv states + rings are per sequence: `model.reset_sequence_state()` on every new prefill; `--max-num-seqs 1`;
+   prefix caching off (no conv / ring snapshots) until state snapshots exist.
+4. **Spec decode -- the decision to make first:** M2.7 hybrid serves spec via the model-internal step path:
+   `QWEN35_EXT_SPEC=module:build` + `QWEN35_EXT_SPEC_K=k` and M2.7's monkeypatch shim `tt/mtp_plugin_shim.py`
+   (decode returns host int32 `[B, k+1]`: accepted drafts + verified token, -1 padded). The step object's interface:
+   `models/experimental/hybrid_moe/dflash_serve.py:177-512` (`allocate_kv`, `warm`, `capture`, `begin_prefill` /
+   `end_prefill`, `step(tok, pos, ..., sampling)`). Wrap the traced loop of `tools/spec_bench.py` (classes `Traced`,
+   `DraftTraced`, `SpecSampler`) in such a class. **Blocker:** the shim matches plugin commit `8b1f8b1`
+   (`prefix-state-cache`), which the published M2.7 package pins; on fork `main` (`5b5b6f8`) its patched signatures
+   are stale (`_build_runner_output` lacks `stage_outputs=`, `_update_request_with_output` lacks `is_stale`).
+   Options: (a) serve on the 8b1f8b1 plugin like M2.7; (b) port the shim to `main`; (c) implement `main`'s native
+   contract (`docs/SPEC_DECODE_CONTRACT.md`: `spec_plan`, `decode_forward(draft_token_ids=..)` -> `VerifyOutput`,
+   `propose_draft_tokens` -> `DraftOutput`; no tt-metal model implements it yet). Ask the owner which plugin
+   revision production uses.
+5. **Parsers:** check whether the vLLM in the image ships Inkling reasoning / tool parsers; else add entries in the
+   plugin's `entrypoints.py:20-29` (`kolibri1_reasoning_parser.py` as the pattern). Chat template takes
+   `reasoning_effort`; vocab padded to 201024 (unpadded 200058): mask the tail in device sampling.
+6. Serve env for the chosen profile: `HYB_PORT=thinkingmachines_inkling_small HYB_SLOTS=106
+   HYB_LIB=.../inkling_int4_s106 HYB_FUSED=0 HYB_DECODE_ROWS=8 HYB_HOSTK_THREADS=6 HYB_WCACHE=...` (same as
+   `tools/eval_hybrid.sh`), plus `HYB_HOST_ROUTE=1` if step 2 above passes.
+
+Dev-harness invariants a vLLM port must keep (each was a real bug, see Log 2026-11-14/15): run one eager pass at every
+row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, then capture every width up front
+(tensors allocated after a capture get overwritten by its replays); the drafter uses its own `TT_CCL`; hybrid needs
+`HYB_DECODE_ROWS >= verify rows`; read back row-major logits (untilize on device).
 
 ## Log
 
