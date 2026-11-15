@@ -127,6 +127,72 @@ Pieces (all traced, per-prompt re-capture):
     ~2M pages/s during decode (`vm.compaction_proactiveness`, a machine-wide setting, left alone).
   - Device profile (`runs/m27/prof_now`): hybrid attention segment 36 programs / ~257 us (4 per-row KV updates, 4 CCLs
     with dispatch gaps), hybrid MoE ~180-230 us (gate|up 16 cores, down 24), a whole layer ~610 us.
+- ROUND 8 (2026-11-14, evening): sampling + a KV allocation bug (commits 4ff62fe1fba..db9a9c197c5).
+  - Bug (production, greedy too): under async scheduling the DFlash step runs one step (up to K + 1 tokens) ahead of
+    vLLM, and the MTP shim reserved only K lookahead slots, so a verify window crossing into a new KV block wrote its
+    last positions to block 0 (vLLM's null block, the row padding): that K / V was lost and later reads saw a previous
+    request's data. 3 of 12 served greedy requests hit it (windows 63..66, 125..128, 253..256; repeated phrases after
+    a block boundary, garbage under sampling). Fix: the shim reserves 2K + 1 (tests/test_mtp_plugin_shim.py fails on
+    the old shim), and dflash_serve.step raises if its window reaches an unallocated block below the context limit.
+    The forced-text quality runs never saw it (the runner allocates its own page table).
+  - Sampling (was: temperature > 0 silently decoded greedily): exact speculative sampling (accept_sparse; drafts sampled
+    from the drafter's block rows, min(1, p / q)); per-chunk top-64 device candidates of the verify and drafter logits
+    (dflash_tt.cands_body, separate traces replayed only for sampled requests; exact for top-k <= 64, checked per row).
+    Host test test_dflash_sampling.py (Monte Carlo TV 0.003). 32K profile, T 1.0 / top-p 0.95 / top-k 40: argmax
+    drafts 47.3 tok/s (1.85 tokens per pass), sampled drafts + sparse accept 51.9 (2.07, 2.9 ms sampling per pass);
+    greedy 63.6 (2.26). With 32 candidates per 16K chunk the top 40 often filled die 0's first chunk (low ids = common
+    tokens): 70-100% of rows fell back to full logits (10 ms); 64 per 32K chunk never does.
+  - Greedy is not bit-reproducible across requests: the experts' device (bfp4) / host (int4) placement follows earlier
+    requests, so near-tied tokens can flip; every variant is coherent after the fix.
+  - Packaging: tt-model-hybrid.yaml packages from the ~/m27-hybrid worktree (source.tt_metal): move it to the commit to
+    ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
+    old package images + `docker builder prune -af` freed ~130 GB.
+  - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
+- FUTURE SCOPE (2026-11-14, not started):
+  - Host-tier prefix cache (vLLM CPU KV offload / LMCache-style): copy a finished or evicted request's KV blocks to host
+    RAM and copy them back when the conversation returns. M2.7 KV is ~135 KB per token (62 layers): a 45K-token
+    conversation is ~6 GB, ~0.15-0.3 s over PCIe vs ~19-24 s re-prefill. Today a resent prompt hits only while its
+    blocks stay on the device (another long request or an elastic switch evicts them). Exact (byte copies). Needs host
+    RAM (scarce while the leak holds ~140 GB) and plumbing through vLLM's block bookkeeping, the generator and the
+    elastic pool's block map (hybrid/elastic.py bmap).
+  - Rejected: KV on the host for decode (every verify pass reads the whole KV: 0.55 GB at 4K, 6 GB at 45K = 11-22 /
+    120-240 ms over PCIe vs a few ms from device DRAM; the DRAM freed buys ~1-2% per promoted layer); CPU attention
+    over host KV (host DRAM is already the CPU experts' bottleneck); sparse / windowed KV fetch (changes the output).
+  - Fused LM head + per-row top-K (gpt-oss fused_decode LinearStream out_mode 6, PR 61548): removes the sampled path's
+    2 x 0.66 ms candidate top-k and some read-back (~+5-7% sampled, ~+1% greedy); a port of custom kernels.
+- ROUND 7 (2026-11-14, after the HF package v1 raahemnabeel/minimax-m2.7-hybrid-qb2), all served 128K elastic:
+  - Shared-KV rows SDPA on by default (QWEN35_ROWS_SDPA_SHARED_FROM=4096; package env too). Bug fixed: the capture
+    picked the variant from the previous request's position (end_prefill captured before setting _pos) and the
+    shared variant was never compiled before capture (TT_FATAL on a long request after a long one). Now
+    _capture(pos) + _warm_verify (both variants at startup and after every switch). Quality, 4.6K forced text vs the
+    BF16 reference (runs/m27/lp46_*, ref46): top-1 0.9126 both, KL 0.0829 shared vs 0.0925 stock; 8K x3 no errors,
+    52.4 -> 55.0 tok/s (fb46_*). Served: 45K decode 31.0 (card) -> 39-41 tok/s, 85.6K 34-39 tok/s.
+  - Elastic demotion gathers the hybrid experts from the full layer's tensors on the device (wcache.gather,
+    HYB_ELASTIC_GATHER=1): every gathered layer byte-identical to its hybrid image (HYB_GATHER_CHECK=1, 18 layers);
+    needs no hybrid image (the first-switch conversion is gone for demotions).
+  - KV resize: one device-made zero block per resize (device_zeros: bf16 fill + typecast, ttnn.zeros bfp8 is built on
+    the host, bench_kv_alloc.py 48 vs 13 ms), cloned / concatenated per layer. Slicing the old pool on shrink and a
+    per-tensor temporary fragmented DRAM (OOM on the next 85K switch, largest free block 27 of 80 MB): not kept.
+  - Result (image path -> now): 45K switch 5.0 -> ~2.8 s, TTFT 23.5 -> 21.4 s; back to short 6-7 -> ~3.2 s (next
+    short TTFT 7.1 -> 3.9 s); 85.6K switch 21.5 -> 8.2 s, TTFT 64.5 -> 49.5 s, back 13 -> 9 s.
+  - Prefill (runs/m27/pf_host, pf_async): host planning is 2-6% of prefill; the main-thread expert copies (~1 s,
+    13.8 GB per prefill) already overlap the device - the background-writer prefetch was 2-10% slower (not kept).
+    Segment pipelining (route on CQ1 while the next segment's attention runs) is worth <=6-8% and collides with the
+    CQ1 staging copies: not done.
+  - Robustness (found serving the package through repeated switches): the elastic pool leaves ~80 MB per DRAM bank at
+    85K (the pool grows ~2 MB/bank per demoted layer faster than the layer frees), so the sorted MoE's per-call 4096-row
+    dispatch buffers (~35 MB contiguous per bank) and a gather's transient (~90 MB/bank) could OOM after a few switches.
+    Prefill now runs 2048-token segments when the pool is past 64K and the largest free block is < 72 MB/bank
+    (QWEN35_PREFILL_TIGHT_FROM / _MB; logits identical, ~20% slower prefill when engaged), and gather() falls back to
+    the image path when the DRAM has no room. Stress (package, 45K x3 + 85K x3 switch cycles): no OOM.
+  - Package v1.4 pushed to raahemnabeel/minimax-m2.7-hybrid-qb2 (rev f43ec00854cf; card rows measured with the package's
+    launch command, serve/card_bench.py). Packaging gotcha: hybrid/hostk/libhostk.so and hybrid/pin/pinx.so are
+    git-ignored build outputs; a fresh worktree must get them copied in before `tt-model package`, or the overlay fails
+    to install (the server then converts the full model and cannot fit). Seed the package weight cache by hard-linking
+    ~/.cache/hybrid-moe/wcache_m27 into ~/.cache/tt-model/minimax-m2.7-hybrid-qb2/weights/wcache_m27.
+  - Ops: the node's k8s telemetry (tt_telemetry_server / collector, tt-fabric-manager-agent) made device opens hang
+    in UMD "Starting devices"; cache/telemetry_guard.sh freezes them (SIGSTOP, user-approved). cache/watchdog.sh kills
+    and resets a device job whose log and CPU (< 2 s per 5 min) stall.
 - DEMO BUILD v1.3 (tag m27-poc-v1.3): + fetch slack controller by default in serving (HYB_FETCH_POLICY=auto: the
   per-pass fetch budget moved by measured pass time; fb_auto: short / 8K = fixed 15% / 2; el_long_auto: 40K context 3%
   faster per pass with ~27 vs 39 host experts / pass). Served: 8-prompt bench 60.1 tok/s, TTFT 0.63 s; 45K prompt

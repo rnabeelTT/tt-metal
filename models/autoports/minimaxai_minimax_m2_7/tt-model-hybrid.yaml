@@ -1,7 +1,7 @@
 # tt-model container (v5.1) manifest for MiniMax-M2.7 (230B MoE, FP8 checkpoint) on one QB2 (2 x p300 = 4 Blackhole
 # dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
 # device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe), DFlash speculative decoding,
-# elastic 128K context. Single user (max_num_seqs 1), greedy.
+# elastic 128K context. Single user (max_num_seqs 1); greedy or sampled (exact speculative sampling).
 # Build: tt-model package --container models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml
 schema: "5.1"
 
@@ -10,9 +10,6 @@ name: minimax-m2.7-hybrid-qb2
 weights: {repo: MiniMaxAI/MiniMax-M2.7, revision: 0a6536713b0b03f3be97494e5cf8d22f668a3164}
 auxiliary_weights:
   - {repo: nvidia/MiniMax-M2.7-DFlash, revision: 506ca1e2662a58808f673a8c96c3cc1c65bd1e73}
-  # int4 host + bfp4 device copies of the experts that can miss, and the expert plans (build_int4_library.py,
-  # build_dev_experts.py, sim_m27.py, ref_m27.py)
-  - {repo: raahemnabeel/minimax-m2.7-hybrid-qb2-experts, revision: e8a57405e487d95b0838b805332856f5b61a85cc}
 kind: vllm-plugin
 arch: blackhole
 
@@ -41,6 +38,7 @@ source:
     - models/experimental/hybrid_moe/ref_m27.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/experimental/hybrid_moe/plans/m27_plan.npz
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet
@@ -89,9 +87,17 @@ serve:
     HYB_ROWS: "4"
     HYB_THREADS: "12"
     HYB_HOSTK_THREADS: "6"
-    HYB_LIB: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/int4_s152
-    HYB_DEV_EXPERTS: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/dev_s152
-    HYB_PLAN: hf://raahemnabeel/minimax-m2.7-hybrid-qb2-experts/plans/plan_m27_routing.npz
+    # the experts that can miss (outside each layer's top 152 of the plan's order, in the 42 layers any profile runs
+    # hybrid) are copied from the checkpoint on the first boot into the weight cache: int4 for the CPU, bfp4 for PCIe
+    # fetches (hybrid/firstboot.py; byte-identical to the earlier published copies). Only official weights download.
+    HYB_LIB: /weight-cache/int4_s152
+    HYB_DEV_EXPERTS: /weight-cache/dev_s152
+    HYB_LIB_KEYS: minimax_m2
+    HYB_BUILD_STATIC: "152"
+    HYB_BUILD_LAYERS: "0,1,3,19,21,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,40,41,42,43,44,45,46,47,48,50,51,52,53,54,55,56,57,58,59,60,61"
+    # expert placement: per layer, the routed mass of reference runs (ranks the static experts) and the build order
+    # (plans/m27_plan.npz, 85 KB of statistics, no weights)
+    HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/m27_plan.npz
     HYB_PLAN_WEIGHT: mass
     # HYB_RAM_CHECK (hybrid/hostmem.py): refuse to start when the host's free RAM cannot hold the profile's expert
     # copies at its full context (error); warn / off to override
@@ -117,7 +123,11 @@ serve:
     QWEN35_PREFIX_CACHING: "1"
     QWEN35_MOE_DN_READERS: "4"
     QWEN35_MOE_DN_CHUNK: "4"
-    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # shared-KV rows SDPA for the verify from 4096 context positions (both variants compiled at startup and after every
+    # elastic switch): long-context decode ~+30% at 45K
+    QWEN35_ROWS_SDPA_SHARED_FROM: "4096"
+    # elastic demotion gathers the hybrid experts from the full layer on the device (byte-identical to the images)
+    HYB_ELASTIC_GATHER: "1"
     # DFlash speculative decoding (nvidia/MiniMax-M2.7-DFlash), 3 drafts per pass
     QWEN35_EXT_SPEC: dflash_serve:build
     QWEN35_EXT_SPEC_K: "3"
@@ -169,7 +179,8 @@ card:
   attribution: >
     Serves [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) by MiniMax (Built with MiniMax M2.7),
     with [nvidia/MiniMax-M2.7-DFlash](https://huggingface.co/nvidia/MiniMax-M2.7-DFlash) as the speculative drafter.
-    The expert copies in raahemnabeel/minimax-m2.7-hybrid-qb2-experts are derived from the MiniMax-M2.7 weights.
+    Only these two official checkpoints are downloaded; the first boot derives the expert copies the server needs from
+    the MiniMax-M2.7 weights on your machine.
   description: >
     MiniMax-M2.7, a 230B-parameter mixture-of-experts model (10B active, 62 layers x 256 experts, FP8 checkpoint),
     served through a hybrid-MoE overlay: the model does not fit in the 4 dies' DRAM, so each layer's most-used experts
@@ -196,57 +207,81 @@ card:
       `HYB_RAM_CHECK=warn` to start anyway (elastic: long contexts may then swap or get the server killed). Swapped
       expert pages make the CPU path several times slower. No `--ulimit memlock` is needed: the Tenstorrent driver
       pins the staging buffers itself, and locking the int4 library is best-effort.
-    - About 440 GB of disk: MiniMax-M2.7 (230 GB), the expert copies (69 GB), the drafter, and ~110 GB of device images
-      the first boot writes to the weight cache
+    - About 440 GB of disk: MiniMax-M2.7 (230 GB) and the drafter downloaded, plus what the first boot writes to the
+      weight cache: the expert copies (69 GB) and ~110 GB of device images
   quickstart: |
     ### Choosing a profile
 
     | profile | max context | layout | free host RAM | short decode | when to pick it |
     | --- | --- | --- | --- | --- | --- |
-    | `p300x2-128k` (default) | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~56 tok/s | long documents / agent sessions now and then |
-    | `p300x2-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~53 tok/s | steady long contexts without switch pauses |
-    | `p300x2-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~60 tok/s | fastest; a machine with other jobs running |
+    | `p300x2-128k` (default) | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~59 tok/s | long documents / agent sessions now and then |
+    | `p300x2-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~59 tok/s | steady long contexts without switch pauses |
+    | `p300x2-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~62 tok/s | fastest; a machine with other jobs running |
 
     `tt-model serve raahemnabeel/minimax-m2.7-hybrid-qb2 --profile p300x2-32k` picks one (`tt-model profiles
     raahemnabeel/minimax-m2.7-hybrid-qb2` lists them). The profiles share the downloads and caches.
 
     ### First boot
 
-    The first boot downloads ~300 GB and converts the experts into device images (about an hour); later boots load
+    The first boot downloads ~235 GB (MiniMax-M2.7 and the drafter), builds the host copies of the experts that can miss
+    (69 GB, FIRSTBOOT_BUILD_TIME) and converts the experts into device images (about an hour); later boots load
     them in ~40 s and are ready in 3-7 minutes. With the elastic profile, a request that needs more than 32K tokens of
-    context waits for a switch first: ~3-5 s up to ~50K tokens, ~20 s for ~100K, and the next short request switches
-    back (5-15 s). The first time a layer switches on a fresh install its device image is converted once (~20 s per
-    layer), so the first very long request can wait a few minutes (~4 minutes at 100K tokens).
+    context waits for a switch first: ~2-5 s up to ~50K tokens, ~7-9 s at ~85K, and the next short request switches
+    back (~3 s from 50K, ~9 s from 85K). A layer moving to hybrid is gathered from its on-device experts; only when the
+    device memory is too fragmented for that does it load a device image, which a fresh install converts once (~20 s
+    per layer).
   usage: |
-    Greedy decoding is the measured setting. One request at a time (max_num_seqs 1); prompts sharing a prefix resume
-    from vLLM's prefix cache at 4096-token boundaries.
+    Greedy (temperature 0) and sampled decoding both work. MiniMax recommends temperature 1.0, top_p 0.95, top_k 40;
+    sampling is exact (speculative sampling: the output is distributed as sampling from the model itself) and runs
+    about 15-20% slower than greedy, because fewer drafted tokens are accepted. top_k up to 64 is sampled from on-device
+    candidates; larger or unset top_k reads the full logits and is slower. Presence / frequency / repetition penalties
+    are not applied. The same seed does not reproduce identical text across requests (the experts' device / host
+    placement, which follows recent requests, shifts the logits slightly). One request at a time (max_num_seqs 1);
+    prompts sharing a prefix resume from vLLM's prefix cache at 4096-token boundaries.
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
     | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.848 (confident tokens 0.933) | — | 8 x 1000 tokens, held out |
 
-    | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
-    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-32k | ~50 | 128 | 1 | 16 | 0.64 s | — | 60.3 | 2.8 s |
-    | p300x2-32k | 24,291 | 128 | 1 | 1 | 10.0 s | 2,430 | 37.7 | 13.4 s |
-    | p300x2-32k, prompt resent (prefix-cache hit) | 24,291 | 128 | 1 | 1 | 1.3 s | — | 37.3 | 4.7 s |
-    | p300x2-64k | ~50 | 128 | 1 | 16 | 0.75 s | — | 53.1 | 3.2 s |
-    | p300x2-64k | 44,780 | 128 | 1 | 1 | 19.6 s | 2,280 | 31.6 | 23.7 s |
-    | p300x2-64k, prompt resent | 44,780 | 128 | 1 | 1 | 1.6 s | — | 31.2 | 5.7 s |
-    | p300x2-128k | ~50 | 128 | 1 | 32 | 0.63 s | — | 56.3 | 2.9 s |
-    | p300x2-128k, incl. the ~4 s switch | 44,780 | 128 | 1 | 2 | 23.4 s | 1,910 | 31.0 | 27.5 s |
-    | p300x2-128k, prompt resent | 44,780 | 128 | 1 | 2 | 1.8 s | — | 32.4 | 5.8 s |
-    | p300x2-128k, incl. the ~21 s switch | 102,594 | 128 | 1 | 1 | 75.3 s | 1,360 | 21.3 | 81.3 s |
-    | p300x2-128k, prompt resent | 102,594 | 128 | 1 | 1 | 2.0 s | — | 22.9 | 7.6 s |
+    | profile | decoding | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2-32k | greedy | ~50 | 128 | 1 | 16 | 0.60 s | — | 66.8 | 2.5 s |
+    | p300x2-32k | sampled | ~50 | 128 | 1 | 16 | 0.61 s | — | 53.9 | 3.0 s |
+    | p300x2-32k | greedy | 23,483 | 128 | 1 | 1 | 9.8 s | 2,395 | 43.8 | 12.7 s |
+    | p300x2-32k, prompt resent (prefix-cache hit) | greedy | 23,483 | 128 | 1 | 1 | 1.2 s | — | 44.0 | 4.0 s |
+    | p300x2-32k, prompt resent | sampled | 23,483 | 128 | 1 | 2 | 1.2 s | — | 40.5 | 4.4 s |
+    | p300x2-64k | greedy | ~50 | 128 | 1 | 16 | 0.71 s | — | 61.6 | 2.8 s |
+    | p300x2-64k | sampled | ~50 | 128 | 1 | 16 | 0.69 s | — | 51.1 | 3.2 s |
+    | p300x2-64k | greedy | 44,767 | 128 | 1 | 1 | 19.3 s | 2,318 | 37.0 | 22.7 s |
+    | p300x2-64k, prompt resent | greedy | 44,767 | 128 | 1 | 1 | 1.8 s | — | 39.9 | 5.0 s |
+    | p300x2-64k, prompt resent | sampled | 44,767 | 128 | 1 | 2 | 1.6 s | — | 36.3 | 5.1 s |
+    | p300x2-128k | greedy | ~50 | 128 | 1 | 32 | 0.60 s | — | 68.9 | 2.5 s |
+    | p300x2-128k | sampled | ~50 | 128 | 1 | 16 | 0.65 s | — | 53.7 | 3.1 s |
+    | p300x2-128k, incl. the ~2-5 s switch | greedy | 44,767 | 128 | 1 | 2 | 24.0 s | 1,868 | 40.8 | 27.1 s |
+    | p300x2-128k, incl. the switch | sampled | 44,767 | 128 | 1 | 1 | 20.1 s | 2,232 | 36.8 | 23.5 s |
+    | p300x2-128k, prompt resent | greedy | 44,767 | 128 | 1 | 2 | 1.3 s | — | 42.6 | 4.3 s |
+    | p300x2-128k, prompt resent | sampled | 44,767 | 128 | 1 | 1 | 1.2 s | — | 38.3 | 4.5 s |
+    | p300x2-128k, incl. the ~7-9 s switch | greedy | 85,516 | 128 | 1 | 2 | 61.1 s | 1,400 | 31.2 | 65.1 s |
+    | p300x2-128k, prompt resent | greedy | 85,516 | 128 | 1 | 2 | 1.1 s | — | 33.6 | 4.9 s |
 
-    Measured on one QB2 through the OpenAI endpoint with `tt-model serve` (no extra docker flags), greedy, warm caches,
-    2026-11-14; the ~50-token rows are 8 short chat prompts per run. Prefill tok/s = prompt tokens / TTFT (the
-    elastic rows include the switch). Decode varies about ±5% between runs with the text (speculative acceptance). Quality figure from the 2026-11-08 teacher-forced comparison (top-1 counts
-    disagreements on near-tied tokens; confident = reference top-1 probability above 0.5).
+    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, warm caches,
+    2026-11-14 (`serve/card_bench.py`, `--sampled` for the sampled rows: temperature 1.0, top_p 0.95, top_k 40, the
+    recommended settings); the ~50-token rows are the 8 short chat prompts per run. Prefill tok/s = prompt tokens / TTFT
+    (the elastic rows include the switch). Sampled decode is ~15-20% slower than greedy at short context (fewer drafted
+    tokens accepted: ~2.07 vs ~2.26 per pass, plus ~3 ms per pass of candidate read-back) and ~5-10% at 45K. The 85K
+    rows ran with `HYB_RAM_CHECK=warn` on a host with less free RAM than the 128K profile asks for; a later 85K request
+    on that host was killed by the kernel's OOM killer (host RAM, see Prerequisites). Prefill falls back to 2048-token
+    segments (~20% slower prefill, identical logits) when elastic switches leave the device memory fragmented, which
+    shows in the 45K elastic TTFT. Decode varies about ±5% between runs with the text (speculative acceptance).
+    Long-context decode uses a shared-KV multi-row attention for the speculative verify from 4096 tokens (vs the BF16
+    reference on a 4.6K-token text: top-1 0.913 and KL 0.083, stock attention 0.913 / 0.093). Quality figure from the
+    2026-11-08 teacher-forced comparison (top-1 counts disagreements on near-tied tokens; confident = reference top-1
+    probability above 0.5).
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
-      Long contexts run with fewer all-on-device layers (about 31 tok/s at 45K and 21 tok/s at 100K vs ~56 short).
+      Long contexts run with fewer all-on-device layers (greedy about 41 tok/s at 45K and 31-34 tok/s at 85K vs ~62-69
+      short).
     - Elastic profile: a request that crosses the 32K layout waits for a layer switch (see Quickstart), and the next
       short request switches back.
     - Expert placement was planned from routing statistics on general text and code; unusual domains route to more
@@ -256,7 +291,7 @@ card:
   licensing: >
     MiniMax-M2.7 is under the MiniMax non-commercial license: personal, research and non-profit use is free;
     commercial use needs prior written authorization from MiniMax (api@minimax.io). The same terms apply to the
-    derived expert copies. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
+    expert copies the first boot derives from it. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
   license: {id: other, name: minimax-m2.7-non-commercial, link: https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE}
 
 verify:

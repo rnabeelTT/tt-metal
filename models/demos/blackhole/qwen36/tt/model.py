@@ -21,6 +21,18 @@ from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
 from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in_seq
 
 
+def device_zeros(shape, dtype, device):
+    """A zero DRAM TILE tensor made on the device. Block-float zeros are a bf16 fill typecast on the device: ttnn.zeros
+    in bfp8 is ~3.6x slower (bench_kv_alloc.py: 48 vs 13 ms per 17 MB tensor), with the same bytes."""
+    kw = dict(layout=ttnn.TILE_LAYOUT, device=device, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    if dtype not in (ttnn.bfloat8_b, ttnn.bfloat4_b):
+        return ttnn.zeros(shape, dtype=dtype, **kw)
+    z = ttnn.zeros(shape, dtype=ttnn.bfloat16, **kw)
+    out = ttnn.typecast(z, dtype, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    ttnn.deallocate(z)
+    return out
+
+
 class Qwen36Model:
     """Qwen3.5-9B text LM on Blackhole P150. HF_MODEL env var selects checkpoint."""
 
@@ -2776,15 +2788,14 @@ class Qwen36Model:
     def _allocate_kv_caches_tp(self, kv_cache_shape, dtype, batch_size):
         """TP paged KV allocation (B=1). Replicated per device; GDN self-manages state."""
 
+        zero = None
+        if os.environ.get("QWEN35_KV_DEVICE_ZEROS", "1") == "1":  # zeros made on the device (no host conversion)
+            # one zero block, cloned per layer (device copies; a single temporary, so no hole beside every cache)
+            zero = device_zeros(kv_cache_shape, dtype, self.device)
+
         def _mk():
-            if os.environ.get("QWEN35_KV_DEVICE_ZEROS", "1") == "1":  # zeros made on the device (no host conversion)
-                return ttnn.zeros(
-                    kv_cache_shape,
-                    dtype=dtype,
-                    layout=ttnn.TILE_LAYOUT,
-                    device=self.device,
-                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                )
+            if zero is not None:
+                return ttnn.clone(zero, memory_config=ttnn.DRAM_MEMORY_CONFIG)
             return ttnn.as_tensor(
                 torch.zeros(kv_cache_shape, dtype=torch.bfloat16),
                 device=self.device,
@@ -2795,6 +2806,8 @@ class Qwen36Model:
             )
 
         kv_caches = [[_mk(), _mk()] for _ in self._attention_layer_indices]
+        if zero is not None:
+            ttnn.deallocate(zero)
         self.set_paged_kv_caches(kv_caches)  # binds via TPAttention.set_paged_kv_cache
         for layer in self.layers:
             if not layer.is_full_attention:

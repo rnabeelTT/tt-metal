@@ -291,6 +291,12 @@ class HybridState:
             return ids
         if self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             z = np.load(self.plan_path)
+        if self._freq is None and self.plan_path and os.path.exists(self.plan_path) and "freq" in z.files:
+            # a compact plan (plans/m27_plan.npz): the per-layer routed mass the routing file's picks sum to
+            if self.plan_weight != "mass":
+                raise ValueError(f"{self.plan_path} carries routed mass only: HYB_PLAN_WEIGHT must be mass")
+            self._freq = z["freq"].astype(np.float64)
+        elif self._freq is None and self.plan_path and os.path.exists(self.plan_path):
             layers = [int(v) for v in z["layers"]]
             f = np.zeros((max(layers) + 1, E))
             for k in z.files:
@@ -687,7 +693,11 @@ def _log_stats(replays):
 def install():
     from . import hostmem
 
-    # before anything loads: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
+    # first boot: build the expert copies from the checkpoint (hybrid/firstboot.py; first process only, before the device
+    # is opened), then: does the host have the free RAM this profile's expert copies need (HYB_RAM_CHECK)
+    from . import firstboot
+
+    firstboot.ensure()
     hostmem.check_startup(
         HYB.lib_dir, hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", "")), HYB.full_layers, HYB.elastic_demote
     )
@@ -1952,6 +1962,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     ttnn.deallocate(ids)
     ttnn.deallocate(scores)
     HYB.st["t_up"] += time.perf_counter() - t1
+    HYB.st["t_pf_prep"] = HYB.st.get("t_pf_prep", 0.0) + time.perf_counter() - t1  # merge layout + uploads
     HYB._pf_t = time.perf_counter()
     # sentinel picks are gathered from the dispatch's trailing padding group, which the skip-padding expert matmuls
     # never write: the sorted path zero-fills its down output for them
@@ -2352,8 +2363,12 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     t0 = time.perf_counter()
     idh = ttnn.to_torch(_die0(ids)).reshape(-1, k).long()
     sch = ttnn.to_torch(_die0(scores)).reshape(-1, k).float()
-    HYB.st["t_read"] += time.perf_counter() - t0
-    return _decide_core(self, x4, idh, sch, mode, defer_host)
+    t1 = time.perf_counter()
+    HYB.st["t_read"] += t1 - t0
+    out = _decide_core(self, x4, idh, sch, mode, defer_host)
+    if mode == "prefill":  # host planning while the device waits for this layer's routed call
+        HYB.st["t_pf_decide"] = HYB.st.get("t_pf_decide", 0.0) + time.perf_counter() - t1
+    return out
 
 
 SENTINEL_ID = 0xFFFF  # an expert id >= any slot count: moe_sorted_dispatch counts no row for it

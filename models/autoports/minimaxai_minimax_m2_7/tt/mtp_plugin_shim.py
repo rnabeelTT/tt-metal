@@ -52,8 +52,12 @@ Patched (plugin revision at /home/raahem/vllm-tt-plugin, ``src/vllm_tt_plugin``)
   (appends token by token, runs ``check_stop`` after each, trims at EOS / stop token / max_tokens / max_model_len),
   consumes exactly the one placeholder reserved for the frame (zero when the frame is empty, clamped at zero), and
   keeps the ``async_tokens_to_discard`` drain and ``kv_cache_manager.cache_blocks`` call of the async base.
-* ``TTScheduler.__init__`` (scheduler.py:112): after construction ``num_lookahead_tokens = max_width - 1`` so
-  ``allocate_slots`` covers the verify window (computed + 1 new + K lookahead = ``num_tokens + K`` slots).
+* ``TTScheduler.__init__`` (scheduler.py:112): after construction ``num_lookahead_tokens = 2 * max_width - 1`` so
+  ``allocate_slots`` covers the verify window. Under async scheduling the step that owns the continuation runs one
+  step ahead of the scheduler: its window starts up to ``max_width`` (K + 1) tokens past ``num_tokens`` and spans
+  K + 1 positions, so it ends at ``num_tokens + 2K + 1`` at most. Reserving only K left the last up-to-K + 1 positions
+  of a window that crossed into a new block on vLLM's null block (row padding 0): their K / V was lost and later
+  reads saw another request's data (hybrid_moe DFlash serving, 2026-11-14: 3 of 12 requests).
   Upstream clamps ``num_tokens_need_slot`` at ``max_model_len`` (kv_cache_manager.py:430), so a pass whose verify
   window would cross ``max_model_len`` has no allocated slots for those positions; the model must not write them.
 
@@ -384,10 +388,11 @@ def _shim_update_request_with_output(self, request, new_token_ids):
 
 
 def _shim_scheduler_init(self, *args, **kwargs):
-    """Wrapper for ``TTScheduler.__init__``: reserve K lookahead slots so ``allocate_slots`` covers the verify window."""
+    """Wrapper for ``TTScheduler.__init__``: reserve 2K + 1 lookahead slots so ``allocate_slots`` covers the verify window
+    of a step that runs one step ahead of the scheduler (module docstring)."""
     _STATE["originals"]["scheduler.__init__"](self, *args, **kwargs)
     if not self._is_block_output_model:
-        lookahead = max_output_width() - 1
+        lookahead = 2 * max_output_width() - 1
         self.num_lookahead_tokens = max(int(self.num_lookahead_tokens), lookahead)
         logger.info("MTP shim: TTScheduler.num_lookahead_tokens = %d", self.num_lookahead_tokens)
 
