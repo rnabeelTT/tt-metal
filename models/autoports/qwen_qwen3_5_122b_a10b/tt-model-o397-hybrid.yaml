@@ -116,6 +116,7 @@ serve:
     HYB_FETCH_POLICY: auto
     HYB_FETCH_BUDGET: "8"
     HYB_FETCH_MAX: "8"
+    HYB_STREAM_CQ1: "1"         # the fetch copies run on a second command queue (opens the mesh with two)
     HYB_PREFETCH: "1"
     HYB_PF_TOPK: "8"
     HYB_STREAM: "0"             # prefill streaming needs the port's grouped prefill hooks (not ported yet)
