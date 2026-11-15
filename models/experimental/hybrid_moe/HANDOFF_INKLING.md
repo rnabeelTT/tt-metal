@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
 | 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **serving done** (fast profile, see Log 2026-11-15 session 2); package build in progress; multimodal not started. |
+| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; tested from a fresh first boot via `tt-model serve`). Multimodal not started. |
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -345,3 +345,11 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     path's programs; try HYB_SOCKET=0 with streaming, then a device-side hang dump); (2) a faster CPU expert kernel
     (AVX512-BF16 dot products: the activations are bf16 and int4 values are exact in bf16; ~1.5-2x on prefill);
     (3) the prefill short convs through a multi-tile fused kernel; (4) multimodal.
+
+- **2026-11-15, published.** `tt-model serve raahemnabeel/inkling-small-hybrid-qb2` (public; tt-metal b188a2b, plugin
+  23b0736, Inkling-Small @8cc5877). Built from the worktree `/home/raahem/inkling-pkg` (full checkout; build
+  `libhostk.so` there first: the manifest's verify step fails without it). Tested from a fresh first boot (int4
+  library 5.6 min, device images ~25 min). Warm numbers through `tt-model serve`: TTFT 0.53 s and decode ~40-45 tok/s
+  on chat prompts; prefill ~350 tok/s (28K: 79 s); needle found to 104K. Quality: teacher-forced 0.866 / 0.947 /
+  0.213; GSM8K-200 97.0%; IFEval-200 88.0 / 90.0 (effort none). Two first-request stalls (75-85 s) after the fresh
+  install did not reproduce on a warm server (likely one-time kernel compiles); worth a check on the next install.
