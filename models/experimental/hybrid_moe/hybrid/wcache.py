@@ -133,6 +133,12 @@ class ExpertImageCache:
         out = []
         for t in (up_gate, down):
             shp = [int(v) for v in t.shape]  # per device [1, E_full, rows, cols]
+            # the concat output's block is reserved before the per-expert slices are allocated: first-fit slices would
+            # otherwise take the largest free block and leave the concat no contiguous room (a second elastic round
+            # trip in a fragmented DRAM: OOM, 2026-11-15); freed right before the concat, which then fits in it
+            reserve = ttnn.allocate_tensor_on_device(
+                ttnn.Shape([1, len(ids), shp[2], shp[3]]), t.dtype, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG
+            )
             zero, parts = None, []
             for e in ids:
                 if e < 0:
@@ -149,6 +155,7 @@ class ExpertImageCache:
                     parts.append(
                         ttnn.slice(t, [0, e, 0, 0], [1, e + 1, shp[2], shp[3]], memory_config=ttnn.DRAM_MEMORY_CONFIG)
                     )
+            ttnn.deallocate(reserve)
             g = ttnn.concat(parts, dim=1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
             for p in {id(p): p for p in parts}.values():
                 ttnn.deallocate(p)
@@ -163,7 +170,7 @@ class ExpertImageCache:
 
     def _gather_fits(self, mesh, up_gate, n_slots):
         """Whether the DRAM has room for a gather next to the full tensors it reads: the slices plus the contiguous
-        concat output of the larger (gate|up) tensor, with 25% margin. The image path frees the full tensors first, so
+        concat output of the larger (gate|up) tensor (reserved first, see gather), with 25% margin. The image path frees the full tensors first, so
         a tight DRAM (many elastic switches fragment it) takes that path instead."""
         mv = ttnn.get_memory_view(mesh, ttnn.BufferType.DRAM)
         from .pin import tile_bytes

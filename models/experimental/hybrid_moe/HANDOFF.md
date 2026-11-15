@@ -78,9 +78,17 @@ Pieces (all traced, per-prompt re-capture):
   the official checkpoint and builds both copies on its first boot (hybrid/firstboot.py, ROUND 9); v1.4 read them from
   the derived repo raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
 - OPEN (2026-11-14, tt-model package e.g. 5e77f21b0271): after a deep elastic round trip (all 24 layers to hybrid and
-  back, HYB_ELASTIC_PREWARM=1) short decode stays ~12% slower until restart (bench 49.3 / 51.9 vs 59.2 / 58.2 after a
-  restart without it; a 45K request's 4-layer round trip leaves it at 58.6 / 56.2). The engine also keeps ~7 GB more
-  host RAM after promoting back. A served ~100K request (19 layers, keep=True) does not do it: bench 54.0 / 56.2 after.
+  back, HYB_ELASTIC_PREWARM=1, a test mode the package does not use) short decode stays ~12% slower until restart
+  (bench 49.3 / 51.9 vs 59.2 / 58.2 after a restart without it; a 45K request's 4-layer round trip leaves it at 58.6 /
+  56.2). A served ~100K request (19 layers, keep=True): bench 54.0 / 56.2 after. 2026-11-15, served 128K, 56K-token
+  prompt (7 layers) x3: short 67.9 -> 67.5 tok/s, no slowdown. The ~7 GB more host RAM after promoting back is the
+  demoted layers' pinned device-format library, kept on purpose for the next demotion (fetch.drop_layer; RSS flat
+  over 3 round trips). Deep round trips not re-measured (host RAM short until the reboot).
+- FIXED (2026-11-15): the SECOND long request after an elastic round trip killed the engine (TT_FATAL DRAM OOM in
+  wcache.gather: 254.8 MB across 8 banks, largest free block 30.2 of 31.9 MB needed). The gather's 192 per-expert
+  slices were allocated first-fit into the largest free block, leaving the concat output no contiguous room although
+  _gather_fits had passed. gather() now reserves the output's block before slicing and frees it right before the
+  concat. 3 x (56K prompt, resend, short) on the served 128K profile: no OOM, HYB_GATHER_CHECK identical every time.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
