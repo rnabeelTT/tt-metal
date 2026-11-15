@@ -324,3 +324,20 @@ PYTHONPATH=$REPO ~/inkling-work/venv/bin/python -m pytest -q --noconftest --impo
   - **Spec decode, eager, pre-fix** (for the record only): plain 3.7–4.2 tok/s; MTP k=2–3 6.3–7.6 tok/s at 2.1–2.3
     tokens/step greedy, 1.9–2.1 at temperature 0.7. Exact speculative sampling (`SPEC_TEMP` etc., M2.7 `SpecSampler`)
     runs end to end; the garble score found no real defects (flags were dictionary misses).
+- **2026-11-15, traced spec decode working and exact** (profile all bfp8 C=106, LIB_S=106; 3 prompts x 128 tokens;
+  `tools/spec_bench.py 3 128` with `SPEC_TRACE=1 SPEC_WARM=16`).
+  - **Traced hang fixed** (`a01ab050179`): layers cache device tensors per row count on first use; one allocated after a
+    trace capture can land in that trace's freed intermediates and is overwritten on every replay. Fix: one eager pass at
+    every width (1..8) before ANY capture, then capture every verify width up front.
+  - **Same bug, drafter side** (`076e81b74c9`): acceptance at the largest k of a run fell (k=3 1.77 vs eager 2.29) because
+    the drafter's lazily cached tensors sat in the widest trace's region (R=K+1, replayed only at k=K). The drafter is now
+    warmed at every width and depth before capture.
+  - **Exactness:** greedy texts traced = eager at every k, and every k = plain k=0 (byte-identical).
+  - **Greedy, tok/s (tokens per pass):** k=0 9.36 (1.00); k=1 **12.35** (1.77); k=2 11.78 (2.07); k=3 11.02 (2.26).
+    Eager for comparison: 4.08 / 5.83 / 5.77 / 5.79.
+  - **Sampling** (T=0.7, top-p 0.95, exact speculative sampling): k=0 9.20; k=1 **12.43** (1.80); k=2 11.88 (2.12);
+    k=3 11.11 (2.31).
+  - **Where a step goes** (k=0, ms): device wait `t_read` ~58 (~1.45 per layer), host experts `t_host` ~33 (80 int4
+    experts per step, ~30 GB/s: bandwidth-bound, 8 host threads = 6), uploads ~9. Host experts grow with verify rows
+    (80 / 138 / 186 / 228 per pass at k=0..3), which is why k>1 loses: the next lever is host-expert cost per verify row,
+    then device time per layer (device profile with a 170 GB container cap: the first profiler run hit host OOM).
