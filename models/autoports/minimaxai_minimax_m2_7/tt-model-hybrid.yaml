@@ -2,7 +2,7 @@
 # p300, or 4 x p150) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's most-used experts stay on the
 # device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe), DFlash speculative decoding,
 # elastic 128K context. Single user (max_num_seqs 1); greedy or sampled (exact speculative sampling), sampled with
-# MiniMax's recommended settings when a request sets none.
+# MiniMax's recommended settings (the checkpoint's generation_config.json, vLLM's default) when a request sets none.
 # Build: tt-model package --container models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml
 schema: "5.1"
 
@@ -62,11 +62,6 @@ serve:
   capabilities:
     tool_parser: minimax_m2
     reasoning_parser: minimax_m2
-  # Requests that set no sampling parameters get MiniMax's recommended ones (the model's generation_config.json). The
-  # TT plugin drops generation_config defaults for block-output models (--generation-config auto -> vllm), so they are
-  # passed explicitly; without this a bare request samples at temperature 1.0 over the full vocabulary.
-  args:
-    - ["--override-generation-config", '{"temperature": 1.0, "top_p": 0.95, "top_k": 40}']
   additional_config:
     tt:
       trace_mode: all
@@ -276,7 +271,9 @@ card:
     is distributed as sampling from the model itself). Greedy (temperature 0) also works and is ~15-20% faster on short
     chats (~5-10% at long context), because more drafted tokens are accepted. top_k up to 64 is sampled from on-device
     candidates; larger or unset top_k reads the full logits and is slower. Presence / frequency / repetition penalties
-    are not applied. The same seed does not reproduce identical text across requests (the experts' device / host
+    are applied as vLLM applies them (~20% slower decode: fewer drafted tokens accepted). Requests that need vLLM's host
+    sampler - logprobs, structured outputs (response_format json_schema, guided decoding), logit_bias, min_p, min_tokens,
+    bad words - decode one token per verify pass (~20 tok/s). The same seed does not reproduce identical text across requests (the experts' device / host
     placement, which follows recent requests, shifts the logits slightly). One request at a time (max_num_seqs 1);
     prompts sharing a prefix resume from vLLM's prefix cache at 4096-token boundaries.
   performance: |

@@ -165,10 +165,20 @@ Pieces (all traced, per-prompt re-capture):
   - License: MiniMax M2.7 is non-commercial (commercial use needs written authorization from MiniMax and "Built with
     MiniMax M2.7" display); attribution on the card and autoport README, LICENSE-MiniMax-M2.7 in the HF repo. The
     DFlash drafter is under the NVIDIA Software and Model Evaluation License.
-  - Request defaults (2026-11-15): the TT plugin normalizes --generation-config auto to vllm for block-output models,
-    so a request without sampling parameters sampled at T 1.0 over the full vocabulary (full-logits path). The package
-    passes --override-generation-config {temperature 1.0, top_p 0.95, top_k 40} (verified in the server log; an
-    explicit temperature 0 stays greedy). serve/serve_m27.sh (dev) does not.
+  - Request defaults: vLLM applies the checkpoint's generation_config.json (temperature 1.0, top_p 0.95, top_k 40) to
+    requests that set none ("Default vLLM sampling parameters have been overridden" in the server log). The plugin's
+    --generation-config auto -> vllm normalization is for block-output models only; this port declares
+    output_tokens_per_step 1 (variable width through mtp_plugin_shim), so it does not apply.
+  - Penalties + host-sampled requests (2026-11-15; before, both were broken in DFlash serving: the single-user step
+    ignored presence / frequency / repetition penalties silently, and a request that needs vLLM's host sampler -
+    logprobs, structured outputs, logit_bias, min_p, min_tokens - killed the engine: the step returned token ids where
+    the plugin reads logits; _mtp_eligible only guards the adaptive MtpServing path). Now dflash_serve.step applies
+    vLLM's penalties exactly (penalize / row_dist / DFlashServing._dist; history = emitted tokens + the drafts before
+    the row; a penalized greedy request takes the candidate path; host test test_dflash_sampling.py (3) vs a dense
+    apply_penalties), and step(host_logits=True) returns row 0's logits for the host sampler (one token per pass; the
+    plugin hands the sampled token to the next step; a host-sampled prefill passes tok0 None). Served 128K: recommended
+    sampling 51.9 tok/s, + all three penalties 42.2 (1.79 vs 1.97 tokens per pass), logprobs / json_schema /
+    logit_bias / min_tokens ~17-23 tok/s on short answers, engine alive throughout.
   - p150x4-{128k,64k,32k} profiles (same layouts, MESH_DEVICE=P150x4, a (1, 4) mesh): not run on p150 hardware. The
     model and hybrid code read the compute grid from the device; a p150 die has a larger grid than a p300 die, so
     grid-derived program configs differ from the measured ones.
