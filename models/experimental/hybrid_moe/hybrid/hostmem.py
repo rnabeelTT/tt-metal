@@ -53,11 +53,18 @@ def layer_bytes(lib_dir, dev_dir):
                 if e.name.startswith("layer_") and e.name.endswith(".pt"):
                     L = int(e.name[len("layer_") : -len(".pt")])
                     sizes[L] = sizes.get(L, 0) + e.stat().st_size
+        dev_seen = False
         if dev_dir and os.path.isdir(dev_dir):
             for e in os.scandir(dev_dir):  # <L>_<e>_gu.tensorbin / <L>_<e>_dn.tensorbin
                 head = e.name.split("_", 1)[0]
                 if head.isdigit() and e.name.endswith(".tensorbin"):
                     sizes[int(head)] = sizes.get(int(head), 0) + e.stat().st_size
+                    dev_seen = True
+        if dev_dir and not dev_seen:
+            # configured but not built yet (a first boot builds them after this check): estimate them from the int4
+            # library (Inkling: gate/up bfp4 + down bfp8 copies, ~48 GB vs ~42 GB of int4; HYB_RAM_DEV_RATIO)
+            r = float(os.environ.get("HYB_RAM_DEV_RATIO", "1.15"))
+            sizes = {L: int(b * (1.0 + r)) for L, b in sizes.items()}
         _sizes = sizes
     return _sizes
 
