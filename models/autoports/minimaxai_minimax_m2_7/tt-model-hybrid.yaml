@@ -177,8 +177,9 @@ default_profile: p300x2-128k
 
 card:
   attribution: >
-    Serves [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) by MiniMax (Built with MiniMax M2.7),
-    with [nvidia/MiniMax-M2.7-DFlash](https://huggingface.co/nvidia/MiniMax-M2.7-DFlash) as the speculative drafter.
+    **Built with MiniMax M2.7.** Serves [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7)
+    (Copyright (c) 2026 MiniMax, MiniMax non-commercial license), with
+    [nvidia/MiniMax-M2.7-DFlash](https://huggingface.co/nvidia/MiniMax-M2.7-DFlash) (NVIDIA) as the speculative drafter.
     Only these two official checkpoints are downloaded; the first boot derives the expert copies the server needs from
     the MiniMax-M2.7 weights on your machine.
   description: >
@@ -288,10 +289,30 @@ card:
       host experts and decode slower.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 device experts).
     - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
-  licensing: >
-    MiniMax-M2.7 is under the MiniMax non-commercial license: personal, research and non-profit use is free;
-    commercial use needs prior written authorization from MiniMax (api@minimax.io). The same terms apply to the
-    expert copies the first boot derives from it. The DFlash drafter is under its own license (see its repo). The serving code is Apache-2.0.
+  licensing: |
+    **MiniMax-M2.7** — Copyright (c) 2026 MiniMax. Licensed under the
+    [MiniMax non-commercial license](https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE); the full text,
+    including its copyright and permission notice, is in this repo as `LICENSE-MiniMax-M2.7`. The same terms apply to
+    the expert copies the first boot derives from the MiniMax-M2.7 weights on your machine.
+
+    - Free: personal use (including self-hosted deployment for coding, development, agents, tools, research and
+      experimentation), and non-commercial research or education by non-profits, academic institutions and
+      researchers.
+    - Commercial use (any use primarily for commercial advantage or monetary compensation, including paid products or
+      services, commercial use of APIs, or hosted deployments) needs prior written authorization from MiniMax: contact
+      api@minimax.io with the subject line "M2.7 licensing". A commercial use must prominently display
+      "Built with MiniMax M2.7" on a related website, user interface, blog post, about page or product documentation.
+    - The license's appendix prohibits using the model or its derivatives to generate or disseminate unlawful content;
+      for any military purpose; to exploit or harm minors; to generate or disseminate false or misleading information
+      with intent to cause harm; or to promote discrimination, hate speech or harmful behavior against individuals or
+      groups.
+
+    **nvidia/MiniMax-M2.7-DFlash** (the speculative drafter) is governed by the
+    [NVIDIA Software and Model Evaluation License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-and-model-evaluation-license/),
+    with the MiniMax non-commercial license as additional information (Copyright (c) 2026 MiniMax); check its terms
+    before any use beyond evaluation.
+
+    The serving code (tt-metal model code and the hybrid-MoE overlay) is Apache-2.0.
   license: {id: other, name: minimax-m2.7-non-commercial, link: https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/LICENSE}
 
 verify:
