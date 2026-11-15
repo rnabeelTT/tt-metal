@@ -237,29 +237,6 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         logits[:, 0, : lg.numel()] = lg
         return logits
 
-    @staticmethod
-    def _mtp_sampling(sp, row):
-        """(temperature, top_k, top_p, seed, presence, frequency, repetition) of request `row`: the engine applies the
-        penalties itself (tt/sampling.py), inside the speculative step."""
-        base = MiniMaxM2ForCausalLM._mtp_sampling(sp, row)
-        if base is None:
-            return None
-
-        def pick(name, default):
-            v = getattr(sp, name, None)
-            if v is None:
-                return default
-            if isinstance(v, (int, float)):
-                return float(v)
-            try:
-                x = v[row]
-            except (IndexError, TypeError):
-                return default
-            x = x.item() if isinstance(x, torch.Tensor) else x
-            return default if x is None else float(x)
-
-        return (*base, pick("presence_penalty", 0.0), pick("frequency_penalty", 0.0), pick("repetition_penalty", 1.0))
-
     def _mtp_decode(self, args, kwargs):
         sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
         if sp is None:

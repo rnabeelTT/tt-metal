@@ -95,14 +95,18 @@ serve:
     HYB_STREAM_MIN: "4"
     HYB_STREAM_MIN_LONG: "1"
     HYB_STREAM_LONG_FROM: "1024"
-    HYB_STREAM_CQ1: "1"
-    HYB_PF_PREFETCH_MIN: "1024"
+    # copies on CQ0, no prefetch banks: on real text a chunk misses many experts with few tokens each, and prefetching a
+    # layer's whole non-resident set wasted copies (16K of held-out text: 478 tok/s with CQ1 + banks, 693 without)
+    HYB_STREAM_CQ1: "0"
+    HYB_PF_PREFETCH_MIN: "0"
     HYB_LRU: "0"
     INKLING_PREFILL_GROUP: "16"
     # the fewest-token missed experts of a prefill step on the CPU (bf16 int4 kernel) while the rest stream; the host
     # kernel runs its whole 8-thread pool in prefill and 6 threads in decode (bandwidth-bound there)
     HYB_PF_SPLIT: "1"
-    HYB_PF_COPY_MS: "0.65"
+    # the split's cost model: ~4 ms per staged copy (measured ~1.3, plus the device rounds it adds) vs the bf16 CPU kernel
+    # (16K of held-out text: 693 -> 892 tok/s from 0.65 -> 4)
+    HYB_PF_COPY_MS: "4"
     HYB_PF_CPU_MS: "0.5,0.05"
     INKLING_DECODE_HOSTK_THREADS: "6"
     HYB_SOCKET: "1"
@@ -158,7 +162,8 @@ card:
     per MoE layer, top-6; sliding-window and global attention with a learned relative bias; short convolutions),
     served through a hybrid-MoE overlay: the experts do not fit in the 4 dies' DRAM, so each layer's 191 most-used
     experts stay on the device (bfp4, with bfp8 down projections in the 16 most sensitive layers) and the other 67
-    are computed on the host CPU from int4 copies. About 95% of routed expert picks hit the device. Decoding is
+    are computed on the host CPU from int4 copies (decode) or streamed to the device over PCIe (prefill, the
+    fewest-token ones on the CPU). About 95% of routed expert picks hit the device. Decoding is
     speculative with the checkpoint's native MTP head (2 drafts per verify pass, exact: the output is the target
     model's own choice). Text only.
   intended_use: >
@@ -169,44 +174,50 @@ card:
     - About 105 GB of free host RAM (the experts the device does not hold: int4 copies for the CPU, ~42 GB, and pinned
       device-format copies for prefill streaming, ~49 GB; plus the server);
       the server checks this at startup (`HYB_RAM_CHECK=warn` to start anyway)
-    - About 720 GB of disk: the BF16 checkpoint (~550 GB), ~42 GB of int4 expert copies and ~110 GB of device images
-      the first boot writes to the weight cache
+    - About 770 GB of disk: the BF16 checkpoint (~550 GB), ~42 GB of int4 expert copies, ~48 GB of device-format
+      copies for prefill streaming and ~110 GB of device images the first boot writes to the weight cache
   quickstart: |
     ### First boot
 
-    The first boot builds the int4 host copies of the experts the device does not hold (~6 min on 8 cores) and
-    converts the resident experts into device images (~25 min); later boots load them and are ready in a few minutes.
-    The first few requests after a fresh install can take longer while kernels compile once.
+    The first boot builds the copies of the experts the device does not hold (int4 for the CPU and device-format
+    copies for prefill streaming) and converts the resident experts into device images; later boots load them and
+    compile every program in a ~2 minute warm-up before the server accepts requests.
   usage: |
     One request at a time (max_num_seqs 1). The reasoning effort is a chat-template kwarg:
     `"chat_template_kwargs": {"reasoning_effort": "none" | "minimal" | "low" | "medium" | "high" | "max"}` (default
-    high). Greedy and sampled decoding (temperature / top-p / top-k / seed) are both exact with respect to the target
-    model: the MTP drafter only proposes tokens.
+    high). Greedy and sampled decoding are both exact with respect to the target model: the MTP drafter only proposes
+    tokens. Temperature / top-p / top-k / seed and the presence / frequency / repetition penalties run inside the
+    speculative step; min_p, logit_bias, logprobs, bad words and structured outputs (json_schema) work too, decoding
+    one token per step (~25 tok/s).
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
-    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.866 (confident tokens 0.947, KL 0.213) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
+    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.866 (confident tokens 0.948, KL 0.199) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
     | GSM8K, greedy, reasoning effort none | 97.0% | — | 200 |
     | IFEval, greedy, reasoning effort none (prompt strict / loose) | 88.0% / 90.0% | — | 200 |
 
     | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-128k | ~50 | 128 | 1 | 8 | 0.53 s | — | 39.8 | 3.7 s |
-    | p300x2-128k, reasoning effort none | ~40 | 130-190 | 1 | 3 | 0.55 s | — | 45.5 | 4.0 s |
-    | p300x2-128k | 914 | ~10 | 1 | 1 | 2.5 s | 361 | 40.2 | 2.8 s |
-    | p300x2-128k | 6,979 | ~10 | 1 | 1 | 19.0 s | 367 | 38.0 | 19.3 s |
-    | p300x2-128k | 27,815 | ~10 | 1 | 1 | 78.6 s | 354 | 38.2 | 78.9 s |
-    | p300x2-128k (6 prefill threads) | 104,192 | ~10 | 1 | 1 | 331 s | 315 | 38.5 | 331 s |
+    | p300x2-128k | ~50 | 256 | 1 | 8 | 0.59 s | — | 36.7 | 7.6 s |
+    | p300x2-128k, temperature 0.7, top-p 0.95 | ~50 | 256 | 1 | 8 | 0.59 s | — | 33.9 | 8.1 s |
+    | p300x2-128k | 914 | ~10 | 1 | 1 | 1.7 s | 543 | — | 1.9 s |
+    | p300x2-128k | 3,511 | ~10 | 1 | 1 | 4.8 s | 735 | — | 5.0 s |
+    | p300x2-128k | 13,926 | ~10 | 1 | 1 | 14.6 s | 955 | — | 14.8 s |
+    | p300x2-128k | 27,821 | ~10 | 1 | 1 | 28.7 s | 970 | — | 28.9 s |
+    | p300x2-128k | 55,613 | ~10 | 1 | 1 | 57.0 s | 975 | — | 57.2 s |
+    | p300x2-128k | 104,192 | ~10 | 1 | 1 | 107.6 s | 968 | — | 107.9 s |
 
-    Measured on one QB2 through the OpenAI endpoint with `tt-model serve`, greedy, warm caches, 2026-11-15; the ~50-token
-    rows are short chat prompts (8 held-out prompts at the default reasoning effort; 3 code / math / prose prompts at
-    effort none); the long rows are a needle in a long document (found at every length). Decode varies with the text
-    (speculative acceptance, how many of a token's experts are on the device). The 104K row is from the development
-    server with the same code (6 host threads in prefill instead of the package's 8).
+    Measured on one QB2 through the OpenAI endpoint, warm caches, 2026-11-15; the ~50-token rows are 8 held-out chat
+    prompts (code, math, prose, three languages) at the default reasoning effort; the long rows are a needle in a long
+    document (found at every length). Decode varies with the text (speculative acceptance, how many of a token's
+    experts are on the device): ~33-44 tok/s across those prompts.
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
-    - Long prompts are prefilled at ~350 tok/s (the CPU computes the experts the device does not hold): a 28K-token
-      prompt takes ~80 s. Streaming those experts to the device is implemented but not enabled yet.
+    - Prefill runs at ~950 tok/s from a few thousand tokens on (a 100K-token prompt takes ~110 s); shorter prompts
+      are slower per token.
+    - Requests with min_p, logit_bias, logprobs, bad words or structured outputs decode one token per step (~25 tok/s).
+    - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
+      does not convert it); `tool_choice: "auto"` returns proper tool_calls.
     - Text only: image and audio inputs are refused.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 / bfp8 device experts).
