@@ -181,17 +181,20 @@ class InklingDecoderLayer(_M27Layer):
         self.attn_sconv.commit_rows(n)
         self.mlp_sconv.commit_rows(n)
 
-    def forward_prefill(self, x, p0: int, page_table_host=None):
+    def forward_prefill(self, x, p0: int, page_table_host=None, valid=None):
         """A prefill chunk (T rows, T % 64 == 0, p0 % block == 0): x [1, 1, T, H/N] fractured -> same. One attention
-        launch for the chunk (tt/attention.forward_prefill), the MoE's prefill path, every conv state past all T rows."""
+        launch for the chunk (tt/attention.forward_prefill), the MoE's prefill path, every conv state past all T rows
+        (or past the first `valid`: a padded chunk's real rows)."""
         mc = Mode.PREFILL
         norm_cfg = self.args.get_norm_config("attn", mc) if self.num_devices > 1 else None
         attn_in = self.attention_norm(x, mode=mc, norm_config=norm_cfg)
         if attn_in.is_sharded():
             attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.DRAM_MEMORY_CONFIG)
-        a = self.attention.forward_prefill(attn_in, p0, page_table_host)
+        a = self.attention.forward_prefill(attn_in, p0, page_table_host, valid=valid)
         ttnn.deallocate(attn_in)
-        a2 = self.attn_sconv.rows(a, commit_all=True)
+        a2 = self.attn_sconv.rows(a, commit_all=valid is None)
+        if valid is not None:
+            self.attn_sconv.commit_rows(int(valid))
         ttnn.deallocate(a)
         h = ttnn.add(x, a2)
         ttnn.deallocate(a2)
@@ -201,7 +204,9 @@ class InklingDecoderLayer(_M27Layer):
             ff_in = ttnn.sharded_to_interleaved(ff_in, ttnn.DRAM_MEMORY_CONFIG)
         f = self.feed_forward.forward(ff_in, mode="prefill")
         ttnn.deallocate(ff_in)
-        f2 = self.mlp_sconv.rows(f, commit_all=True)
+        f2 = self.mlp_sconv.rows(f, commit_all=valid is None)
+        if valid is not None:
+            self.mlp_sconv.commit_rows(int(valid))
         ttnn.deallocate(f)
         out = ttnn.add(h, f2)
         ttnn.deallocate(h)

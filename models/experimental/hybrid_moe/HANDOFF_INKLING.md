@@ -14,15 +14,40 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
 | 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **next**: vLLM integration (plan below). Packaging and multimodal not started. |
+| 6. vLLM serving, package, multimodal | **in progress** (2026-11-15 second session): see Plan to completion. |
 
-**Next steps, in order:**
-1. **vLLM serving** (all serving AND all reported measurements go through the vLLM server + the TT plugin, like every
-   other model; `tools/spec_bench.py` numbers are dev signals only). Plan: **vLLM serving plan** below.
-2. `HYB_HOST_ROUTE=1` is decided: keep it in Inkling's serve env (decode-path quality at noise level, see Log).
-3. Free-running task evals (GSM8K / IFEval) through the vLLM server, TTFT / decode via `vllm bench serve`.
-4. Long-context profiles (128K / 256K / 1M; only 8K exercised so far) and the >128K log-scaling path.
-5. Package (`templates/tt-model-hybrid.yaml`), expert artifacts to HF, model card; then multimodal (host encoders).
+**Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
+`tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
+
+Diagnosis behind the plan:
+- Decode is bound by host int4 expert bandwidth (~36 of ~46 GB/s DDR), so the device slot count decides speed.
+  All-bfp8 C=106 misses ~80 experts per token (~1.26 GB of reads); bfp4 C=194 misses ~13 (~0.21 GB). Multi-row
+  verify multiplies misses, so a high-miss profile also caps spec decode at k=1.
+- C=106 also makes prefill CPU-bound: ~4 s for 1000 tokens. bfp8 device copies for prompt streaming (~160 GB) do not
+  fit in host RAM next to the int4 library.
+- On quality the profiles are closer than top-1 alone suggests. early_gu4dn8 C=194 is 0.842 / 0.933 / 0.287 (M2.7:
+  0.848 / 0.933 / 0.196), and its NLL is closer to the reference than all-bfp8 C=106 (3.136 vs 3.168; ref 3.093).
+- A bfp4 profile can use M2.7's tuned fast path (fused kernels, single-trace socket decode, fetch, prefill streaming).
+  The LoFi weight rounding is lossless for bfp4. Inkling's fused build and host routing are already in place, but
+  that path has never run.
+
+Steps (device jobs one at a time, each watched; CPU / editor work runs alongside):
+1. **vLLM serving v1** on plugin `23b0736` (`prefix-state-cache`, the revision M2.7 production runs; the spec shim
+   matches it). `tt/generator_vllm.py`, `vllm_metadata.json`, `vllm_bundle/`, HF-config registration in
+   `serve/sitecustomize.py`, an MTP spec step (`QWEN35_EXT_SPEC`, built from `tools/spec_bench.py`'s traced loop),
+   and `serve/serve_inkling.sh`. Gate: greedy text through the server equals plain decode; chat, reasoning and tools
+   work.
+2. **Fast profile:** bfp4 + bfp8-ish early layers at C~194 on the fused / socket path. Gates: decode path = prefill
+   path (rows consistency), teacher-forced parity, then task evals.
+3. **Quality decision by task evals through the server** (GSM8K, IFEval, a LiveCodeBench slice), fast profile vs
+   all-bfp8 C=106. If the fast profile falls short: GPTQ-style error-compensated rounding into the bfp4 grid (offline,
+   CPU; the device format is unchanged) for the device experts.
+4. **Speed in serving:** fetch / LRU slots, prompt streaming (TTFT), MTP k (and DSpark if it accepts more), long
+   context (128K default; 256K / 1M if DRAM allows; log_scaling > 128K tested).
+5. **Package and publish:** `tt-model-hybrid.yaml` (first-boot expert builds like the M2.7 package), card numbers
+   from `vllm bench serve` / `serve/bench.py`, `tt-model package --container`, a clean `tt-model serve` test,
+   `tt-model push`.
+6. Multimodal (vision / audio encoders on the host) after text ships.
 
 ## vLLM serving plan (mapped 2026-11-15 from the M2.7 hybrid port; plugin fork `~/fork-vllm-tt-plugin`)
 

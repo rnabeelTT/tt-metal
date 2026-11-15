@@ -279,11 +279,12 @@ class InklingAttention:
         return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
                              memory_config=DRAM)
 
-    def forward_prefill(self, x, p0: int, page_table_host: torch.Tensor | None = None, reduce=True):
+    def forward_prefill(self, x, p0: int, page_table_host: torch.Tensor | None = None, reduce=True, valid=None):
         """A prefill chunk in ONE attention launch: x [1, 1, T, H] replicated (normed) at positions p0 .. p0 + T - 1,
         p0 a multiple of the block size, T a multiple of 64 (pad the chunk; padded rows write KV past the prompt, which
         decode overwrites before any row can attend to it) and <= prefill_chunk. page_table_host [max_blocks] int32:
-        the sequence's logical -> physical blocks (global layers). The k/v conv states advance past all T rows.
+        the sequence's logical -> physical blocks (global layers). The k/v conv states advance past all T rows, or past
+        the first `valid` (the real rows of a padded chunk; the rest are padding).
         -> [1, 1, T, H/N] fractured (reduce) or the [1, 1, T, H] partial."""
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
         T = int(x.shape[2])
@@ -297,8 +298,11 @@ class InklingAttention:
         v = ttnn.slice(p, (0, 0, 0, qd + kd), (1, 1, T, qd + 2 * kd), memory_config=mc)
         r = ttnn.slice(p, (0, 0, 0, qd + 2 * kd), (1, 1, T, self.fd), memory_config=mc)
         ttnn.deallocate(p)
-        k = self.k_sconv.rows(k, commit_all=True)
-        v = self.v_sconv.rows(v, commit_all=True)
+        k = self.k_sconv.rows(k, commit_all=valid is None)
+        v = self.v_sconv.rows(v, commit_all=valid is None)
+        if valid is not None:
+            self.k_sconv.commit_rows(int(valid))
+            self.v_sconv.commit_rows(int(valid))
         q = ttnn.reshape(q, (1, T, NH, HD))
         q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
         k = ttnn.reshape(k, (1, T, NKV, HD))

@@ -1,0 +1,9 @@
+{
+  "arch": "InklingForConditionalGeneration",
+  "main_class": "models.autoports.thinkingmachines_inkling_small.tt.generator_vllm:InklingForConditionalGeneration",
+  "hf_model": "thinkingmachines/Inkling-Small",
+  "mesh_device": [
+    "P300x2"
+  ],
+  "notes": "Inkling-Small (HF inkling_mm_model, 276B total / 12B active, 42 layers, 256 routed + 2 shared experts top-6, sliding + global attention with relative bias, short convs) on a (1,4) Blackhole mesh, text only; served through the hybrid-MoE overlay (models/experimental/hybrid_moe, serve/serve_inkling.sh) with native MTP speculative decoding; registered by the vLLM TT plugin from EXTRA_MODELS_DIR."
+}
