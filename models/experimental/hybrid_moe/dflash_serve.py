@@ -337,7 +337,7 @@ class Verify:
         if self.ctrace is not None:
             ttnn.execute_trace(self.mesh, self.ctrace, cq_id=0, blocking=False)
             outs = self.couts
-        else:
+        else:  # eager (warm-up)
             outs = self._cands_body(self.logits)
         comp = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
         per_die = int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1])
@@ -461,6 +461,7 @@ class DFlashServing:
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), self.gen.page_table[0])
         self.ver.run()
         self.ver.run()
+        self.ver.read_cands(self.R, self.V)  # compiles the sampled path's candidate top-k (captured with the verify)
         self.dr.reset()
         self.dr.stage_pass([], 0)
         self.dr.run("pass", self.dr.pass_body)
@@ -489,6 +490,7 @@ class DFlashServing:
         self.ver.stage([0] * self.R, list(range(8, 8 + self.R)), row)
         self.ver.run()
         self.ver.run()
+        self.ver.read_cands(self.R, self.V)  # compiles the sampled path's candidate top-k (captured with the verify)
         ttnn.synchronize_device(self.mesh)
 
     def warm_prefill_path(self):
