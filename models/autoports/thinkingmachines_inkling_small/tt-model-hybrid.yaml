@@ -89,7 +89,6 @@ serve:
     HYB_LOWBIT: "0"
     # prefill streaming: missed experts copied over PCIe into 128 staging slots and computed on the device, the prefill
     # layer-major in groups of 16 chunks of 1024 tokens (a staged expert serves 16K tokens)
-    HYB_STREAM_SLOTS: "128"
     HYB_STREAM_ROUNDS: "3"
     HYB_STREAM_MIN: "4"
     HYB_STREAM_MIN_LONG: "1"
@@ -98,10 +97,16 @@ serve:
     HYB_PF_PREFETCH_MIN: "1024"
     HYB_LRU: "0"
     INKLING_PREFILL_GROUP: "16"
+    # the fewest-token missed experts of a prefill step on the CPU while the rest stream; the host kernel runs its
+    # whole 8-thread pool in prefill and 6 threads in decode (bandwidth-bound there)
+    HYB_PF_SPLIT: "1"
+    HYB_PF_COPY_MS: "0.65"
+    HYB_PF_CPU_MS: "0.5,0.05"
+    INKLING_DECODE_HOSTK_THREADS: "6"
     HYB_SOCKET: "1"
     HYB_SOCKET_H2D_DEPTH: "4"
     HYB_PREFETCH: "1"
-    HYB_HOSTK_THREADS: "6"
+    HYB_HOSTK_THREADS: "8"
     # the 67 experts per layer the device does not hold are copied from the checkpoint on the first boot into the weight
     # cache (hybrid/firstboot.py; ~15 min): int4 for the CPU (decode misses), and gate/up bfp4 + down bfp8 device
     # copies for prefill streaming; only the official weights download
@@ -120,14 +125,26 @@ serve:
     INKLING_PREFILL_CHUNK: "1024"
     INKLING_SPEC_K: "2"
 
+# Two profiles share the downloads and the caches: the KV caches of a 128K context leave room for 32 prefill staging
+# slots, a 32K context for 128 (faster long prompts).
 serve_profiles:
+  - name: p300x2-128k
+    description: >
+      Up to 128K tokens of context (the default).
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 131072
+    env:
+      HYB_STREAM_SLOTS: "32"
   - name: p300x2-32k
     description: >
-      Up to 32K tokens of context.
+      Up to 32K tokens; more prefill staging slots (faster prompts of several thousand tokens).
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 32768
-default_profile: p300x2-32k
+    env:
+      HYB_STREAM_SLOTS: "128"
+default_profile: p300x2-128k
 
 card:
   attribution: >

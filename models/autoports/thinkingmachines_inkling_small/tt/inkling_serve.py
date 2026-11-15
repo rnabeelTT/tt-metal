@@ -366,8 +366,16 @@ class InklingSpecServing:
         hyb = _hyb()
         if hyb is not None and hyb.enabled:
             hyb.stream.begin_prefill(len(ids) - 1)  # the streaming threshold / prefetch banking by prompt length
+            if hyb.hostk:
+                hyb.hostk_threads = 0  # prefill: the host kernel's whole pool (compute-bound)
         hook = self._mtp_prompt_hook(ids) if self.mtp_prompt else None
-        self.model.prefill_tokens(torch.as_tensor(ids[:-1]), self.pt_host, buckets=self.buckets, on_chunk=hook)
+        try:
+            self.model.prefill_tokens(torch.as_tensor(ids[:-1]), self.pt_host, buckets=self.buckets, on_chunk=hook)
+        finally:
+            if hyb is not None and hyb.enabled and hyb.hostk:
+                # decode: INKLING_DECODE_HOSTK_THREADS (default 6; bandwidth-bound, the rest leave DRAM bandwidth to
+                # the uploads)
+                hyb.hostk_threads = int(os.environ.get("INKLING_DECODE_HOSTK_THREADS", "6"))
 
     def _reset(self):
         self.model.reset_sequence_state()

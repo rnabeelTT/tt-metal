@@ -39,6 +39,9 @@ case $PROFILE in
           PENV="$PENV -e HYB_STREAM_ROUNDS=${SROUNDS:-3} -e HYB_STREAM_MIN=${SMIN:-4} -e HYB_STREAM_MIN_LONG=1"
           PENV="$PENV -e HYB_STREAM_LONG_FROM=${SLONG:-1024} -e HYB_STREAM_CQ1=1 -e HYB_PF_PREFETCH_MIN=1024 -e HYB_LRU=0"
           PENV="$PENV -e INKLING_PREFILL_GROUP=${PGROUP:-16}"
+          # split: the fewest-token missed experts of a prefill step on the CPU while the rest stream (1-4K prompts:
+          # 7% faster); costs for Inkling's experts: an 18.4 MB copy ~0.65 ms, an int4 expert ~0.5 ms + 0.05 per token
+          PENV="$PENV -e HYB_PF_SPLIT=${PFSPLIT:-1} -e HYB_PF_COPY_MS=0.65 -e HYB_PF_CPU_MS=0.5,0.05 -e HYB_HOSTK_THREADS=${HK_THREADS:-8}"
         fi
         TRACE_MIB=${TRACE_MIB:-320} ;;
   *) echo "PROFILE=$PROFILE: fast | quality"; exit 1 ;;
