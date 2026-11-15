@@ -75,8 +75,9 @@ def ensure():
         return
     os.environ["_HYB_EXPERTS_READY"] = "1"  # the EngineCore child inherits it
     lib, dev, plan = (hfpath.resolve(os.environ.get(k, "")) for k in ("HYB_LIB", "HYB_DEV_EXPERTS", "HYB_PLAN"))
-    if not (lib and dev and plan):
-        raise ValueError("HYB_BUILD_LAYERS needs HYB_LIB, HYB_DEV_EXPERTS and HYB_PLAN (a compact plan with `order`)")
+    if not (lib and plan):
+        raise ValueError("HYB_BUILD_LAYERS needs HYB_LIB and HYB_PLAN (a compact plan with `order`); HYB_DEV_EXPERTS "
+                         "too when the profile fetches / streams experts over PCIe")
     snap, spec = _spec(plan)
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     layers = ",".join(str(v) for v in spec["layers"])
@@ -91,6 +92,8 @@ def ensure():
         ),
         ("device-format expert copies", dev, [os.path.join(here, "build_dev_experts.py"), snap, dev, cold, layers], {}),
     ):
+        if not out:  # no HYB_DEV_EXPERTS: a profile without the PCIe fetch / prefill streaming (e.g. Inkling's)
+            continue
         if _done(out, spec, what):
             continue
         os.makedirs(out, exist_ok=True)

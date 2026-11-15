@@ -3,21 +3,29 @@
 # user) on the QB2, through vLLM + the TT plugin (OpenAI-compatible API on PORT, model name inkling-small-hybrid).
 #
 # usage: serve/serve_inkling.sh ; logs -> serve/server_inkling.log
-# env:   PROFILE  quality (default: all routed experts bfp8, 106 device slots per layer, unfused decode, host routing)
-#                 fast    (routed bfp4 with layers 2-17 gate/up bfp4 + down bfp8, 192 slots, fused decode kernels)
-#        CTX (max model len, default 32768), K (MTP drafts per verify pass, default 1), PORT (8000),
-#        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400), HYB_IMAGE, WCACHE, LIB_S (106),
+# env:   PROFILE  fast (default: routed bfp4 with layers 2-17 gate/up bfp4 + down bfp8, 192 device slots per layer, fused
+#                 decode kernels, host <-> device sockets, MTP k=2; the int4 host library of the 67 experts per layer
+#                 outside the device's 191 built on first use, plans/inkling_plan.npz)
+#                 quality (all routed experts bfp8, 106 slots, unfused decode, host routing; MTP k=1)
+#        CTX (max model len, default 32768), K (MTP drafts per verify pass; fast 2, quality 1), PORT (8000),
+#        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400; fast 320), HYB_IMAGE, WCACHE, LIB, FP32ACC (1), PREFETCH (1),
 #        EXTRA (more docker -e flags)
 # Code: this checkout's Inkling port, the M2.7 port, qwen36 and hybrid_moe are mounted over the image's copies.
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)   # models/experimental/hybrid_moe
 REPO=$(cd "$P/../../.." && pwd)
-PROFILE=${PROFILE:-quality}
+PROFILE=${PROFILE:-fast}
 CTX=${CTX:-32768}
-K=${K:-1}
+PLAN=/opt/tt-metal/models/experimental/hybrid_moe/plans/inkling_plan.npz
 case $PROFILE in
-  quality) POLICY=all_bfp8; S=106; PENV="-e HYB_FUSED=0 -e HYB_HOST_ROUTE=1" ;;
+  quality) K=${K:-1}; POLICY=all_bfp8; S=106; LIB=/hyblib/inkling_int4_s106
+           PENV="-e HYB_FUSED=0 -e HYB_HOST_ROUTE=1 -e HYB_PLAN=$PLAN -e HYB_PLAN_WEIGHT=mass" ;;
   # fast: little DRAM beside the experts -> 1024-row prefill launches (half the 2048-row transients)
-  fast) POLICY=early_gu4dn8; S=192; PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024}"
+  fast) K=${K:-2}; POLICY=early_gu4dn8; S=192; LIB=${LIB:-/hyblib/inkling_int4_fb191}
+        PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024} -e HYB_SOCKET=1"
+        PENV="$PENV -e HYB_PREFETCH=${PREFETCH:-1} -e HYB_PLAN=$PLAN -e HYB_PLAN_WEIGHT=mass"
+        # first use: build the int4 library of every expert outside each layer's 191 device slots (hybrid/firstboot.py)
+        PENV="$PENV -e HYB_LIB_KEYS=port:thinkingmachines_inkling_small -e HYB_BUILD_STATIC=191"
+        PENV="$PENV -e HYB_BUILD_LAYERS=$(seq -s, 2 41) -e QWEN35_MOE_FP32_ACC=${FP32ACC:-1}"
         TRACE_MIB=${TRACE_MIB:-320} ;;
   *) echo "PROFILE=$PROFILE: quality | fast"; exit 1 ;;
 esac
@@ -48,8 +56,7 @@ docker run -d --name inkling-serve \
   -e VLLM_ENGINE_READY_TIMEOUT_S=7200 \
   -e QWEN35_PRECISION_CONFIG=/opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/$POLICY.json \
   -e HYB_ENABLE=1 -e HYB_PORT=thinkingmachines_inkling_small -e HYB_POC_DIR=/opt/tt-metal/models/experimental/hybrid_moe \
-  -e HYB_SLOTS=$S -e HYB_LIB=/hyblib/inkling_int4_s${LIB_S:-106} \
-  -e HYB_PLAN=/opt/tt-metal/models/experimental/hybrid_moe/runs/inkling/plan_inkling_hyb.npz \
+  -e HYB_SLOTS=$S -e HYB_LIB=$LIB \
   -e HYB_STREAM_SLOTS=0 -e HYB_SKIP=0 -e HYB_LOWBIT=0 -e HYB_HOSTK_THREADS=${HK_THREADS:-6} -e HYB_DECODE_ROWS=8 \
   -e HYB_WCACHE=${WCACHE:-/cache/wcache} $PENV \
   -e INKLING_SPEC_K=$K -e INKLING_TRACE=${TRACE:-1} ${EXTRA} \

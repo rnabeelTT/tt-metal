@@ -69,6 +69,11 @@ ROUTER_FUSED_SIGB = os.environ.get("QWEN35_ROUTER_FUSED_SIGB", "0") == "1"
 # at TP4; zero columns / rows contribute exactly 0) for prefill and decode alike. Weights are stored rounded to the
 # fused matmul's 5 significant bits (prefill reads the same rounded weights).
 MOE_FUSED_DECODE = os.environ.get("QWEN35_MOE_FUSED_DECODE", "0") == "1"
+# QWEN35_MOE_FP32_ACC (default 0: every port unchanged): the routed expert matmuls (prefill, unfused decode) accumulate
+# in FP32 DST, with output sub-blocks of at most 4 tiles (FP32 DST holds half the bf16 tiles: the 8-tile sub-blocks are
+# what corrupted the expert output in tt-metal #49068). bf16 accumulation over K = 4096 cost Inkling's bfp4 prefill
+# path ~0.03 teacher-forced top-1 against the fused decode kernels (which accumulate in FP32).
+MOE_FP32_ACC = os.environ.get("QWEN35_MOE_FP32_ACC", "0") == "1"
 MOE_FUSED_ROWS_MAX = int(os.environ.get("QWEN35_MOE_FUSED_ROWS_MAX", "32") or 0)
 MOE_PAD_INTER = int(os.environ.get("QWEN35_MOE_PAD_INTER", "0") or 0)
 # optional routed-expert weight source: an object with load(mesh, layer, spec) -> (up_gate, down) | None and
@@ -94,8 +99,9 @@ def sparse_matmul_program_config(
     per_core_n = n_tiles // cores
     cy = _largest_divisor_at_most(cores, grid_y)
     cx = cores // cy
-    sub_w = _largest_divisor_at_most(per_core_n, 8)
-    sub_h = _largest_divisor_at_most(m_tiles, max(1, 8 // sub_w))
+    dst = 4 if MOE_FP32_ACC else 8  # DST tiles per sub-block
+    sub_w = _largest_divisor_at_most(per_core_n, dst)
+    sub_h = _largest_divisor_at_most(m_tiles, max(1, dst // sub_w))
     in0_block_w = _largest_divisor_at_most(k_tiles, max(1, in0_block_w_cap))
     return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
         compute_with_storage_grid_size=ttnn.CoreCoord(cx, cy),
@@ -394,7 +400,9 @@ class Qwen35MoE:
             mesh_device.arch(),
             math_fidelity=self.prec.routed_fidelity,
             math_approx_mode=False,
-            fp32_dest_acc_en=False,  # tt-metal #49068: fp32 dest halves the matmul dest and corrupts expert output on BH
+            # tt-metal #49068: fp32 dest halves the matmul dest and corrupted the expert output on BH with 8-tile
+            # sub-blocks; QWEN35_MOE_FP32_ACC=1 enables it with 4-tile sub-blocks (sparse_matmul_program_config)
+            fp32_dest_acc_en=MOE_FP32_ACC,
             packer_l1_acc=False,
         )
         self.shared_ckc = ttnn.init_device_compute_kernel_config(

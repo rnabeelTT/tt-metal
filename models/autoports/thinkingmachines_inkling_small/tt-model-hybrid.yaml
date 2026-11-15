@@ -1,0 +1,160 @@
+# tt-model container (v5.1) manifest for thinkingmachines/Inkling-Small (276B MoE, 12B active, BF16 checkpoint) on one
+# QB2 (2 x p300 = 4 Blackhole dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's 191
+# most-used experts stay on the device (bfp4; bfp8 down projections in layers 2-17), the other 67 are computed on the
+# host CPU from int4 copies built on the first boot; native MTP speculative decoding (2 drafts per pass). Single user
+# (max_num_seqs 1); greedy or sampled (exact speculative sampling). Text only.
+# Build: tt-model package --container models/autoports/thinkingmachines_inkling_small/tt-model-hybrid.yaml
+schema: "5.1"
+
+repo: raahemnabeel/inkling-small-hybrid-qb2
+name: inkling-small-hybrid-qb2
+weights: {repo: thinkingmachines/Inkling-Small, revision: 8cc5877b44d343f88b92086aa1fb72897950f06a}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/inkling-pkg   # worktree of branch raahem/inkling-small-hybrid (rnabeelTT/tt-metal)
+  code:
+    - models/autoports/thinkingmachines_inkling_small/__init__.py
+    - models/autoports/thinkingmachines_inkling_small/tt
+    - models/autoports/thinkingmachines_inkling_small/vllm_metadata.json
+    - models/autoports/thinkingmachines_inkling_small/vllm_bundle
+    - models/autoports/thinkingmachines_inkling_small/doc/precision/early_gu4dn8.json
+    - models/autoports/thinkingmachines_inkling_small/doc/precision/all_bfp8.json
+    # the shared qwen35-lineage code the Inkling port builds on (the M2.7 port's model / MoE / generator / vLLM adapter)
+    - models/autoports/minimaxai_minimax_m2_7/__init__.py
+    - models/autoports/minimaxai_minimax_m2_7/tt
+    - models/autoports/minimaxai_minimax_m2_7/doc/context_contract.json
+    - models/autoports/minimaxai_minimax_m2_7/doc/datatype_sweep/selected_precision_config.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/__init__.py
+    - models/autoports/qwen_qwen3_5_122b_a10b/tt
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/context_contract.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/selected_precision_config.json
+    # the hybrid overlay: runtime modules only (no runs/, benchmarks or debug scripts)
+    - models/experimental/hybrid_moe/hybrid
+    - models/experimental/hybrid_moe/serve/sitecustomize.py
+    - models/experimental/hybrid_moe/build_int4_library.py
+    - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/experimental/hybrid_moe/plans/inkling_plan.npz
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 23b0736 (prefix-state-cache): the M2.7 hybrid package's plugin
+  extra_models_dir: models/autoports/thinkingmachines_inkling_small/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 1
+  capabilities:
+    tool_parser: inkling
+    reasoning_parser: inkling
+  args: ["--limit-mm-per-prompt", '{"image": 0, "audio": 0}']
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: all
+      trace_region_size: 335544320
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: thinkingmachines/Inkling-Small
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
+    HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
+    QWEN35_PRECISION_CONFIG: /opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/early_gu4dn8.json
+    # --- the hybrid overlay (serve/serve_inkling.sh PROFILE=fast) ---
+    HYB_ENABLE: "1"
+    HYB_PORT: thinkingmachines_inkling_small
+    HYB_SLOTS: "192"          # 2 shared + 189 routed experts + the zero sink, per layer
+    HYB_FUSED: "1"
+    HYB_ROWS: "3"
+    HYB_DECODE_ROWS: "8"
+    HYB_SKIP: "0"
+    HYB_LOWBIT: "0"
+    HYB_STREAM_SLOTS: "0"
+    HYB_SOCKET: "1"
+    HYB_PREFETCH: "1"
+    HYB_HOSTK_THREADS: "6"
+    # the 67 experts per layer the device does not hold are copied from the checkpoint on the first boot into the weight
+    # cache as int4 for the CPU (hybrid/firstboot.py, ~15 min); only the official weights download
+    HYB_LIB: /weight-cache/int4_s191
+    HYB_LIB_KEYS: port:thinkingmachines_inkling_small
+    HYB_BUILD_STATIC: "191"
+    HYB_BUILD_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41"
+    # expert placement: the build order and routed mass of reference runs (plans/inkling_plan.npz, statistics only)
+    HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/inkling_plan.npz
+    HYB_PLAN_WEIGHT: mass
+    HYB_RAM_CHECK: error
+    HYB_WCACHE: /weight-cache/wcache_inkling   # device images of the resident experts, written on the first boot
+    QWEN35_MOE_FP32_ACC: "1"   # FP32 accumulation in the prefill expert matmuls (quality: see the card)
+    INKLING_PREFILL_CHUNK: "1024"
+    INKLING_SPEC_K: "2"
+
+serve_profiles:
+  - name: p300x2-32k
+    description: >
+      Up to 32K tokens of context.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 32768
+default_profile: p300x2-32k
+
+card:
+  attribution: >
+    Serves [thinkingmachines/Inkling-Small](https://huggingface.co/thinkingmachines/Inkling-Small) by Thinking
+    Machines Lab, with its own multi-token-prediction (MTP) head as the speculative drafter. Only the official
+    checkpoint is downloaded; the first boot derives the expert copies the server needs on your machine.
+  description: >
+    Inkling-Small, a 276B-parameter mixture-of-experts model (12B active; 42 layers, 256 routed + 2 shared experts
+    per MoE layer, top-6; sliding-window and global attention with a learned relative bias; short convolutions),
+    served through a hybrid-MoE overlay: the experts do not fit in the 4 dies' DRAM, so each layer's 191 most-used
+    experts stay on the device (bfp4, with bfp8 down projections in the 16 most sensitive layers) and the other 67
+    are computed on the host CPU from int4 copies. About 95% of routed expert picks hit the device. Decoding is
+    speculative with the checkpoint's native MTP head (2 drafts per verify pass, exact: the output is the target
+    model's own choice). Text only.
+  intended_use: >
+    Single-user chat, coding and agent use (tool calls through vLLM's inkling parser, reasoning split into
+    reasoning_content; the reasoning effort is a chat-template kwarg) on one QB2.
+  prerequisites: |
+    - A host CPU with AVX-512 (the host expert kernel); 16 or more cores recommended
+    - About 60 GB of free host RAM (the int4 copies of the experts the device does not hold, ~42 GB, plus the server)
+    - About 720 GB of disk: the BF16 checkpoint (~550 GB), ~42 GB of int4 expert copies and ~110 GB of device images
+      the first boot writes to the weight cache
+  quickstart: |
+    ### First boot
+
+    The first boot downloads the checkpoint, builds the int4 host copies of the experts (~15 min on 8 cores) and
+    converts the resident experts into device images (~25 min); later boots load them in a couple of minutes.
+  usage: |
+    One request at a time (max_num_seqs 1). The reasoning effort is a chat-template kwarg:
+    `"chat_template_kwargs": {"reasoning_effort": "none" | "minimal" | "low" | "medium" | "high" | "max"}` (default
+    high, 0.9). Greedy and sampled decoding (temperature / top-p / top-k / seed) are both exact.
+  performance: |
+    _to be measured_
+  limitations: |
+    - One user at a time; batching is not supported by the hybrid path.
+    - Text only: image and audio inputs are refused.
+    - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
+    - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 / bfp8 device experts).
+    - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
+  licensing: >
+    Inkling-Small is released under the Apache 2.0 license; the serving code is Apache-2.0.
+  license: {id: apache-2.0}
+
+verify:
+  - "import models.autoports.thinkingmachines_inkling_small.tt.generator_vllm as g; assert g.InklingForConditionalGeneration"
