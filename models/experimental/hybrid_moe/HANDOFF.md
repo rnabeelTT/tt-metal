@@ -165,6 +165,13 @@ Pieces (all traced, per-prompt re-capture):
   - License: MiniMax M2.7 is non-commercial (commercial use needs written authorization from MiniMax and "Built with
     MiniMax M2.7" display); attribution on the card and autoport README, LICENSE-MiniMax-M2.7 in the HF repo. The
     DFlash drafter is under the NVIDIA Software and Model Evaluation License.
+  - Request defaults (2026-11-15): the TT plugin normalizes --generation-config auto to vllm for block-output models,
+    so a request without sampling parameters sampled at T 1.0 over the full vocabulary (full-logits path). The package
+    passes --override-generation-config {temperature 1.0, top_p 0.95, top_k 40} (verified in the server log; an
+    explicit temperature 0 stays greedy). serve/serve_m27.sh (dev) does not.
+  - p150x4-{128k,64k,32k} profiles (same layouts, MESH_DEVICE=P150x4, a (1, 4) mesh): not run on p150 hardware. The
+    model and hybrid code read the compute grid from the device; a p150 die has a larger grid than a p300 die, so
+    grid-derived program configs differ from the measured ones.
 - FUTURE SCOPE (2026-11-14, not started):
   - Host-tier prefix cache (vLLM CPU KV offload / LMCache-style): copy a finished or evicted request's KV blocks to host
     RAM and copy them back when the conversation returns. M2.7 KV is ~135 KB per token (62 layers): a 45K-token
