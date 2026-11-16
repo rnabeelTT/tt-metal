@@ -39,6 +39,7 @@ from .experts import (
     gu_ring,
     logits_row_bytes,
     place_along_rows,
+    place_banks_offrow,
 )
 
 TILE_ROWS = (1, 2, 4, 8)  # custom_mm activation tile heights
@@ -560,7 +561,15 @@ class ExpertDownRows:
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
         self.max_slots = min(num_experts, rows * k) + 1
         self.weight_dtype = weight_dtype
-        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+        # QWEN35_MOE_DN_OFFROW=1: a bank whose optimal reader row is an earlier bank's (banks 0 / 4 on row 9 here) gets its
+        # readers on the next row inward, reading on NOC1 (place_banks_offrow, as DecodeLinear): on the shared row the
+        # two banks' readers ran 44 / 49 vs 34-37 us per core (M2.7 shapes, 6 readers per bank, 4 rows). 0 (default;
+        # untested on the other models' shapes): every bank on its row
+        self.noc1_banks = set()
+        if os.environ.get("QWEN35_MOE_DN_OFFROW", "0") == "1":
+            placed, self.noc1_banks = place_banks_offrow(mesh_device, {b: readers for b in range(self.banks)})
+        else:
+            placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
@@ -619,9 +628,22 @@ class ExpertDownRows:
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)
-        kernels = _kernels(
-            self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
-        )
+        kernels = []
+        for noc1 in (False, True):
+            sel = [c for c, b, _ in self.assign if (b in self.noc1_banks) == noc1]
+            if not sel:
+                continue
+            keys = {(c.x, c.y) for c in sel}
+            kernels += _kernels(
+                _range_set(sel),
+                "dnr",
+                (rd_ct, {k: v for k, v in rd_rt.items() if k in keys}),
+                (wr_ct, {k: v for k, v in wr_rt.items() if k in keys}),
+                (cp_ct, None),
+                defines,
+                dst_full=self.dst_full,
+                reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
+            )
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         io = [down, shared_down, act, table, out] + ([ep_offset] if ep_offset is not None else [])
         return ttnn.generic_op(io, program)

@@ -125,6 +125,7 @@ serve:
     QWEN35_MOE_DN_READERS: "6"
     QWEN35_MOE_DN_CHUNK: "2"
     QWEN35_MOE_GU_OFFROW: "2"
+    QWEN35_MOE_DN_OFFROW: "1"
     # shared-KV rows SDPA for the verify from 4096 context positions (both variants compiled at startup and after every
     # elastic switch): long-context decode ~+30% at 45K
     QWEN35_ROWS_SDPA_SHARED_FROM: "4096"

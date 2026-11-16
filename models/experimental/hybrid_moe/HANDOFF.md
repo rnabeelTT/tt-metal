@@ -174,6 +174,14 @@ Pieces (all traced, per-prompt re-capture):
   (304 -> 398 GB/s), union 32 138 -> 101, union 14 unchanged; bit-identical. Full model: forced log-probs identical
   (KL 0.0, 735 positions), verify 41.2 -> 39.9 ms per pass (41.9 before the down change). Ornith-35B / Coder-Next
   (m = 1, also two-bank groups) may gain the same: untested there.
+- DOWN PLACEMENT (2026-11-16): the down rows op reads bank-locally (each core one bank) but banks 0 / 4 put 12 readers
+  on row 9: per core 44 / 49 vs 34-37 us. QWEN35_MOE_DN_OFFROW=1 (place_banks_offrow: bank 4's readers on row 8, NOC1;
+  code default 0, M2.7 package / serve_m27.sh 1): down union 23 49.1 -> 34.5 us (311 -> 442 GB/s), union 32 67 -> 47,
+  bit-identical. Verify device profile (scratch attnprof/p18 vs p17, same short prompt): full-layer experts 162.7 ->
+  115.5 us, full layer 333 -> 287 us, 44 full layers 14.77 -> 12.81 ms, verify span 29.9 -> 27.9 ms; the 18 hybrid
+  layers unchanged (14.4 ms: their device time saved is spent waiting on the CPU experts). Forced 4 prompts: log-probs
+  identical (KL 0.0), verify 41.9 (morning) -> 39.7 ms with all three MoE changes. Experts now ~400-440 GB/s of the
+  ~490 ceiling; next MoE item: router + route (42 us per layer).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
