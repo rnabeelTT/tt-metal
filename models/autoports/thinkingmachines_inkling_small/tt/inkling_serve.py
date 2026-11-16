@@ -188,6 +188,21 @@ class InklingSpecServing:
         # INKLING_WATCHDOG=N (seconds, default 600; 0 = off): a prefill / decode step that makes no progress for N s dumps
         # every Python thread's stack to stderr (host-side vs device-wait hangs), once per stall
         self.watchdog = float(os.environ.get("INKLING_WATCHDOG", "600"))
+        # INKLING_MEMDUMP=dir (debug): a native thread copies the large host mappings (command-queue sysmem) into dir
+        # when steps stop for INKLING_MEMDUMP_SECS (default 90)
+        self._memdump = None
+        if os.environ.get("INKLING_MEMDUMP"):
+            import ctypes
+
+            so = os.path.join(os.path.dirname(__file__), "../../../experimental/hybrid_moe/hybrid/pin/memdump.so")
+            self._memdump = ctypes.CDLL(os.path.abspath(so))
+            self._memdump.memdump_start.argtypes = [ctypes.c_double, ctypes.c_char_p, ctypes.c_uint64, ctypes.c_uint64]
+            self._memdump.memdump_start(
+                float(os.environ.get("INKLING_MEMDUMP_SECS", "90")),
+                os.environ["INKLING_MEMDUMP"].encode(),
+                1 << 30,
+                1 << 29,
+            )
         if os.environ.get("INKLING_PROGLOG") == "1":
             install_program_log(mesh, lambda: self.captured)
         # the continuation: the next token to verify, its position, the pending drafts (+ their q when sampling)
@@ -680,6 +695,8 @@ class InklingSpecServing:
         return nxt
 
     def _arm(self):
+        if self._memdump is not None:
+            self._memdump.memdump_tick()
         if self.watchdog > 0:
             import faulthandler
             import sys

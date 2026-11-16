@@ -43,6 +43,15 @@ case $PROFILE in
           # 7% faster); costs for Inkling's experts: an 18.4 MB copy ~0.65 ms, an int4 expert ~0.5 ms + 0.05 per token
           PENV="$PENV -e HYB_PF_SPLIT=${PFSPLIT:-1} -e HYB_PF_COPY_MS=${COPY_MS:-4} -e HYB_PF_CPU_MS=0.5,0.05 -e HYB_HOSTK_THREADS=${HK_THREADS:-8}"
         fi
+        # FETCH=1: missed experts copied into 16 LRU device slots per layer during decode (M2.7's PCIe fetch; 175 static
+        # slots, so the int4 / device-format libraries cover everything outside the top 175; layers 18-41 fetch their
+        # down projections as bfp4 copies). fixed policy: 30% of a layer's misses, at most 2 per layer and step
+        if [ "${FETCH:-0}" = 1 ]; then
+          LIB=/hyblib/inkling_int4_fb175
+          PENV="$PENV -e HYB_LIB=$LIB -e HYB_DEV_EXPERTS=/hyblib/inkling_dev_gu4dn8_s175 -e HYB_BUILD_STATIC=175 -e HYB_LRU=16"
+          PENV="$PENV -e HYB_FETCH_DN_EXPERTS=/hyblib/inkling_dev_dn4_s175 -e HYB_FETCH_DN_LAYERS=18-41"
+          PENV="$PENV -e HYB_FETCH_POLICY=fixed -e HYB_FETCH_FRAC=${FFRAC:-0.3} -e HYB_FETCH_MAX=${FMAX:-2}"
+        fi
         TRACE_MIB=${TRACE_MIB:-320} ;;
   *) echo "PROFILE=$PROFILE: only fast (the one configuration)"; exit 1 ;;
 esac
@@ -65,11 +74,12 @@ docker run -d --name inkling-serve \
   -v "$REPO/models/autoports/minimaxai_minimax_m2_7:/opt/tt-metal/models/autoports/minimaxai_minimax_m2_7" \
   -v "$REPO/models/demos/blackhole/qwen36:/opt/tt-metal/models/demos/blackhole/qwen36" \
   -v "$P:/opt/tt-metal/models/experimental/hybrid_moe" \
+  -v "$REPO/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:/opt/tt-metal/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:ro" \
   -v "$PORT_DIR/vllm_bundle:/extra_models:ro" \
   --user "$(id -u):$(id -g)" -p ${PORT:-8000}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=thinkingmachines/Inkling-Small -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e HOME=/tmp -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e EXTRA_MODELS_DIR=/extra_models \
-  -e TT_METAL_LOGGER_LEVEL=Error -e TT_METAL_CACHE=/cache/tt -e TT_METAL_LOGS_PATH=/cache/logs \
+  -e TT_METAL_LOGGER_LEVEL=Error -e TT_METAL_CACHE=/cache/tt_fix -e TT_METAL_LOGS_PATH=/cache/logs \
   -e VLLM_ENGINE_READY_TIMEOUT_S=7200 \
   -e QWEN35_PRECISION_CONFIG=/opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/$POLICY.json \
   -e HYB_ENABLE=1 -e HYB_PORT=thinkingmachines_inkling_small -e HYB_POC_DIR=/opt/tt-metal/models/experimental/hybrid_moe \

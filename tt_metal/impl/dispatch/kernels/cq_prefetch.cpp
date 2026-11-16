@@ -2125,6 +2125,12 @@ uint32_t process_exec_buf_cmd(
         }
     }
 
+    // The trace buffer is sized for the longest device's trace, so a shorter trace is followed by padding pages that
+    // paged_read_into_cmddat_q may already be prefetching (trid 1) when EXEC_BUF_END is reached. Retire those reads
+    // before cmddat_q is handed back to host fetches, or they land on top of the next fetched host commands.
+    noc_async_read_barrier_with_trid(1);
+    invalidate_l1_cache();
+
     return CQ_PREFETCH_CMD_BARE_MIN_SIZE;
 }
 

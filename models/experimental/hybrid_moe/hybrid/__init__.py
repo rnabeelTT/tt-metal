@@ -64,8 +64,14 @@ def install():
             os.environ.setdefault("QWEN35_FB_CONSUMER", "0")
     for k, v in _ENV_ON.items():
         os.environ.setdefault(k, v)
-    # the async fetch / the prefill stream copies write on CQ1: every mesh opens with two queues
-    if os.environ.get("HYB_FETCH_ASYNC") == "1" or os.environ.get("HYB_STREAM_CQ1") == "1":
+    # the async fetch / the prefill stream copies write on CQ1: every mesh opens with two queues (socket mode makes the
+    # decode fetch asynchronous: HYB.sock)
+    lru = int(os.environ.get("HYB_LRU", "0") or 0) > 0
+    if (
+        os.environ.get("HYB_FETCH_ASYNC") == "1"
+        or os.environ.get("HYB_STREAM_CQ1") == "1"
+        or (lru and os.environ.get("HYB_SOCKET") == "1")
+    ):
         import ttnn
 
         _open = ttnn.open_mesh_device

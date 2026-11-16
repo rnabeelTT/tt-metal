@@ -86,13 +86,18 @@ def main():
         os.replace(tmp, path)
 
     port_sd = None
-    if os.environ.get("HYB_LIB_KEYS", "").startswith("port:"):  # the port owns the checkpoint layout (as build_int4_library)
+    if os.environ.get("HYB_LIB_KEYS", "").startswith(
+        "port:"
+    ):  # the port owns the checkpoint layout (as build_int4_library)
         import importlib
 
         port_sd = importlib.import_module(
             f"models.autoports.{os.environ['HYB_LIB_KEYS'][5:]}.tt.weights"
         ).StreamingStateDict(snap)
 
+    # HYB_DEV_PARTS: which copies to write (default "gu,dn"; "dn": the own-format downs of HYB_FETCH_DN_EXPERTS, whose
+    # gate/up the main copies already hold)
+    parts = set(os.environ.get("HYB_DEV_PARTS", "gu,dn").split(","))
     for L in layers:
         t0 = time.time()
         ids = sorted(order[L, int(S) :].tolist())
@@ -107,7 +112,11 @@ def main():
                 gate, up = gu[: gu.shape[0] // 2], gu[gu.shape[0] // 2 :]
             else:
                 pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
-                gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
+                gate, up, down = (
+                    get(pre + "w1.weight"),
+                    get(pre + "w3.weight"),
+                    get(pre + "w2.weight"),
+                )  # [N,H] [N,H] [H,N]
             N, H = gate.shape
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]
@@ -115,7 +124,8 @@ def main():
                 [torch.cat([up_t[:, d * Nl : (d + 1) * Nl], gate_t[:, d * Nl : (d + 1) * Nl]], -1) for d in range(TP)],
                 -1,
             )  # [H, TP * 2 Nl]
-            dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1, layer_dtype(L, "gate_up"))
+            if "gu" in parts:
+                dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1, layer_dtype(L, "gate_up"))
             dump(p + "_dn.tensorbin", round_sig(down.T.contiguous()).reshape(1, 1, N, H), -2, layer_dtype(L, "down"))
             done += 1
         handles.clear()

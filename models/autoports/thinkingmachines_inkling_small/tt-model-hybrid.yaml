@@ -38,6 +38,9 @@ source:
     - models/experimental/hybrid_moe/hybrid
     - models/experimental/hybrid_moe/serve/sitecustomize.py
     - models/experimental/hybrid_moe/build_int4_library.py
+    # tt-metal fix (compiled on the device at startup): the prefetcher retires a trace's read-ahead before host fetches
+    # resume; without it, socket-mode decode hangs device 0's prefetcher on stale trace bytes (most runs with fetch)
+    - tt_metal/impl/dispatch/kernels/cq_prefetch.cpp
     - models/experimental/hybrid_moe/build_dev_experts.py
     - models/experimental/hybrid_moe/plans/inkling_plan.npz
     - models/demos/blackhole/qwen36

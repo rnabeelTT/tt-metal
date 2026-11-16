@@ -47,9 +47,30 @@ import ttnn
 from . import hfpath
 
 
+def _parse_layers(spec):
+    """ "2-17,30" -> {2, ..., 17, 30}; "" -> None (every layer)."""
+    spec = spec.strip()
+    if not spec:
+        return None
+    out = set()
+    for part in spec.split(","):
+        a, _, b = part.strip().partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
 class FetchCache:
     def __init__(self):
         self.D = int(os.environ.get("HYB_LRU", "0") or 0)
+        # HYB_LRU_LAYERS (e.g. "2-17,30"): only these layers get the D LRU slots (the others keep C - 1 static slots
+        # and never fetch). For a mixed-precision profile whose device-format copies match only some layers' weights
+        # (Inkling: copies gate/up bfp4 + down bfp8 = layers 2-17 of early_gu4dn8); unset = every hybrid layer
+        self.lru_layers = _parse_layers(os.environ.get("HYB_LRU_LAYERS", ""))
+        # HYB_FETCH_DN_EXPERTS: down-projection copies in each layer's OWN format, for the layers whose down weights
+        # differ from HYB_DEV_EXPERTS' format (Inkling: the streaming copies are gate/up bfp4 + down bfp8 in every layer,
+        # layers 18-41 hold bfp4 downs on the device). Their gate/up still comes from the main region (same bytes)
+        self.dn_dir = hfpath.resolve(os.environ.get("HYB_FETCH_DN_EXPERTS", ""))
+        self.alt = {}  # layer -> (region id, {expert: index}, down bytes per die) of those copies
         self.f = float(os.environ.get("HYB_FETCH_FRAC", "0.4"))
         self.F = int(os.environ.get("HYB_FETCH_MAX", "2"))
         self.dir = hfpath.resolve(os.environ.get("HYB_DEV_EXPERTS", ""))
@@ -121,14 +142,19 @@ class FetchCache:
         return self.D > 0
 
     # -- setup ------------------------------------------------------------------------------------------------------
+    def d_of(self, layer):
+        """LRU slots of a layer (HYB_LRU_LAYERS: 0 outside the listed layers)."""
+        return self.D if self.lru_layers is None or int(layer) in self.lru_layers else 0
+
     def plan_layer(self, layer, E, C, static_ids):
         """The slot list of a layer: static experts, D empty LRU slots (zero experts), the sink."""
-        S = C - 1 - self.D
+        D = self.d_of(layer)
+        S = C - 1 - D
         self.__dict__.setdefault("_static_n", {})[layer] = S
         self.lru[layer] = OrderedDict()
-        self.free[layer] = list(range(S, S + self.D))
+        self.free[layer] = list(range(S, S + D))
         self.stamp[layer] = np.full(E, -1, dtype=np.int64)
-        return [int(i) for i in static_ids[:S]] + [-1] * self.D + [-1]
+        return [int(i) for i in static_ids[:S]] + [-1] * D + [-1]
 
     def load_host(self, layer, experts):
         """The device-format copies of a layer's missable experts (host RAM; read once at build). A layer whose copies
@@ -143,27 +169,87 @@ class FetchCache:
             p = os.path.join(self.dir, f"{layer}_{e}")
             self.host[(layer, e)] = (ttnn.load_tensor(p + "_gu.tensorbin"), ttnn.load_tensor(p + "_dn.tensorbin"))
 
-    def _pin_path(self, layer, experts):
+    def _pin_path(self, layer, experts, tag=None):
         if not (self.pin_cache and self.pinx_on and self.shapes is not None):
             return None
         import hashlib
         import json
 
         gsh, dsh, gdt, ddt, mesh = self.shapes
-        key = json.dumps(
-            [
-                1,
-                int(layer),
-                sorted(int(e) for e in experts),
-                gsh,
-                dsh,
-                str(gdt),
-                str(ddt),
-                len(mesh.get_device_ids()),
-                os.path.abspath(self.dir),
-            ]
+        key = [
+            1,
+            int(layer),
+            sorted(int(e) for e in experts),
+            gsh,
+            dsh,
+            str(gdt),
+            str(ddt),
+            len(mesh.get_device_ids()),
+            os.path.abspath(self.dir),
+        ]
+        if tag is not None:  # a second region of the layer (the own-format downs: _pin_alt_dn)
+            key += [tag, os.path.abspath(self.dn_dir)]
+        h = hashlib.sha1(json.dumps(key).encode()).hexdigest()[:16]
+        return os.path.join(self.pin_cache, f"pin_L{int(layer):02d}_{tag + '_' if tag else ''}{h}.raw")
+
+    def _pin_alt_dn(self):
+        """HYB_FETCH_DN_EXPERTS (direct fetch): for every LRU layer whose down weights are not in the main copies'
+        format, a pinned region of its missable experts' downs in the layer's own format (from the region cache file,
+        else each copy written to a staging tensor and read back raw, then cached)."""
+        gsh, dsh, gdt, ddt, mesh = self.shapes
+        todo = sorted(L for L, m in self.mods.items() if self.d_of(L) and L in self.raw and m.down.dtype != ddt)
+        if not todo:
+            return
+        if not self.dn_dir:
+            raise ValueError(
+                f"HYB_LRU in layers {todo}: their down weights are not in HYB_DEV_EXPERTS' format ({ddt}); set "
+                f"HYB_FETCH_DN_EXPERTS (copies in the layers' own format) or leave them out of HYB_LRU_LAYERS"
+            )
+        px, tp = self.px, self.px.tp
+        t0, n_cached, convs = time.perf_counter(), 0, {}
+        for L in todo:
+            dt = self.mods[L].down.dtype
+            if dt not in convs:
+                conv = ttnn.from_torch(
+                    torch.zeros(dsh[0], dsh[1], tp * dsh[2], dsh[3]),
+                    dtype=dt,
+                    mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2),
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh,
+                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                )
+                convs[dt] = (conv, *px.dst(conv))
+            conv, dd, nd = convs[dt]
+            idx = self.raw[L][1]
+            experts = sorted(idx, key=idx.get)
+            size = len(experts) * tp * nd
+            rid, buf = px.region(size)
+            path = self._pin_path(L, experts, tag=f"dn{str(dt).rsplit('.', 1)[-1]}")
+            if path is not None and os.path.exists(path) and os.path.getsize(path) == size:
+                with open(path, "rb", buffering=0) as f:
+                    if f.readinto(memoryview(buf)[:size]) != size:
+                        raise RuntimeError(f"pinned-region cache {path}: short read")
+                n_cached += 1
+            else:
+                for i, e in enumerate(experts):
+                    t = ttnn.load_tensor(os.path.join(self.dn_dir, f"{L}_{e}_dn.tensorbin"))
+                    if t.dtype != dt:
+                        raise RuntimeError(f"{self.dn_dir}: layer {L} expert {e} down is {t.dtype}, the layer's {dt}")
+                    ttnn.copy_host_to_device_tensor(t, conv)
+                    px.read(dd, rid, [i * tp * nd + d * nd for d in range(tp)])
+                if path is not None:
+                    tmp = path + ".tmp"
+                    with open(tmp, "wb", buffering=0) as f:
+                        f.write(memoryview(buf)[:size])
+                    os.replace(tmp, path)
+            self.alt[L] = (rid, {e: i for i, e in enumerate(experts)}, nd)
+        for conv, _, _ in convs.values():
+            ttnn.deallocate(conv)
+        print(
+            f"HYB_FETCH_DN_EXPERTS: own-format downs of {len(todo)} layers pinned ({n_cached} from the region cache, "
+            f"{time.perf_counter() - t0:.1f} s)",
+            flush=True,
         )
-        return os.path.join(self.pin_cache, f"pin_L{int(layer):02d}_{hashlib.sha1(key.encode()).hexdigest()[:16]}.raw")
 
     def _pin_layers(self, layers, conv):
         """Pinned regions of the given layers' device-format experts (finalize / finalize_more): from the region cache
@@ -258,6 +344,7 @@ class FetchCache:
         if self.direct:
             for L, mod in self.mods.items():
                 self.wdst[L] = (px.dst(mod.up_gate)[0], px.dst(mod.down)[0])
+            self._pin_alt_dn()
         elif self.dev is not None:
             self.dev["pdst"] = [(px.dst(g)[0], px.dst(d)[0]) for g, d in zip(self.dev["gu"], self.dev["dn"])]
         if stream is not None and stream.dev is not None:
@@ -581,6 +668,8 @@ class FetchCache:
     def choose(self, layer, ids, slot_of):
         """After routing a layer's step (ids [m, k]): LRU hits refreshed, the fetch set chosen, slot_of updated in place
         (fetched experts now resident at their LRU slots). Returns (fetched ids, their slots) for stage()."""
+        if not self.d_of(layer):
+            return [], []
         if self.policy in ("dyn", "auto"):
             return self.choose_dyn(layer, ids, slot_of)
         self.step += 1
@@ -704,20 +793,28 @@ class FetchCache:
         CQ0, ahead of the segment that runs device_writes)."""
         t0 = time.perf_counter()
         if self.direct:
+            if not fetched:
+                return
             if layer not in self.wdst:
                 raise RuntimeError(f"layer {layer}: direct fetch before finalize() (no pinned weight destinations)")
             dg, dd = self.wdst[layer]
             ng, nd = self.raw[layer][2], self.raw[layer][3]
+            alt = self.alt.get(layer)
+            tp = self.px.tp
             for e, s in zip(fetched, slots):
                 rid, og, od = self.raw_offsets(layer, e)
+                drid = rid
+                if alt is not None:  # the down in the layer's own format (HYB_FETCH_DN_EXPERTS)
+                    drid, didx, nd = alt
+                    od = [didx[e] * tp * nd + d * nd for d in range(tp)]
                 w0 = time.perf_counter()
                 cq = 1 if self.async_on else 0
                 if self.bgwrite and cq == 1:  # HYB_PINX_BGWRITE: the copies run on pinx's worker thread
                     self.px.write_async(dg, rid, og, s * ng, ng, cq_id=1)
-                    self.px.write_async(dd, rid, od, s * nd, nd, cq_id=1)
+                    self.px.write_async(dd, drid, od, s * nd, nd, cq_id=1)
                 else:
                     self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
-                    self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
+                    self.px.write_at(dd, drid, od, s * nd, nd, cq_id=cq)
                 st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
                 if layer == self.verify_layer:  # debug: read the slot straight back once the write has run
                     self._verify_now(layer, e, s, cq)

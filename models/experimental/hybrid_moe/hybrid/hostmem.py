@@ -60,11 +60,32 @@ def layer_bytes(lib_dir, dev_dir):
                 if head.isdigit() and e.name.endswith(".tensorbin"):
                     sizes[int(head)] = sizes.get(int(head), 0) + e.stat().st_size
                     dev_seen = True
+        # HYB_FETCH_DN_EXPERTS: the decode fetch's own-format downs (a second pinned region per listed layer)
+        from . import hfpath
+
+        dn_dir = hfpath.resolve(os.environ.get("HYB_FETCH_DN_EXPERTS", ""))
+        dn_layers = os.environ.get("HYB_FETCH_DN_LAYERS", "")
+        dn = {}
+        if dn_dir and os.path.isdir(dn_dir):
+            for e in os.scandir(dn_dir):
+                head = e.name.split("_", 1)[0]
+                if head.isdigit() and e.name.endswith("_dn.tensorbin"):
+                    dn[int(head)] = dn.get(int(head), 0) + e.stat().st_size
+        if dn_dir and dn_layers and not dn:  # not built yet: bfp4 downs ~0.3 x the int4 rows of the layer
+            from .fetch import _parse_layers
+
+            dn = {
+                L: int(sizes.get(L, 0) * float(os.environ.get("HYB_RAM_DN_RATIO", "0.3")))
+                for L in _parse_layers(dn_layers)
+            }
         if dev_dir and not dev_seen:
             # configured but not built yet (a first boot builds them after this check): estimate them from the int4
             # library (Inkling: gate/up bfp4 + down bfp8 copies, ~48 GB vs ~42 GB of int4; HYB_RAM_DEV_RATIO)
             r = float(os.environ.get("HYB_RAM_DEV_RATIO", "1.15"))
             sizes = {L: int(b * (1.0 + r)) for L, b in sizes.items()}
+        for L, b in dn.items():
+            if L in sizes:
+                sizes[L] += b
         _sizes = sizes
     return _sizes
 
@@ -105,7 +126,11 @@ def check_startup(lib_dir, dev_dir, full_layers, demote):
         fit = int((avail - need_start) // step) if step else 0
         short = int(os.environ.get("QWEN35_KV_TOKENS", "0") or 0)
         long_ = int(os.environ.get("QWEN35_MAX_TOKENS_ALL_USERS", "0") or 0)
-        reach = f" (contexts up to ~{(short + fit * (long_ - short) // len(demote)) // 1024}K tokens)" if short and long_ else ""
+        reach = (
+            f" (contexts up to ~{(short + fit * (long_ - short) // len(demote)) // 1024}K tokens)"
+            if short and long_
+            else ""
+        )
         problem = (
             f"only {fit} of the {len(peak) - len(start)} elastic demotions fit{reach}: longer contexts would swap the "
             f"expert copies or get the server killed"

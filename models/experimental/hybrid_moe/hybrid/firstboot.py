@@ -76,23 +76,51 @@ def ensure():
     os.environ["_HYB_EXPERTS_READY"] = "1"  # the EngineCore child inherits it
     lib, dev, plan = (hfpath.resolve(os.environ.get(k, "")) for k in ("HYB_LIB", "HYB_DEV_EXPERTS", "HYB_PLAN"))
     if not (lib and plan):
-        raise ValueError("HYB_BUILD_LAYERS needs HYB_LIB and HYB_PLAN (a compact plan with `order`); HYB_DEV_EXPERTS "
-                         "too when the profile fetches / streams experts over PCIe")
+        raise ValueError(
+            "HYB_BUILD_LAYERS needs HYB_LIB and HYB_PLAN (a compact plan with `order`); HYB_DEV_EXPERTS "
+            "too when the profile fetches / streams experts over PCIe"
+        )
     snap, spec = _spec(plan)
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     layers = ",".join(str(v) for v in spec["layers"])
     cold = f"{plan}:{spec['static']}"
     env = dict(os.environ, HYB_LIB_KEYS=spec["keys"], THREADS=str(os.cpu_count() or 8))
-    for what, out, cmd, extra in (
+    builds = [
         (
             "int4 host expert library",
             lib,
             [os.path.join(here, "build_int4_library.py"), snap, lib, layers],
             {"HYB_LIB_COLD": cold},
+            spec,
         ),
-        ("device-format expert copies", dev, [os.path.join(here, "build_dev_experts.py"), snap, dev, cold, layers], {}),
-    ):
-        if not out:  # no HYB_DEV_EXPERTS: a profile without the PCIe fetch / prefill streaming (e.g. Inkling's)
+        (
+            "device-format expert copies",
+            dev,
+            [os.path.join(here, "build_dev_experts.py"), snap, dev, cold, layers],
+            {},
+            spec,
+        ),
+    ]
+    # HYB_FETCH_DN_EXPERTS / HYB_FETCH_DN_LAYERS: the downs of the layers whose device format differs from the copies
+    # above, in the served precision policy's format (hybrid/fetch.py, decode fetch of a mixed-precision profile)
+    dn_dir = hfpath.resolve(os.environ.get("HYB_FETCH_DN_EXPERTS", ""))
+    dn_layers = os.environ.get("HYB_FETCH_DN_LAYERS", "")
+    if dn_dir and dn_layers:
+        from .fetch import _parse_layers
+
+        dl = ",".join(str(v) for v in sorted(_parse_layers(dn_layers)))
+        pol = os.environ.get("QWEN35_PRECISION_CONFIG", "")
+        builds.append(
+            (
+                "own-format down copies",
+                dn_dir,
+                [os.path.join(here, "build_dev_experts.py"), snap, dn_dir, cold, dl],
+                {"HYB_DEV_PARTS": "dn", "HYB_DEV_POLICY": pol},
+                dict(spec, layers=[int(v) for v in dl.split(",")], parts="dn", policy=os.path.basename(pol)),
+            )
+        )
+    for what, out, cmd, extra, spec in builds:
+        if not out:  # no HYB_DEV_EXPERTS: a profile without the PCIe fetch / prefill streaming
             continue
         if _done(out, spec, what):
             continue

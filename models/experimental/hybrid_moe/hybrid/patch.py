@@ -336,7 +336,7 @@ class HybridState:
             if not self.fused:
                 raise ValueError("HYB_LRU needs the fused hybrid (HYB_FUSED=1)")
             ids = self.fetch.plan_layer(layer, E, C, rank)
-            n_real = C - 1 - self.fetch.D
+            n_real = C - 1 - self.fetch.d_of(layer)
         else:
             ids = [int(i) for i in rank[:n_real]] + ([-1] if self.fused else [])
         self.resident[layer] = ids
@@ -1128,7 +1128,9 @@ class _HybSockets:
 
     def __init__(self, mesh, H):
         ndev = mesh.get_num_devices()
-        mcc = lambda d, x: ttnn.MeshCoreCoord(ttnn.MeshCoordinate(0, d), ttnn.CoreCoord(x, 0))  # noqa: E731
+        # HYB_SOCK_CORES: "x0,y" - the four socket cores are (x0..x0+3, y) (debug: placement vs the dispatch cores)
+        sx, sy = (int(v) for v in os.environ.get("HYB_SOCK_CORES", "0,0").split(","))
+        mcc = lambda d, x: ttnn.MeshCoreCoord(ttnn.MeshCoordinate(0, d), ttnn.CoreCoord(sx + x, sy))  # noqa: E731
         # FIFO depths in pages: device -> host FIFOs live in pinned host memory (deep: the device never waits on the
         # host's reads); host -> device FIFOs in device L1 (the only buffer type they support), whose range the L1
         # allocator reserves on every core: 64-page FIFOs (~420 KB) left too little L1 for the prefill matmuls'
@@ -2438,8 +2440,12 @@ def _select_host(self, lg):
     z = lg[:, :E].astype(np.float32)
     if HYB.router_kind == "inkling" and HYB.hostk:
         # the C selection (hostk_route_inkling: same picks and weights, ~3x faster than the NumPy below)
-        return hostk.route_inkling(np.ascontiguousarray(z), HYB.n_routed, HYB.top_k_routed,
-                                   np.ascontiguousarray(HYB.sel_bias[L], dtype=np.float32))
+        return hostk.route_inkling(
+            np.ascontiguousarray(z),
+            HYB.n_routed,
+            HYB.top_k_routed,
+            np.ascontiguousarray(HYB.sel_bias[L], dtype=np.float32),
+        )
     if HYB.router_kind == "inkling":
         sg = 1.0 / (1.0 + np.exp(-z))
         R, kr = HYB.n_routed, HYB.top_k_routed

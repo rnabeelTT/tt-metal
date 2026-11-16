@@ -22,6 +22,12 @@ if os.environ.get("HYB_ENABLE") == "1":
 
 import ttnn  # noqa: E402
 
+if os.environ.get("INKLING_WATCHDOG", "600") != "0":  # `docker kill -s USR2 <container>`: every thread's Python stack
+    import faulthandler
+    import signal
+
+    faulthandler.register(signal.SIGUSR2, all_threads=True)
+
 from models.autoports.thinkingmachines_inkling_small.tt.inkling_serve import InklingSpecServing  # noqa: E402
 from models.autoports.thinkingmachines_inkling_small.tt.model import create_model  # noqa: E402
 
@@ -43,6 +49,12 @@ PROMPTS = [
     ],
     [{"role": "user", "content": "Explain in three short paragraphs how a hash map handles collisions."}],
 ]
+
+if os.environ.get("ENGINE_PROMPTS") == "heldout":  # the served bench's prompts (serve/bench.py: prompts_v2.HELDOUT)
+    sys.path.insert(0, os.environ.get("HYB_POC_DIR", "/opt/tt-metal/models/experimental/hybrid_moe"))
+    from prompts_v2 import HELDOUT  # noqa: E402
+
+    PROMPTS = [[{"role": "user", "content": p}] for p in HELDOUT]
 
 
 def main():
@@ -115,8 +127,38 @@ def main():
             if len(ks) > 1:
                 break  # traces of a second engine would need the first one's released: one k per process
     finally:
+        _quiesce(mesh)
         ttnn.close_mesh_device(mesh)
         ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+
+
+def _drop_sockets(hyb):
+    import gc
+
+    if hyb is not None and getattr(hyb, "socks", None) is not None:
+        hyb.socks = None
+        gc.collect()
+
+
+def _quiesce(mesh):
+    """Before closing the mesh: the async fetch's queued CQ1 copies flushed and both queues drained, the pinned regions
+    released (their destructors talk to the mesh). Each step logs, so a hang at exit names the step it stopped in."""
+    hyb = getattr(sys.modules.get("hybrid.patch"), "HYB", None)
+    f = getattr(hyb, "fetch", None) if hyb is not None else None
+    for name, fn in (
+        ("pinx flush", lambda: f.px.flush() if f is not None and f.px is not None else None),
+        ("synchronize", lambda: ttnn.synchronize_device(mesh)),
+        ("fetch release", lambda: f.release() if f is not None else None),
+        ("sockets release", lambda: _drop_sockets(hyb)),
+    ):
+        t0 = time.time()
+        print(f"[exit] {name} ...", flush=True)
+        try:
+            fn()
+        except Exception as e:  # keep closing
+            print(f"[exit] {name} failed: {e}", flush=True)
+        print(f"[exit] {name} done ({time.time() - t0:.1f} s)", flush=True)
+    print("[exit] close_mesh_device ...", flush=True)
 
 
 if __name__ == "__main__":

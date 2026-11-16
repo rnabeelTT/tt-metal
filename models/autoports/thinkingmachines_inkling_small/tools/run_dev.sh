@@ -15,6 +15,9 @@ CACHE=${INKLING_CACHE:-$HOME/.cache/inkling}
 mkdir -p "$CACHE/tt" "$CACHE/logs" "$HOME/.cache/hybrid-moe"
 M=(-v "$P:/opt/tt-metal/models/autoports/thinkingmachines_inkling_small"
    -v "$REPO/models/experimental/hybrid_moe:/opt/tt-metal/models/experimental/hybrid_moe")
+# the prefetcher fix (retire exec_buf read-ahead before host fetches resume) until the image carries it
+if [[ "${DEV_ENV:-}" != *cq_prefetch.cpp* ]]; then
+  M+=(-v "$REPO/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:/opt/tt-metal/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:ro"); fi
 [ "${MOUNT_SHARED:-1}" = 1 ] && M+=(-v "$REPO/models/demos/blackhole/qwen36:/opt/tt-metal/models/demos/blackhole/qwen36"
   -v "$REPO/models/autoports/minimaxai_minimax_m2_7:/opt/tt-metal/models/autoports/minimaxai_minimax_m2_7")
 # one device job at a time (shared with the hybrid_moe scripts)
@@ -26,6 +29,6 @@ exec docker run --rm "${TTY[@]}" --name "inkling-dev-$$" \
   "${M[@]}" -v "$HF_HOST:/hf" -v "$CACHE:/cache" \
   --user "$(id -u):$(id -g)" -w /opt/tt-metal \
   -e HOME=/tmp -e ARCH_NAME=blackhole -e MESH_DEVICE=P300x2 -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub \
-  -e HF_HUB_OFFLINE=1 -e TT_METAL_CACHE=/cache/tt -e TT_METAL_LOGS_PATH=/cache/logs \
+  -e HF_HUB_OFFLINE=1 -e TT_METAL_CACHE=/cache/${TT_CACHE_DIR:-tt_fix} -e TT_METAL_LOGS_PATH=/cache/logs \
   -e TT_METAL_LOGGER_LEVEL=${TT_METAL_LOGGER_LEVEL:-Error} -e PYTHONPATH=/opt/tt-metal \
   ${DEV_ENV:+$DEV_ENV} --entrypoint "" "$IMG" "$@"
