@@ -701,6 +701,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         cuts=(),
         on_cut=None,
         host_logits=True,
+        on_layer_cut=None,
     ):
         """B=1 prefill of any logical length through the model's masked fixed-bucket path (pads each segment to one of
         the pre-warmed bucket lengths, masks the GDN state to the exact valid length): full 2048-token segments carry the
@@ -736,19 +737,33 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             self.model._build_request_rope(tokens, None)
         logits, sh = None, None
         G = int(getattr(self, "prefill_group_size", 1))
-        if G > 1 and len(bounds) > 2 and vision_tokens is None and not cuts and hasattr(self.model, "prefill_group"):
-            # layer-major over groups of G segments (model.prefill_group); only the last group's logits are read
+        layer_cuts = bool(cuts) and on_layer_cut is not None
+        if (
+            G > 1
+            and len(bounds) > 2
+            and vision_tokens is None
+            and (not cuts or layer_cuts)
+            and hasattr(self.model, "prefill_group")
+        ):
+            # layer-major over groups of G segments (model.prefill_group); only the last group's logits are read.
+            # Prefix-cache cuts (on_layer_cut): each GDN layer's state is snapshotted right after that layer ran the
+            # segment ending at the cut (in a layer-major pass the state at a cut exists only then)
             spans = list(zip(bounds[:-1], bounds[1:]))
             for g0 in range(0, len(spans), G):
                 grp = spans[g0 : g0 + G]
                 segs = [tokens[:, cs - start : ce - start] for cs, ce in grp]
                 starts = [cs for cs, _ in grp]
+                kw = {}
+                if layer_cuts:
+                    ends = {i: ce for i, (_, ce) in enumerate(grp) if ce in cuts}
+                    if ends:
+                        kw["cut_after"] = {i: (lambda li, _q=q: on_layer_cut(_q, li)) for i, q in ends.items()}
                 if g0 + G < len(spans):
-                    self.model.prefill_group(segs, page_table, starts)
+                    self.model.prefill_group(segs, page_table, starts, **kw)
                 elif want_sharded:
-                    lg, sh = self.model.prefill_group(segs, page_table, starts, return_sharded=True)
+                    lg, sh = self.model.prefill_group(segs, page_table, starts, return_sharded=True, **kw)
                 else:
-                    lg = self.model.prefill_group(segs, page_table, starts)
+                    lg = self.model.prefill_group(segs, page_table, starts, **kw)
             if host_logits:
                 logits = self._host_logits(lg)
             return (logits, sh) if want_sharded else logits
@@ -810,6 +825,19 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             ttnn.copy(dn.rec_state, rec)
             for c, t in zip(dn.conv_states, taps):
                 ttnn.copy(c, t)
+
+    def _prefix_save_layer(self, slot, li):
+        """One decoder layer's GDN state -> its place in pool slot ``slot`` (layer-major prefill: called right after
+        layer ``li`` ran the segment that ends at the cut). Full-attention layers hold no state."""
+        layer = self.model.layers[li]
+        if layer.is_full_attention:
+            return
+        idx = sum(1 for la in self.model.layers[:li] if not la.is_full_attention)
+        recs, convs = self._prefix_pool[slot]
+        dn = layer.attention
+        ttnn.copy(dn.rec_state, recs[idx])
+        for c, t in zip(dn.conv_states, convs[idx]):
+            ttnn.copy(c, t)
 
     def _prefix_restore(self, slot):
         """Pool slot -> the bound B = 1 prefill scratch, then the chunk-outer conv left context from the taps (as
@@ -1003,6 +1031,7 @@ class Qwen35MoeGenerator(ReadinessGenerator):
                         vision=vis_u,
                         cuts=list(cut_slot),
                         on_cut=lambda q: self._prefix_save(cut_slot[q]),
+                        on_layer_cut=lambda q, li: self._prefix_save_layer(cut_slot[q], li),
                         # the served sampler reads the device logits: no host copy of the full vocab row (~14 ms)
                         host_logits=sampler is None and finals[u],
                     )

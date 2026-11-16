@@ -73,8 +73,14 @@ serve:
     PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
     HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
     QWEN35_TRACE_REGION_MIB: "96"
-    QWEN35_PREFIX_STATE_SLOTS: "0"
-    QWEN35_PREFIX_CACHING: "0"
+    # vLLM prefix caching (--enable-prefix-caching below): 4 GDN state snapshots (56 MiB per die each), saved at segment
+    # boundaries and at each prompt's last block (PROMPT_END), so a follow-up turn resumes where the last prompt ended.
+    # Measured 2026-11-16: 18K resend 14.5 -> 1.1 s, chat turn 2 on a 17K context 1.4-4.1 s; cold TTFT unchanged;
+    # recall on hits 8/8; a 125K prompt still fits
+    QWEN35_PREFIX_STATE_SLOTS: "4"
+    QWEN35_PREFIX_SLOT_MIB: "64"
+    QWEN35_PREFIX_STATE_PROMPT_END: "1"
+    QWEN35_PREFIX_CACHING: "1"
     QWEN35_VISION: "0"
     QWEN35_BATCHED_PREFILL: "0"
     QWEN35_DISPATCH_MC: "1"     # multi-core MoE dispatch: same outputs bit for bit, 1.41 -> 0.56 ms per 2048-row MoE call; in-boot A/B TTFT 18K 15.07 -> 14.73 s (2026-11-16)
@@ -141,6 +147,7 @@ serve:
     DFLASH_BLOCK: "8"           # the drafter trained at 16; 16 rows exceed the K / V shard row (11 cores)
     DFLASH_WINDOW: "256"
     DFLASH_WARMUP: "384"
+  args: [--enable-auto-tool-choice, --enable-prefix-caching]
 
 serve_profiles:
   - name: p300x2-128k

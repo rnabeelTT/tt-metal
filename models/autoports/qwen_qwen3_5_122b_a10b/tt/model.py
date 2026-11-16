@@ -817,7 +817,7 @@ class Qwen35MoeModel(Qwen36Model):
             self._vis_mask_buf,
         )
 
-    def prefill_group(self, segments, page_table, chunk_starts, return_sharded=False):
+    def prefill_group(self, segments, page_table, chunk_starts, return_sharded=False, cut_after=None):
         """Layer-major masked-bucket prefill of consecutive segments of one request (from the MiniMax-M2.7 port): every
         layer runs over all the segments before the next layer starts (each segment on its own staged input set and
         hidden buffer), so a layer's per-call costs that do not depend on the rows (the hybrid overlay's expert copies
@@ -849,6 +849,8 @@ class Qwen35MoeModel(Qwen36Model):
                 xs[i] = self._bucket_layer(layer, xs[i], bi, cs)
                 if layer_hook is not None:
                     layer_hook(bi, bucket, li, xs[i])
+                if cut_after is not None and i in cut_after:  # prefix caching: this layer's state at segment i's end
+                    cut_after[i](li)
         for x in xs[:-1]:
             ttnn.deallocate(x)
         out, out_sh = self._bucket_logits(staged[-1][0], xs[-1])

@@ -215,9 +215,14 @@ _PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048"))  # the 
 _PREFIX_DEVICES = {"P150": 1, "N150": 1, "P100": 1, "P300": 2, "P150X2": 2}.get(
     os.environ.get("MESH_DEVICE", "P300x2").strip().upper(), 4
 )
-# not wired with a speculative step (MTP, or the external spec whose GDN state lives in its verify snapshots)
+# not wired with MTP; with an external spec step (DFlash) only when QWEN35_PREFIX_STATE_SLOTS is set explicitly (its
+# verify snapshots start from the slot state the prefill writes; a resume restores that state first)
 _PREFIX_STATE_SLOTS = (
-    int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if (_MTP_K == 0 and _EXT_SPEC_K == 0) else 0
+    int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES)))
+    if (_MTP_K == 0 and _EXT_SPEC_K == 0)
+    else int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", "0") or 0)
+    if _MTP_K == 0
+    else 0
 )
 _PREFIX_STATE_MIN = int(os.environ.get("QWEN35_PREFIX_STATE_MIN", "1024"))
 # QWEN35_PREFIX_STATE_PROMPT_END=1 also snapshots each prompt's last block boundary: hits reach the end of the previous
@@ -463,8 +468,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # and templates). The masked-bucket prefill programs allocate transients while a request runs (the expert-sorted
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
-    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size)
-    _PREFIX_SLOT_GIB = 48.0 / 1024 * 4 / _PREFIX_DEVICES
+    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size);
+    # QWEN35_PREFIX_SLOT_MIB for models with more GDN state (Ornith-1.5-397B: 56 MiB per die)
+    _PREFIX_SLOT_GIB = float(os.environ.get("QWEN35_PREFIX_SLOT_MIB", str(48.0 * 4 / _PREFIX_DEVICES))) / 1024
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
     # QWEN35_DFLASH: per die the drafter (TP bfp8 matmul weights ~0.2 GiB, replicated conv projections ~0.07), the verify
@@ -621,6 +627,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         start_pos = kwargs.get("start_pos")
         starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
         prefix_state = kwargs.get("prefix_state")
+        if prefix_state is not None:
+            prefix_state = list(prefix_state)
         restored = [bool(p and p.get("restore")) for p in prefix_state] if prefix_state is not None else [False] * N
         if any(s and not r for s, r in zip(starts, restored)) and not self.model_capabilities["supports_chunked_prefill"]:
             raise NotImplementedError("chunked prefill is not supported (model_capabilities)")
@@ -708,7 +716,16 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             if self._mtp.adaptive and self._mtp.in_phase:
                 self._mtp.suspend()  # unbind for the prefill; the next decode resumes / drops / leaves the phase
             for u in range(N):
-                self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
+                ids_u = tokens[u, : plens[u]].tolist()
+                hit = prefix_state is not None and prefix_state[u] and prefix_state[u].get("restore") is not None
+                if hit and starts[u] and self._mtp.feature_start(ids_u, starts[u]) != starts[u]:
+                    # the drafter's context window reaches before the cached prefix and the previous request does
+                    # not hold those rows' features: run the whole prompt (the cached KV is rewritten with the same
+                    # values) instead of failing the request
+                    logger.info(f"prefix-cache hit at {starts[u]} dropped (DFlash context window): full prefill")
+                    prefix_state[u] = dict(prefix_state[u], restore=None)
+                    starts[u] = 0
+                self._mtp.begin_prefill(ids_u, pt[u], slot=slots[u], start=starts[u])
             try:
                 out = self._gen.prefill_serving(
                     tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp, **chunked
