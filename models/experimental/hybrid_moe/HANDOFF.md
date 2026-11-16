@@ -165,6 +165,15 @@ Pieces (all traced, per-prompt re-capture):
   ~88 -> ~62 us per layer at the ceiling. down: QWEN35_MOE_DN_READERS=6 / CHUNK=2 (48 cores) 48.8 vs 57.5 us (4 / 4),
   repeatable; 12 readers do not fit. Now the package / serve_m27.sh default: forced 4 prompts (runs/m27/ref_fb2) top-1
   0.8898 / KL 0.0351 both (identical), verify 41.9 -> 41.2 ms per pass (fixed fetch A/B config).
+- GATE|UP PLACEMENT (2026-11-16): per-core profile of the gate|up rows op (scratch moebw/bench3.py): group 0 (banks 0
+  and 4, whose optimal reader rows are both row 9) ran ~100 us per core vs 60-75 for groups 1-3 and set the op's time;
+  banks 0 / 4 stream like the others with bank-local readers (DecodeLinear: all 8 banks 166 us), so it is the two
+  banks' responses converging on one row's links. Moving the group to row 8 (NOC1) did not help (they converge there);
+  spreading its 4 readers over the rows free of bank readers (2, 5, 8) and reading on NOC1 did: QWEN35_MOE_GU_OFFROW=2
+  (qwen36 moe_decode/union.py; code default 0, M2.7 package / serve_m27.sh 2): gate|up union 23 100.4 -> 76.7 us
+  (304 -> 398 GB/s), union 32 138 -> 101, union 14 unchanged; bit-identical. Full model: forced log-probs identical
+  (KL 0.0, 735 positions), verify 41.2 -> 39.9 ms per pass (41.9 before the down change). Ornith-35B / Coder-Next
+  (m = 1, also two-bank groups) may gain the same: untested there.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
