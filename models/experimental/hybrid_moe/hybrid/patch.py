@@ -998,8 +998,16 @@ def install():
         # layer output's per-die shard, instead of replicated before it)
         HYB.pf_defer_now = idx is not None
         HYB.pf_deferred = None
+        lp = getattr(HYB, "layer_prof", False)
+        if lp:
+            ttnn.synchronize_device(self.mesh_device)
+            t_l = time.perf_counter()
         try:
             y = bucket_layer(self, layer, x, bi, chunk_start)
+            if lp:
+                ttnn.synchronize_device(self.mesh_device)
+                key = "t_lp_full" if layer.is_full_attention else "t_lp_gdn"
+                HYB.st[key] = HYB.st.get(key, 0.0) + time.perf_counter() - t_l
         except BaseException:
             HYB.pf_pending = []
             raise
@@ -1065,6 +1073,13 @@ def _dev_tune():
             HYB.pf_cpu_ms = [float(x) for x in v.split(":")]
         elif k == "cold_threads":
             HYB.cold.nthreads, HYB.cold.pool = int(v), None
+        elif k == "moe_cfg":  # A/B only: grouped sparse matmul gate-up in0 : down in0 : subblock w, on every MoE layer
+            gu, dn, sw = (int(x) for x in v.split(":"))
+            for mod in HYB.fetch.mods.values():
+                mod.opt = mod.opt.with_(grouped_gate_up_in0=gu, grouped_down_in0=dn, grouped_subblock_w=sw)
+                mod._cfg_grouped = None
+        elif k == "layer_prof":
+            HYB.layer_prof = v == "1"
         elif k == "devroute":
             HYB.pf_devroute = v == "1"
         elif k == "host_zeros":  # A/B only: the old all-zero host block per prefill step
@@ -1990,7 +2005,14 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         return _forward_fused(self, x4, orig, partial, logits)
     if partial and HYB.enabled and HYB.C < HYB.E and T == 1:
         raise RuntimeError(f"layer {self.layer_num}: one-row decode boundary (partial={partial!r}) needs HYB_FUSED=1")
+    lp = mode == "prefill" and getattr(HYB, "layer_prof", False)
+    if lp:
+        ttnn.synchronize_device(self.device)
+        t_r = time.perf_counter()
     scores, ids = self._route(x4)
+    if lp:
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_lp_route"] = HYB.st.get("t_lp_route", 0.0) + time.perf_counter() - t_r
     if not (HYB.enabled and HYB.C < HYB.E):
         routed = _routed(self, x4, scores, ids, T, mode)
         ttnn.deallocate(scores)
@@ -2233,7 +2255,15 @@ def _devroute_step(self, x4, scores, ids, T, orig, partial):
     try:
         second = (self._stream_attrs["up_gate"], self._stream_attrs["down"], NS, group_ids,
                   lambda: ttnn.wait_for_event(0, copied))
+        lp = getattr(HYB, "layer_prof", False)
+        if lp:
+            ttnn.synchronize_device(self.device)
+            t_m = time.perf_counter()
         routed = self._routed_sorted(x4, scores, cid, T, second=second)
+        if lp:
+            ttnn.synchronize_device(self.device)
+            HYB.st["t_lp_routed"] = HYB.st.get("t_lp_routed", 0.0) + time.perf_counter() - t_m
+            t_m = time.perf_counter()
     finally:
         self._sorted_zero_out = False
     ttnn.deallocate(cid)
@@ -2243,7 +2273,11 @@ def _devroute_step(self, x4, scores, ids, T, orig, partial):
     HYB.st["pf_devroute"] = HYB.st.get("pf_devroute", 0) + 1
     HYB.st["prefill_rows"] += T
     HYB.st["t_devroute"] = HYB.st.get("t_devroute", 0.0) + time.perf_counter() - t0
-    return _finish(self, _plus_shared(self, routed, x4), orig, partial)
+    out = _finish(self, _plus_shared(self, routed, x4), orig, partial)
+    if getattr(HYB, "layer_prof", False):
+        ttnn.synchronize_device(self.device)
+        HYB.st["t_lp_shared_reduce"] = HYB.st.get("t_lp_shared_reduce", 0.0) + time.perf_counter() - t_m
+    return out
 
 
 def _devroute_table(self, L, T):
