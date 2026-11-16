@@ -89,6 +89,21 @@ Pieces (all traced, per-prompt re-capture):
   slices were allocated first-fit into the largest free block, leaving the concat output no contiguous room although
   _gather_fits had passed. gather() now reserves the output's block before slicing and frees it right before the
   concat. 3 x (56K prompt, resend, short) on the served 128K profile: no OOM, HYB_GATHER_CHECK identical every time.
+- OPEN (2026-11-16): long prefills after a demotion run 2048-token segments (~20% slower: 56K TTFT ~33-35 s vs 26 s
+  at 4096). Tried and reverted (diff: ~/m27-pkg/prefill_room_experiment.diff): a demotion that holds a 72 MB/bank block for the prefill
+  (Elastic._hold_room) plus a gather that frees the full tensor before its final concat (ttnn.concat runs > 47
+  inputs in batches through intermediates it allocates inside the call). It kept a >= 72 MB block after every 56K
+  demotion (56K TTFT 34.8 -> 27.9 s, 3 cycles, gathers byte-identical), but 4096-token segments then OOMed: a 73K
+  prompt (11 layers, 131 MB/bank free, largest 94) and once a 56K one (138 free, largest 72.0). Allocating out_dn
+  before the small intermediates (optimized_decoder._routed_sorted) did not fix it. Measured: a 4096 segment's MoE
+  needs x_disp + out_dn (~35 MB/bank each at G ~1400 groups) on top of ~45 MB of other prefill state, and with
+  131-138 MB free per bank in pieces that only fits sometimes. So the demoted profile is at the DRAM limit; this is
+  not just fragmentation. The successes all had a second free block >= 29 MB, and the failures did not.
+  RISK in the shipped code: the generator's test (largest free block >= QWEN35_PREFILL_TIGHT_MB = 72) is a weak
+  proxy. A layout with a 72-90 MB block after a demotion would pick 4096 segments and can OOM. It has not happened in
+  the package tests (56K demotions leave 62-63 MB -> 2048), but a sturdier test (total free plus the second-largest
+  block, or 2048 whenever layers are demoted) would close it. `HYB_DRAM_MAP=1` (in the diff) logs the free list at
+  each switch step.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
