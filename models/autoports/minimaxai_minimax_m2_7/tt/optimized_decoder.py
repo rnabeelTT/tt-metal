@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from dataclasses import dataclass, replace
 
 import torch
@@ -35,6 +36,22 @@ from models.demos.blackhole.qwen36.utils.substate import substate
 # Qwen3-Coder-Next perf pass: at one decode token the pairs path repeats the TILE row block on the batch dim instead of
 # the row-major to_layout / repeat / tilize round trip (two tilizes, ~24 us per layer).
 PAIRS_T1_TILE_REPEAT = os.environ.get("QWEN35_PAIRS_T1_TILE_REPEAT", "0") == "1"
+
+
+# QWEN35_MOE_PF_TIMES=1: synchronized wall time of each step of the expert-sorted routed path (_routed_sorted),
+# accumulated in PF_TIMES (a profiling aid: the synchronizations slow the run)
+PF_TIMES = {}
+_PF_ON = os.environ.get("QWEN35_MOE_PF_TIMES") == "1"
+
+
+def _pf_t(device, key, t0):
+    """Adds the time since t0 to PF_TIMES[key] (after synchronizing) and returns the new mark; no-op when off."""
+    if not _PF_ON:
+        return t0
+    ttnn.synchronize_device(device)
+    now = time.perf_counter()
+    PF_TIMES[key] = PF_TIMES.get(key, 0.0) + now - t0
+    return now
 
 
 @dataclass(frozen=True)
@@ -588,8 +605,12 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             self._cfg_sorted_dn = sparse_matmul_program_config(
                 gs, H, Nl, target_cores=opt.sorted_down_cores, in0_block_w_cap=opt.sorted_down_in0
             )
+        t_pf = _pf_t(self.device, "start", time.perf_counter()) if _PF_ON else 0.0
         m = (self._dispatch if second is None else self._dispatch_two[E2]).build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
+        t_pf = _pf_t(self.device, "dispatch_build", t_pf)
+        if _PF_ON:
+            PF_TIMES["groups"] = PF_TIMES.get("groups", 0) + int(G)
         grouped = bool(getattr(opt, "sorted_grouped", False))
         # the kernel gather needs the skip-aware grouped matmul (padding groups' tiles are not written)
         x_disp = gather_rows(
@@ -600,6 +621,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             group_ids=m["group_ids"] if (grouped and self._skip_pad_groups_rule()) else None,
             num_experts=E if second is None else E + E2,
         )  # [1,G,gs,H]
+        t_pf = _pf_t(self.device, "gather_rows", t_pf)
         if second is not None:
             gid_a, gid_b = group_ids(m)
             sets = [(self.up_gate, self.down, gid_a, self._pairs_mask(G, E))]
@@ -636,6 +658,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 compute_kernel_config=self.routed_ckc,
                 dtype=act,
             )  # compact [1,G,32,2Nl]
+        t_pf = _pf_t(self.device, "gate_up_mm", t_pf)
         ttnn.deallocate(x_disp)
         din = ttnn.swiglu(fused, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1,G,32,Nl]
         ttnn.deallocate(fused)
@@ -643,6 +666,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
         din = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Nl)), m["weights"], memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(m["weights"])
         din = ttnn.reshape(din, (1, G, gs, Nl))
+        t_pf = _pf_t(self.device, "swiglu_weight", t_pf)
         out_dn = self._alloc_dev(
             (1, G, gs, H),
             act,
@@ -667,6 +691,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
                 compute_kernel_config=self.routed_ckc,
                 dtype=act,
             )  # compact [1,G,32,H]
+        t_pf = _pf_t(self.device, "down_mm", t_pf)
         ttnn.deallocate(din)
         ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
@@ -674,6 +699,7 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             ttnn.deallocate(gid_a)
             ttnn.deallocate(gid_b)
         y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
+        _pf_t(self.device, "undispatch", t_pf)
         ttnn.deallocate(down)
         for key in ("undispatch", "undispatch_rm"):
             if m.get(key) is not None:
