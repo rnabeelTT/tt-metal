@@ -85,9 +85,17 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         "sparse_matmul (grouped): per_core_M ({}) must equal Mt ({}) (whole groups per core)",
         per_core_M,
         Mt);
+    // per_core_N < Nt: each group's output columns in Nt / per_core_N blocks, one work unit per (block, group) (the
+    // kernels' GROUP_COLS): a [K, per_core_N] weight block can stay resident where the whole [K, N] does not fit
     TT_FATAL(
-        per_core_N == Nt,
-        "sparse_matmul (grouped): per_core_N ({}) must equal Nt ({}) (whole groups per core)",
+        per_core_N > 0 && Nt % per_core_N == 0,
+        "sparse_matmul (grouped): per_core_N ({}) must divide Nt ({})",
+        per_core_N,
+        Nt);
+    const uint32_t col_blocks = Nt / per_core_N;
+    TT_FATAL(
+        col_blocks == 1 || !untilize_out,
+        "sparse_matmul (grouped): untilize_out needs per_core_N == Nt (got {} of {})",
         per_core_N,
         Nt);
     TT_FATAL(
@@ -102,9 +110,9 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
         Mt,
         out_subblock_h);
     TT_FATAL(
-        Nt % out_subblock_w == 0,
-        "sparse_matmul (grouped): Nt ({}) must be divisible by out_subblock_w ({})",
-        Nt,
+        per_core_N % out_subblock_w == 0,
+        "sparse_matmul (grouped): per_core_N ({}) must be divisible by out_subblock_w ({})",
+        per_core_N,
         out_subblock_w);
     const auto out_shape = output_tensor.padded_shape();
     TT_FATAL(
@@ -173,19 +181,21 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     // in0 reader must skip exactly those groups too or the compute kernel (which skips them) leaves their in0 blocks
     // in cb_in0 and the reader deadlocks on a full CB. Resident mode therefore always runs the id-aware in0 reader,
     // whatever the program config's skip_padding_groups says (the sorted dispatch pads with sentinel ids >= E).
-    const bool skip_groups = skip_padding_groups || resident_in1;
+    // (column blocks: the id-aware in0 reader maps every work unit to its group)
+    const bool skip_groups = skip_padding_groups || resident_in1 || col_blocks > 1;
     const uint32_t idx_page_size = idx_buffer->aligned_page_size();
 
-    // ---- core split over whole groups
+    // ---- core split over whole work units (a group, or one column block of a group)
+    const uint32_t units = G * col_blocks;
     const CoreCoord grid = pc->compute_with_storage_grid_size;
     uint32_t num_cores = 0, groups_g1 = 0, groups_g2 = 0;
     CoreRangeSet all_cores, core_group_1, core_group_2;
     if (pc->allowed_worker_cores.has_value()) {
         std::tie(num_cores, all_cores, core_group_1, core_group_2, groups_g1, groups_g2) =
-            tt::tt_metal::split_work_to_cores(pc->allowed_worker_cores.value(), G, /*row_wise=*/true);
+            tt::tt_metal::split_work_to_cores(pc->allowed_worker_cores.value(), units, /*row_wise=*/true);
     } else {
         std::tie(num_cores, all_cores, core_group_1, core_group_2, groups_g1, groups_g2) =
-            tt::tt_metal::split_work_to_cores(grid, G, /*row_wise=*/true);
+            tt::tt_metal::split_work_to_cores(grid, units, /*row_wise=*/true);
     }
     TT_FATAL(
         num_cores > 0 && groups_g1 > 0, "sparse_matmul (grouped): no work split (G={}, grid={}x{})", G, grid.x, grid.y);
@@ -264,6 +274,11 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
     }
     if (resident_in1) {
         dm_defines["RESIDENT_IN1"] = "1";
+    }
+    if (col_blocks > 1) {
+        dm_defines["GROUP_COLS"] = std::to_string(col_blocks);
+        dm_defines["NUM_GROUPS"] = std::to_string(G);
+        dm_defines["COL_TILES"] = std::to_string(per_core_N);
     }
     // untilize_out: pack-untilize is exact up to 16 tiles of row width -> chunk the [32, N] block (chunk = the largest
     // multiple of the subblock width that divides N and is <= 16 tiles); the resident compute kernel carries the path
@@ -350,9 +365,11 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
             out_subblock_num_tiles,
             groups_per_core,  // batch
             out_block_tiles,
-            untilize_out ? 1u : 0u,                           // untilize_out (pack-untilize into cb_out)
-            (skip_padding_groups || resident_in1) ? 1u : 0u,  // get_batch_from_reader: group validity (mailbox)
-            0u,                                               // in0_transpose_tile
+            untilize_out ? 1u : 0u,  // untilize_out (pack-untilize into cb_out)
+            skip_groups
+                ? 1u
+                : 0u,  // get_batch_from_reader: group validity (mailbox; the writer posts it whenever skip_groups)
+            0u,        // in0_transpose_tile
         };
     };
     const std::unordered_map<std::string, uint32_t> compute_named_args = {
@@ -469,7 +486,8 @@ SparseMatmulMultiCoreReuseGroupedProgramFactory::create(
              groups_written});
         groups_written += groups_here;
     }
-    TT_FATAL(groups_written == G, "sparse_matmul (grouped): distributed {} of {} groups", groups_written, G);
+    TT_FATAL(
+        groups_written == units, "sparse_matmul (grouped): distributed {} of {} work units", groups_written, units);
 
     return {std::move(program), shared_variables_t{in0_reader_kernel, in1_writer_kernel, cores}};
 }

@@ -727,8 +727,11 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
             opt = self.opt
             grid = self.device.compute_with_storage_grid_size()
 
-            def cfg(k, n_tiles, in0_cap, w_tile_bytes):
+            def cfg(k, n_tiles, in0_cap, w_tile_bytes, col_blocks=1):
+                """col_blocks > 1: each core computes n_tiles / col_blocks output columns of a group (one work unit per
+                column block and group: the grouped factory's per_core_N < Nt)."""
                 k_tiles = k // 32
+                n_tiles = n_tiles // col_blocks  # this config's per-core output columns
                 ib = max(1, min(int(in0_cap), k_tiles))
                 while k_tiles % ib:
                     ib -= 1
@@ -771,7 +774,16 @@ class Qwen35MoEOptimized(Qwen35MoEFused):
 
             gu_tiles = -(-(2 * Nl) // self.tile_gu.tile_shape[1])
             tile_bytes = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088}
-            cfg_gu, _ = cfg(H, gu_tiles, opt.grouped_gate_up_in0, tile_bytes.get(self.up_gate.dtype, 2048))
+            gu_tb = tile_bytes.get(self.up_gate.dtype, 2048)
+            cfg_gu, gu_resident = cfg(H, gu_tiles, opt.grouped_gate_up_in0, gu_tb)
+            # QWEN35_GU_COL_SPLIT (default 1; 0 = off): the gate|up projection in 2 column blocks when its whole [K, N] weight block misses
+            # the resident L1 budget but half of it fits (M2.7: 96 x 24 bfp4 tiles = 1.33 MB > 1.3 MB): the weights
+            # are then read once per run of same-expert groups instead of once per group (44.7K prefill 17.3 -> 15.5 s,
+            # logits identical)
+            if os.environ.get("QWEN35_GU_COL_SPLIT", "1") == "1" and not gu_resident and gu_tiles % 2 == 0:
+                cfg_split, split_resident = cfg(H, gu_tiles, opt.grouped_gate_up_in0, gu_tb, col_blocks=2)
+                if split_resident:
+                    cfg_gu = cfg_split
             cfg_dn, dn_resident = cfg(Nl, H // 32, opt.grouped_down_in0, tile_bytes.get(self.down.dtype, 2048))
             # a SEPARATE config object for the expert-sorted path's down projection: the pairs path (decode widths
             # 2-16 and the MTP pass) shares cfg_dn and must keep TILE output (served c=1 pass 71.5 -> 86 ms when the

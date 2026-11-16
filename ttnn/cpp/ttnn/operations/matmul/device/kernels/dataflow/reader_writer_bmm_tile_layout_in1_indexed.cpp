@@ -87,7 +87,21 @@ void kernel_main() {
     const volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(idx_l1_addr);
 
     for (uint32_t b = 0; b < batch; ++b) {
+#ifdef GROUP_COLS
+        // GROUP_COLS column blocks of COL_TILES output tiles each: work unit u = column block (u / NUM_GROUPS) of
+        // compact group (u % NUM_GROUPS); the weights and the output of the unit start COL_TILES * block tiles in
+        const uint32_t u = start_batch + b;
+        const uint32_t gb = u % NUM_GROUPS;
+        const uint32_t col0 = (u / NUM_GROUPS) * COL_TILES;
+        out_tensor_start_tile_id = gb * MtNt + col0;
+        // a neighbour unit continues the run only within the same column block
+        auto same_as = [&](uint32_t u2, uint32_t id) -> bool {
+            return u2 / NUM_GROUPS == u / NUM_GROUPS && ids[u2 % NUM_GROUPS] == id;
+        };
+#else
         const uint32_t gb = start_batch + b;
+        constexpr uint32_t col0 = 0;
+#endif
         ASSERT(gb < num_groups_total);
         const uint32_t group_id = ids[gb];
 #ifdef RESIDENT_IN1
@@ -96,8 +110,13 @@ void kernel_main() {
         // kernel pops it after the run's last group (run code through the BRISC mailbox: 0 skip, 1 single, 2 first,
         // 3 middle, 4 last). The id list is this forward's routing (device-resident), so runs are found at run time.
         const bool group_valid = group_id < num_experts;
+#ifdef GROUP_COLS
+        const bool prev_same = group_valid && b > 0 && same_as(u - 1, group_id);
+        const bool next_same = group_valid && (b + 1 < batch) && same_as(u + 1, group_id);
+#else
         const bool prev_same = group_valid && b > 0 && ids[gb - 1] == group_id;
         const bool next_same = group_valid && (b + 1 < batch) && ids[gb + 1] == group_id;
+#endif
         const uint32_t run_code = !group_valid ? 0u : (prev_same ? (next_same ? 3u : 4u) : (next_same ? 2u : 1u));
         ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, run_code);
         ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, run_code);
@@ -110,7 +129,7 @@ void kernel_main() {
             // the run's first group: read every K-block of the expert into the resident CB region in one reservation
             constexpr uint32_t resident_tiles = num_blocks * in1_block_num_tiles;
             dfb_in1.reserve_back(resident_tiles);
-            uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt;
+            uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt + col0;
             uint32_t in1_write_offset = 0;
             for (uint32_t block = 0; block < num_blocks; ++block) {
                 uint32_t in1_tensor_row_start_tile_id = in1_tensor_current_block_start_tile_id;
@@ -148,7 +167,7 @@ void kernel_main() {
         ASSERT(group_id < num_experts);
 #endif
 #ifndef RESIDENT_IN1
-        uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt;
+        uint32_t in1_tensor_current_block_start_tile_id = group_id * KtNt + col0;
         for (uint32_t block = 0; block < num_blocks; ++block) {
             dfb_in1.reserve_back(in1_block_num_tiles);
             uint32_t in1_write_offset = 0;
