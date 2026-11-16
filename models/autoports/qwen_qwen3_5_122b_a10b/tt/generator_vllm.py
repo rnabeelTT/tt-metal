@@ -733,7 +733,12 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             except Exception:
                 self._mtp.abort_prefill()
                 raise
-            tok0 = [int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)]
+            if sampler is None and getattr(self._mtp, "host_logits", False):
+                tok0 = [None] * N  # vLLM's host sampler picks the first token; the first decode step receives it
+            else:
+                tok0 = [
+                    int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)
+                ]
             if self._mtp.multi or self._mtp.adaptive:
                 self._mtp.end_prefill(tok0, plens, slots)
             else:
@@ -886,8 +891,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
 
     @staticmethod
     def _mtp_sampling(sp, row):
-        """(temperature, top_k, top_p, seed) of request `row` from the plugin's TTSamplingParams (lists or tensors);
-        None when absent. Penalties are not applied by the MTP step."""
+        """(temperature, top_k, top_p, seed, presence, frequency, repetition) of request `row` from the plugin's
+        TTSamplingParams (lists or tensors); None when absent (DFlash applies the penalties; MtpServing ignores them)."""
         if sp is None:
             return None
 
@@ -909,7 +914,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         p = float(pick(getattr(sp, "top_p", None), 1.0))
         seed = pick(getattr(sp, "seed", None), None)
         seed = None if seed is None or int(seed) < 0 else int(seed)
-        return (t, k, p, seed)
+        pres = float(pick(getattr(sp, "presence_penalty", None), 0.0))
+        freq = float(pick(getattr(sp, "frequency_penalty", None), 0.0))
+        rep = float(pick(getattr(sp, "repetition_penalty", None), 1.0))
+        return (t, k, p, seed, pres, freq, rep)
 
     def _mtp_decode(self, args, kwargs):
         """MTP step: the plugin hands the last emitted token at position num_tokens - 1 (padding rows at -1); returns a
@@ -937,13 +945,26 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             self._decode_steps = getattr(self, "_decode_steps", 0) + 1
             return out
         assert len(live) <= 1, "single-user MTP step got several live rows"
+        sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
+        # no device sampling params = a step for vLLM's host sampler (logprobs, structured outputs, logit bias,
+        # min_tokens, ...): the plugin reads logits [B, 1, V] back, which a step with host_logits support returns
+        host = sp is None and getattr(self._mtp, "host_logits", False)
+        if host:
+            out = torch.zeros(tokens.numel(), 1, int(self._gen.args.vocab_size), dtype=torch.float32)
         for i in live:
             row = None
             if page_table is not None:
                 pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
                 row = pt[i]
             authoritative = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
-            sampling = self._mtp_sampling(kwargs.get("sampling_params", args[6] if len(args) > 6 else None), i)
+            if host:
+                lg = self._mtp.step(
+                    int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative, host_logits=True
+                ).reshape(-1)
+                n = min(int(lg.numel()), int(out.shape[-1]))
+                out[i, 0, :n] = lg[:n]
+                continue
+            sampling = self._mtp_sampling(sp, i)
             ids = self._mtp.step(
                 int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative, sampling=sampling
             )

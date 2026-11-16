@@ -29,6 +29,7 @@ default 1), DFLASH_WARMUP (serving: tokens of the startup warm-up generation, de
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import sys
@@ -417,10 +418,30 @@ def _sample(dist, gen, exclude=None):
     return j if ids is None else int(ids[j])
 
 
+NO_PENALTIES = (0.0, 0.0, 1.0)  # (presence, frequency, repetition)
+
+
+def penalize(x, prompt_ids, counts, pen):
+    """vLLM's penalties (model_executor/layers/utils.py apply_penalties) on one full logits row `x` [V]: repetition r
+    scales the logit of every token seen in the prompt or the output (x / r when x > 0, else x * r), then frequency f and
+    presence p subtract f * count and p * (count > 0), count = the token's occurrences in the output. prompt_ids: the
+    prompt's distinct ids; counts [V]: the output counts; pen = (presence, frequency, repetition)."""
+    pres, freq, rep = pen
+    x = x.float()
+    if rep != 1.0:
+        seen = counts > 0
+        seen[prompt_ids[prompt_ids < x.shape[-1]]] = True
+        x = torch.where(seen, torch.where(x > 0, x / rep, x * rep), x)
+    if freq != 0.0 or pres != 0.0:
+        x = x - freq * counts - pres * (counts > 0).float()
+    return x
+
+
 class DFlashServing:
     """Single-user DFlash step with MtpServing's single-user interface (generator_vllm drives it as its `_mtp`)."""
 
     adaptive = multi = per_slot = in_trace = in_phase = False
+    host_logits = True  # step(host_logits=True): one verified position's logits for vLLM's host sampler
     head = None  # no MTP head (the Qwen3.5 port's generator_vllm reads it)
 
     def __init__(self, gen, k: int = 3, drafter=None):
@@ -665,7 +686,11 @@ class DFlashServing:
         self._ctx_ids = self._ids  # the context's ids; the last n_hist have their features in hist
         self.dr.fill_prompt(feats[-W:], start=max(0, P - W))
         self._capture()
-        self._pos, self._tok, self._prev_acc = P, int(tok0), []
+        # tok0 None: vLLM's host sampler picks the first token (logprobs, structured outputs, ...); the plugin hands it
+        # to the first decode step
+        self._pos, self._tok, self._prev_acc = P, (None if tok0 is None else int(tok0)), []
+        self._out_counts = collections.Counter([] if tok0 is None else [int(tok0)])  # emitted tokens (penalties)
+        self._pen_prompt = None  # the prompt's distinct ids, built by the request's first penalized row
         self._rng = None  # the sampled request's generator (created at its first step)
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["sample"] = 0.0
@@ -687,18 +712,33 @@ class DFlashServing:
         ttnn.synchronize_device(self.mesh)
 
     # ------------------------------------------------------------------ decode
-    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None) -> list[int]:
+    def step(self, tok: int, pos: int, page_table_row=None, host_authoritative=False, sampling=None, host_logits=False):
         """Returns the accepted drafts followed by the verified next token (1..R ids). The step owns the continuation
         (as MtpServing.step: on the plugin's steady async path its host token can lag by a step); the plugin's tok / pos
-        are checked when it flags the host inputs authoritative (the first decode after a prefill)."""
+        are checked when it flags the host inputs authoritative (the first decode after a prefill).
+
+        sampling = (temperature, top_k, top_p, seed[, presence, frequency, repetition]): penalties are applied as vLLM
+        does to the full verify rows (row i's output history = the emitted tokens + the drafts before it).
+        host_logits: a step for vLLM's host sampler (logprobs, structured outputs, logit bias, min_tokens, ...; the
+        plugin then passes no device sampling params): the same verify pass with no draft accepted, returning row 0's
+        logits [V]; vLLM samples the token and the plugin hands it to the next step."""
         if self._pos is None:
             raise RuntimeError("DFlash step before any prefill")
-        if host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
+        if self._tok is None:  # the previous token was sampled on the host: the plugin's token continues the request
+            if int(pos) != self._pos:
+                raise RuntimeError(f"DFlash step at plugin pos {pos} after a host-sampled token at pos {self._pos}")
+            self._tok = int(tok)
+            self._out_counts.update([self._tok])
+        elif host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
             raise RuntimeError(
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
                 f"(tok {self._tok}, pos {self._pos})"
             )
-        sampled = sampling is not None and sampling[0] > 0 and self._force is None
+        pen = tuple(float(v) for v in sampling[4:7]) if (sampling is not None and len(sampling) > 4) else NO_PENALTIES
+        self._pen = pen if any(abs(a - b) > 1e-6 for a, b in zip(pen, NO_PENALTIES)) else None
+        if host_logits or self._force is not None:
+            self._pen = None
+        sampled = sampling is not None and sampling[0] > 0 and self._force is None and not host_logits
         if sampled and self._rng is None:  # a new sampled request: its seed, or a fresh random one
             self._rng = torch.Generator()
             if sampling[3] is not None:
@@ -740,10 +780,30 @@ class DFlashServing:
             top = self._force[i + 1 : i + 1 + R]
             if len(top) < R:
                 raise RuntimeError(f"DFlash forced decode ran past the recorded {len(self._force)} tokens")
-        if sampled:  # speculative sampling against the point-mass drafts, row by row until the first rejection
+        logits0 = None
+        if host_logits:  # vLLM's host sampler decides this position: no draft accepted, row 0's logits returned
+            a = 0
+            logits0 = ver.read_raw_logits(1, self.V)[0]
+        elif self._pen is not None and not sampled:  # greedy with penalties: the argmax of each penalized full row
             t_s = time.perf_counter()
-            T, tk, tp, _ = sampling
-            if 0 < tk <= Verify.CAND_K:  # the device candidates (~1 KB per row) instead of the full logits
+            lg = ver.read_raw_logits(R, self.V)
+            top = list(top)
+            a = 0
+            while True:
+                m = int(torch.argmax(self._penalize(lg[a], drafts[:a])))
+                if a < K and drafts[a] == m:
+                    a += 1
+                    continue
+                top[a] = m
+                break
+            self.stats["sample"] += time.perf_counter() - t_s
+        elif sampled:  # speculative sampling against the point-mass drafts, row by row until the first rejection
+            t_s = time.perf_counter()
+            T, tk, tp = sampling[:3]
+            if self._pen is not None:  # penalties: the full rows, penalized with the history up to each row
+                lg = ver.read_raw_logits(R, self.V)
+                row_dist = lambda r: _target_dist(self._penalize(lg[r], drafts[:r]), T, tk, tp)  # noqa: E731
+            elif 0 < tk <= Verify.CAND_K:  # the device candidates (~1 KB per row) instead of the full logits
                 cv, ci = ver.read_cands(R, self.V)
                 row_dist = lambda r: _target_dist_cands(cv[r], ci[r], T, tk, tp)  # noqa: E731
             else:
@@ -786,7 +846,12 @@ class DFlashServing:
         out = drafts[:a] + [top[a]]
         ver.set_base(a)  # GDN: the next pass continues from row a's state (rows a + 1 .. were rejected drafts)
         self._prev_acc = list(range(p, p + a + 1))
-        self._tok, self._pos = top[a], p + a + 1
+        if host_logits:
+            out = [None]
+            self._tok, self._pos = None, p + 1  # vLLM samples it; the plugin passes it to the next step
+        else:
+            self._out_counts.update(out)
+            self._tok, self._pos = top[a], p + a + 1
         st = self.stats
         st["passes"] += 1
         st["tokens"] += len(out)
@@ -797,7 +862,23 @@ class DFlashServing:
         st["wall"] += time.perf_counter() - a0
         if st["passes"] % 64 == 0:
             self._log_stats("running")
-        return out
+        return logits0 if host_logits else out
+
+    _pen = None
+
+    def _penalize(self, x, extra):
+        """penalize() one full logits row with the request's penalties; output history = the emitted tokens + `extra`
+        (the drafts before the row)."""
+        if self._pen_prompt is None:
+            self._pen_prompt = torch.unique(torch.tensor(self._ids[: self._P], dtype=torch.int64))
+        c = self._out_counts.copy()
+        c.update(int(v) for v in extra)
+        V = x.shape[-1]
+        counts = torch.zeros(V, dtype=torch.float32)
+        keys = [t for t in c if 0 <= t < V]
+        if keys:
+            counts[torch.tensor(keys)] = torch.tensor([float(c[t]) for t in keys])
+        return penalize(x, self._pen_prompt, counts, self._pen)
 
     _pf_st0 = None
 
