@@ -226,16 +226,20 @@ card:
     | p300x2-128k | greedy | ~50 | 256 | 1 | 16 | 1.12 s | — | 18.6 | — |
     | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.08 s | — | 18.4 | — |
     | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.09 s | — | 18.1 | — |
-    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 46.3 s | 98 | 16.9 | 53.9 s |
-    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 184.9 s | 97 | 16.9 | 192.4 s |
-    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 381.7 s | 95 | 15.8 | 389.8 s |
+    | p300x2-128k | greedy | 1,128 | 64 | 1 | 1 | 9.0 s | 125 | 16.8 | 12.8 s |
+    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 20.4 s | 222 | 15.7 | 28.5 s |
+    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 24.3 s | 741 | 18.4 | 31.2 s |
+    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 36.4 s | 995 | 16.5 | 44.1 s |
 
     Measured on one QB2 (Ryzen 7 9700X, 2-channel DDR5 at 3600 MT/s) through the OpenAI endpoint with `tt-model
     serve`, warm caches, 2026-11-15; the ~50-token rows are the 8 held-out chat prompts (thinking on) per run, the long
     rows GSM8K questions concatenated (thinking off). Prefill tok/s = prompt tokens / TTFT. Per-prompt decode spans
     ~15-21 tok/s with the text (speculative acceptance and how many experts miss the device). GSM8K from the same
-    configuration in development (2026-11-14; 57 / 60 without speculation or the fetch). The `p300x2-128k-lowmem`
-    profile decoded ~13.6 tok/s on short prompts in development (not re-measured on this package).
+    configuration in development (2026-11-14; 57 / 60 without speculation or the fetch); after the prefill-streaming
+    change the first 40 questions scored 38 / 40, the same as before it. The long-prompt rows are the first request of
+    each length after a start (a repeat of the 4,529-token prompt took ~18 s); before prefill streaming (2026-11-15)
+    they were 46.3 s / 184.9 s / 381.7 s. The `p300x2-128k-lowmem` profile decoded ~13.6 tok/s on short prompts in
+    development and prefills on the CPU (not re-measured on this package).
   limitations: |
     - One user at a time; the hybrid path does not batch.
     - Decode speed depends on the text: the more of a token's experts are off the device, the more the CPU does
@@ -244,9 +248,11 @@ card:
       reads of low-weight host experts). They are not bit-reproducible between requests either: which copy of an
       expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text.
     - Penalties (presence / frequency / repetition) are ignored in decode.
-    - Prefill is slow: ~95-100 tok/s (a 4K-token prompt waits ~46 s, 32K ~6 minutes). The Qwen3.5 port does not
-      stream experts to the device in prefill yet, so the CPU computes every off-device expert for every prompt
-      token. Decode is not affected.
+    - Prefill copies a layer's off-device experts to the device once per 64K tokens, a fixed cost of ~9-10 s per prompt
+      on top of the compute: short and mid-length prompts prefill at ~125-220 tok/s, long ones approach ~1,000 tok/s.
+      From 4,096 prompt tokens the experts without a prebuilt device copy are converted from the int4 copies during
+      prefill (a second 4-bit rounding: their weights carry ~12-16% error against the FP8 checkpoint instead of
+      ~10-12% for the prebuilt copies); long-context retrieval checks still pass (see Performance).
     - Prefix caching is off (a resent prompt is prefilled again).
     - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
   licensing: >
