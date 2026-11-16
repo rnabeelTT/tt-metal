@@ -130,7 +130,7 @@ serve:
     HYB_STREAM_MIN_LONG: "1"
     HYB_STREAM_LONG_FROM: "1024"
     HYB_PF_PREFETCH_MIN: "0"
-    HYB_PF_COLD_MIN: "4096"
+    HYB_PF_COLD_MIN: "2560"
     HYB_PREFILL_SENTINEL: "1"
     # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash), 3 drafts, GDN rows-mode verify
     QWEN35_EXT_SPEC: dflash_serve:build

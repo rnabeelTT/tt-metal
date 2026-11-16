@@ -89,6 +89,18 @@ class ColdConvert:
         if i + 1 < len(layers):
             self._start(layers[i + 1])
 
+    def try_ready(self, layer):
+        """Registers `layer`'s converted experts if every conversion has finished (non-blocking); True if registered."""
+        if not self.active or layer not in self.jobs:
+            return False
+        b, experts, futs = self.jobs[layer]
+        if not all(f.done() for f in futs):
+            return False
+        for f in futs:
+            f.result()
+        self.hyb.fetch.cold[layer] = (self.banks[b][0], {e: i for i, e in enumerate(experts)})
+        return True
+
     def mark(self, layer, mesh):
         """After a prefill step's copies are enqueued: the CQ1 event the bank's next reuse waits for."""
         if self.active and layer in self.jobs:

@@ -1198,6 +1198,91 @@ __attribute__((optimize("fp-contract=off"))) static void bfp4_face_row(
     *exp_out = (uint8_t)shared;
 }
 
+// Four face rows at once: library rows n0 .. n0 + 63 (n0 % 64 == 0, one library block) of column k, as bfp4_face_row
+// would write them for n0, n0 + 16, n0 + 32, n0 + 48 (same bytes): one load of the packed weights, the four shared
+// exponents reduced together (6 lane shuffles instead of 4 full reductions).
+__attribute__((optimize("fp-contract=off"))) static void bfp4_face_rows4(
+    const uint8_t* w,
+    const uint16_t* sz,
+    int N,
+    int K,
+    int gs,
+    int planar,
+    int sig,
+    int k,
+    int n0,
+    uint8_t* const exp_out[4],
+    uint8_t* const mant_out[4]) {
+    const uint8_t* blk = w + (size_t)(n0 / 64) * K * 32;
+    __m512i q[4];
+    if (!planar) {
+        __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)k * 32)));
+        __m512i v1 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)k * 32 + 16)));
+        q[0] = _mm512_and_si512(v0, _mm512_set1_epi32(15));
+        q[1] = _mm512_and_si512(v1, _mm512_set1_epi32(15));
+        q[2] = _mm512_srli_epi32(v0, 4);
+        q[3] = _mm512_srli_epi32(v1, 4);
+    } else {
+        __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)k * 16)));
+        __m512i vl = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)K * 16 + (size_t)k * 16)));
+        for (int m = 0; m < 4; m++) {
+            __m512i h = _mm512_and_si512(_mm512_srli_epi32(vh, 2 * m), _mm512_set1_epi32(3));
+            __m512i l = _mm512_and_si512(_mm512_srli_epi32(vl, 2 * m), _mm512_set1_epi32(3));
+            q[m] = _mm512_or_si512(_mm512_slli_epi32(h, 2), l);
+        }
+    }
+    const uint16_t* zp = sz + ((size_t)(k / gs) * N + n0) * 2;
+    __m512i b[4], e[4];
+    for (int m = 0; m < 4; m++) {
+        __m512i u = _mm512_loadu_si512((const void*)(zp + 32 * m));
+        __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
+        __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
+        __m512 qf = _mm512_cvtepi32_ps(_mm512_sub_epi32(q[m], _mm512_set1_epi32(8)));
+        __m512 wv = _mm512_add_ps(_mm512_mul_ps(qf, s), z);
+        b[m] = _mm512_castps_si512(wv);
+        if (sig < 24) {
+            const int drop = 24 - sig;
+            b[m] = _mm512_and_si512(
+                _mm512_add_epi32(b[m], _mm512_set1_epi32(1 << (drop - 1))), _mm512_set1_epi32(~((1 << drop) - 1)));
+        }
+        e[m] = _mm512_and_si512(_mm512_srli_epi32(b[m], 23), _mm512_set1_epi32(0xff));
+    }
+    __m512i A = _mm512_max_epu32(_mm512_shuffle_i32x4(e[0], e[1], 0x44), _mm512_shuffle_i32x4(e[0], e[1], 0xEE));
+    __m512i B = _mm512_max_epu32(_mm512_shuffle_i32x4(e[2], e[3], 0x44), _mm512_shuffle_i32x4(e[2], e[3], 0xEE));
+    __m512i C = _mm512_max_epu32(_mm512_shuffle_i32x4(A, B, 0x88), _mm512_shuffle_i32x4(A, B, 0xDD));
+    C = _mm512_max_epu32(C, _mm512_shuffle_epi32(C, (_MM_PERM_ENUM)0x4E));
+    C = _mm512_max_epu32(C, _mm512_shuffle_epi32(C, (_MM_PERM_ENUM)0xB1));  // 128-bit lane m: shared exponent of row m
+    uint32_t sh[16];
+    _mm512_storeu_si512((void*)sh, C);
+    for (int m = 0; m < 4; m++) {
+        __m512i S;
+        switch (m) {
+            case 0: S = _mm512_shuffle_i32x4(C, C, 0x00); break;
+            case 1: S = _mm512_shuffle_i32x4(C, C, 0x55); break;
+            case 2: S = _mm512_shuffle_i32x4(C, C, 0xAA); break;
+            default: S = _mm512_shuffle_i32x4(C, C, 0xFF); break;
+        }
+        __m512i mant = _mm512_or_si512(_mm512_and_si512(b[m], _mm512_set1_epi32(0x7fffff)), _mm512_set1_epi32(0x800000));
+        mant = _mm512_srlv_epi32(mant, _mm512_sub_epi32(S, e[m]));  // counts >= 32 give 0
+        __m512i rv = _mm512_and_si512(mant, _mm512_set1_epi32(0x1fffff));
+        __m512i m3 = _mm512_srli_epi32(mant, 21);
+        __mmask16 up = _mm512_cmpgt_epu32_mask(rv, _mm512_set1_epi32(0x100000)) |
+                       (_mm512_cmpeq_epu32_mask(rv, _mm512_set1_epi32(0x100000)) &
+                        _mm512_test_epi32_mask(m3, _mm512_set1_epi32(1)));
+        m3 = _mm512_mask_add_epi32(m3, up, m3, _mm512_set1_epi32(1));
+        m3 = _mm512_min_epu32(m3, _mm512_set1_epi32(7));
+        __mmask16 zero = _mm512_cmpeq_epi32_mask(e[m], _mm512_setzero_si512());
+        m3 = _mm512_mask_mov_epi32(m3, zero, _mm512_setzero_si512());
+        __mmask16 nz = _mm512_test_epi32_mask(m3, m3);
+        __m512i sgn = _mm512_maskz_and_epi32(nz, _mm512_srli_epi32(b[m], 28), _mm512_set1_epi32(8));
+        __m128i nib = _mm512_cvtepi32_epi8(_mm512_or_si512(sgn, m3));
+        __m128i pr = _mm_maddubs_epi16(nib, _mm_set1_epi16(0x1001));
+        __m128i packed = _mm_packus_epi16(pr, pr);
+        _mm_storel_epi64((__m128i*)mant_out[m], packed);
+        *exp_out[m] = (uint8_t)sh[4 * m];
+    }
+}
+
 // One matrix [R, C] (row i = column k(i) of the library matrix, its 16-wide column blocks c0 -> library rows n0(c0))
 // as bfp4_b tiles in row-major tile order (576 bytes each: 4 x 16 exponents, then the 4 faces' nibbles).
 static void bfp4_matrix(
@@ -1213,14 +1298,39 @@ static void bfp4_matrix(
     int k0,
     const int* n0_of_cb,
     uint8_t* out) {
-    const int ct_n = C / 32;
-    for (int i = 0; i < R; i++) {
-        const int rt = i / 32, ti = i % 32, fr = ti / 16, ri = ti % 16;
-        for (int cb = 0; cb < C / 16; cb++) {
-            const int ct = cb / 2, fc = cb % 2, f = fr * 2 + fc;
-            uint8_t* tile = out + ((size_t)rt * ct_n + ct) * 576;
-            bfp4_face_row(w, sz, N, K, gs, planar, sig, k0 + i, n0_of_cb[cb], tile + f * 16 + ri, tile + 64 + f * 128 + ri * 8);
+    // Column blocks outer in runs that share one 64-row library block (4 consecutive 16-row blocks), output rows inner:
+    // the library block is then read sequentially (k-major inside it) instead of one 16-byte piece of each of up to 64
+    // blocks per output row, which left the kernel waiting on DRAM (~10 ms per expert per thread before).
+    const int ct_n = C / 32, ncb = C / 16;
+    for (int cb0 = 0; cb0 < ncb;) {
+        int run = 1;
+        while (cb0 + run < ncb && run < 4 && n0_of_cb[cb0 + run] == n0_of_cb[cb0] + 16 * run &&
+               n0_of_cb[cb0 + run] / 64 == n0_of_cb[cb0] / 64) {
+            run++;
         }
+        const int four = run == 4 && n0_of_cb[cb0] % 64 == 0;
+        for (int i = 0; i < R; i++) {
+            const int rt = i / 32, ti = i % 32, fr = ti / 16, ri = ti % 16;
+            if (four) {
+                uint8_t* eo[4];
+                uint8_t* mo[4];
+                for (int j = 0; j < 4; j++) {
+                    const int cb = cb0 + j, ct = cb / 2, fc = cb % 2, f = fr * 2 + fc;
+                    uint8_t* tile = out + ((size_t)rt * ct_n + ct) * 576;
+                    eo[j] = tile + f * 16 + ri;
+                    mo[j] = tile + 64 + f * 128 + ri * 8;
+                }
+                bfp4_face_rows4(w, sz, N, K, gs, planar, sig, k0 + i, n0_of_cb[cb0], eo, mo);
+                continue;
+            }
+            for (int cb = cb0; cb < cb0 + run; cb++) {
+                const int ct = cb / 2, fc = cb % 2, f = fr * 2 + fc;
+                uint8_t* tile = out + ((size_t)rt * ct_n + ct) * 576;
+                bfp4_face_row(
+                    w, sz, N, K, gs, planar, sig, k0 + i, n0_of_cb[cb], tile + f * 16 + ri, tile + 64 + f * 128 + ri * 8);
+            }
+        }
+        cb0 += run;
     }
 }
 

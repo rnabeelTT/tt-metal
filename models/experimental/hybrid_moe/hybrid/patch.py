@@ -1009,6 +1009,8 @@ def install():
             HYB.pf_deferred = None
         if idx is not None and idx == len(grp) - 1 and HYB.pf_pending:
             _resolve_deferred()  # the layer's last segment: every segment's output is complete before the next layer
+        if idx is not None and idx == len(grp) - 1 and HYB.stream.on:
+            _early_prefetch()
         return y
 
     if hasattr(model_cls, "prefill_group"):
@@ -1059,6 +1061,10 @@ def _dev_tune():
             HYB.pf_copy_ms = float(v)
         elif k == "cpu_ms":
             HYB.pf_cpu_ms = [float(x) for x in v.split(":")]
+        elif k == "cold_threads":
+            HYB.cold.nthreads, HYB.cold.pool = int(v), None
+        elif k == "early":
+            HYB.stream.early = v == "1"
         elif k == "zerocopy" and HYB.fetch.px is not None:
             HYB.fetch.px.zerocopy = v == "1"
     print(f"HYB_TUNE {open(path).read().split()}", flush=True)
@@ -2159,6 +2165,21 @@ def _resolve_deferred():
         ttnn.add(y, dense, output_tensor=y)
         ttnn.deallocate(dense)
         HYB.st["t_up"] += time.perf_counter() - t0
+
+
+def _early_prefetch():
+    """After a group's last segment of a decoder layer: the next hybrid layer's staging copies start now (stream.py
+    prefetch_after), with its converted experts if their conversions have finished. The layer is the one whose prefill
+    step ran last (stream.step sets stream.cur); a layer without a hybrid MoE leaves it, and its repeat copies nothing."""
+    L = HYB.stream.cur
+    if L is None or L not in HYB.stream.layers:
+        return
+    i = HYB.stream.layers.index(L)
+    if i + 1 < len(HYB.stream.layers):
+        HYB.cold.try_ready(HYB.stream.layers[i + 1])
+    t0 = time.perf_counter()
+    HYB.stream.prefetch_after(L, _nonresident_hot_first, HYB.stream.dev["mesh"], HYB.st)
+    HYB.st["t_stream"] += time.perf_counter() - t0
 
 
 def _nonresident_hot_first(layer):
