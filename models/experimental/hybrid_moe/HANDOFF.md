@@ -148,6 +148,14 @@ Pieces (all traced, per-prompt re-capture):
   layer rather than bandwidth-bound; the kernel already splits each expert over the threads. NOTE: the 42-46 ms verify
   figures above are the deterministic A/B config (HYB_FETCH_POLICY=fixed, FRAC=0: ~90 CPU experts per pass), not
   serving.
+- DEVICE PROFILE v1.7 (2026-11-16, package config, short prompt; scratch p17/seq.csv): the verify trace is 1047 programs
+  (was 1783), 29.9 ms device span per pass (drafter trace 350 programs, 3.5 ms). 44 full layers 14.8 ms (median 333 us,
+  was 403); 18 hybrid layers 14.4 ms (median 771 us; ~230 us with no CPU wait: layers 26/28/31/61; the rest is the
+  socket recv of the host partial waiting on the CPU experts, up to 635 us in one layer, plus ~50 us host routing round
+  trip per hybrid layer). Full layer, end to end (program ends; the FW zones start early while waiting for go): attention
+  99 us, mixer boundary 15, MoE 205 (router matmul + route 42, fused experts 163), mlp boundary 15. Prologue 0.15 ms
+  (the embedding all_gather reads 104 us), epilogue (taps, LM head, argmax) 0.55 ms. Device floor without CPU waits
+  ~20 ms, of which MoE ~14 ms (experts ~10 ms, router+route ~2.6 ms).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
