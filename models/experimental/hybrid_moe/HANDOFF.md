@@ -156,6 +156,8 @@ Pieces (all traced, per-prompt re-capture):
   - Packaging: tt-model-hybrid.yaml packages from the ~/m27-hybrid worktree (source.tt_metal): move it to the commit to
     ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
     old package images + `docker builder prune -af` freed ~130 GB.
+    2026-11-16: wcache images and pin regions not read since 2026-11-14 (pre-v1.5 keys; dev-run pins, whose key holds
+    the dev dir path) deleted from both hard-linked dirs, 101 GiB; a missing image or pin only re-converts / re-pins.
   - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
 - ROUND 9 (2026-11-15): v1.5 package, evals, first boot, license.
   - Accuracy (package image e2c3eb6fe803, p300x2-64k, T 1.0 / top-p 0.95 / top-k 40, MiniMax system prompt,
