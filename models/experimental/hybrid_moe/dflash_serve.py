@@ -122,10 +122,13 @@ class Verify:
         x = m.embd(m._decode_tokens_view(self.tok, BW))
         x = ttnn.to_memory_config(ttnn.reshape(x, (1, 1, BW, x.shape[-1])), DRAM)
         taps = []
-        # the per-row KV-write index tensors, once per pass for every layer (instead of slice + reshape per layer)
-        row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
-        for layer in m.layers:
-            layer.attention.rows_pos_rows = row_idx
+        # the per-row KV-write index tensors, once per pass for every layer (instead of slice + reshape per layer); only
+        # the per-row writes read them (QWEN35_KVROWS=0): the default one-program write reads the masks
+        row_idx = []
+        if os.environ.get("QWEN35_KVROWS", "1") != "1":
+            row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
+            for layer in m.layers:
+                layer.attention.rows_pos_rows = row_idx
         for li, layer in enumerate(m.layers):
             y = self.rows.layer_forward_rows(
                 layer,

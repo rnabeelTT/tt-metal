@@ -417,7 +417,9 @@ class TPAttention:
         ttnn.deallocate(qkv)
         rows = getattr(self, "rows_pos_rows", None)
         masks = self.rows_pos_masks
-        one = rows is None and masks is not None and _KVROWS
+        # the masks carry every row's position, so the one-program write needs no per-row index tensors (rows_pos_rows
+        # serves the per-row calls below only)
+        one = masks is not None and _KVROWS
         if one:  # every row's K / V in one program (attn_decode/kvrows.py): the same cache bytes, ~5 vs ~21 us
             from models.demos.blackhole.qwen36.tt.attn_decode.kvrows import kv_rows_update
 

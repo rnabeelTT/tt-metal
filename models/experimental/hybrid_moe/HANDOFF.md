@@ -106,6 +106,22 @@ Pieces (all traced, per-prompt re-capture):
   after a switch: 0 layers 148, 4 (45K) 140-143, 7 (56K) 134-138, 11 (73K) 131. Served 128K: 45K keeps 4096
   segments when its block fits (TTFT 20.3 s, as before); 56K with an 89 MB block now takes 2048 (34-35 s). Static
   profiles (no demotion) are unchanged. Published: HF rev eacfa120 (image 69268fc9c617), serving here.
+- PROFILE (2026-11-16, package v1.6 config, 32K pool, short prompt; device profiler + an op-order hook since traced
+  runtime ids do not resolve through the inspector): a verify pass is ONE trace of 1783 programs; a full layer is 26
+  programs, 403 us on the critical path (median over 14 layers). MoE ~262 us (fused union experts ~205, router 12,
+  RS 11.5, ffn norm all_gather 20 + rms 6). Attention ~141 us: attn norm AG 12.5 + rms 6.7, QKV 22.4, QKStats 4.2,
+  stats all_gather 9.6, prep 12.7, KV write 17.1 (4 programs), SDPA 17.8, post 6.5, WO 16.8, RS 9.9, add 2.8. The
+  layer boundaries (RS + add + AG + rms_norm, twice per layer) are ~75 us of every layer: the largest lever. The
+  qwen36 fabric boundary (fabric_boundary/ops.py: all-reduce + add + RMSNorm in one program, up to 8 rows) does this,
+  but the hybrid overlay forces it off (hybrid/__init__.py _ENV_OFF; HYB_BOUNDARY was slower / degraded on the 397B,
+  2026-11-04) and it has never run on M2.7: it needs the replicated residual through the rows path, the hybrid MoE's
+  partial handoff for 4 rows, the DFlash taps and the elastic rebuild.
+  - DONE: the verify pass now writes K / V with the one-program kvrows op (it took the 4 per-row calls because
+    dflash_serve set rows_pos_rows, which disabled kvrows): tokens identical (3 prompts x 128, fixed fetch so the run
+    is deterministic: old vs old identical, old vs new identical), served short greedy 67.2 / 66.3 -> 68.3 / 68.4,
+    sampled 54.4 / 54.0 -> 54.5 / 57.1 tok/s.
+  - Smaller attention items left: post (6.5 us, the head concat x ones) into the SDPA writer; QKStats + its all_gather
+    (13.8 us).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
