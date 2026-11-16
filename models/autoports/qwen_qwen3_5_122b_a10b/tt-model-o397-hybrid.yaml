@@ -77,6 +77,7 @@ serve:
     QWEN35_PREFIX_CACHING: "0"
     QWEN35_VISION: "0"
     QWEN35_BATCHED_PREFILL: "0"
+    QWEN35_DISPATCH_MC: "1"     # multi-core MoE dispatch: same outputs bit for bit, 1.41 -> 0.56 ms per 2048-row MoE call; in-boot A/B TTFT 18K 15.07 -> 14.73 s (2026-11-16)
     QWEN35_MAX_TOKENS_ALL_USERS: "131072"
     QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
     QWEN35_PREFILL_SEGMENT: "2048"    # 4096-token segments overflow the GDN prefill L1

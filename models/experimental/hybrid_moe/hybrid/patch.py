@@ -1086,6 +1086,8 @@ def _dev_tune():
             HYB.pf_host_zeros = v == "1"
         elif k == "early":
             HYB.stream.early = v == "1"
+        elif k == "dispatch_mc":  # A/B: the MoE sorted dispatch's multi-core kernel (QWEN35_DISPATCH_MC)
+            _port("moe_dispatch").DISPATCH_MC = v == "1"
         elif k == "zerocopy" and HYB.fetch.px is not None:
             HYB.fetch.px.zerocopy = v == "1"
     print(f"HYB_TUNE {open(path).read().split()}", flush=True)
