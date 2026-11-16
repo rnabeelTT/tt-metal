@@ -134,6 +134,10 @@ Pieces (all traced, per-prompt re-capture):
     Verify per pass (fixed fetch, deterministic): short 44.3 -> 42.6 ms, 4.6K 46.7 -> 43.9, 4 forced prompts 45.3 ->
     43.5. Quality vs the BF16 reference (same tokens forced): 4.6K text top-1 0.9071 both, KL 0.0765 -> 0.0783; 4
     short texts (runs/m27/ref_fb2, new: ref_fb no longer matches fb_rec) top-1 0.8898 both, KL 0.0369 -> 0.0351.
+    Published as v1.7 (image 3201778b998a, serving here; launch cmd ~/m27-pkg/serve_default_running.cmd, v1.6's kept as
+    serve_default_running_v16.cmd). Served 128K card (OSL 128, greedy / sampled): short 73.8 / 57.6 tok/s (v1.5 68.9 /
+    53.7), TTFT 0.57 s; 44.7K first 40.1 / 36.8 (TTFT 23.4 s incl. switch); resent 44.7 / 38.3 (TTFT 1.3 s); short
+    after long greedy 55.3, sampled 42.0 (2 runs; a single run read 29: sampling noise). No errors, switches clean.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
