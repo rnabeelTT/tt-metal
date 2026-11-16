@@ -46,7 +46,7 @@ source:
 
 runtime:
   vllm: {version: "0.26.0"}
-  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 8b1f8b1 (rnabeelTT/vllm-tt-plugin, branch dflash), as M2.7
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 8b1f8b1 (rnabeelTT/vllm-tt-plugin, branch dflash: M2.7's 8b1f8b1 + the prefix-state decode-row fix)
   extra_models_dir: models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
   overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
   lock: requirements.lock
@@ -73,12 +73,15 @@ serve:
     PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
     HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
     QWEN35_TRACE_REGION_MIB: "96"
-    # vLLM prefix caching (--enable-prefix-caching below): 4 GDN state snapshots (56 MiB per die each), saved at segment
-    # boundaries and at each prompt's last block (PROMPT_END), so a follow-up turn resumes where the last prompt ended.
+    # vLLM prefix caching (--enable-prefix-caching below): 16 GDN state snapshots kept in host RAM (225 MB each, ~3.6 GB;
+    # QWEN35_PREFIX_STATE_HOST: no device pool), saved at segment boundaries and at each prompt's last block
+    # (PROMPT_END), so a follow-up turn resumes where the last prompt ended; DFlash keeps the drafter context of the
+    # last 8 requests (DFLASH_FEAT_CACHE), so interleaved conversations resume too.
     # Measured 2026-11-16: 18K resend 14.5 -> 1.1 s, chat turn 2 on a 17K context 1.4-4.1 s; cold TTFT unchanged;
     # recall on hits 8/8; a 125K prompt still fits
-    QWEN35_PREFIX_STATE_SLOTS: "4"
-    QWEN35_PREFIX_SLOT_MIB: "64"
+    QWEN35_PREFIX_STATE_SLOTS: "16"
+    QWEN35_PREFIX_STATE_HOST: "1"
+    QWEN35_PREFIX_SLOT_MIB: "0"
     QWEN35_PREFIX_STATE_PROMPT_END: "1"
     QWEN35_PREFIX_CACHING: "1"
     QWEN35_VISION: "0"

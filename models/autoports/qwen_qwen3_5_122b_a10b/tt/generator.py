@@ -793,6 +793,12 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         one slot = the recurrent state + conv taps of every GDN layer in the B = 1 prefill layout. The plugin's index
         chooses the slots; :meth:`prefill_serving` saves into and restores from them. Allocated with the KV cache (before
         any trace capture) and warmed with one save / restore. Returns the bytes per device of one slot."""
+        if os.environ.get("QWEN35_PREFIX_STATE_HOST", "0") == "1":
+            # host tier: every snapshot in host RAM (non-blocking device -> host reads queued behind the prefill's own
+            # work, so a save captures the state at its cut; a restore uploads it). No device pool.
+            self._prefix_host = [None] * int(n_slots)
+            self._prefix_pool = None
+            return 0
         prev = self.model._bind_gdn_prefill_scratch() if self.max_batch_size > 1 else None
         try:
             dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
@@ -819,8 +825,14 @@ class Qwen35MoeGenerator(ReadinessGenerator):
 
     def _prefix_save(self, slot):
         """GDN state of the bound B = 1 prefill scratch (B = 1 build: the decode buffers) -> pool slot."""
-        recs, convs = self._prefix_pool[slot]
         dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+        if getattr(self, "_prefix_pool", None) is None and getattr(self, "_prefix_host", None) is not None:
+            self._prefix_host[slot] = [
+                (ttnn.from_device(dn.rec_state, blocking=False), [ttnn.from_device(c, blocking=False) for c in dn.conv_states])
+                for dn in dn_layers
+            ]
+            return
+        recs, convs = self._prefix_pool[slot]
         for dn, rec, taps in zip(dn_layers, recs, convs):
             ttnn.copy(dn.rec_state, rec)
             for c, t in zip(dn.conv_states, taps):
@@ -833,8 +845,18 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         if layer.is_full_attention:
             return
         idx = sum(1 for la in self.model.layers[:li] if not la.is_full_attention)
-        recs, convs = self._prefix_pool[slot]
         dn = layer.attention
+        if getattr(self, "_prefix_pool", None) is None and getattr(self, "_prefix_host", None) is not None:
+            n_dn = sum(1 for la in self.model.layers if not la.is_full_attention)
+            ent = self._prefix_host[slot]
+            if ent is None or idx == 0:  # the first GDN layer of a save starts a fresh snapshot
+                ent = self._prefix_host[slot] = [None] * n_dn
+            ent[idx] = (
+                ttnn.from_device(dn.rec_state, blocking=False),
+                [ttnn.from_device(c, blocking=False) for c in dn.conv_states],
+            )
+            return
+        recs, convs = self._prefix_pool[slot]
         ttnn.copy(dn.rec_state, recs[idx])
         for c, t in zip(dn.conv_states, convs[idx]):
             ttnn.copy(c, t)
@@ -844,8 +866,22 @@ class Qwen35MoeGenerator(ReadinessGenerator):
         :meth:`_pending_restore`)."""
         from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_rows import rebuild_conv_carry
 
-        recs, convs = self._prefix_pool[slot]
         dn_layers = [layer.attention for layer in self.model.layers if not layer.is_full_attention]
+        if getattr(self, "_prefix_pool", None) is None and getattr(self, "_prefix_host", None) is not None:
+            ent = self._prefix_host[slot]
+            if ent is None or any(e is None for e in ent):
+                missing = None if ent is None else [i for i, e in enumerate(ent) if e is None]
+                raise RuntimeError(
+                    f"prefix-cache restore from host slot {slot}: snapshot never written or incomplete (GDN layers "
+                    f"missing {missing})"
+                )
+            for dn, (rec, taps) in zip(dn_layers, ent):
+                ttnn.copy_host_to_device_tensor(rec, dn.rec_state)
+                for t, c in zip(taps, dn.conv_states):
+                    ttnn.copy_host_to_device_tensor(t, c)
+                rebuild_conv_carry(dn)
+            return
+        recs, convs = self._prefix_pool[slot]
         for dn, rec, taps in zip(dn_layers, recs, convs):
             ttnn.copy(rec, dn.rec_state)
             for t, c in zip(taps, dn.conv_states):

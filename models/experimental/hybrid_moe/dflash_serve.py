@@ -579,19 +579,28 @@ class DFlashServing:
     # it are still held from the previous request (feature_start)
     prefix_start_ok = True
 
+    # DFLASH_FEAT_CACHE: the context features of this many earlier requests are kept (LRU), so a prefix-cache hit of a
+    # conversation that is not the latest one still finds its drafter window (interleaved conversations)
+    _FEAT_CACHE = int(os.environ.get("DFLASH_FEAT_CACHE", "8"))
+
     def _held(self, prompt_ids, upto):
-        """The previous request's context features for prompt rows [P - window, upto), or None if any is not held (the
-        rows' ids must match the context they were computed in, from position 0)."""
+        """The context features for prompt rows [P - window, upto) from the latest request or an earlier one still
+        kept, or None if no context holds them all (the rows' ids must match the context they were computed in, from
+        position 0)."""
         lo = max(0, len(prompt_ids) - self.window)
         if upto <= lo:
             return torch.zeros(0, 0)
-        ids = getattr(self, "_ctx_ids", None)
-        if ids is None:
-            return None
-        first = len(ids) - self.n_hist
-        if first > lo or len(ids) < upto or ids[:upto] != list(prompt_ids[:upto]):
-            return None
-        return torch.cat(self.hist)[lo - first : upto - first]
+        want = list(prompt_ids[:upto])
+        cur = getattr(self, "_ctx_ids", None)
+        ctxs = ([(cur, self.hist, self.n_hist)] if cur is not None else []) + list(
+            reversed(getattr(self, "_feat_lru", []))
+        )
+        for ids, hist, n_hist in ctxs:
+            first = len(ids) - n_hist
+            if first > lo or len(ids) < upto or ids[:upto] != want:
+                continue
+            return torch.cat(hist)[lo - first : upto - first]
+        return None
 
     def feature_start(self, prompt_ids, cached: int) -> int:
         """The prefill start for a prompt whose first `cached` rows hold KV: `cached` when the window's features before
@@ -681,6 +690,11 @@ class DFlashServing:
         if self._reuse is not None and self._reuse.shape[0]:
             feats = torch.cat([self._reuse.to(feats.dtype), feats])[-W:]
         self._reuse = None
+        prev = getattr(self, "_ctx_ids", None)
+        if prev is not None and self._FEAT_CACHE > 0:  # the previous request's context stays findable (LRU)
+            lru = self.__dict__.setdefault("_feat_lru", [])
+            lru.append((prev, [torch.cat(self.hist)[-2 * W :]], min(self.n_hist, 2 * W)))
+            del lru[: -self._FEAT_CACHE]
         self.hist = [feats.clone()]  # host copies of the context features (refills; the next request's prefix)
         self.n_hist = self.hist[0].shape[0]
         self._ctx_ids = self._ids  # the context's ids; the last n_hist have their features in hist
