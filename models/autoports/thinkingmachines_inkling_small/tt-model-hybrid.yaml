@@ -1,7 +1,8 @@
 # tt-model container (v5.1) manifest for thinkingmachines/Inkling-Small (276B MoE, 12B active, BF16 checkpoint) on one
-# QB2 (2 x p300 = 4 Blackhole dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's 191
-# most-used experts stay on the device (bfp4; bfp8 down projections in layers 2-17), the other 67 are computed on the
-# host CPU from int4 copies built on the first boot; native MTP speculative decoding (2 drafts per pass). Single user
+# QB2 (2 x p300 = 4 Blackhole dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's 175
+# most-used experts stay on the device (bfp4; bfp8 down projections in layers 2-17) plus 16 slots that decode refills
+# with recently missed experts over PCIe; the rest are computed on the host CPU from int4 copies built on the first
+# boot; native MTP speculative decoding (2 drafts per pass). Single user
 # (max_num_seqs 1); greedy or sampled (exact speculative sampling). Text only.
 # Build: tt-model package --container models/autoports/thinkingmachines_inkling_small/tt-model-hybrid.yaml
 schema: "5.1"
@@ -102,7 +103,16 @@ serve:
     # layer's whole non-resident set wasted copies (16K of held-out text: 478 tok/s with CQ1 + banks, 693 without)
     HYB_STREAM_CQ1: "0"
     HYB_PF_PREFETCH_MIN: "0"
-    HYB_LRU: "0"
+    # decode fetch (as M2.7): 16 LRU device slots per layer after the 175 static ones; a step copies 30% of a layer's
+    # missed experts (at most 2) into them over PCIe on CQ1 while the CPU computes the rest; resident from the next
+    # verify pass. Layers 18-41 fetch their down projections as bfp4 copies (their static downs are bfp4 too).
+    # Measured (tools/engine_bench.py, greedy k=2): 48.6-48.9 tok/s vs 45.4 without; fetching more was slower
+    HYB_LRU: "16"
+    HYB_FETCH_POLICY: fixed
+    HYB_FETCH_FRAC: "0.3"
+    HYB_FETCH_MAX: "2"
+    HYB_FETCH_DN_EXPERTS: /weight-cache/dev_dn4_s175
+    HYB_FETCH_DN_LAYERS: "18-41"
     INKLING_PREFILL_GROUP: "16"
     # the fewest-token missed experts of a prefill step on the CPU (bf16 int4 kernel) while the rest stream; the host
     # kernel runs its whole 8-thread pool in prefill and 6 threads in decode (bandwidth-bound there)
@@ -116,14 +126,14 @@ serve:
     HYB_SOCKET_H2D_DEPTH: "4"
     HYB_PREFETCH: "1"
     HYB_HOSTK_THREADS: "8"
-    # the 67 experts per layer the device does not hold are copied from the checkpoint on the first boot into the weight
+    # the 83 experts per layer outside the 175 static device slots are copied from the checkpoint on the first boot into the weight
     # cache (hybrid/firstboot.py; ~15 min): int4 for the CPU (decode misses), and gate/up bfp4 + down bfp8 device
     # copies for prefill streaming; only the official weights download
-    HYB_LIB: /weight-cache/int4_s191
-    HYB_DEV_EXPERTS: /weight-cache/dev_gu4dn8_s191
+    HYB_LIB: /weight-cache/int4_s175
+    HYB_DEV_EXPERTS: /weight-cache/dev_gu4dn8_s175
     HYB_DEV_POLICY: /opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/all_gu4dn8.json
     HYB_LIB_KEYS: port:thinkingmachines_inkling_small
-    HYB_BUILD_STATIC: "191"
+    HYB_BUILD_STATIC: "175"
     HYB_BUILD_LAYERS: "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41"
     # expert placement: the build order and routed mass of reference runs (plans/inkling_plan.npz, statistics only)
     HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/inkling_plan.npz
@@ -163,10 +173,10 @@ card:
   description: >
     Inkling-Small, a 276B-parameter mixture-of-experts model (12B active; 42 layers, 256 routed + 2 shared experts
     per MoE layer, top-6; sliding-window and global attention with a learned relative bias; short convolutions),
-    served through a hybrid-MoE overlay: the experts do not fit in the 4 dies' DRAM, so each layer's 191 most-used
-    experts stay on the device (bfp4, with bfp8 down projections in the 16 most sensitive layers) and the other 67
-    are computed on the host CPU from int4 copies (decode) or streamed to the device over PCIe (prefill, the
-    fewest-token ones on the CPU). About 95% of routed expert picks hit the device. Decoding is
+    served through a hybrid-MoE overlay: the experts do not fit in the 4 dies' DRAM, so each layer's 175 most-used
+    experts stay on the device (bfp4, with bfp8 down projections in the 16 most sensitive layers), 16 more device
+    slots per layer hold recently missed experts that decode copies over PCIe, and the rest are computed on the host
+    CPU from int4 copies (decode) or streamed to the device over PCIe (prefill, the fewest-token ones on the CPU). About 95% of routed expert picks hit the device. Decoding is
     speculative with the checkpoint's native MTP head (2 drafts per verify pass, exact: the output is the target
     model's own choice). Text only.
   intended_use: >
@@ -174,11 +184,12 @@ card:
     reasoning_content; the reasoning effort is a chat-template kwarg) on one QB2.
   prerequisites: |
     - A host CPU with AVX-512 (the host expert kernel); 8 or more cores
-    - About 105 GB of free host RAM (the experts the device does not hold: int4 copies for the CPU, ~42 GB, and pinned
-      device-format copies for prefill streaming, ~49 GB; plus the server);
+    - About 135 GB of free host RAM (the experts outside the 175 static device slots: int4 copies for the CPU, ~49 GB,
+      and pinned device-format copies for prefill streaming and the decode fetch, ~66 GB; plus the server);
       the server checks this at startup (`HYB_RAM_CHECK=warn` to start anyway)
-    - About 770 GB of disk: the BF16 checkpoint (~550 GB), ~42 GB of int4 expert copies, ~48 GB of device-format
-      copies for prefill streaming and ~110 GB of device images the first boot writes to the weight cache
+    - About 790 GB of disk: the BF16 checkpoint (~550 GB), ~49 GB of int4 expert copies, ~66 GB of device-format
+      copies for prefill streaming and the decode fetch and ~110 GB of device images the first boot writes to the
+      weight cache
   quickstart: |
     ### First boot
 

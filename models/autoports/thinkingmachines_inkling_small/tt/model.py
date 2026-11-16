@@ -35,6 +35,43 @@ class Qwen35MoeModel(_M27Model):
             args.rope_head_dim = ROPE_DUMMY_DIM
             args.partial_rotary_factor = ROPE_DUMMY_DIM / args.head_dim
         super().__init__(mesh_device, args, state_dict, tensor_cache_path)
+        self._pad_lm_head(state_dict)
+
+    def _pad_lm_head(self, state_dict):
+        """The vocab-sharded LM head with each die's shard a whole number of tiles: 201024 / 4 = 50256 columns per die
+        is half a tile short, so every _lm_head all-gather took all_gather_async's composite path (untilize, 5 permutes,
+        a concat, tilize: ~1.3 ms per call, measured with tools/draft_prof.py) on each verify pass and draft depth. Zero
+        columns up to a multiple of 32 x N (201088) make it the native gather; their logits (0) sit past the real vocab
+        (unpadded_vocab_size 200058), which every consumer slices away. INKLING_PAD_LM_HEAD=0 keeps the stock head."""
+        import os
+
+        import torch
+        import ttnn
+
+        N = int(self.num_devices)
+        if (
+            N < 2
+            or not getattr(self, "_lmhead_vocab_sharded", False)
+            or os.environ.get("INKLING_PAD_LM_HEAD", "1") != "1"
+        ):
+            return
+        w = state_dict["output.weight"]  # [vocab, dim]
+        V = int(w.shape[0])
+        Vp = -(-V // (32 * N)) * (32 * N)
+        if Vp == V:
+            return
+        wt = torch.zeros(int(w.shape[1]), Vp, dtype=torch.bfloat16)
+        wt[:, :V] = w.T.to(torch.bfloat16)
+        dtype = self.lm_head_weight.dtype
+        ttnn.deallocate(self.lm_head_weight)
+        self.lm_head_weight = ttnn.as_tensor(
+            wt,
+            dtype=dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.mesh_device,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=ttnn.ShardTensorToMesh(self.mesh_device, dim=-1),
+        )
 
     def prefill_tokens(
         self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None, on_chunk=None, group=None

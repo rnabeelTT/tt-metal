@@ -1360,6 +1360,12 @@ def _route_host(self, lg, m, ids=None):
             raise RuntimeError(f"layer {L}: device-selected expert ids out of range: {ids.tolist()}")
         sw = np.take_along_axis(sg, ids, 1)
         sc = sw / sw.sum(1, keepdims=True)
+    elif HYB.router_kind == "inkling" and ids is None and HYB.croute:
+        # one C call (hostk_route_inkling: the picks and weights of the NumPy path below, ~3x faster)
+        cb = HYB.__dict__.setdefault("_cbias", {})
+        if L not in cb:
+            cb[L] = np.ascontiguousarray(HYB.sel_bias[L], dtype=np.float32)
+        ids, sc = hostk.route_inkling(np.ascontiguousarray(z, dtype=np.float32), HYB.n_routed, HYB.top_k_routed, cb[L])
     elif HYB.router_kind == "inkling":
         sg = 1.0 / (1.0 + np.exp(-z))
         R, kr = HYB.n_routed, HYB.top_k_routed

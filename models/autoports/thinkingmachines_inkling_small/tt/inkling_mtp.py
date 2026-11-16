@@ -22,13 +22,12 @@ import os
 from types import SimpleNamespace
 
 import torch
+import ttnn
 from safetensors import safe_open
 
-import ttnn
 from models.autoports.thinkingmachines_inkling_small.tt.layer import InklingDecoderLayer
 from models.autoports.thinkingmachines_inkling_small.tt.weights import deinterleave
 from models.demos.blackhole.qwen36.utils.substate import LazyState
-from models.tt_transformers.tt.common import Mode
 
 
 class _MtpArgs:
@@ -62,14 +61,26 @@ def mtp_state(snap: str, n_depth: int):
     def get(k):
         _, d, sub = k.split(".", 2)
         p = f"model.mtp.layers.{d}.transformer_block."
-        attn = {"q_proj.weight": "wq_du.weight", "k_proj.weight": "wk_dv.weight", "v_proj.weight": "wv_dv.weight",
-                "r_proj.weight": "wr_du.weight", "o_proj.weight": "wo_ud.weight", "q_norm.weight": "q_norm.weight",
-                "k_norm.weight": "k_norm.weight", "k_sconv.conv1d.weight": "k_sconv.weight",
-                "v_sconv.conv1d.weight": "v_sconv.weight", "rel_logits_proj.proj": "rel_logits_proj.proj"}
+        attn = {
+            "q_proj.weight": "wq_du.weight",
+            "k_proj.weight": "wk_dv.weight",
+            "v_proj.weight": "wv_dv.weight",
+            "r_proj.weight": "wr_du.weight",
+            "o_proj.weight": "wo_ud.weight",
+            "q_norm.weight": "q_norm.weight",
+            "k_norm.weight": "k_norm.weight",
+            "k_sconv.conv1d.weight": "k_sconv.weight",
+            "v_sconv.conv1d.weight": "v_sconv.weight",
+            "rel_logits_proj.proj": "rel_logits_proj.proj",
+        }
         if sub.startswith("self_attn."):
-            return f.get_tensor(p + "attn." + attn[sub[len("self_attn."):]])
-        simple = {"input_layernorm.weight": "attn_norm.weight", "post_attention_layernorm.weight": "mlp_norm.weight",
-                  "attn_sconv.weight": "attn_sconv.weight", "mlp_sconv.weight": "mlp_sconv.weight"}
+            return f.get_tensor(p + "attn." + attn[sub[len("self_attn.") :]])
+        simple = {
+            "input_layernorm.weight": "attn_norm.weight",
+            "post_attention_layernorm.weight": "mlp_norm.weight",
+            "attn_sconv.weight": "attn_sconv.weight",
+            "mlp_sconv.weight": "mlp_sconv.weight",
+        }
         if sub in simple:
             return f.get_tensor(p + simple[sub])
         if sub in ("mlp.gate_proj.weight", "mlp.up_proj.weight"):
@@ -80,15 +91,38 @@ def mtp_state(snap: str, n_depth: int):
             return (f.get_tensor(p + "mlp.w2_md.weight").float() * gs).to(torch.bfloat16)
         raise KeyError(k)
 
-    names = ["input_layernorm.weight", "post_attention_layernorm.weight", "attn_sconv.weight", "mlp_sconv.weight",
-             "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight"] + [
-        f"self_attn.{n}" for n in ("q_proj.weight", "k_proj.weight", "v_proj.weight", "r_proj.weight",
-                                   "o_proj.weight", "q_norm.weight", "k_norm.weight", "k_sconv.conv1d.weight",
-                                   "v_sconv.conv1d.weight", "rel_logits_proj.proj")]
+    names = [
+        "input_layernorm.weight",
+        "post_attention_layernorm.weight",
+        "attn_sconv.weight",
+        "mlp_sconv.weight",
+        "mlp.gate_proj.weight",
+        "mlp.up_proj.weight",
+        "mlp.down_proj.weight",
+    ] + [
+        f"self_attn.{n}"
+        for n in (
+            "q_proj.weight",
+            "k_proj.weight",
+            "v_proj.weight",
+            "r_proj.weight",
+            "o_proj.weight",
+            "q_norm.weight",
+            "k_norm.weight",
+            "k_sconv.conv1d.weight",
+            "v_sconv.conv1d.weight",
+            "rel_logits_proj.proj",
+        )
+    ]
     state = LazyState(get, [f"layers.{d}.{n}" for d in range(n_depth) for n in names])
-    parts = [{"hidden_norm": f.get_tensor(f"model.mtp.layers.{d}.hidden_norm.weight"),
-              "embed_norm": f.get_tensor(f"model.mtp.layers.{d}.embed_norm.weight"),
-              "input_proj": f.get_tensor(f"model.mtp.layers.{d}.input_proj.weight")} for d in range(n_depth)]
+    parts = [
+        {
+            "hidden_norm": f.get_tensor(f"model.mtp.layers.{d}.hidden_norm.weight"),
+            "embed_norm": f.get_tensor(f"model.mtp.layers.{d}.embed_norm.weight"),
+            "input_proj": f.get_tensor(f"model.mtp.layers.{d}.input_proj.weight"),
+        }
+        for d in range(n_depth)
+    ]
     assert all(f"model.mtp.layers.{d}.input_proj.weight" in keys for d in range(n_depth))
     return state, parts
 
@@ -114,13 +148,44 @@ class InklingMtp:
         for d in range(self.n_depth):
             blk = InklingDecoderLayer(self.mesh, self.args, state, d, None, tt_ccl=self.ccl)
             p = parts[d]
-            nw = lambda w: ttnn.as_tensor(w.reshape(1, 1, 1, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,  # noqa
-                                          layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                                          memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=rep)
-            w_in = ttnn.as_tensor(p["input_proj"].to(torch.bfloat16).T.contiguous(), dtype=ttnn.bfloat8_b,
-                                  layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                                  mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))  # [2H, H] col-parallel
-            self.depths.append(SimpleNamespace(block=blk, hn=nw(p["hidden_norm"]), en=nw(p["embed_norm"]), w_in=w_in))
+            nw = lambda w: ttnn.as_tensor(
+                w.reshape(1, 1, 1, -1).to(torch.bfloat16),
+                dtype=ttnn.bfloat16,  # noqa
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                mesh_mapper=rep,
+            )
+            w_in = ttnn.as_tensor(
+                p["input_proj"].to(torch.bfloat16).T.contiguous(),
+                dtype=ttnn.bfloat8_b,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1),
+            )  # [2H, H] col-parallel
+            # the input projection as two halves (hidden part, embedding part): x = hn(prev) @ W_a + en(e) @ W_b instead of
+            # a concat to 2H (the concat alone was ~0.7 ms of a ~5.6 ms depth on the device profile, tools/draft_prof.py)
+            wt = p["input_proj"].to(torch.bfloat16).T.contiguous()  # [2H, H]
+            Hh = wt.shape[0] // 2
+            half = lambda t: ttnn.as_tensor(
+                t.contiguous(),
+                dtype=ttnn.bfloat8_b,
+                layout=ttnn.TILE_LAYOUT,  # noqa
+                device=self.mesh,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1),
+            )
+            self.depths.append(
+                SimpleNamespace(
+                    block=blk,
+                    hn=nw(p["hidden_norm"]),
+                    en=nw(p["embed_norm"]),
+                    w_in=w_in,
+                    w_a=half(wt[:Hh]),
+                    w_b=half(wt[Hh:]),
+                )
+            )
         self.eps = float(args.inkling["rms_norm_eps"])
         self.inv_mup = 1.0 / float(args.logits_mup_width_multiplier)
 
@@ -131,8 +196,7 @@ class InklingMtp:
     def _gather(self, x):
         from models.tt_transformers.tt.ccl import tt_all_gather
 
-        return tt_all_gather(x, self.mesh, self.ccl, cluster_axis=None, dim=3,
-                             topology=self.model.args.ccl_topology())
+        return tt_all_gather(x, self.mesh, self.ccl, cluster_axis=None, dim=3, topology=self.model.args.ccl_topology())
 
     def own_ccl(self):
         """Context: the target model's shared helpers (embedding, LM head) run on the drafter's CCL semaphores."""
@@ -152,6 +216,19 @@ class InklingMtp:
     def _norm(self, x, w):
         return ttnn.multiply(ttnn.rms_norm(x, epsilon=self.eps), w)
 
+    def inproj(self, dp, h, e):
+        """The depth's input projection of [hidden_norm(h) | embed_norm(e)] -> [1, 1, R, H/N] fractured.
+        INKLING_MTP_SPLIT=0: the concat + one matmul (the original form)."""
+        if os.environ.get("INKLING_MTP_SPLIT", "1") != "1":
+            return ttnn.linear(ttnn.concat([self._norm(h, dp.hn), self._norm(e, dp.en)], dim=-1), dp.w_in)
+        grid = ttnn.CoreGrid(y=8, x=8)
+        xa = ttnn.linear(self._norm(h, dp.hn), dp.w_a, core_grid=grid)
+        xb = ttnn.linear(self._norm(e, dp.en), dp.w_b, core_grid=grid)
+        x = ttnn.add(xa, xb)
+        ttnn.deallocate(xa)
+        ttnn.deallocate(xb)
+        return x
+
     def step(self, d, prev_hidden, token_tt, cur_pos, page_table):
         """Depth d on one row: prev_hidden [1, 1, 1, H] replicated, token_tt [1, 1] uint32 (the token whose embedding
         feeds this depth), cur_pos [1] int32 (the position this depth writes). -> (logits [1, 1, 1, V] replicated,
@@ -161,8 +238,7 @@ class InklingMtp:
         e = ttnn.reshape(e, (1, 1, 1, e.shape[-1]))
         if self.N > 1:  # the framework embedding is hidden-sharded: gather to the full row for the depth's norm
             e = self._gather(e)
-        x_in = ttnn.concat([self._norm(prev_hidden, dp.hn), self._norm(e, dp.en)], dim=-1)  # [1, 1, 1, 2H]
-        x = ttnn.linear(x_in, dp.w_in)  # [1, 1, 1, H/N] fractured
+        x = self.inproj(dp, prev_hidden, e)  # [1, 1, 1, H/N] fractured
         out = dp.block.forward(x, mode="decode", position_tensor=cur_pos, page_table=page_table)
         full = self._gather(out) if self.N > 1 else out
         logits = self.model._lm_head(ttnn.multiply(full, self.inv_mup))

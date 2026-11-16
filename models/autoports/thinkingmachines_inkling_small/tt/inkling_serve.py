@@ -358,9 +358,8 @@ class InklingSpecServing:
         dp = mtp.depths[0]
         e = model.embd(self._dev(self._ids_host(toks)))
         e = mtp._gather(ttnn.reshape(e, (1, 1, R, e.shape[-1])))
-        x_in = ttnn.concat([mtp._norm(hrows, dp.hn), mtp._norm(e, dp.en)], dim=-1)
         out = dp.block.forward_rows(
-            ttnn.linear(x_in, dp.w_in), self._dev(self._pos_host(p0, R)), self.pt, commit_all=True
+            mtp.inproj(dp, hrows, e), self._dev(self._pos_host(p0, R)), self.pt, commit_all=True
         )
         full = mtp._gather(out)
         prev = ttnn.slice(full, (0, 0, R - 1, 0), (1, 1, R, full.shape[-1]))
@@ -382,8 +381,7 @@ class InklingSpecServing:
         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, w, h.shape[-1]))
         e = model.embd(self.d_ids[w])
         e = mtp._gather(ttnn.reshape(e, (1, 1, w, e.shape[-1])))
-        x_in = ttnn.concat([mtp._norm(hrows, dp.hn), mtp._norm(e, dp.en)], dim=-1)
-        out = dp.block.forward_rows(ttnn.linear(x_in, dp.w_in), self.d_pos[w], self.pt, commit_all=True)
+        out = dp.block.forward_rows(mtp.inproj(dp, hrows, e), self.d_pos[w], self.pt, commit_all=True)
         full = mtp._gather(out)
         last = ttnn.slice(full, (0, 0, w - 1, 0), (1, 1, w, full.shape[-1]))
         lg = self._rm_logits(model._lm_head(ttnn.multiply(last, mtp.inv_mup)))
