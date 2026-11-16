@@ -450,6 +450,9 @@ class DFlashServing:
             HYB.lib_layer(li)
         logger.info(f"DFlash: host library resident ({time.time() - t0:.1f} s wait)")
         HYB.fetch.finalize(HYB.loader, HYB.stream)  # HYB_PINX: pinned zero-copy expert library (before any capture)
+        from hybrid.patch import fill_lru
+
+        fill_lru()  # empty LRU slots get each layer's most routed pinned experts
         if getattr(HYB, "wcache", None) is not None:
             print(HYB.wcache.summary(), flush=True)
         import threading

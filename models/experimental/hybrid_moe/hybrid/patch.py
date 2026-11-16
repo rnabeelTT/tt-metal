@@ -159,6 +159,7 @@ class HybridState:
         # + per pair, and the fixed CPU-side cost of a step (activation readback, result upload and add). Off by default:
         # on the full model it gains nothing at 512-2K (runs/m27/split_full: the device waits on the CPU).
         self.pf_split = os.environ.get("HYB_PF_SPLIT", "0") == "1"
+        self.pf_devroute = os.environ.get("HYB_PF_DEVROUTE", "1") == "1"  # _devroute_step
         self.pf_host_async = os.environ.get("HYB_PF_HOST_ASYNC", "1") == "1"  # prefill host experts on HYB.pool
         # HYB_PF_DEFER (default 1): in a layer-major prefill group (the port's prefill_group), a segment's CPU experts
         # are added to its layer output after the layer's LAST segment instead of blocking that segment's MoE, so they
@@ -712,6 +713,7 @@ def _finalize_fetch_once():
     for L in sorted(HYB.slot_of):
         HYB.lib_layer(L)
     HYB.fetch.finalize(HYB.loader, HYB.stream)
+    fill_lru()
 
 
 def install():
@@ -1063,6 +1065,10 @@ def _dev_tune():
             HYB.pf_cpu_ms = [float(x) for x in v.split(":")]
         elif k == "cold_threads":
             HYB.cold.nthreads, HYB.cold.pool = int(v), None
+        elif k == "devroute":
+            HYB.pf_devroute = v == "1"
+        elif k == "host_zeros":  # A/B only: the old all-zero host block per prefill step
+            HYB.pf_host_zeros = v == "1"
         elif k == "early":
             HYB.stream.early = v == "1"
         elif k == "zerocopy" and HYB.fetch.px is not None:
@@ -2035,9 +2041,14 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     # the next hybrid layer's prefetch goes on CQ1 before this step's routing readback blocks on the device
     HYB.cold.step(self.layer_num)  # this layer's converted cold experts registered, the next layer's started
     HYB.stream.step(self.layer_num, _nonresident_hot_first, HYB.st)
+    out = _devroute_step(self, x4, scores, ids, T, orig, partial)
+    if out is not None:
+        return out
     dec = _decide(self, x4, scores, ids, T, mode, defer_host=HYB.pf_host_async)
+    if getattr(HYB, "_gap0", None) is not None:
+        HYB.st["t_pf_decide"] = HYB.st.get("t_pf_decide", 0.0) + time.perf_counter() - HYB._gap0
     # the host experts run on a worker thread (the int4 kernel releases the GIL) while the device computes below
-    host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["host"] is None else None
+    host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["job"] is not None and dec["host"] is None else None
     t1 = time.perf_counter()
     stream = list(dec.get("stream") or ())
     # HYB_STREAM_MERGE: the resident experts and the first staging round in one routed call (_merged_round)
@@ -2080,6 +2091,9 @@ def _forward(self, x, mode=None, partial=False, logits=None):
             routed = _routed(self, x4, n_sc, n_ids, T, mode)
         ttnn.deallocate(n_sc)
         ttnn.deallocate(n_ids)
+        if getattr(HYB, "_gap0", None) is not None:  # readback done -> the routed call enqueued: the device's idle gap
+            HYB.st["t_pf_gap"] = HYB.st.get("t_pf_gap", 0.0) + time.perf_counter() - HYB._gap0
+            HYB._gap0 = None
         _pf_mark(self, "t_pf_routed")
         for r, (writes, s_ids, s_sc) in enumerate(rounds):  # the streamed experts: the routed call over the staging
             if cq1:
@@ -2109,8 +2123,8 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         t0 = time.perf_counter()
         dec["host"] = host_fut.result()
         HYB.st["t_host_wait"] = HYB.st.get("t_host_wait", 0.0) + time.perf_counter() - t0
-    rows_nz = (dec["host"] != 0).any(1).nonzero().reshape(-1)
-    if rows_nz.numel():
+    rows_nz = None if dec["host"] is None else (dec["host"] != 0).any(1).nonzero().reshape(-1)
+    if rows_nz is not None and rows_nz.numel():
         t0 = time.perf_counter()
         out = _add(out, _host_rows_dense(self, dec["host"], rows_nz, [int(s) for s in out.shape], out.dtype))
         HYB.st["t_up"] += time.perf_counter() - t0
@@ -2180,6 +2194,117 @@ def _early_prefetch():
     t0 = time.perf_counter()
     HYB.stream.prefetch_after(L, _nonresident_hot_first, HYB.stream.dev["mesh"], HYB.st)
     HYB.st["t_stream"] += time.perf_counter() - t0
+
+
+def _devroute_step(self, x4, scores, ids, T, orig, partial):
+    """HYB_PF_DEVROUTE (default 1): a prefill step whose every pick has a device copy is routed on the device, with no
+    readback. Applies when the prompt converts its cold experts (ColdConvert active) and this layer's whole
+    non-resident set fits the staging (the 257 = E - resident experts do): the set is staged once per layer (copies on
+    CQ1; usually already there from the previous layer's prefetch_after), and a per-layer table [T, E] maps each expert
+    id to its id in the two-set routed call (resident slot s, or C + staging slot), applied to the router's ids with
+    ttnn.gather. The two-set call's group-id lists come from the dispatch's own list through two fixed tables over
+    every uint16 value. The host path's readback, placement and uploads (~9 ms per step with the device idle) go.
+    Returns the layer output, or None for the host path."""
+    if not (HYB.pf_devroute and HYB.cold.active and HYB.stream.on and HYB.stream.merge and HYB.fetch.px is not None):
+        return None
+    L = self.layer_num
+    st = HYB.stream
+    if not (st.can_cq1(L) and _prefill_sentinel(self, T)) or L not in HYB.fetch.cold:
+        return None
+    tab, writes = _devroute_table(self, L, T)
+    if tab is None:
+        return None
+    t0 = time.perf_counter()
+    copied = _stream_copy(self, writes)  # this layer's missing staging copies (or only orders CQ0 after CQ1's)
+    cid = ttnn.gather(tab, -1, index=ids)
+    ttnn.deallocate(ids)
+    C, NS = HYB.C, st.NS
+
+    def group_ids(m):
+        gid = m["group_ids"]
+        ga, gb = _devroute_gid_tables(self, gid, C, NS)
+        g4 = ttnn.reshape(gid, (1, 1, 1, int(gid.shape[-1])))
+        return (
+            ttnn.reshape(ttnn.gather(ga, -1, index=g4), tuple(gid.shape)),
+            ttnn.reshape(ttnn.gather(gb, -1, index=g4), tuple(gid.shape)),
+        )
+
+    self._sorted_zero_out = True
+    try:
+        second = (self._stream_attrs["up_gate"], self._stream_attrs["down"], NS, group_ids,
+                  lambda: ttnn.wait_for_event(0, copied))
+        routed = self._routed_sorted(x4, scores, cid, T, second=second)
+    finally:
+        self._sorted_zero_out = False
+    ttnn.deallocate(cid)
+    ttnn.deallocate(scores)
+    st.mark_read(L, self.device)
+    HYB.cold.mark(L, self.device)
+    HYB.st["pf_devroute"] = HYB.st.get("pf_devroute", 0) + 1
+    HYB.st["prefill_rows"] += T
+    HYB.st["t_devroute"] = HYB.st.get("t_devroute", 0.0) + time.perf_counter() - t0
+    return _finish(self, _plus_shared(self, routed, x4), orig, partial)
+
+
+def _devroute_table(self, L, T):
+    """(device table [1, 1, T, E] uint16: expert id -> two-set call id, the staging copies still to make) for layer L,
+    or (None, None) when some non-resident expert has no device copy or the set does not fit the staging."""
+    st, fetch = HYB.stream, HYB.fetch
+    nonres = np.flatnonzero(HYB.slot_of[L] < 0)
+    if len(nonres) > len(st._slots(L)) or not all(fetch.has_expert(L, int(e)) for e in nonres):
+        return None, None
+    slots, writes = st._assign(L, [int(e) for e in nonres])
+    tab = HYB.slot_of[L].astype(np.int64).copy()
+    tab[nonres] = HYB.C + np.asarray(slots, dtype=np.int64)
+    key = (L, T, tab.tobytes())
+    cache = HYB.__dict__.setdefault("_devroute_tabs", {})
+    t = cache.get(L)
+    if t is None or t[0] != key:
+        if t is not None:
+            ttnn.deallocate(t[1])
+        dev = ttnn.from_torch(
+            torch.from_numpy(tab.astype(np.int32)).reshape(1, 1, 1, -1).expand(1, 1, T, -1).contiguous(),
+            dtype=ttnn.uint16,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.device,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+        t = cache[L] = (key, dev)
+    return t[1], writes
+
+
+def _devroute_gid_tables(self, gid, C, NS):
+    """The two fixed group-id maps over every uint16 value v: (v if v < C else sentinel, v - C if C <= v < C + NS
+    else sentinel), in the dispatch group ids' dtype and layout."""
+    key = (C, NS, str(gid.dtype), str(gid.layout))
+    cache = HYB.__dict__.setdefault("_devroute_gid", {})
+    if key not in cache:
+        v = np.arange(65536, dtype=np.int64)
+        a = np.where(v < C, v, SENTINEL_ID)
+        b = np.where((v >= C) & (v < C + NS), v - C, SENTINEL_ID)
+
+        def up(x):
+            return ttnn.from_torch(
+                torch.from_numpy(x.astype(np.int32)).reshape(1, 1, 1, -1),
+                dtype=gid.dtype,
+                layout=gid.layout,
+                device=self.device,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.device),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
+
+        cache[key] = (up(a), up(b))
+    return cache[key]
+
+
+def fill_lru():
+    """After fetch.finalize: the empty LRU slots filled with each layer's most routed pinned experts (fetch.fill_free)."""
+    t0 = time.perf_counter()
+    n = HYB.fetch.fill_free(HYB.slot_of, _nonresident_hot_first)
+    if n:
+        ttnn.synchronize_device(HYB.fetch.mesh)
+        print(f"HYB_LRU_FILL: {n} empty LRU slots filled ({time.perf_counter() - t0:.1f} s)", flush=True)
 
 
 def _nonresident_hot_first(layer):
@@ -2481,7 +2606,8 @@ def _decide(self, x4, scores, ids, T, mode, defer_host=False):
     t0 = time.perf_counter()
     idh = ttnn.to_torch(_die0(ids)).reshape(-1, k).long()
     sch = ttnn.to_torch(_die0(scores)).reshape(-1, k).float()
-    HYB.st["t_read"] += time.perf_counter() - t0
+    HYB._gap0 = time.perf_counter()
+    HYB.st["t_read"] += HYB._gap0 - t0
     return _decide_core(self, x4, idh, sch, mode, defer_host)
 
 
@@ -2608,7 +2734,13 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
         host = None if defer_host else HYB.host_compute(*job)
     else:
         job = None
-        host = torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
+        # prefill: no host part at all (None; _forward adds nothing) instead of a [rows, H] fp32 zero block per step
+        # that _forward then scanned for non-zero rows (32 MB per 2048-row step, while the device waited)
+        host = (
+            None
+            if mode == "prefill" and not getattr(HYB, "pf_host_zeros", False)
+            else torch.zeros(valid, int(x4.shape[-1]), dtype=torch.float32)
+        )
     # non-resident picks need SOME index: the all-zero sink slot when there is one (fused: C - 1), never a real
     # expert's slot. The prefill routing matrix is a scatter of (index, score) per pick, and a zero-score pick aimed at
     # slot 0 could overwrite a real pick of the slot-0 expert in the same row. The sorted prefill dispatch takes the

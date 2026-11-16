@@ -272,6 +272,34 @@ class FetchCache:
             flush=True,
         )
 
+    def fill_free(self, slot_of, order):
+        """HYB_LRU_FILL (default 1): every free LRU slot (they start empty and only decode fetches fill them) gets the
+        next pinned non-resident expert in order(layer) (most routed first), written now on CQ0 and resident from here
+        on, an LRU entry like any fetched one. Decode hits more from the first request, and a layer's non-resident set
+        is then E - (C - 1) experts, which a long prefill can stage whole (patch._devroute_step). Returns the count."""
+        if not (self.direct and self.px is not None) or os.environ.get("HYB_LRU_FILL", "1") != "1":
+            return 0
+        n = 0
+        for L, (dg, dd) in self.wdst.items():
+            free, lru = self.free.get(L), self.lru.get(L)
+            if not free or L not in self.raw:
+                continue
+            pinned = self.raw[L][1]
+            ng, nd = self.raw[L][2], self.raw[L][3]
+            for e in order(L):
+                if not free:
+                    break
+                if slot_of[L][e] >= 0 or e not in pinned:
+                    continue
+                s = free.pop()
+                rid, og, od = self.raw_offsets(L, e)
+                self.px.write_at(dg, rid, og, s * ng, ng, cq_id=0)
+                self.px.write_at(dd, rid, od, s * nd, nd, cq_id=0)
+                lru[e] = s
+                slot_of[L][e] = s
+                n += 1
+        return n
+
     def finalize_more(self, layers, loader=None):
         """finalize() for layers that became hybrid after it ran (elastic demotion, hybrid/elastic.py): their
         device-format experts pinned as finalize() does (a layer pinned by an earlier demotion keeps its region) and the
