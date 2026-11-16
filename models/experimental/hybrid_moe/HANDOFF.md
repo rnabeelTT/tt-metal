@@ -195,6 +195,19 @@ Pieces (all traced, per-prompt re-capture):
   57.6), TTFT 0.59 s; 44.7K first 45.7 / 40.3 (v1.7 40.1 / 36.8), TTFT 23.8 s incl. switch; resent 47.4 / 38.9 (44.7 /
   38.3), TTFT 1.3 s; short after long greedy 67.8 (55.3), sampled 36.5 (N = 1, noisy: 29-42 seen before). No errors.
   Artifact v34 updated (tiles, bars, served table, v1.8 note).
+- SAMPLED VS GREEDY + SLOWDOWN AFTER LONG PROMPTS (2026-11-16, v1.8 config):
+  - Runner A/B, same 4 prompts x 128 (POC_SAMPLING=1.0,40,0.95,0 vs greedy; scratch attnprof/smpG, smpS): greedy 76.6,
+    sampled 69.0 tok/s (-10%): 2.28 vs 2.21 tokens per pass, draft 4.8 vs 6.0 ms, verify equal (24.6 / 24.8), post-
+    verify 0.4 vs 1.27 ms. Host math is small (row distribution 25 us, draw 5, accept 30); the rest is the two
+    candidate traces (top-64 per vocab chunk, ~710 us each on one die) and their readbacks. One 65536-wide chunk per
+    die is 2x faster (353 us, same top-64 incl. ties) but ttnn.topk past 32768 segfaults on mesh tensors: kept at 2.
+  - The served card's 25% sampled gap is mostly the order of the bench (sampled after the long cycles) plus a
+    slowdown after long prompts: runner short/long/short (rt1) 81.2 -> 77.2 tok/s with the device time unchanged
+    (t_read 14.5-15 ms) and host time up (draft +0.6 ms, t_lg2rows +0.3). Served: one 44.7K request took available
+    host RAM from 55 to 18 GB; the next short decode swapped in at 1-8 MB/s and read the int4 library back from disk
+    at 14-21 MB/s (62 vs ~80 tok/s). Cause: this host's ~140 GB leaked by OOM-killed runs (only a reboot frees it).
+    Re-measure the card after a reboot before optimizing further.
+  - Runner: POC_SAMPLING, POC_AFTER_LONG, ms_per_pass post / sample / dcand / vcand.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,

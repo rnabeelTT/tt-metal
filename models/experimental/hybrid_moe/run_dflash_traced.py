@@ -4,7 +4,7 @@
 with vLLM serving). The drafter is built BEFORE the target.
 
 env: POC_PROMPTS, POC_PROMPT_START, POC_NEW_TOKENS, POC_FORCE (fixed-text decode, see below), POC_MAX_SEQ, POC_LONG (a ~N-token code prompt from this repo's
-sources), POC_WARMUP (warm-up generation tokens, default 64, 0 = off), DFLASH_K (drafts per pass, default 3), DFLASH_MEMONLY (print the footprint and stop),
+sources), POC_WARMUP (warm-up generation tokens, default 64, 0 = off), POC_SAMPLING (temperature,top_k,top_p,seed: sampled decode), POC_AFTER_LONG (1: the short prompts again after the POC_LONG one), DFLASH_K (drafts per pass, default 3), DFLASH_MEMONLY (print the footprint and stop),
 plus dflash_serve's DFLASH_*. usage (in the image): python run_dflash_traced.py <out dir>
 """
 
@@ -27,6 +27,12 @@ NEW = int(os.environ.get("POC_NEW_TOKENS", "128"))
 # each prompt's recorded text (dflash_serve.generate(force=...))
 _fz = os.environ.get("POC_FORCE")
 forced = {r["prompt"]: r["ids"] for r in json.load(open(_fz))["runs"] if "ids" in r} if _fz else {}
+# POC_SAMPLING="temperature,top_k,top_p,seed": sampled decode (the serving step's speculative sampling)
+_smp = os.environ.get("POC_SAMPLING")
+SAMPLING = None
+if _smp:
+    _t, _k, _p, _s = _smp.split(",")
+    SAMPLING = (float(_t), int(_k), float(_p), int(_s))
 HYB_KEYS = (
     "pf_act",
     "pf_pred",
@@ -105,6 +111,10 @@ def main():
             body = "\n\n".join(f"# file: {os.path.basename(f)}\n" + open(f).read() for f in files.split(","))
             text = gen.tokenizer.decode(gen.tokenizer.encode(body)[:long_n])
             prompts.append("Here is some Python code:\n\n" + text + "\n\nExplain what this code does, file by file.")
+            if (
+                os.environ.get("POC_AFTER_LONG") == "1"
+            ):  # the short prompts again after the long one (an elastic round trip)
+                prompts += prompts[:-1]
         # warm-up: one throwaway generation first, so the measured prompts see filled LRU slots and touched pinned /
         # locked host pages (a serving process does this at startup: DFlashServing.capture)
         warm_n = int(os.environ.get("POC_WARMUP", "64"))
@@ -179,7 +189,7 @@ def main():
                     HYB.fetch.f = v
                 if cfg[2] and ncq < 2:
                     raise ValueError("an async fetch setting needs HYB_FETCH_ASYNC=1 (two command queues)")
-            r = srv.generate(p_text, NEW, gen.page_table[:1], force=forced.get(p_text[:80]))
+            r = srv.generate(p_text, NEW, gen.page_table[:1], force=forced.get(p_text[:80]), sampling=SAMPLING)
             if HYB.fetch.auto:  # the slack controller's budget trajectory (pass, budget, window mean ms)
                 r["fetch_auto"] = HYB.fetch.budget_log[-12:]
                 print("FETCH_AUTO", json.dumps(HYB.fetch.budget_log[-12:]), flush=True)

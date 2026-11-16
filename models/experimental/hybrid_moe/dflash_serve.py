@@ -951,11 +951,12 @@ class DFlashServing:
     # ------------------------------------------------------------------ standalone generation
     _force = None  # generate(force=...): the recorded token sequence a fixed-text run decodes
 
-    def generate(self, text, n_new, page_table, chat=True, force=None):
+    def generate(self, text, n_new, page_table, chat=True, force=None, sampling=None):
         """Eager prefill + traced DFlash decode of one prompt on `page_table` [1, W] (the runner; the serving warm-up).
         Returns the generated ids and timings; the traces are released at the end. ``force`` = a recorded output
         (ids, first token first): every pass accepts the drafts that match it and continues with it, so runs of
-        different configurations decode the same text (same verify inputs, comparable cost per pass)."""
+        different configurations decode the same text (same verify inputs, comparable cost per pass). ``sampling`` = the
+        step's (temperature, top_k, top_p, seed) for a sampled run."""
         tok = self.gen.tokenizer
         if chat:
             text = tok.apply_chat_template(
@@ -987,7 +988,7 @@ class DFlashServing:
         out, pos = [t0], P
         t1 = time.time()
         while len(out) < n_new:
-            new = self.step(out[-1], pos)
+            new = self.step(out[-1], pos, sampling=sampling)
             out += new
             pos += len(new)
         dt = time.time() - t1
@@ -1021,6 +1022,11 @@ class DFlashServing:
                 "draft": round(1e3 * st["draft"] / n, 1),
                 "verify": round(1e3 * st["verify"] / n, 1),
                 "stage": round(1e3 * st["stage"] / n, 2),  # host input uploads of both (inside draft + verify)
+                # after the verify: the sampled accept (verify candidates, distributions), features, bookkeeping
+                "post": round(1e3 * (st["wall"] - st["draft"] - st["verify"]) / n, 2),
+                "sample": round(1e3 * st.get("sample", 0.0) / n, 2),
+                "dcand": round(1e3 * st.get("t_dcand", 0.0) / n, 2),
+                "vcand": round(1e3 * st.get("t_vcand", 0.0) / n, 2),
             },
             "prefill_s": round(t_pf, 2),
             "drafter_refills": st["refills"],
