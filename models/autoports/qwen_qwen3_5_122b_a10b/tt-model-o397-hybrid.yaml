@@ -46,7 +46,7 @@ source:
 
 runtime:
   vllm: {version: "0.26.0"}
-  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # 8b1f8b1 (rnabeelTT/vllm-tt-plugin, branch dflash: M2.7's 8b1f8b1 + the prefix-state decode-row fix)
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # e0e2952 (rnabeelTT/vllm-tt-plugin, branch dflash: M2.7's 8b1f8b1 + the prefix-state decode-row fix)
   extra_models_dir: models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
   overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
   lock: requirements.lock
