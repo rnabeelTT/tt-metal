@@ -88,6 +88,11 @@ static void gemv_block_many(
     const uint8_t* w, const uint16_t* sz, int N, int K, int gs, const float* const* x, const float* const* xs, int nr,
     int layout, float out[][64]);
 #define BF16_FN __attribute__((target("avx512bf16")))  // the BF16 path only runs when hostk_set_bf16(1) (CPU checked)
+// bf16 bit patterns of 0..15 (exact), 32 entries for vpermw
+static const uint16_t k_bf16_lut[32] __attribute__((aligned(64))) = {
+    0x0000, 0x3F80, 0x4000, 0x4040, 0x4080, 0x40A0, 0x40C0, 0x40E0, 0x4100, 0x4110, 0x4120, 0x4130, 0x4140, 0x4150, 0x4160,
+    0x4170};
+
 BF16_FN static void gemv_block_bf(
     const uint8_t* w, const uint16_t* sz, int N, int K, int gs, const uint16_t* const* xb, const float* const* xs,
     int nr, int layout, float out[][64]);
@@ -338,7 +343,25 @@ BF16_FN static void gemv_block_bf(
         const uint8_t* p = w + (size_t)g * gs * (layout ? 16 : 32);
         const uint8_t* pl = w + (size_t)K * 16 + (size_t)g * gs * 16;
         __m512 prev[4];
-        for (int k = 0; k < gs; k++, p += layout ? 16 : 32, pl += 16) {
+        if (layout != 0) {
+            // bit planes: two k rows at a time in 16-bit lanes (lanes 0-15 row k, 16-31 row k + 1, as `both` below),
+            // each 4-bit weight looked up as its bf16 bit pattern (exact for 0..15): the same wb bytes as the fp32 path
+            const __m512i lut = _mm512_loadu_si512((const void*)k_bf16_lut);
+            const __m512i n3 = _mm512_set1_epi16(3);
+            for (int k = 0; k < gs; k += 2, p += 32, pl += 32) {
+                const __m512i vh = _mm512_cvtepu8_epi16(_mm256_loadu_si256((const __m256i*)p));
+                const __m512i vl = layout == 1 ? _mm512_cvtepu8_epi16(_mm256_loadu_si256((const __m256i*)pl)) : vh;
+                for (int i = 0; i < 4; i++) {
+                    __m512i q = _mm512_and_si512(_mm512_srli_epi16(vh, 2 * i), n3);
+                    if (layout == 1) {
+                        q = _mm512_or_si512(_mm512_slli_epi16(q, 2), _mm512_and_si512(_mm512_srli_epi16(vl, 2 * i), n3));
+                    }
+                    const __m512i bf = _mm512_permutexvar_epi16(q, lut);
+                    _mm512_store_si512(wb + (k >> 1) * 4 + i, _mm512_permutexvar_epi16(pidx, bf));
+                }
+            }
+        }
+        for (int k = 0; k < (layout ? 0 : gs); k++, p += layout ? 16 : 32, pl += 16) {
             __m512 f[4];
             if (layout == 0) {
                 __m512i v0 = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)p));
