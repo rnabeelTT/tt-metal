@@ -189,6 +189,12 @@ Pieces (all traced, per-prompt re-capture):
   byte-identical (random, tied logits; E 256 and 192): E 256 43.4 -> 10.8 us (split 8; 2: 18.7, 4: 12.7), E 192 24.1
   -> 9.6. Full model: forced log-probs identical (KL 0.0), verify 39.7 -> 38.6 ms per pass (morning 41.9). Left: the
   router matmul (~11 us; qwen36's boundary consumer fusion is one-row only, and M2.7 needs FP32 logits).
+- v1.8 PUBLISHED (2026-11-16, image f805268bc619 from 1442c03f805, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.7's kept as serve_default_running_v17.cmd): the MoE changes above on in the package
+  env. Served 128K card (OSL 128, greedy / sampled; ~/m27-pkg/card_run_v18.out): short 80.9 / 60.8 tok/s (v1.7 73.8 /
+  57.6), TTFT 0.59 s; 44.7K first 45.7 / 40.3 (v1.7 40.1 / 36.8), TTFT 23.8 s incl. switch; resent 47.4 / 38.9 (44.7 /
+  38.3), TTFT 1.3 s; short after long greedy 67.8 (55.3), sampled 36.5 (N = 1, noisy: 29-42 seen before). No errors.
+  Artifact v34 updated (tiles, bars, served table, v1.8 note).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
