@@ -206,29 +206,28 @@ card:
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
-    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.866 (confident tokens 0.948, KL 0.199) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
-    | GSM8K, greedy, reasoning effort none | 97.0% | — | 200 |
-    | IFEval, greedy, reasoning effort none (prompt strict / loose) | 88.0% / 90.0% | — | 200 |
+    | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.873 (confident tokens 0.951, KL 0.200) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
+    | GSM8K, greedy, reasoning effort none | 96.5% | — | 200 |
+    | IFEval, greedy, reasoning effort none (prompt strict / loose) | 89.0% / 92.0% | — | 200 |
 
     | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-128k | ~50 | 256 | 1 | 8 | 0.64 s | — | 35.3 | 7.9 s |
-    | p300x2-128k, temperature 0.7, top-p 0.95 | ~50 | 256 | 1 | 8 | 0.64 s | — | 33.9 | 8.2 s |
-    | p300x2-128k | 914 | ~10 | 1 | 1 | 1.8 s | 507 | — | 2.0 s |
-    | p300x2-128k | 3,511 | ~10 | 1 | 1 | 5.7 s | 621 | — | 5.9 s |
-    | p300x2-128k | 13,926 | ~10 | 1 | 1 | 16.2 s | 861 | — | 16.4 s |
-    | p300x2-128k | 27,821 | ~10 | 1 | 1 | 28.4 s | 979 | — | 28.6 s |
-    | p300x2-128k | 55,613 | ~10 | 1 | 1 | 59.8 s | 930 | — | 60.1 s |
-    | p300x2-128k | 104,192 | ~10 | 1 | 1 | 112.0 s | 930 | — | 112.3 s |
+    | p300x2-128k | ~30 | 128 | 1 | 16 | 0.59 s | — | 48.2 | 3.3 s |
+    | p300x2-128k, temperature 1.0, top-p 0.95, top-k 40 | ~30 | 128 | 1 | 16 | 0.54 s | — | 47.1 | 3.3 s |
+    | p300x2-128k | 3,788 | 128 | 1 | 1 | 6.6 s | 572 | 41.0 | 9.7 s |
+    | p300x2-128k | 14,880 | 128 | 1 | 1 | 16.9 s | 883 | 42.4 | 19.9 s |
+    | p300x2-128k | 29,708 | 128 | 1 | 1 | 32.7 s | 909 | 49.8 | 35.2 s |
+    | p300x2-128k | 62,385 | 128 | 1 | 1 | 68.7 s | 908 | 47.6 | 71.3 s |
+    | p300x2-128k | 118,465 | 128 | 1 | 1 | 136.7 s | 866 | 48.9 | 139.3 s |
 
-    Measured on one QB2 through the OpenAI endpoint with `tt-model serve`, warm caches, 2026-11-15; the ~50-token rows
-    are 8 held-out chat prompts (code, math, prose, three languages) at the default reasoning effort; the long rows are a
-    needle in a long document (found at every length). Decode varies with the text (speculative acceptance, how many of
-    a token's experts are on the device): ~32-40 tok/s across those prompts.
+    Measured on one QB2 through the OpenAI endpoint with `tt-model serve`, warm caches, 2026-11-16 (`serve/card_bench.py`):
+    the ~30-token rows are 8 held-out chat prompts (code, math, prose, three languages) twice each at the default
+    reasoning effort; the long rows are this repository's source as the prompt. Decode varies with the text
+    (speculative acceptance, how many of a token's experts are on the device): ~41-50 tok/s across these prompts.
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
-    - Prefill runs at ~950 tok/s from a few thousand tokens on (a 100K-token prompt takes ~110 s); shorter prompts
-      are slower per token.
+    - Prefill runs at ~870-930 tok/s from ~15K tokens on (a 118K-token prompt takes ~137 s); shorter prompts are
+      slower per token.
     - Requests with min_p, logit_bias, logprobs, bad words or structured outputs decode one token per step (~25 tok/s).
     - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
       does not convert it); `tool_choice: "auto"` returns proper tool_calls.

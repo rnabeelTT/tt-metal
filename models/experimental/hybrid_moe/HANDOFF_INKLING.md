@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
 | 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; tested from a fresh first boot via `tt-model serve`). Multimodal not started. |
+| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k). 2026-11-16 package (fetch, prefetcher fix, LM-head / drafter speedups): 48.2 / 47.1 tok/s greedy / sampled at 128K, prefill ~900 tok/s to 118K, GSM8K-200 96.5%, IFEval-200 89.0 / 92.0; clean `tt-model stop` (11.7 s) and restart without a board reset. Multimodal not started. |
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -411,3 +411,48 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     human text, 1.31 vs 1.42; DSpark's card claims 3.35 at block 7 on generation). Short-prompt TTFT 0.53 -> 0.64 s with
     streaming on (a streaming threshold by prompt length would recover it). tool_choice "required" (vLLM's inkling
     parser leaves the JSON calls in content).
+
+- **2026-11-16, session 4: the decode hang (root cause, tt-metal fix), decode fetch, drafter / LM-head speedups.**
+  - **Decode hang, root cause: a race in the CQ prefetcher, fixed in `tt_metal/impl/dispatch/kernels/cq_prefetch.cpp`.**
+    A mesh trace buffer is sized for the longest device's trace, so a shorter trace is followed by padding pages that
+    `paged_read_into_cmddat_q` may still be prefetching (NOC trid 1) when EXEC_BUF_END is processed. `process_exec_buf_cmd`
+    returned without retiring them, so they could land on top of the next host commands fetched into cmddat_q, and
+    the prefetcher then executed stale trace bytes as host commands (device 0 CQ0 stuck in relay_paged_packed /
+    relay_inline). The fix retires trid 1 before returning (one barrier per replay). Socket decode queues the next
+    host commands during a replay, so it hit the race (1 in 4 runs; 9 of 9 with the LRU fetch, which queues more);
+    the watcher's slowdown hid it. Found with the prefetcher's cmddat_q dumped via exalens (`~/.cache/inkling/pfregs.py`:
+    the stuck bytes were identical across hangs and absent from the host issue queue) and the host sysmem dumped from
+    inside the process (`INKLING_MEMDUMP`, `hybrid/pin/memdump.c`). After the fix: every fetch + sockets run clean
+    (20+). The package ships the patched source (JIT-compiled at startup; kernel caches rebuild on its hash);
+    `tools/run_dev.sh` and `serve/serve_inkling.sh` mount it. Upstream this.
+  - **Decode fetch (M2.7's PCIe expert copies)**: 175 static + 16 LRU slots per layer (S=175 libraries), fixed policy
+    30% of a layer's misses, at most 2 per layer and step, copied on CQ1 and resident from the next replay; layers 18-41
+    fetch their downs as bfp4 own-format copies (HYB_FETCH_DN_EXPERTS). Fetching more was slower (0.6/4, 1.0/8, auto
+    budget 16, LRU 32 on S=159); auto (M2.7) ~ equal. Held-out prompts: host experts per step 47.8 -> ~20.
+  - **LM head padded to tile-aligned vocab shards** (201024 -> 201088 columns; 50256 per die was half a tile short):
+    every `_lm_head` all-gather had taken all_gather_async's composite path (untilize, 5 permutes, concat, tilize).
+    Traced draft depth 3.17 -> 1.68 ms; verify faster too. MTP input projection as two matmuls (no concat to 2H).
+    C routing (hostk_route_inkling) in decode.
+  - **Measured** (vLLM, `serve/card_bench.py`: 8 held-out prompts x2, OSL 128, thinking at the template default):
+    shipped package 38.9 / 35.7 tok/s greedy / sampled -> fetch 44.8 / 41.4 -> + LM head / drafter / routing
+    **51.9 / 48.2** (M2.7's card on the same harness: 66.8 / 53.9). k=3 47.0 / 43.2 (k stays 2).
+    Quality: prefill path 0.873 / 0.951 / 0.200; decode path (EVAL_PATH=rows, fetch 1.0/8 worst case) 0.866 / 0.948 /
+    0.203 vs 0.870 / 0.951 / 0.203 without fetch (M2.7 0.848 / 0.933 / 0.196).
+  - **DSpark (RadixArk/Inkling-Small-DSpark-Preview) does not beat MTP** (CPU reference, `dspark_inkling_ref.py`): on
+    thinking-mode sampled text (the template default effort, temperature 1.0, top-p 0.95: its training setting) 1.75
+    tokens per pass at block 7 / 1.86 at block 15, vs MTP 2.18 / 2.52 / 2.78 at k = 2 / 3 / 4. Every convention the
+    checkpoint leaves open was tried (tap layers L vs L-1, residual / layer delta / RMS-normed / next-layer-normed
+    features, embedding raw / normed, logits x1 / x1/16, Markov on / off); the best is residual taps, raw embedding,
+    logits / 16 + Markov. Its card's 3.35 was measured against the NVFP4 target in SGLang; not reproducible here.
+  - Tried, no gain: k=3, drafter weights bf16 (identical acceptance), per-die argmax (exact but 404 vs 451 us),
+    HYB_PREFETCH off, decode host threads 4 / 8, DEVICE_PULL sockets (recv_async_h2d supports HOST_PUSH only).
+  - **Open:** `close_mesh_device` hangs at exit after a fetch run (2 CQs + sockets; flush / sync / pinned release /
+    socket release all complete first); serving never closes the mesh mid-run, but check a `tt-model serve` stop and
+    restart. Remaining gap to M2.7 is acceptance (MTP ~1.7-2.0 tokens per pass on chat vs DFlash ~2.3) and 40 hybrid
+    layers with a host step each (M2.7 at 32K: 18).
+  - **Package (built from 6c823ce7497 + card), measured through `tt-model serve` at p300x2-128k:** short chat 48.2 tok/s
+    greedy / 47.1 sampled (temperature 1.0, top-p 0.95, top-k 40), TTFT 0.54-0.59 s; prefill 572 tok/s at 3.8K, ~880-910
+    tok/s from 15K to 118K (118K: 137 s), decode 41-50 tok/s at those contexts. GSM8K-200 96.5%, IFEval-200 89.0 /
+    92.0; every feature check passes (reasoning split, tool call, streaming, json_schema, min_p, logprobs, penalties).
+    `tt-model stop` shut down cleanly in 11.7 s and the next `tt-model serve` came up without a board reset (220 s
+    warm). DRAM free after warm-up at 128K: 0.74 GiB.
