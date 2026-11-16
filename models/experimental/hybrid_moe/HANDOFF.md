@@ -182,6 +182,13 @@ Pieces (all traced, per-prompt re-capture):
   layers unchanged (14.4 ms: their device time saved is spent waiting on the CPU experts). Forced 4 prompts: log-probs
   identical (KL 0.0), verify 41.9 (morning) -> 39.7 ms with all three MoE changes. Experts now ~400-440 GB/s of the
   ~490 ceiling; next MoE item: router + route (42 us per layer).
+- ROUTING SPLIT (2026-11-16): of the full layer's router + route 42 us, the router matmul is ~11 and the routing
+  (RouteRows: one core per row, sigmoid + bias top-8 in 64-bit fixed point on FPU-less RISC-Vs) ~31. QWEN35_ROUTE_SPLIT=P
+  (qwen36 moe_decode RouteRows + route_rows_*.cpp ROUTE_SPLIT; code default 1, M2.7 package / serve_m27.sh 8): P cores
+  per row each take E / P experts, the part-0 core merges in part order (ties keep the lower id, as before). Route table
+  byte-identical (random, tied logits; E 256 and 192): E 256 43.4 -> 10.8 us (split 8; 2: 18.7, 4: 12.7), E 192 24.1
+  -> 9.6. Full model: forced log-probs identical (KL 0.0), verify 39.7 -> 38.6 ms per pass (morning 41.9). Left: the
+  router matmul (~11 us; qwen36's boundary consumer fusion is one-row only, and M2.7 needs FP32 logits).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
