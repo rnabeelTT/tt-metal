@@ -1059,6 +1059,8 @@ def _dev_tune():
             HYB.pf_copy_ms = float(v)
         elif k == "cpu_ms":
             HYB.pf_cpu_ms = [float(x) for x in v.split(":")]
+        elif k == "zerocopy" and HYB.fetch.px is not None:
+            HYB.fetch.px.zerocopy = v == "1"
     print(f"HYB_TUNE {open(path).read().split()}", flush=True)
 
 

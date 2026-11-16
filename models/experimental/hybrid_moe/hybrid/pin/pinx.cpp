@@ -75,6 +75,12 @@ int pinx_dst(void* mesh, uint64_t address, uint64_t size, uint64_t page_size) {
     return static_cast<int>(g_dsts.size() - 1);
 }
 
+// tt-metal's pinned interleaved write (buffer_dispatch::write_to_device_buffer) reads the source at
+// host_data + region.offset, while the copy path reads it at host_data: a zero-copy write at a non-zero destination
+// offset would relay the wrong host bytes (every slot write but slot 0). The host pointer handed to a zero-copy
+// transfer is therefore shifted back by the destination offset; tt-metal adds it again.
+inline std::byte* pinned_src(std::byte* p, uint64_t dst_offset) { return p - dst_offset; }
+
 // Device d of the mesh (row-major) <- region bytes [offsets[d], offsets[d] + size) into the destination's device-local
 // bytes [dst_offset, dst_offset + size) (size 0: the whole destination; dst_offset a multiple of its page size).
 // Non-blocking: the region must not change until the write completed.
@@ -93,7 +99,9 @@ int pinx_write_at(
         if (offsets[i] + n > r.size) {
             return -2;
         }
-        auto x = dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(dst_offset, n));
+        auto x = dist::ShardDataTransfer{c}
+                     .host_data(pinned_src(r.base + offsets[i], dst_offset))
+                     .region(ttm::BufferRegion(dst_offset, n));
         ttm::experimental::ShardDataTransferSetPinnedMemory(x, r.pinned);
         xfers.push_back(std::move(x));
         ++i;
@@ -126,7 +134,9 @@ int pinx_write_at2(
         if (offsets[i] + n > r.size) {
             return -2;
         }
-        auto x = dist::ShardDataTransfer{c}.host_data(r.base + offsets[i]).region(ttm::BufferRegion(dst_offset, n));
+        auto x = dist::ShardDataTransfer{c}
+                     .host_data(use_pinned ? pinned_src(r.base + offsets[i], dst_offset) : r.base + offsets[i])
+                     .region(ttm::BufferRegion(dst_offset, n));
         if (use_pinned) {
             ttm::experimental::ShardDataTransferSetPinnedMemory(x, r.pinned);
         }

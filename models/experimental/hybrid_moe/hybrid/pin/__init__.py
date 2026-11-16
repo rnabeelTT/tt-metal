@@ -59,10 +59,12 @@ class Pinx:
         self.mp = ctypes.c_void_p(cpp_ptr(mesh))
         self.tp = len(mesh.get_device_ids())
         self.keep = []  # the mmaps backing pinned regions
-        # HYB_PINX_ZEROCOPY=1: writes read the pinned region straight over the NOC. Off by default: measured on the
-        # QB2 (P300x2, cache/test_pinx_write2.py), 5-15% of zero-copy slot writes never landed on 3 of the 4 dies
-        # (CQ0 and CQ1 alike) while the copy path (bytes through the command queue) never failed in the same test
-        self.zerocopy = os.environ.get("HYB_PINX_ZEROCOPY", "0") == "1"
+        # HYB_PINX_ZEROCOPY (default 1): writes read the pinned region straight over the NOC (~28 GB/s on the QB2
+        # against ~15 GB/s for the copy path, and no host memcpy). tt-metal's pinned write reads its source at
+        # host_data + the destination offset (the copy path at host_data); pinx.cpp compensates (pinned_src). Before that
+        # every zero-copy write at a non-zero offset relayed the wrong host bytes, which is why the copy path was the
+        # default (cache/test_pinx_write2.py: 5-15% of slot writes wrong). 0: bytes through the command queue.
+        self.zerocopy = os.environ.get("HYB_PINX_ZEROCOPY", "1") == "1"
         self.by_rid = {}  # region id -> its uint8 view
 
     def region(self, size):
