@@ -138,6 +138,16 @@ Pieces (all traced, per-prompt re-capture):
     serve_default_running_v16.cmd). Served 128K card (OSL 128, greedy / sampled): short 73.8 / 57.6 tok/s (v1.5 68.9 /
     53.7), TTFT 0.57 s; 44.7K first 40.1 / 36.8 (TTFT 23.4 s incl. switch); resent 44.7 / 38.3 (TTFT 1.3 s); short
     after long greedy 55.3, sampled 42.0 (2 runs; a single run read 29: sampling noise). No errors, switches clean.
+- CPU EXPERT PROFILE (2026-11-16, v1.7 package config incl. auto fetch, 32K pool, 3 short prompts x 128 greedy; runner
+  run_dflash_traced.py): pass = draft 4.6-5.0 + verify 27.1-29.0 + stage ~1.5 ms, 2.33-2.43 tokens per pass, 68-76 tok/s.
+  Experts on the device for 97% of decode picks (dec_hits 552-560 of 576 per pass, ~13 fetched per pass); 15-20 experts
+  per pass on the CPU: t_host 4.2-5.4 ms of kernel time, t_wait 2.9-4.0 ms of it on the critical path. HYB_SKIP=1 (no
+  CPU experts; timing floor only, it changes the output): verify 22.2-23.0 ms. So the CPU experts cost ~5 ms of a ~28 ms
+  verify (~15% of a pass); the rest is device time (t_read ~18 ms = the host waiting on the device). The host is a Ryzen
+  7 9700X (8 cores, 2-channel DDR5): ~1 expert (~7 MB int4) per hybrid layer at ~28 GB/s effective, latency-bound per
+  layer rather than bandwidth-bound; the kernel already splits each expert over the threads. NOTE: the 42-46 ms verify
+  figures above are the deterministic A/B config (HYB_FETCH_POLICY=fixed, FRAC=0: ~90 CPU experts per pass), not
+  serving.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
