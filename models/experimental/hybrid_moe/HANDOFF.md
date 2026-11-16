@@ -208,6 +208,24 @@ Pieces (all traced, per-prompt re-capture):
     at 14-21 MB/s (62 vs ~80 tok/s). Cause: this host's ~140 GB leaked by OOM-killed runs (only a reboot frees it).
     Re-measure the card after a reboot before optimizing further.
   - Runner: POC_SAMPLING, POC_AFTER_LONG, ms_per_pass post / sample / dcand / vcand.
+- AFTER THE REBOOT (2026-11-16, ~140 GB freed): served v1.8 card, same order as before: short 81.6 / 66.2 tok/s
+  (greedy / sampled; sampled was 60.8 under the RAM pressure), 44.7K first 44.2 / 40.4 (TTFT 23.0 s), resent 47.3 /
+  43.0, short after long 70.7 / 55.5 (one prompt that runs ~70 anyway): no slowdown after long prompts, swap 0.
+- PREFILL (2026-11-16, bench_prefill 44.7K tokens, served long state: 40 full layers, 49K pool, 4096 segments):
+  - BENCH_LAYER_TIMES=2 (synchronized): MoE 77% (full 6.8 s, hybrid 8.8 s: routed on device 4.2, streaming 2.3),
+    attention 3.65 s. QWEN35_MOE_PF_TIMES=1 (sorted path steps): gate|up matmul 6.8 s, dispatch build 4.4 s (~1370
+    calls), down matmul 3.3, gather rows 2.4, swiglu + weights 1.5, undispatch 1.45.
+  - QWEN35_SORTED_GROUP_ROWS 64: slower (19.1 vs 17.8 s); 128: over the 65536-row dispatch limit.
+  - moe_sorted_dispatch kernel rewrite (90e8de52420): 2.44 -> 1.74 ms per 4096-token call, outputs byte-identical;
+    prefill 17.8 -> 17.3-17.6 s, logits identical.
+  - gate|up in 2 resident column blocks (01f7c9b5f12, grouped sparse matmul per_core_N < Nt; QWEN35_GU_COL_SPLIT,
+    default 1): the 1.33 MB weight block missed the 1.3 MB resident budget, so weights were re-read per 32-row
+    group. Prefill 17.3 -> 15.5 s, logits bit-identical. Not in a published image yet (dev image 95b4b894d9b9).
+- LONG-CONTEXT DECODE (2026-11-16, device profile at 44K, scratch p19 vs p18): verify span 27.9 -> 41.8 ms.
+  Attention 6.0 -> 12.5 ms (SDPA 22 -> 126 us per layer: the shared-KV rows op reads ~24 MB per layer per die,
+  ~230 GB/s vs ~490; per-core flash-decode loop over ~800 tokens, likely compute / latency bound); hybrid layers 12.4
+  -> 21.6 ms (22 vs 18 layers, ~36 vs 15-20 CPU experts per pass unprofiled, t_wait ~5 vs ~3 ms); full-layer MoE
+  7.9 -> 6.1 ms. Acceptance 1.94 vs ~2.3 tokens per pass (drafter).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
