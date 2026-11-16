@@ -99,11 +99,13 @@ Pieces (all traced, per-prompt re-capture):
   needs x_disp + out_dn (~35 MB/bank each at G ~1400 groups) on top of ~45 MB of other prefill state, and with
   131-138 MB free per bank in pieces that only fits sometimes. So the demoted profile is at the DRAM limit; this is
   not just fragmentation. The successes all had a second free block >= 29 MB, and the failures did not.
-  RISK in the shipped code: the generator's test (largest free block >= QWEN35_PREFILL_TIGHT_MB = 72) is a weak
-  proxy. A layout with a 72-90 MB block after a demotion would pick 4096 segments and can OOM. It has not happened in
-  the package tests (56K demotions leave 62-63 MB -> 2048), but a sturdier test (total free plus the second-largest
-  block, or 2048 whenever layers are demoted) would close it. `HYB_DRAM_MAP=1` (in the diff) logs the free list at
-  each switch step.
+  `HYB_DRAM_MAP=1` (in the diff) logs the free list at each switch step.
+- FIXED (2026-11-16, v1.6): the generator's 4096-segment test (largest free block >= QWEN35_PREFILL_TIGHT_MB = 72)
+  could pass after a demotion and then OOM (above). While layers are demoted (elastic sets gen.prefill_demoted) the
+  4096 segments now also need QWEN35_PREFILL_TIGHT_DEMOTED_MB (default 140) MB per bank free in total. Free per bank
+  after a switch: 0 layers 148, 4 (45K) 140-143, 7 (56K) 134-138, 11 (73K) 131. Served 128K: 45K keeps 4096
+  segments when its block fits (TTFT 20.3 s, as before); 56K with an 89 MB block now takes 2048 (34-35 s). Static
+  profiles (no demotion) are unchanged.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
