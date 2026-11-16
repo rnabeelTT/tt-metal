@@ -121,7 +121,7 @@ serve:
     HYB_PREFETCH: "1"
     HYB_PF_TOPK: "8"
     # prefill streaming: a prefill step's missed experts are copied into 258 device staging slots (a layer's 128 pinned
-    # + its converted cold experts) and computed there; from 4096 prompt tokens the experts with no device-format copy
+    # + its converted cold experts) and computed there; from 2560 prompt tokens the experts with no device-format copy
     # are converted from the int4 library one layer ahead (hybrid/coldconv.py), below it they run on the CPU
     HYB_STREAM: "1"
     HYB_STREAM_SLOTS: "258"
