@@ -73,16 +73,16 @@ serve:
     PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
     HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
     QWEN35_TRACE_REGION_MIB: "96"
-    # vLLM prefix caching (--enable-prefix-caching below): 16 GDN state snapshots kept in host RAM (225 MB each, ~3.6 GB;
-    # QWEN35_PREFIX_STATE_HOST: no device pool), saved at segment boundaries and at each prompt's last block
-    # (PROMPT_END), so a follow-up turn resumes where the last prompt ended; DFlash keeps the drafter context of the
-    # last 8 requests (DFLASH_FEAT_CACHE), so interleaved conversations resume too.
+    # vLLM prefix caching (--enable-prefix-caching below): 24 GDN state snapshots kept in host RAM (225 MB each, ~5.4 GB;
+    # QWEN35_PREFIX_STATE_HOST: no device pool), saved at the 2048-token segment boundaries a prefill crosses anyway;
+    # DFlash keeps the drafter context of the last 8 requests (DFLASH_FEAT_CACHE), so interleaved conversations
+    # resume too. PROMPT_END snapshots stay off: the extra cut changed a cold prompt's answers (3K retrieval 7/8 -> 5/8).
     # Measured 2026-11-16: 18K resend 14.5 -> 1.1 s, chat turn 2 on a 17K context 1.4-4.1 s; cold TTFT unchanged;
     # recall on hits 8/8; a 125K prompt still fits
-    QWEN35_PREFIX_STATE_SLOTS: "16"
+    QWEN35_PREFIX_STATE_SLOTS: "24"
     QWEN35_PREFIX_STATE_HOST: "1"
     QWEN35_PREFIX_SLOT_MIB: "0"
-    QWEN35_PREFIX_STATE_PROMPT_END: "1"
+    QWEN35_PREFIX_STATE_PROMPT_END: "0"
     QWEN35_PREFIX_CACHING: "1"
     QWEN35_VISION: "0"
     QWEN35_BATCHED_PREFILL: "0"
@@ -156,7 +156,7 @@ serve_profiles:
   - name: p300x2-128k
     description: >
       The default: up to 128K tokens, socket decode with PCIe fetch of recently missed experts. The fastest profile;
-      needs ~205 GB of free host RAM (the int4 library plus pinned device-format copies of 128 experts per layer).
+      needs ~210 GB of free host RAM (the int4 library, pinned device-format copies of 128 experts per layer and the prefix-cache snapshots).
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 131072
@@ -198,7 +198,7 @@ card:
 
       | profile | free host RAM |
       | --- | --- |
-      | `p300x2-128k` (default) | ~205 GB (int4 library resident + pinned device-format copies) |
+      | `p300x2-128k` (default) | ~210 GB (int4 library resident + pinned device-format copies + prefix-cache snapshots) |
       | `p300x2-128k-lowmem` | ~135 GB (int4 library only) |
 
       The server checks this at startup against the RAM free right now (other jobs count) and refuses to start if
@@ -225,52 +225,57 @@ card:
     (temperature, top_k, top_p, seed) use exact speculative sampling against the drafter's drafts, so the output
     follows the requested distribution. A top_k of 32 or less (the model's default is 20) reads only the device's
     top-k candidates; other settings read the verify's full logits (a little slower). Presence / frequency /
-    repetition penalties are not applied in decode. The model's recommended sampling: temperature 0.6, top_p 0.95,
-    top_k 20.
+    repetition penalties are applied as vLLM applies them. Requests that need vLLM's host sampler - logprobs,
+    structured outputs (response_format json_schema), logit_bias, min_p, min_tokens - decode one token per pass.
+    The model's recommended sampling: temperature 0.6, top_p 0.95, top_k 20.
+
+    Prefix caching is on: a prompt that shares a prefix with an earlier one (a follow-up chat turn, the same document
+    with a new question) resumes from the last 2048-token boundary of the shared part instead of prefilling it again.
+    The recurrent-state snapshots this needs live in host RAM (24 of them, ~5.4 GB); a single long prompt takes one per
+    2048 tokens, so a 48K prompt alone can evict every other conversation's snapshots.
   performance: |
     | eval | this package | prompts |
     | --- | --- | --- |
-    | GSM8K accuracy, greedy | 39 / 40 (0.98) | first 40 test questions |
+    | GSM8K accuracy, greedy | 37 / 40 (0.93) | first 40 test questions |
 
     | profile | sampling | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-128k | greedy | ~50 | 256 | 1 | 8 | 1.11 s | — | 17.9 | — |
-    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.07 s | — | 18.2 | — |
-    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.07 s | — | 17.3 | — |
-    | p300x2-128k | greedy | 1,128 | 64 | 1 | 1 | 6.7 s | 169 | 17.7 | 10.2 s |
-    | p300x2-128k | greedy | 2,314 | 128 | 1 | 1 | 10.7 s | 217 | 17.1 | 18.1 s |
-    | p300x2-128k | greedy | 3,029 | 128 | 1 | 1 | 10.6 s | 286 | 16.2 | 18.4 s |
-    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 10.7 s | 424 | 15.5 | 18.9 s |
-    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 14.9 s | 1,212 | 15.4 | 23.1 s |
-    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 24.7 s | 1,467 | 16.2 | 32.6 s |
+    | p300x2-128k | greedy | ~50 | 256 | 1 | 8 | ~1.1 s | — | 18.1 | — |
+    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.10 s | — | 18.7 | — |
+    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.09 s | — | 18.3 | — |
+    | p300x2-128k | greedy | 1,146 | 128 | 1 | 1 | 6.6 s | 175 | 17.4 | 13.9 s |
+    | p300x2-128k | greedy | 2,332 | 128 | 1 | 1 | 10.3 s | 226 | 17.6 | 17.5 s |
+    | p300x2-128k | greedy | 3,146 | 128 | 1 | 1 | 10.5 s | 299 | 16.1 | 18.4 s |
+    | p300x2-128k | greedy | 4,547 | 128 | 1 | 1 | 10.5 s | 433 | 17.6 | 17.7 s |
+    | p300x2-128k | greedy | 18,017 | 128 | 1 | 1 | 14.9 s | 1,207 | 15.9 | 22.9 s |
+    | p300x2-128k | greedy | 36,264 | 128 | 1 | 1 | 23.6 s | 1,534 | 16.3 | 31.5 s |
+
+    Prefix caching (greedy, thinking off): two interleaved conversations of 16.7K and 10.8K tokens, cold first turns
+    13.9 s / 12.3 s, every follow-up turn 4.4-4.9 s; the 36,264-token prompt resent 8.8 s (resumed at 34,816 tokens).
 
     Long-context retrieval (repeat the first sentence of problem k from a list of GSM8K problems, 8 values of k,
-    greedy): 7 / 8 at 18K tokens (the same miss, k = 8, as every earlier build) and 8 / 8 at 3K tokens.
+    greedy): 7 / 8 at 18K tokens and 7 / 8 at 3K tokens (the 3K miss reproduces the sentence with a straight
+    apostrophe where the dataset has a typographic one); 6 / 8 at 3K when the questions resume from the prefix cache.
 
     Measured on one QB2 (Ryzen 7 9700X, 2-channel DDR5 at 3600 MT/s) through the OpenAI endpoint with `tt-model
-    serve`, warm caches, 2026-11-16; the ~50-token rows are the 8 held-out chat prompts (thinking on) per run, the long
-    rows GSM8K questions concatenated (thinking off). Prefill tok/s = prompt tokens / TTFT. Decode varies with the text
-    (speculative acceptance and how many experts miss the device; per prompt ~15-21 tok/s) and between runs: the
-    greedy row measured 17.9-19.2 tok/s on this image across restarts, the same range as the previous package. GSM8K
-    on the previous package: 38 / 40. Time to first token on the previous package (2026-11-16, first request of each
-    length): 8.8 s / 21.0 s / 24.5 s / 37.1 s at 1,128 / 4,529 / 17,998 / 36,245 tokens; before prefill streaming
-    (2026-11-15) 46.3 s / 184.9 s / 381.7 s from 4,529 tokens. The `p300x2-128k-lowmem` profile decoded ~13.6 tok/s
-    on short prompts in development and prefills on the CPU (not re-measured on this package).
+    serve`, warm caches, 2026-11-16. The ~50-token rows are the 8 held-out chat prompts (thinking on), the long rows
+    GSM8K questions concatenated (thinking off), each long prompt cold (a unique first line, so no prefix-cache hit).
+    Prefill tok/s = prompt tokens / TTFT. Decode varies with the text (speculative acceptance and how many experts
+    miss the device; per prompt ~15-21 tok/s) and between restarts (about +-5%).
   limitations: |
     - One user at a time; the hybrid path does not batch.
     - Decode speed depends on the text: the more of a token's experts are off the device, the more the CPU does
       (the per-prompt spread in the table). Unusual domains route to more host experts and decode slower.
     - Outputs are close to but not identical to the reference model (bfp4 device experts, int4 host experts, 2-bit
       reads of low-weight host experts). They are not bit-reproducible between requests either: which copy of an
-      expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text.
-    - Penalties (presence / frequency / repetition) are ignored in decode.
-    - Prefill copies a layer's off-device experts to the device once per 64K tokens (zero-copy PCIe reads of pinned
-      host memory, ~28 GB/s), and from 2,560 prompt tokens routes on the device; a prompt of 2-5K tokens still takes
-      ~10 s, from there time grows ~0.5 s per 1K tokens. From 2,560 prompt tokens the experts without a prebuilt device
-      copy are converted from the int4 copies during prefill (a second 4-bit rounding: their weights carry ~12-16%
-      error against the FP8 checkpoint instead of ~10-12% for the prebuilt copies); the retrieval checks under
-      Performance scored as before.
-    - Prefix caching is off (a resent prompt is prefilled again).
+      expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text. A
+      prompt resumed from the prefix cache also computes its new part on a different expert path than a cold prompt
+      (the CPU for short parts), so its answer can differ from the cold one.
+    - Prompts of 2-5K tokens take ~10 s to the first token (the experts without a prebuilt device copy are converted
+      on the CPU, bound by host memory bandwidth); from there time grows ~0.5 s per 1K tokens. From 2,560 prompt
+      tokens those converted experts carry a second 4-bit rounding (~12-16% weight error against the FP8 checkpoint
+      instead of ~10-12% for the prebuilt copies); the retrieval checks under Performance include it.
+    - A follow-up turn resumes from a 2048-token boundary, so it prefills up to ~2K tokens again (~4-5 s).
     - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
   licensing: >
     Ornith-1.5-397B and its DFlash drafter are MIT-licensed by ornith-ai; the expert copies the server builds are
