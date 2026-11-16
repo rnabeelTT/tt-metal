@@ -185,6 +185,9 @@ class InklingSpecServing:
         if self.mtp is not None:
             ffs += [getattr(getattr(dp, "block", None), "feed_forward", None) for dp in self.mtp.depths]
         self.guard = LazyCacheGuard(ffs, [args])
+        # INKLING_WATCHDOG=N (seconds, default 600; 0 = off): a prefill / decode step that makes no progress for N s dumps
+        # every Python thread's stack to stderr (host-side vs device-wait hangs), once per stall
+        self.watchdog = float(os.environ.get("INKLING_WATCHDOG", "600"))
         if os.environ.get("INKLING_PROGLOG") == "1":
             install_program_log(mesh, lambda: self.captured)
         # the continuation: the next token to verify, its position, the pending drafts (+ their q when sampling)
@@ -676,9 +679,29 @@ class InklingSpecServing:
         self._tok, self._pos = nxt, p + 1
         return nxt
 
+    def _arm(self):
+        if self.watchdog > 0:
+            import faulthandler
+            import sys
+
+            faulthandler.dump_traceback_later(self.watchdog, repeat=False, file=sys.stderr, exit=False)
+
+    def _disarm(self):
+        if self.watchdog > 0:
+            import faulthandler
+
+            faulthandler.cancel_dump_traceback_later()
+
     def prefill(self, prompt_ids, sampling=None) -> int:
         """A new sequence: prefill the prompt (all but its last token; that one is the first verify row) and return
         the first generated token. sampling = (temperature, top_k, top_p, seed) or None (greedy)."""
+        self._arm()
+        try:
+            return self._prefill_request(prompt_ids, sampling)
+        finally:
+            self._disarm()
+
+    def _prefill_request(self, prompt_ids, sampling):
         t0 = time.time()
         P = len(prompt_ids)
         if P < 1:
@@ -736,6 +759,13 @@ class InklingSpecServing:
         step); the plugin's tok / pos are checked when it flags them authoritative."""
         if self._pos is None:
             raise RuntimeError("Inkling step before any prefill")
+        self._arm()
+        try:
+            return self._step(tok, pos, host_authoritative)
+        finally:
+            self._disarm()
+
+    def _step(self, tok, pos, host_authoritative):
         buf, self._pending = self._pending, []
         adopt, self.adopt_next = self.adopt_next, False
         if (

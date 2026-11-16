@@ -31,6 +31,10 @@ class PrefillStream:
         self.min_tokens = self.min_short = int(os.environ.get("HYB_STREAM_MIN", "4"))
         self.min_long = int(os.environ.get("HYB_STREAM_MIN_LONG", str(self.min_short)))
         self.long_from = int(os.environ.get("HYB_STREAM_LONG_FROM", "0"))  # 0: HYB_STREAM_MIN at every length
+        # HYB_STREAM_FROM: prompts shorter than this stream nothing (the CPU takes every miss): on a chat-length prompt
+        # hardly any expert reaches HYB_STREAM_MIN tokens and the streaming path's per-layer planning only adds TTFT
+        # (Inkling, ~50-token prompts: +35-50 ms)
+        self.stream_from = int(os.environ.get("HYB_STREAM_FROM", "256"))
         self.NS = int(os.environ.get("HYB_STREAM_SLOTS", "128"))
         self.rounds = int(os.environ.get("HYB_STREAM_ROUNDS", "1"))
         self.cq1 = os.environ.get("HYB_STREAM_CQ1", "0") == "1"
@@ -147,6 +151,8 @@ class PrefillStream:
         the device is faster, runs/m27/pf_min; short ones keep HYB_STREAM_MIN, whose CPU path keeps the drafter's
         prompt features closer)."""
         self.min_tokens = self.min_long if (self.long_from and tokens >= self.long_from) else self.min_short
+        if tokens < self.stream_from:
+            self.min_tokens = 1 << 30
         self.banked = bool(self.prefetch_min) and tokens >= self.prefetch_min and self.can_prefetch()
         self.cur = None
         self.last_read = {}
