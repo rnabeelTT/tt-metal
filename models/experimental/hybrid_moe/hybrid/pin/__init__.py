@@ -99,16 +99,19 @@ class Pinx:
             raise ValueError(f"pinx: {len(offsets)} offsets for {self.tp} devices")
         return (ctypes.c_uint64 * self.tp)(*[int(o) for o in offsets])
 
-    def write(self, dst, region, offsets, cq_id=0):
-        if not self.zerocopy:
+    def write(self, dst, region, offsets, cq_id=0, zc=None):
+        """zc: None = self.zerocopy; False forces the copy path (many small writes, e.g. decode: a zero-copy write
+        also records an event and invalidates the prefetcher cache, which cost decode ~5%)."""
+        if not (self.zerocopy if zc is None else zc):
             return self.write_at2(dst, region, offsets, 0, 0, cq_id=cq_id, pinned=False)
         rc = self.lib.pinx_write(self.mp, dst, region, self._offs(offsets), cq_id)
         if rc != 0:
             raise RuntimeError(f"pinx_write returned {rc} (dst {dst}, region {region}, offsets {list(offsets)})")
 
-    def write_at(self, dst, region, offsets, dst_offset, size, cq_id=0):
-        """Region bytes [offsets[d], + size) into the destination's device-local bytes [dst_offset, + size)."""
-        if not self.zerocopy:
+    def write_at(self, dst, region, offsets, dst_offset, size, cq_id=0, zc=None):
+        """Region bytes [offsets[d], + size) into the destination's device-local bytes [dst_offset, + size). zc as
+        write()."""
+        if not (self.zerocopy if zc is None else zc):
             return self.write_at2(dst, region, offsets, dst_offset, size, cq_id=cq_id, pinned=False)
         rc = self.lib.pinx_write_at(self.mp, dst, region, self._offs(offsets), cq_id, int(dst_offset), int(size))
         if rc != 0:
@@ -196,6 +199,6 @@ class PinnedRows:
         t0 = time.perf_counter()
         fill(torch.from_numpy(self.buf[off : off + n]).view(torch.bfloat16).view(n // (2 * w), w))
         t1 = time.perf_counter()
-        self.px.write(d[0], self.rid, [off] * self.px.tp)
+        self.px.write(d[0], self.rid, [off] * self.px.tp, zc=False)  # per-step small uploads: the copy path
         self.t_copy += t1 - t0
         self.t_write += time.perf_counter() - t1

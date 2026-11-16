@@ -407,8 +407,8 @@ class FetchCache:
             if host_row[v] < 0:
                 nohost.add(v)
             rid, og, od = self.raw_offsets(layer, c)
-            self.px.write_at(dg, rid, og, s * ng, ng)
-            self.px.write_at(dd, rid, od, s * nd, nd)
+            self.px.write_at(dg, rid, og, s * ng, ng, zc=False)
+            self.px.write_at(dd, rid, od, s * nd, nd, zc=False)
             if c in lru:  # it leaves its LRU slot for the static one
                 self.free[layer].append(lru.pop(c))
             slot_of[c] = s
@@ -753,8 +753,9 @@ class FetchCache:
                     self.px.write_async(dg, rid, og, s * ng, ng, cq_id=1)
                     self.px.write_async(dd, rid, od, s * nd, nd, cq_id=1)
                 else:
-                    self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq)
-                    self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq)
+                    # decode's per-step fetches keep the copy path (zero-copy writes slowed decode ~5%)
+                    self.px.write_at(dg, rid, og, s * ng, ng, cq_id=cq, zc=False)
+                    self.px.write_at(dd, rid, od, s * nd, nd, cq_id=cq, zc=False)
                 st["t_fetch_w"] = st.get("t_fetch_w", 0.0) + time.perf_counter() - w0
                 if layer == self.verify_layer:  # debug: read the slot straight back once the write has run
                     self._verify_now(layer, e, s, cq)
