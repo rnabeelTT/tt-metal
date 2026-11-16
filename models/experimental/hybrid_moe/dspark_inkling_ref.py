@@ -64,7 +64,27 @@ def main():
     torch.set_num_threads(int(os.environ.get("REF_THREADS", "16")))
     seqs = json.load(open(texts))
     taps = torch.load(os.path.join(ref_dir, "taps.pt"))
-    names, tap = taps["names"], taps["taps"]  # [B, T, 5, H]
+    names, tap = taps["names"], taps["taps"]  # [B, T, n_taps, H]
+    # DSPARK_TAPS: the layers (outputs) fed to the drafter, default its config's target_layer_ids; taps.pt may hold
+    # more (e.g. 4,5,10,11,...: the one-layer-earlier convention for an engine that captures layer inputs)
+    have = [int(v) for v in taps.get("layers", [5, 11, 23, 29, 35])]
+    want = [int(v) for v in os.environ.get("DSPARK_TAPS", "5,11,23,29,35").split(",")]
+    # DSPARK_FEAT=delta: each tap layer's own contribution (out_L - out_{L-1}) instead of the residual stream after it
+    # (an engine that captures a sublayer output rather than the residual); needs L - 1 in taps.pt too
+    if os.environ.get("DSPARK_FEAT", "resid") == "delta":
+        tap = tap[:, :, [have.index(v) for v in want]].float() - tap[:, :, [have.index(v - 1) for v in want]].float()
+        tap = tap.to(torch.bfloat16)
+    else:
+        tap = tap[:, :, [have.index(v) for v in want]]
+    # DSPARK_FEAT=rms: each tap RMS-normalized (no gain) before the concat (an engine that captures a normed hidden)
+    if os.environ.get("DSPARK_FEAT") in ("rms", "nextnorm"):
+        t32 = tap.float()
+        t32 = t32 * torch.rsqrt(t32.pow(2).mean(-1, keepdim=True) + 1e-6)
+        if os.environ.get("DSPARK_FEAT") == "nextnorm":  # the normed input of layer L + 1 (its attn_norm gain)
+            g = torch.stack([R.get(f"model.llm.layers.{v + 1}.attn_norm.weight").float() for v in want])  # [n, H]
+            t32 = t32 * g
+        tap = t32.to(torch.bfloat16)
+    print(f"taps {want} (file has {have}), features {os.environ.get('DSPARK_FEAT', 'resid')}", flush=True)
     model = load_dspark()
     BS = min(BS, model.block_size)
     mask_id = model.mask_token_id
@@ -74,7 +94,18 @@ def main():
     bnorm.weight.data = R.get("model.llm.embed_norm.weight").to(torch.bfloat16)
     head = R.get("model.llm.unembed.weight")[: cfg.unpadded_vocab_size]
     markov = getattr(model, "markov_head", None)
-    variants = [(en, sc) for en in ("raw", "normed") for sc in (1.0, 1.0 / cfg.logits_mup_width_multiplier)]
+    # (embedding raw / normed, logit scale, Markov bias on / off)
+    variants = [
+        (en, sc, mk)
+        for en in ("raw", "normed")
+        for sc in (1.0, 1.0 / cfg.logits_mup_width_multiplier)
+        for mk in (True, False)
+    ]
+    if os.environ.get("DSPARK_FAST") == "1":  # the convention that works: raw embedding, logits / 16, Markov on / off
+        variants = [
+            ("raw", 1.0 / cfg.logits_mup_width_multiplier, True),
+            ("raw", 1.0 / cfg.logits_mup_width_multiplier, False),
+        ]
     acc = {v: [] for v in variants}
     for b, name in enumerate(names):
         ids = torch.tensor(seqs[name])
@@ -89,7 +120,7 @@ def main():
             block[0] = ids[s]
             pos = torch.arange(0, s + BS).unsqueeze(0)
             ctx = ctx_all[:s].unsqueeze(0).to(torch.bfloat16)
-            for en, sc in variants:
+            for en, sc, mk in variants:
                 e = torch.nn.functional.embedding(block, emb_w).unsqueeze(0)
                 if en == "normed":
                     e = bnorm(e)
@@ -99,7 +130,7 @@ def main():
                 prev = block[0]
                 for j in range(BS - 1):  # the Markov bias of the previous (drafted) token, sequential
                     lg = base[j]
-                    if markov is not None:
+                    if markov is not None and mk:
                         lg = lg + markov.compute_step_bias(prev.view(1))[0, : lg.shape[0]].float()
                     prev = lg.argmax()
                     drafts.append(int(prev))
@@ -109,11 +140,22 @@ def main():
                     if d != t:
                         break
                     run += 1
-                acc[(en, sc)].append(run + 1)
-        print(f"{name}: " + "  ".join(f"{en}/{'x1/16' if sc < 1 else 'x1'} {np.mean(acc[(en, sc)]):.2f}"
-                                     for en, sc in variants), flush=True)
-    print("MEAN acceptance length (block %d): " % BS + "  ".join(
-        f"emb {en}, logits {'/16' if sc < 1 else 'x1'}: {np.mean(v):.3f}" for (en, sc), v in acc.items()))
+                acc[(en, sc, mk)].append(run + 1)
+        print(
+            f"{name}: "
+            + "  ".join(
+                f"{en}/{'x1/16' if sc < 1 else 'x1'}/{'mk' if mk else 'nomk'} " f"{np.mean(acc[(en, sc, mk)]):.2f}"
+                for en, sc, mk in variants
+            ),
+            flush=True,
+        )
+    print(
+        "MEAN acceptance length (block %d): " % BS
+        + "  ".join(
+            f"emb {en}, logits {'/16' if sc < 1 else 'x1'}, markov {'on' if mk else 'off'}: {np.mean(v):.3f}"
+            for (en, sc, mk), v in acc.items()
+        )
+    )
 
 
 if __name__ == "__main__":
