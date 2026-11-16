@@ -226,6 +226,17 @@ Pieces (all traced, per-prompt re-capture):
   ~230 GB/s vs ~490; per-core flash-decode loop over ~800 tokens, likely compute / latency bound); hybrid layers 12.4
   -> 21.6 ms (22 vs 18 layers, ~36 vs 15-20 CPU experts per pass unprofiled, t_wait ~5 vs ~3 ms); full-layer MoE
   7.9 -> 6.1 ms. Acceptance 1.94 vs ~2.3 tokens per pass (drafter).
+  SDPA per call (one chip, rows op, 64-128-token chunks): ~400 GB/s marginal from 16K to 64K tokens, plus ~50-60 us
+  fixed: per core ~10 us per 128-token chunk of compute (QK, softmax, PV; the reader runs ~3.5 GB/s per core) and a
+  ~30 us six-round tree reduction over 55 cores. Not pursued (user, 2026-11-16): a cheaper tree ~3-4% at 44K;
+  approx exp / lower fidelity needs the quality gate.
+- v1.9 PUBLISHED (2026-11-16, image b07f953e02c9 from 2d154a47974, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.8's kept as serve_default_running_v18.cmd): + the dispatch kernel rewrite and the
+  gate|up column split. Served card (~/m27-pkg/card_run_v19.out, greedy / sampled): 128K short 82.3 / 67.1 tok/s,
+  TTFT 0.60 s; 44.7K first 43.4 / 40.1 (TTFT 21.6 s, was 23.0), resent 49.1 / 42.5 (1.3-1.5 s); 85K first 33.9
+  (TTFT 64.4 s), resent 39.0 (2.6 s). 64K short 74.5 / 60.0, 44.7K first TTFT 16.5 s 42.5 / 38.5, resent 46.3 / 43.7.
+  32K short 79.7 / 62.6, 23.5K TTFT 8.3 s 52.2 / 45.4, resent 57.4 / 42.1. bench_prefill (44 full layers): 2K 1.34 s,
+  8K 2.73, 16K 5.0. No errors. Artifact v37: every number refreshed to v1.9 (runner and no-spec bars dropped).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
