@@ -26,7 +26,7 @@ export DEV_ENV="-v $HOME/.cache/hybrid-moe:/hyblib \
  -e HYB_DECODE_ROWS=${DECODE_ROWS:-8} ${WC:+-e HYB_WCACHE=$WC} \
  ${FULL:+-e HYB_FULL_LAYERS=$FULL} ${EVAL_TEXTS:+-e EVAL_TEXTS=$EVAL_TEXTS} ${EVAL_T:+-e EVAL_T=$EVAL_T} ${EXTRA}"
 if [ -n "$TOOL" ]; then  # any other tool with the same hybrid environment, e.g. TOOL=spec_bench.py TOOL_ARGS="4 128"
-  exec "$P/tools/run_dev.sh" python models/autoports/thinkingmachines_inkling_small/tools/$TOOL $TOOL_ARGS
+  exec "$P/tools/run_dev.sh" ${TOOL_PY:-python} models/autoports/thinkingmachines_inkling_small/tools/$TOOL $TOOL_ARGS
 fi
 exec "$P/tools/run_dev.sh" python models/autoports/thinkingmachines_inkling_small/tools/teacher_force.py \
   /opt/tt-metal/models/experimental/hybrid_moe/runs/inkling/texts_held.json /cache/ref/held "$OUT"
