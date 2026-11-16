@@ -82,6 +82,7 @@ class FetchCache:
         if self.replan_n and (not self.direct or self.async_on):
             raise ValueError("HYB_REPLAN needs the synchronous direct fetch (HYB_FETCH_DIRECT=1, HYB_FETCH_ASYNC=0)")
         self.store = {}  # layer -> (region id, {expert: store index}) victims' device bytes (pinned)
+        self.cold = {}  # layer -> (region id, {expert: index}): a prefill's converted copies (coldconv.py), cleared after
         # HYB_WCACHE: a layer's pinned region (raw device bytes of its missable experts) cached as one file, read
         # straight into the region on later builds / elastic demotions instead of loading and converting the copies
         self.pin_cache = os.environ.get("HYB_WCACHE", "")
@@ -327,13 +328,15 @@ class FetchCache:
             (layer, e) in self.host
             or (layer in self.raw and e in self.raw[layer][1])
             or (layer in self.store and e in self.store[layer][1])
+            or (layer in self.cold and e in self.cold[layer][1])
         )
 
     def raw_offsets(self, layer, e):
         """(region, gate|up offsets per die, down offsets per die) of a pinned expert (cold library or victim store)."""
         rid, idx, ng, nd = self.raw[layer]
         if e not in idx:
-            rid, idx = self.store[layer]
+            # a prefill's converted copy (coldconv.py) or the replan victim store
+            rid, idx = self.cold[layer] if (layer in self.cold and e in self.cold[layer][1]) else self.store[layer]
         tp = self.px.tp
         base = idx[e] * tp * (ng + nd)
         return rid, [base + d * ng for d in range(tp)], [base + tp * ng + d * nd for d in range(tp)]

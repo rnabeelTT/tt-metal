@@ -80,7 +80,7 @@ serve:
     QWEN35_MAX_TOKENS_ALL_USERS: "131072"
     QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
     QWEN35_PREFILL_SEGMENT: "2048"    # 4096-token segments overflow the GDN prefill L1
-    QWEN35_PREFILL_GROUP: "8"
+    QWEN35_PREFILL_GROUP: "32"        # layer-major prefill over 32 segments (64K tokens): a layer's expert copies serve them all
     QWEN35_MOE_DN_READERS: "4"
     QWEN35_MOE_DN_CHUNK: "4"
     QWEN35_ROWS_SDPA_SHARED_FROM: "0"
@@ -95,6 +95,7 @@ serve:
     HYB_ROWS: "4"
     HYB_THREADS: "12"
     HYB_HOSTK_THREADS: "6"      # 8 / 10 threads no faster (host DRAM bound, ~42 GB/s)
+    HYB_HOSTK_THREADS_PREFILL: "8"  # prefill's CPU experts are compute bound (BF16 tiles): one thread per core
     # expert copies: built on the first start from the checkpoint above (hybrid/autobuild.py) into the weight cache;
     # only the routing plan ships with the code (per layer the routed mass of every expert, from a BF16 CPU reference)
     HYB_BUILD_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/plan_o397.npz
@@ -119,8 +120,18 @@ serve:
     HYB_STREAM_CQ1: "1"         # the fetch copies run on a second command queue (opens the mesh with two)
     HYB_PREFETCH: "1"
     HYB_PF_TOPK: "8"
-    HYB_STREAM: "0"             # prefill streaming needs the port's grouped prefill hooks (not ported yet)
-    HYB_PREFILL_SENTINEL: "0"
+    # prefill streaming: a prefill step's missed experts are copied into 258 device staging slots (a layer's 128 pinned
+    # + its converted cold experts) and computed there; from 4096 prompt tokens the experts with no device-format copy
+    # are converted from the int4 library one layer ahead (hybrid/coldconv.py), below it they run on the CPU
+    HYB_STREAM: "1"
+    HYB_STREAM_SLOTS: "258"
+    HYB_STREAM_ROUNDS: "3"
+    HYB_STREAM_MIN: "4"
+    HYB_STREAM_MIN_LONG: "1"
+    HYB_STREAM_LONG_FROM: "1024"
+    HYB_PF_PREFETCH_MIN: "0"
+    HYB_PF_COLD_MIN: "4096"
+    HYB_PREFILL_SENTINEL: "1"
     # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash), 3 drafts, GDN rows-mode verify
     QWEN35_EXT_SPEC: dflash_serve:build
     QWEN35_EXT_SPEC_K: "3"
@@ -150,6 +161,7 @@ serve_profiles:
       HYB_LRU: "0"
       HYB_PREFETCH: "0"
       HYB_FETCH_FRAC: "0.3"
+      HYB_STREAM: "0"           # no device-format copies: prefill's off-device experts run on the CPU
 default_profile: p300x2-128k
 
 card:

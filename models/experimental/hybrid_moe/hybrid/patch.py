@@ -253,6 +253,9 @@ class HybridState:
         self.pf_valid = None  # real rows of the prefill segment the current layer call runs (bucket padding excluded)
         self.replan_tokens = 0  # prompt tokens of the prefill awaiting its re-plan (0: none pending)
         self.stream = PrefillStream(self.fetch)  # prefill: missed experts with enough tokens computed on the device
+        from .coldconv import ColdConvert
+
+        self.cold = ColdConvert(self)  # prefill: device copies of the experts with none, converted from the int4 library
         self.record = None
         self.enabled = True
         self.reset_stats()
@@ -953,9 +956,13 @@ def install():
     def prefill_single(self, tokens, *a, **kw):
         HYB.stream.begin_prefill(int(tokens.shape[1]))
         _dev_tune()
+        HYB.cold.begin(int(tokens.shape[1]))
         _begin_replan(int(tokens.shape[1]))
-        with _prefill_threads():
-            return single(self, tokens, *a, **kw)
+        try:
+            with _prefill_threads():
+                return single(self, tokens, *a, **kw)
+        finally:
+            HYB.cold.end()
 
     gen_mod.Qwen35MoeGenerator._prefill_single = prefill_single
     model_cls = _port("model").Qwen35MoeModel
@@ -964,9 +971,13 @@ def install():
     def prefill_all_logits(self, token_ids, *a, **kw):
         HYB.stream.begin_prefill(int(token_ids.shape[-1]))
         _dev_tune()
+        HYB.cold.begin(int(token_ids.shape[-1]))
         _begin_replan(int(token_ids.shape[-1]))
-        with _prefill_threads():
-            return all_logits(self, token_ids, *a, **kw)
+        try:
+            with _prefill_threads():
+                return all_logits(self, token_ids, *a, **kw)
+        finally:
+            HYB.cold.end()
 
     model_cls.prefill_all_logits = prefill_all_logits
     stage_inputs, bucket_layer = model_cls._stage_bucket_inputs, model_cls._bucket_layer
@@ -1038,6 +1049,16 @@ def _dev_tune():
             HYB.pf_drop_host = v == "1"
         elif k == "stream":
             HYB.stream.on = v == "1"
+        elif k == "cold":
+            HYB.cold.on = v == "1"
+        elif k == "cold_min":
+            HYB.cold.min_tokens = int(v)
+        elif k == "split":
+            HYB.pf_split = v == "1"
+        elif k == "copy_ms":
+            HYB.pf_copy_ms = float(v)
+        elif k == "cpu_ms":
+            HYB.pf_cpu_ms = [float(x) for x in v.split(":")]
     print(f"HYB_TUNE {open(path).read().split()}", flush=True)
 
 
@@ -2004,6 +2025,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
         ttnn.deallocate(ids)
         return _finish(self, out, orig, partial)
     # the next hybrid layer's prefetch goes on CQ1 before this step's routing readback blocks on the device
+    HYB.cold.step(self.layer_num)  # this layer's converted cold experts registered, the next layer's started
     HYB.stream.step(self.layer_num, _nonresident_hot_first, HYB.st)
     dec = _decide(self, x4, scores, ids, T, mode, defer_host=HYB.pf_host_async)
     # the host experts run on a worker thread (the int4 kernel releases the GIL) while the device computes below
@@ -2065,6 +2087,7 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     finally:
         self._sorted_zero_out = False
     HYB.stream.mark_read(self.layer_num, self.device)
+    HYB.cold.mark(self.layer_num, self.device)
     HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + len(rounds)
     out = _plus_shared(self, routed, x4)
     if host_fut is not None and HYB.pf_defer_now and self.layer_num not in HYB.pf_no_defer:

@@ -1131,3 +1131,142 @@ int hostk_moe_wait(void) {
     pthread_mutex_unlock(&g_am);
     return rc;
 }
+
+// ---- int4 library -> device bfp4_b tile images (prefill streaming of experts with no device-format copy) ----
+// One 16-value bfp4_b face row: the weights of rows n0 .. n0+15 at column k of a library matrix [N, K] (torch int4
+// pack or bit planes, see the top of this file), dequantized w = (q - 8) s + z (fp32, unfused, as torch), rounded to
+// `sig` significant bits (build_dev_experts.round_sig), then tt-metal's bfp packing (blockfloat_common.cpp,
+// convert_u32_to_bfp<Bfp4_b>: shared exponent = the row's max, mantissa shifted by the difference, rounded to nearest
+// even to 3 bits, saturated, sign kept only on a nonzero mantissa). Writes the shared exponent and 8 bytes of nibbles
+// (value j in bits 4 (j % 2) of byte j / 2).
+__attribute__((optimize("fp-contract=off"))) static void bfp4_face_row(
+    const uint8_t* w,
+    const uint16_t* sz,
+    int N,
+    int K,
+    int gs,
+    int planar,
+    int sig,
+    int k,
+    int n0,
+    uint8_t* exp_out,
+    uint8_t* mant_out) {
+    const uint8_t* blk = w + (size_t)(n0 / 64) * K * 32;
+    const int r0 = n0 % 64;
+    __m512i q;
+    if (!planar) {
+        __m512i v = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)k * 32 + (r0 % 32))));
+        q = r0 < 32 ? _mm512_and_si512(v, _mm512_set1_epi32(15)) : _mm512_srli_epi32(v, 4);
+    } else {
+        const int m = r0 / 16;
+        __m512i vh = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)k * 16)));
+        __m512i vl = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i*)(blk + (size_t)K * 16 + (size_t)k * 16)));
+        __m512i h = _mm512_and_si512(_mm512_srli_epi32(vh, 2 * m), _mm512_set1_epi32(3));
+        __m512i l = _mm512_and_si512(_mm512_srli_epi32(vl, 2 * m), _mm512_set1_epi32(3));
+        q = _mm512_or_si512(_mm512_slli_epi32(h, 2), l);
+    }
+    __m512i u = _mm512_loadu_si512((const void*)(sz + ((size_t)(k / gs) * N + n0) * 2));
+    __m512 s = _mm512_castsi512_ps(_mm512_slli_epi32(u, 16));
+    __m512 z = _mm512_castsi512_ps(_mm512_and_si512(u, _mm512_set1_epi32((int)0xFFFF0000u)));
+    __m512 qf = _mm512_cvtepi32_ps(_mm512_sub_epi32(q, _mm512_set1_epi32(8)));
+    __m512 wv = _mm512_add_ps(_mm512_mul_ps(qf, s), z);
+    __m512i b = _mm512_castps_si512(wv);
+    if (sig < 24) {
+        const int drop = 24 - sig;
+        b = _mm512_and_si512(_mm512_add_epi32(b, _mm512_set1_epi32(1 << (drop - 1))), _mm512_set1_epi32(~((1 << drop) - 1)));
+    }
+    __m512i e = _mm512_and_si512(_mm512_srli_epi32(b, 23), _mm512_set1_epi32(0xff));
+    const uint32_t shared = (uint32_t)_mm512_reduce_max_epu32(e);
+    __m512i mant = _mm512_or_si512(_mm512_and_si512(b, _mm512_set1_epi32(0x7fffff)), _mm512_set1_epi32(0x800000));
+    mant = _mm512_srlv_epi32(mant, _mm512_sub_epi32(_mm512_set1_epi32((int)shared), e));  // counts >= 32 give 0
+    __m512i rv = _mm512_and_si512(mant, _mm512_set1_epi32(0x1fffff));
+    __m512i m3 = _mm512_srli_epi32(mant, 21);
+    __mmask16 up = _mm512_cmpgt_epu32_mask(rv, _mm512_set1_epi32(0x100000)) |
+                   (_mm512_cmpeq_epu32_mask(rv, _mm512_set1_epi32(0x100000)) &
+                    _mm512_test_epi32_mask(m3, _mm512_set1_epi32(1)));
+    m3 = _mm512_mask_add_epi32(m3, up, m3, _mm512_set1_epi32(1));
+    m3 = _mm512_min_epu32(m3, _mm512_set1_epi32(7));
+    __mmask16 zero = _mm512_cmpeq_epi32_mask(e, _mm512_setzero_si512());
+    m3 = _mm512_mask_mov_epi32(m3, zero, _mm512_setzero_si512());
+    __mmask16 nz = _mm512_test_epi32_mask(m3, m3);
+    __m512i sgn = _mm512_maskz_and_epi32(nz, _mm512_srli_epi32(b, 28), _mm512_set1_epi32(8));
+    __m128i nib = _mm512_cvtepi32_epi8(_mm512_or_si512(sgn, m3));  // 16 bytes, one nibble each
+    // pairs (lo, hi) -> lo + 16 hi
+    __m128i pr = _mm_maddubs_epi16(nib, _mm_set1_epi16(0x1001));
+    __m128i packed = _mm_packus_epi16(pr, pr);
+    _mm_storel_epi64((__m128i*)mant_out, packed);
+    *exp_out = (uint8_t)shared;
+}
+
+// One matrix [R, C] (row i = column k(i) of the library matrix, its 16-wide column blocks c0 -> library rows n0(c0))
+// as bfp4_b tiles in row-major tile order (576 bytes each: 4 x 16 exponents, then the 4 faces' nibbles).
+static void bfp4_matrix(
+    const uint8_t* w,
+    const uint16_t* sz,
+    int N,
+    int K,
+    int gs,
+    int planar,
+    int sig,
+    int R,
+    int C,
+    int k0,
+    const int* n0_of_cb,
+    uint8_t* out) {
+    const int ct_n = C / 32;
+    for (int i = 0; i < R; i++) {
+        const int rt = i / 32, ti = i % 32, fr = ti / 16, ri = ti % 16;
+        for (int cb = 0; cb < C / 16; cb++) {
+            const int ct = cb / 2, fc = cb % 2, f = fr * 2 + fc;
+            uint8_t* tile = out + ((size_t)rt * ct_n + ct) * 576;
+            bfp4_face_row(w, sz, N, K, gs, planar, sig, k0 + i, n0_of_cb[cb], tile + f * 16 + ri, tile + 64 + f * 128 + ri * 8);
+        }
+    }
+}
+
+// Expert `row` of a layer's int4 library -> its device-format copy, the layout of build_dev_experts.py: per die d,
+// gate|up as [H, 2 Nl] = [up_d | gate_d] and down as [Nl, H] (rows d Nl ..), each bfp4_b tiles; out = [gu die 0 .. tp-1
+// | dn die 0 .. tp-1]. Returns the bytes written, or -1 on bad shapes.
+int64_t hostk_to_bfp4(
+    int H,
+    int I,
+    int gs,
+    int tp,
+    int planar,
+    int sig,
+    const uint8_t* gu_p,
+    const uint16_t* gu_sz,
+    const uint8_t* dn_p,
+    const uint16_t* dn_sz,
+    int64_t row,
+    uint8_t* out) {
+    if (H % 64 || I % (64 * tp) || 64 % gs || tp < 1 || tp > 8) {
+        return -1;
+    }
+    const int Nl = I / tp;
+    const size_t gu_bytes = (size_t)2 * I * H / 2, dn_bytes = (size_t)H * I / 2;
+    const size_t gu_sz_n = (size_t)(H / gs) * 2 * I * 2, dn_sz_n = (size_t)(I / gs) * H * 2;
+    const uint8_t* wg = gu_p + row * gu_bytes;
+    const uint16_t* sg = gu_sz + row * gu_sz_n;
+    const uint8_t* wd = dn_p + row * dn_bytes;
+    const uint16_t* sd = dn_sz + row * dn_sz_n;
+    const size_t ng = (size_t)(H / 32) * (2 * Nl / 32) * 576, nd = (size_t)(Nl / 32) * (H / 32) * 576;
+    int n0[8192 / 16];
+    if (2 * Nl / 16 > 512 || H / 16 > 512) {
+        return -1;
+    }
+    for (int d = 0; d < tp; d++) {
+        for (int cb = 0; cb < 2 * Nl / 16; cb++) {  // [up_d | gate_d]: library rows I + d Nl .. (up), d Nl .. (gate)
+            const int c0 = cb * 16;
+            n0[cb] = c0 < Nl ? I + d * Nl + c0 : d * Nl + (c0 - Nl);
+        }
+        bfp4_matrix(wg, sg, 2 * I, H, gs, planar, sig, H, 2 * Nl, 0, n0, out + d * ng);
+    }
+    for (int cb = 0; cb < H / 16; cb++) {
+        n0[cb] = cb * 16;
+    }
+    for (int d = 0; d < tp; d++) {
+        bfp4_matrix(wd, sd, H, I, gs, planar, sig, Nl, H, d * Nl, n0, out + tp * ng + d * nd);
+    }
+    return (int64_t)(tp * (ng + nd));
+}
