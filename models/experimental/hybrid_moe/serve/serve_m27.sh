@@ -21,7 +21,7 @@ PF_ENV="$PF_ENV -e HYB_STREAM_CQ1=1 -e HYB_PF_PREFETCH_MIN=${PF_PREFETCH:-1024}"
 # vLLM automatic prefix caching (PC=0 turns it off): a resent prefix resumes at its last 4096-token boundary
 PF_ENV="$PF_ENV -e QWEN35_PREFIX_CACHING=${PC:-1}"
 # rows-mode MoE down op: 4 readers per bank, 4-slot chunks (bench_moe_rows.py: 137 vs 157 us per call)
-PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=4 -e QWEN35_MOE_DN_CHUNK=4"
+PF_ENV="$PF_ENV -e QWEN35_MOE_DN_READERS=6 -e QWEN35_MOE_DN_CHUNK=2"
 # DFlash drafter context window 256 (8K prompt: 1.79 -> 1.91-2.08 tokens per pass vs 1024; runs/m27/fb_win, fb_win2)
 PF_ENV="$PF_ENV -e DFLASH_WINDOW=${DWIN:-256}"
 # startup warm-up generation: 384 tokens (64 left the first 3 requests' verify at 50-61 ms against ~40 steady)

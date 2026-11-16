@@ -156,6 +156,15 @@ Pieces (all traced, per-prompt re-capture):
   99 us, mixer boundary 15, MoE 205 (router matmul + route 42, fused experts 163), mlp boundary 15. Prologue 0.15 ms
   (the embedding all_gather reads 104 us), epilogue (taps, LM head, argmax) 0.55 ms. Device floor without CPU waits
   ~20 ms, of which MoE ~14 ms (experts ~10 ms, router+route ~2.6 ms).
+- MOE EXPERT BANDWIDTH (2026-11-16, one chip, scratch moebw/bench.py at M2.7 per-die shapes, 4 rows): distinct experts
+  per layer for 4 consecutive tokens 23.3 mean (21-27; ref_held routing). Fused experts scale linearly at ~6.5 us per
+  expert (~300 GB/s) + ~12 us per call: bandwidth-bound. The chip streams ~490 GB/s with >= 4 readers per bank (qwen36
+  DecodeLinear: 294 GB/s at 2 per bank, 488-490 at 4-10). gate|up runs 4 readers per column group = 2 per bank (16
+  cores; 349 GB/s at union 23); more readers are slower (5: 94, 6: 103, 8: 163 us vs 88: the extra cores sit off the
+  banks' rows), so its gap to ~490 GB/s needs a layout change (readers on the banks' rows / both NOCs), not a knob:
+  ~88 -> ~62 us per layer at the ceiling. down: QWEN35_MOE_DN_READERS=6 / CHUNK=2 (48 cores) 48.8 vs 57.5 us (4 / 4),
+  repeatable; 12 readers do not fit. Now the package / serve_m27.sh default: forced 4 prompts (runs/m27/ref_fb2) top-1
+  0.8898 / KL 0.0351 both (identical), verify 41.9 -> 41.2 ms per pass (fixed fetch A/B config).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
