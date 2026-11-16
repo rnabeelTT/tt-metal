@@ -219,30 +219,32 @@ card:
   performance: |
     | eval | this package | prompts |
     | --- | --- | --- |
-    | GSM8K accuracy, greedy | 56 / 60 (0.93) | first 60 test questions |
+    | GSM8K accuracy, greedy | 39 / 40 (0.98) | first 40 test questions |
 
     | profile | sampling | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-128k | greedy | ~50 | 256 | 1 | 8 | 1.11 s | — | 19.0 | — |
-    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.07 s | — | 18.9 | — |
-    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.09 s | — | 18.3 | — |
-    | p300x2-128k | greedy | 1,128 | 64 | 1 | 1 | 8.8 s | 128 | 19.3 | 12.0 s |
-    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 21.0 s | 216 | 16.4 | 28.8 s |
-    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 24.5 s | 735 | 19.5 | 31.0 s |
-    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 37.1 s | 976 | 15.9 | 45.1 s |
+    | p300x2-128k | greedy | ~50 | 256 | 1 | 8 | 1.11 s | — | 17.9 | — |
+    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.07 s | — | 18.2 | — |
+    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.07 s | — | 17.3 | — |
+    | p300x2-128k | greedy | 1,128 | 64 | 1 | 1 | 6.7 s | 169 | 17.7 | 10.2 s |
+    | p300x2-128k | greedy | 2,314 | 128 | 1 | 1 | 10.7 s | 217 | 17.1 | 18.1 s |
+    | p300x2-128k | greedy | 3,029 | 128 | 1 | 1 | 10.6 s | 286 | 16.2 | 18.4 s |
+    | p300x2-128k | greedy | 4,529 | 128 | 1 | 1 | 10.7 s | 424 | 15.5 | 18.9 s |
+    | p300x2-128k | greedy | 17,998 | 128 | 1 | 1 | 14.9 s | 1,212 | 15.4 | 23.1 s |
+    | p300x2-128k | greedy | 36,245 | 128 | 1 | 1 | 24.7 s | 1,467 | 16.2 | 32.6 s |
 
-    Long-context retrieval (repeat the first sentence of problem k from an 18K-token list of GSM8K problems, 8 values of
-    k, greedy): 7 / 8, the same as before prefill streaming (both builds missed k = 8).
+    Long-context retrieval (repeat the first sentence of problem k from a list of GSM8K problems, 8 values of k,
+    greedy): 7 / 8 at 18K tokens (the same miss, k = 8, as every earlier build) and 8 / 8 at 3K tokens.
 
     Measured on one QB2 (Ryzen 7 9700X, 2-channel DDR5 at 3600 MT/s) through the OpenAI endpoint with `tt-model
     serve`, warm caches, 2026-11-16; the ~50-token rows are the 8 held-out chat prompts (thinking on) per run, the long
-    rows GSM8K questions concatenated (thinking off). Prefill tok/s = prompt tokens / TTFT. Per-prompt decode spans
-    ~15-21 tok/s with the text (speculative acceptance and how many experts miss the device). GSM8K from the same
-    configuration in development (2026-11-14; 57 / 60 without speculation or the fetch); after the prefill-streaming
-    change the first 40 questions scored 38 / 40, the same as before it. The long-prompt rows are the first request of
-    each length after a start (a repeat of the 4,529-token prompt took 17.5 s); before prefill streaming (2026-11-15)
-    they were 46.3 s / 184.9 s / 381.7 s. The `p300x2-128k-lowmem` profile decoded ~13.6 tok/s on short prompts in
-    development and prefills on the CPU (not re-measured on this package).
+    rows GSM8K questions concatenated (thinking off). Prefill tok/s = prompt tokens / TTFT. Decode varies with the text
+    (speculative acceptance and how many experts miss the device; per prompt ~15-21 tok/s) and between runs: the
+    greedy row measured 17.9-19.2 tok/s on this image across restarts, the same range as the previous package. GSM8K
+    on the previous package: 38 / 40. Time to first token on the previous package (2026-11-16, first request of each
+    length): 8.8 s / 21.0 s / 24.5 s / 37.1 s at 1,128 / 4,529 / 17,998 / 36,245 tokens; before prefill streaming
+    (2026-11-15) 46.3 s / 184.9 s / 381.7 s from 4,529 tokens. The `p300x2-128k-lowmem` profile decoded ~13.6 tok/s
+    on short prompts in development and prefills on the CPU (not re-measured on this package).
   limitations: |
     - One user at a time; the hybrid path does not batch.
     - Decode speed depends on the text: the more of a token's experts are off the device, the more the CPU does
@@ -251,11 +253,12 @@ card:
       reads of low-weight host experts). They are not bit-reproducible between requests either: which copy of an
       expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text.
     - Penalties (presence / frequency / repetition) are ignored in decode.
-    - Prefill copies a layer's off-device experts to the device once per 64K tokens, a fixed cost of ~9-10 s per prompt
-      on top of the compute: short and mid-length prompts prefill at ~125-220 tok/s, long ones approach ~1,000 tok/s.
-      From 4,096 prompt tokens the experts without a prebuilt device copy are converted from the int4 copies during
-      prefill (a second 4-bit rounding: their weights carry ~12-16% error against the FP8 checkpoint instead of
-      ~10-12% for the prebuilt copies); the long-context retrieval check under Performance scored as before.
+    - Prefill copies a layer's off-device experts to the device once per 64K tokens (zero-copy PCIe reads of pinned
+      host memory, ~28 GB/s), and from 2,560 prompt tokens routes on the device; a prompt of 2-5K tokens still takes
+      ~10 s, from there time grows ~0.5 s per 1K tokens. From 2,560 prompt tokens the experts without a prebuilt device
+      copy are converted from the int4 copies during prefill (a second 4-bit rounding: their weights carry ~12-16%
+      error against the FP8 checkpoint instead of ~10-12% for the prebuilt copies); the retrieval checks under
+      Performance scored as before.
     - Prefix caching is off (a resent prompt is prefilled again).
     - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
   licensing: >
