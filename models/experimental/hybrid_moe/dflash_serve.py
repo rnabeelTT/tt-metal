@@ -78,6 +78,38 @@ def load_drafter(mesh, rows):
     )
 
 
+# DFLASH_FB (default 1): the verify pass's layer boundaries on the fabric boundary (Verify._body_fabric); 0 = the
+# reduce-scatter + add + all-gather + RMSNorm path
+_FB = os.environ.get("DFLASH_FB", "1") == "1"
+
+
+def _fabric(model, rows):
+    """The model-wide FabricBoundary of the verify pass (its receive buffers and semaphores, and the norms' weights as
+    flat pages), built once, before any trace capture."""
+    fb = model.__dict__.get("_dflash_fb")
+    if fb is None:
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import FabricBoundary
+
+        args = model.args
+        fb = FabricBoundary(
+            model.mesh_device,
+            int(args.dim),
+            float(args.norm_eps),
+            ring_topology=args.ccl_topology() == ttnn.Topology.Ring,
+            max_rows=rows,
+            lazy_sites=True,  # the receive buffers' L1 only while a verify trace lives: a long prefill needs it
+        )
+        fb.gammas = {
+            "attn": [fb.gamma(layer.attention_norm.norm.weight) for layer in model.layers],
+            "ffn": [fb.gamma(layer.ffn_norm.norm.weight) for layer in model.layers],
+            "final": fb.gamma(model.norm.norm.weight),
+        }
+        model._dflash_fb = fb
+    if rows > fb.max_rows:
+        raise ValueError(f"verify width {rows} > the fabric boundary's {fb.max_rows} rows")
+    return fb
+
+
 class Verify:
     """The target's R-row verify pass with persistent inputs."""
 
@@ -97,6 +129,8 @@ class Verify:
         self.tok, self.pos, self.rot, self.pt = dev(tok), dev(pos), dev(rot), dev(pt)
         self.masks = dev(self.rows.rows_pos_masks_host([-1] * self.BW, self.BW))
         self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
+        self.fb = _fabric(m, self.BW) if _FB else None
+        self._legacy_warm = False
 
     def stage(self, tokens, positions, page_table_row):
         row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
@@ -117,6 +151,11 @@ class Verify:
         ttnn.copy_host_to_device_tensor(masks, self.masks)
 
     def body(self):
+        if self.fb is not None:
+            return self._body_fabric()
+        return self._body_legacy()
+
+    def _body_legacy(self):
         m, BW = self.model, self.BW
         cos, sin = m._rope_from_idxs(self.rot)
         x = m.embd(m._decode_tokens_view(self.tok, BW))
@@ -164,6 +203,65 @@ class Verify:
         self.logits = logits  # a trace output: sampled requests (and DFLASH_LP_DIR captures) read it back
         return out
 
+    def _body_fabric(self):
+        """body() with the layer boundaries on the fabric boundary (DFLASH_FB=1): the residual stays replicated (flat,
+        on the boundary core) and each boundary (all-reduce of the per-device partial sums + residual add + the next
+        RMSNorm) is one program instead of reduce-scatter + add + all-gather + RMSNorm; the attention and the MoE return
+        their per-device partial sums. The tap layers' boundaries also write the residual as rows (the drafter's input).
+        """
+        m, BW, fb, g = self.model, self.BW, self.fb, self.fb.gammas
+        cos, sin = m._rope_from_idxs(self.rot)
+        x = m.embd(m._decode_tokens_view(self.tok, BW))
+        x = ttnn.reshape(x, (1, 1, BW, x.shape[-1]))
+        if int(x.shape[-1]) != fb.hidden:  # the embedding is split over the mesh: gather the rows once
+            xg = ttnn.all_gather(x, dim=3, topology=m.args.ccl_topology(), memory_config=ttnn.L1_MEMORY_CONFIG)
+            ttnn.deallocate(x)
+            x = xg
+        res, h = fb(x, None, g["attn"][0])
+        ttnn.deallocate(x)
+        taps = []
+        n = len(m.layers)
+        for li, layer in enumerate(m.layers):
+            att = layer.attention
+            att.rows_kv_write, att.rows_pos_masks = True, self.masks
+            try:
+                part = att.forward_decode(h, self.pos, cos, sin, page_table=self.pt, partial="fabric")
+            finally:
+                att.rows_kv_write, att.rows_pos_masks = False, None
+            ttnn.deallocate(h)
+            h2, ff_in = fb(res, part, g["ffn"][li], "mixer")
+            ttnn.deallocate(res)
+            ttnn.deallocate(part)
+            ff_part = layer.feed_forward.forward(ff_in, mode="decode", partial="fabric")
+            ttnn.deallocate(ff_in)
+            last = li == n - 1
+            out = fb(
+                h2,
+                ff_part,
+                g["final"] if last else g["attn"][li + 1],
+                "mlp",
+                out_memory_config=DRAM if last else ttnn.L1_MEMORY_CONFIG,
+                res_rows_memory_config=DRAM if li in self.dr.taps else None,
+            )
+            ttnn.deallocate(h2)
+            ttnn.deallocate(ff_part)
+            res, h = out[0], out[1]
+            if li in self.dr.taps:
+                taps.append(out[2])
+        ttnn.deallocate(res)
+        cat = ttnn.concat(taps, dim=-1)  # [1, 1, BW, n_taps * H], replicated
+        if self.BW > self.R:  # the padded rows are not context
+            taps.append(cat)
+            cat = ttnn.slice(cat, (0, 0, 0, 0), (1, 1, self.R, int(cat.shape[-1])), memory_config=DRAM)
+        ttnn.copy(cat, self.dr.c_taps[self.R])
+        for t in taps + [cat, cos, sin]:
+            ttnn.deallocate(t)
+        logits = ttnn.linear(h, m.lm_head_weight, compute_kernel_config=m._lm_head_ckc())
+        ttnn.deallocate(h)
+        out = argmax_max(logits)
+        self.logits = logits
+        return out
+
     def read_logits_raw(self, rows, vocab):
         """Host FP32 logits [rows, vocab] of the last run."""
         return read_logits(self.mesh, self.logits, rows, vocab)
@@ -195,6 +293,18 @@ class Verify:
             outs = self.outs
             if cands and self.cand_trace is not None:
                 ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
+        elif self.fb is not None and self.fb.sites is None:  # an eager pass (warm-up): the receive buffers for it only
+            if not self._legacy_warm:
+                # the model's lazily made persistent buffers (the fused MoE rows buffers, the hybrid host-step buffers)
+                # are made by the first pass: made by a fabric pass, its live L1 (flat residual, L1 partials) pushes
+                # them down and the free L1 above them is lost to a long prefill's circular buffers (TT_THROW clash)
+                self._legacy_warm = True
+                read_argmax(
+                    self.mesh, self._body_legacy(), int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1])
+                )
+            self.fb.alloc_sites()
+            outs = self.body()
+            self.fb.free_sites()  # (freeing does not wait for the queued pass: later work is queued behind it)
         else:
             outs = self.body()
         return read_argmax(self.mesh, outs, int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1]))
@@ -205,8 +315,12 @@ class Verify:
         if self.cand_trace is not None:
             ttnn.release_trace(self.mesh, self.cand_trace)
         self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
+        if self.fb is not None:
+            self.fb.free_sites()
 
     def capture(self):
+        if self.fb is not None:
+            self.fb.alloc_sites()  # normally done by the caller before any of the request's captures (_capture)
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.outs = self.body()
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
@@ -593,6 +707,8 @@ class DFlashServing:
         K / V chunk read once for all rows; 40K context ~20% faster per token); shorter ones keep the stock decode
         (cheaper below ~2K positions). Both variants are compiled by _warm_verify."""
         ttnn.synchronize_device(self.mesh)
+        if self.ver.fb is not None:  # before the drafter's capture too: never on a live trace's intermediates
+            self.ver.fb.alloc_sites()
         thr = _rows_sdpa_shared_from()
         self._set_rows_sdpa(bool(thr) and int(pos) >= thr)
         self.dr.capture("pass", self.dr.pass_body)

@@ -134,6 +134,7 @@ serve:
     QWEN35_EXT_SPEC_K: "3"
     DFLASH_TP: "1"
     DFLASH_WINDOW: "256"
+    DFLASH_FB: "1"
     DFLASH_WARMUP: "384"
 
 # 4 Blackhole dies, single user, DFlash speculative decoding. The profiles trade context for host RAM

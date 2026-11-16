@@ -1751,11 +1751,12 @@ def _forward_fused(self, x4, orig, partial, logits=None):
             ttnn.deallocate(dc_ids)
     host = ttnn.to_layout(B["host_sock" if sock else "host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
-        if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
-            raise NotImplementedError(
-                "fused hybrid on the fabric boundary needs the one-row kernels: HYB_SINGLE_ROWS=0"
-            )
-        out = ttnn.add(part, host, output_tensor=part)
+        if mk == 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
+            out = ttnn.add(part, host, output_tensor=part)
+        else:  # rows: a per-call L1 BF16 partial the boundary's packers read (the caller frees it)
+            out = ttnn.add(part, host, memory_config=ttnn.L1_MEMORY_CONFIG, dtype=ttnn.bfloat16)
+            if mk != m:
+                ttnn.deallocate(part)
         ttnn.deallocate(host)
         return out
     out = ttnn.add(part, host, memory_config=dram)
@@ -1808,10 +1809,38 @@ def _to_dram(t, free):
     return d
 
 
+def _port_fabric_rows(self, x, mode):
+    """A device-only layer's (HYB_FULL_LAYERS, the port's own MoE) rows on the fabric boundary: the port's fused rows
+    kernels write this device's partial sum into a per-call L1 BF16 [1, 1, m, H] tensor that the boundary's packers read
+    (the caller frees it); the port's own forward would clone it to DRAM and reduce-scatter it."""
+    f = getattr(self, "_fused", None)
+    m = int(x.shape[-2])
+    if (
+        f is None
+        or mode == "prefill"
+        or getattr(self, "has_shared", False)
+        or not 2 <= m <= HYB.rows_max
+        or len(x.shape) != 4
+        or math.prod(list(x.shape)[:-1]) != m
+    ):
+        raise RuntimeError(
+            f"layer {getattr(self, 'layer_num', '?')}: fabric rows need the port's fused rows kernels, no shared expert "
+            f"and 2..{HYB.rows_max} decode rows (fused {f is not None}, mode {mode}, shape {list(x.shape)})"
+        )
+    if x.is_sharded():
+        x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
+    out = ttnn.allocate_tensor_on_device(
+        ttnn.Shape([1, 1, m, int(x.shape[-1])]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.device, ttnn.L1_MEMORY_CONFIG
+    )
+    return f.rows(x, self.up_gate, self.down, out=out)
+
+
 def _forward(self, x, mode=None, partial=False, logits=None):
     from .seg import SEG
 
     if not getattr(self, "_hyb_on", True):
+        if partial == "fabric":
+            return _port_fabric_rows(self, x, mode)
         if partial is False and logits is None:  # ports whose MoE forward takes only (x, mode) (MiniMax-M2)
             return _orig_forward(self, x, mode=mode)
         return _orig_forward(self, x, mode=mode, partial=partial, logits=logits)

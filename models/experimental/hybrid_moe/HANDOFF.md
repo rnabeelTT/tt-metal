@@ -122,6 +122,18 @@ Pieces (all traced, per-prompt re-capture):
     sampled 54.4 / 54.0 -> 54.5 / 57.1 tok/s.
   - Smaller attention items left: post (6.5 us, the head concat x ones) into the SDPA writer; QKStats + its all_gather
     (13.8 us).
+  - DONE (DFLASH_FB=1, default): the verify pass's layer boundaries on the qwen36 fabric boundary
+    (dflash_serve.Verify._body_fabric): residual replicated (flat on one core), each boundary = fabric all-reduce of the
+    per-device partials + residual add + the next RMSNorm in one program (was RS + add + AG + rms). The attention's
+    wo writes an L1 BF16 partial (tp.py l1_bf16; was bfp8 DRAM), the hybrid layers' fused rows add the host partial
+    into an L1 BF16 tensor, the HYB_FULL_LAYERS layers run the port's fused rows into a per-call L1 output
+    (patch._port_fabric_rows); the tap layers' boundaries also write residual' as rows (fb_rows.cpp FB_RES_ROWS) for
+    the drafter. L1: the receive buffers + semaphores (FabricBoundary lazy_sites) live only while a verify trace does
+    (allocated before the drafter's capture, freed by release), and the first eager warm pass runs the legacy body so
+    the model's lazily made persistent buffers land where they did: otherwise a 4.6K prefill hit a CB / L1 clash.
+    Verify per pass (fixed fetch, deterministic): short 44.3 -> 42.6 ms, 4.6K 46.7 -> 43.9, 4 forced prompts 45.3 ->
+    43.5. Quality vs the BF16 reference (same tokens forced): 4.6K text top-1 0.9071 both, KL 0.0765 -> 0.0783; 4
+    short texts (runs/m27/ref_fb2, new: ref_fb no longer matches fb_rec) top-1 0.8898 both, KL 0.0369 -> 0.0351.
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
