@@ -490,3 +490,7 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     every die after the prefetcher fix: hybrid/pin/test_zerocopy.py; the copy path 0 of 200).
   - **Remaining gap to M2.7's prefill** (~1.2-1.3K vs ~2.3K tok/s): host work per chunk. Next levers: fewer ops per
     layer-chunk (fused conv / MoE glue), traced attention segments, more device-resident experts (DRAM).
+  - **Package (built from 21d47b7852f + card), measured through `tt-model serve` at p300x2-128k:** short chat 49.8
+    tok/s greedy / 47.0 sampled, TTFT 0.53-0.54 s; prefill 862 tok/s at 3.8K, ~1,140-1,200 tok/s from 15K to 118K
+    (118.6K: 104 s, was 137 s); resent prompts 1.3-1.9 s, next chat turn 1.5-2.0 s. GSM8K-200 96.0%, IFEval-200
+    90.0 / 90.0; feature checks pass; DRAM free after warm-up 0.72 GiB; ready in 280 s.
