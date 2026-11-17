@@ -167,6 +167,8 @@ class HybridState:
         # HYB_PF_BGSTREAM (default 0): a pipelined prefill step's first staging round is copied by pinx's background
         # writer on CQ1 while this thread runs other host work (hybrid/stream.py upload_bg)
         self.pf_bgstream = os.environ.get("HYB_PF_BGSTREAM", "0") == "1"
+        # HYB_PF_XRM (default 1): the prefill MoE input read back row-major (untilized on the device, see _pf_pre)
+        self.pf_xrm = os.environ.get("HYB_PF_XRM", "1") == "1"
         self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
         self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
         self.pf_cpu_fixed_ms = [
@@ -2307,16 +2309,25 @@ def _pf_pre(self, x, mode="prefill"):
     # row-major on the device first: a host readback of a tile tensor untilizes [T, 320] fp32 on the host (~10 ms)
     lg_rm = ttnn.to_layout(lg_t, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
     ttnn.deallocate(lg_t)
-    ctx = dict(
-        orig=orig,
-        T=T,
-        x4=x4,
-        lg_rm=lg_rm,
-        h_lg=ttnn.from_device(_die0(lg_rm), blocking=False),
-        h_x=ttnn.from_device(_die0(x4), blocking=False),
-        ev=ttnn.record_event(self.device, 0),
+    # the MoE input too (HYB_PF_XRM, default 1): the CPU experts' rows read row-major, not untilized on the host
+    # (~2.2 ms of the main thread per 1536-row chunk)
+    x_rm = (
+        ttnn.to_layout(x4, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if HYB.pf_xrm and x4.layout == ttnn.TILE_LAYOUT
+        else None
     )
-    HYB.st["t_pf_pre"] = HYB.st.get("t_pf_pre", 0.0) + time.perf_counter() - t0
+    t1 = time.perf_counter()
+    h_lg = ttnn.from_device(_die0(lg_rm), blocking=False)
+    h_x = ttnn.from_device(_die0(x_rm if x_rm is not None else x4), blocking=False)
+    t2 = time.perf_counter()
+    ev = ttnn.record_event(self.device, 0)
+    t3 = time.perf_counter()
+    ctx = dict(orig=orig, T=T, x4=x4, lg_rm=lg_rm, x_rm=x_rm, h_lg=h_lg, h_x=h_x, ev=ev)
+    st = HYB.st
+    st["t_pf_pre"] = st.get("t_pf_pre", 0.0) + t3 - t0
+    st["t_pf_pre_ops"] = st.get("t_pf_pre_ops", 0.0) + t1 - t0  # the router, layouts
+    st["t_pf_pre_rd"] = st.get("t_pf_pre_rd", 0.0) + t2 - t1  # the two non-blocking reads
+    st["t_pf_pre_ev"] = st.get("t_pf_pre_ev", 0.0) + t3 - t2  # the event
     return ctx
 
 
@@ -2337,6 +2348,8 @@ def _pf_plan(self, ctx, mode="prefill"):
     t1 = time.perf_counter()
     lg = ttnn.to_torch(ctx["h_lg"]).reshape(T, -1).float().numpy()
     ttnn.deallocate(ctx["lg_rm"])
+    if ctx.get("x_rm") is not None:
+        ttnn.deallocate(ctx["x_rm"])
     HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + time.perf_counter() - t0
     HYB.st["t_pf_wait"] = HYB.st.get("t_pf_wait", 0.0) + t1 - t0
     t1 = time.perf_counter()

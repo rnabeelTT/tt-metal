@@ -102,6 +102,18 @@ class Qwen35MoeModel(_M27Model):
         on_layer(li, end, part): called when layer li's conv states hold the sequence up to end (the absolute position
         after a chunk's real rows): part "attn" for the attention-side convs (k, v, attn), "mlp" for the MLP conv
         (pipelined layers advance the attention side ahead of the MLP side; e.g. the engine's prefix snapshots)."""
+
+        from models.autoports.thinkingmachines_inkling_small.tt.attention import prefill_uploads_clear
+
+        prefill_uploads_clear()  # (left over by a prefill that raised, or by direct forward_prefill calls)
+        try:
+            return self._prefill_tokens(
+                ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer
+            )
+        finally:
+            prefill_uploads_clear()
+
+    def _prefill_tokens(self, ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer):
         import os
         import sys
 

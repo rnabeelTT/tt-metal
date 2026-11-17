@@ -258,9 +258,7 @@ class InklingDecoderLayer(_M27Layer):
             attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.DRAM_MEMORY_CONFIG)
         a = self.attention.forward_prefill(attn_in, p0, page_table_host, valid=valid)
         ttnn.deallocate(attn_in)
-        a2 = self.attn_sconv.rows(a, commit_all=valid is None)
-        if valid is not None:
-            self.attn_sconv.commit_final(int(valid))
+        a2 = self.attn_sconv.prefill_commit(a, valid)
         ttnn.deallocate(a)
         h = ttnn.add(x, a2)
         ttnn.deallocate(a2)
@@ -293,9 +291,7 @@ class InklingDecoderLayer(_M27Layer):
         valid = pre["valid"]
         f = fin()
         ttnn.deallocate(pre["ff_in"])
-        f2 = self.mlp_sconv.rows(f, commit_all=valid is None)
-        if valid is not None:
-            self.mlp_sconv.commit_final(int(valid))
+        f2 = self.mlp_sconv.prefill_commit(f, valid)
         ttnn.deallocate(f)
         out = ttnn.add(pre["h"], f2)
         ttnn.deallocate(pre["h"])
@@ -313,9 +309,7 @@ class InklingDecoderLayer(_M27Layer):
             attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.DRAM_MEMORY_CONFIG)
         a = self.attention.forward_prefill(attn_in, p0, page_table_host, valid=valid)
         ttnn.deallocate(attn_in)
-        a2 = self.attn_sconv.rows(a, commit_all=valid is None)
-        if valid is not None:
-            self.attn_sconv.commit_final(int(valid))
+        a2 = self.attn_sconv.prefill_commit(a, valid)
         ttnn.deallocate(a)
         h = ttnn.add(x, a2)
         ttnn.deallocate(a2)
@@ -325,9 +319,7 @@ class InklingDecoderLayer(_M27Layer):
             ff_in = ttnn.sharded_to_interleaved(ff_in, ttnn.DRAM_MEMORY_CONFIG)
         f = self.feed_forward.forward(ff_in, mode="prefill")
         ttnn.deallocate(ff_in)
-        f2 = self.mlp_sconv.rows(f, commit_all=valid is None)
-        if valid is not None:
-            self.mlp_sconv.commit_final(int(valid))
+        f2 = self.mlp_sconv.prefill_commit(f, valid)
         ttnn.deallocate(f)
         out = ttnn.add(h, f2)
         ttnn.deallocate(h)

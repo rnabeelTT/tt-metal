@@ -36,8 +36,19 @@ KERNELS = Path(__file__).parent / "sconv_kernels"
 # more; longer row sets (prefill chunks) keep the ttnn ops
 FUSED = os.environ.get("INKLING_SCONV_KERNEL", "1") == "1"
 FUSED_MAX_ROWS = 29  # 3 carried rows + R rows in one tile
+# INKLING_SCONV_PF_KERNEL (default 1): a prefill chunk (R % 32 == 0 rows, bf16) through one program over the row tiles
+# (sconv_kernels/pf_*.cpp: the same arithmetic as the fused rows kernel, the carried rows passed between tiles) plus a
+# state copy, instead of ~15 ttnn ops per conv
+PF_KERNEL = os.environ.get("INKLING_SCONV_PF_KERNEL", "1") == "1"
 # INKLING_SCONV_COMMIT_RM (default 1): a prefill chunk's commit through sconv_kernels/commit_rm.cpp (offset at run time)
 COMMIT_RM = os.environ.get("INKLING_SCONV_COMMIT_RM", "1") == "1"
+
+
+def _stable_hash(*key):
+    """A program-cache key that is the same in every process (Python's hash() is salted per process and signed)."""
+    import hashlib
+
+    return int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
 
 
 def _range_set(cores):
@@ -127,6 +138,7 @@ class ShortConv:
         self.st = z()  # rows x_{t-3}, x_{t-2}, x_{t-1}
         self.state = [self.st]  # (the persistent state tensors, for callers that save / restore them)
         self._zero = z()
+        self._pf_stn = None  # the prefill kernel's new-state rows (prefill_commit), allocated with its first program
         self.fused = FUSED and c_local % 32 == 0
         if self.fused:  # the taps as full bf16 tiles per die, [4, 1, 32, C]: every row of tap j's tile holds tap row j
             tf = w.float().T.reshape(K, 1, 1, -1).expand(K, 1, 32, -1).contiguous()
@@ -219,6 +231,116 @@ class ShortConv:
         io = [x, self.st, self.taps_tiles] + ([seq] if seq is not None else []) + [y]
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return y, seq
+
+    def _pf_ok(self, x):
+        R = int(x.shape[2])
+        return (
+            self.fused
+            and PF_KERNEL
+            and x.dtype == ttnn.bfloat16
+            and x.layout == ttnn.TILE_LAYOUT
+            and R > FUSED_MAX_ROWS
+            and R % 32 == 0
+            and not x.is_sharded()
+        )
+
+    def _pf_program(self, R):
+        """The prefill conv program for R rows (built once per R; the per-call addresses and the commit row count are
+        common runtime arguments, so a call only rewrites those)."""
+        P = getattr(self, "_pf_progs", None)
+        if P is None:
+            P = self._pf_progs = {}
+        if R in P:
+            return P[R]
+        grid = self.mesh.compute_with_storage_grid_size()
+        gx, gy = int(grid.x), int(grid.y)
+        cols, Rt = self.cols, R // 32
+        G = max(1, min(Rt, (gx * gy) // cols))
+        n_items = cols * G
+        cores = [ttnn.CoreCoord(i // gy, i % gy) for i in range(n_items)]
+        cr = _range_set(cores)
+        if self._pf_stn is None:
+            self._pf_stn = ttnn.from_torch(
+                torch.zeros(1, 1, K - 1, self.C * self.mesh.get_num_devices()),
+                dtype=ttnn.float32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.mesh,
+                mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=3),
+            )
+        cb_x, cb_s, cb_t, cb_scr, cb_o = 0, 1, 2, 3, 16
+        cbs = [
+            _cb(cr, cb_x, ttnn.bfloat16, 2048, 2),
+            _cb(cr, cb_s, ttnn.bfloat16, 2048, 6),
+            _cb(cr, cb_t, ttnn.bfloat16, 2048, 4),
+            _cb(cr, cb_scr, ttnn.float32, 768 + 2048, 1),
+            _cb(cr, cb_o, ttnn.bfloat16, 2048, 2),
+        ]
+        P[R] = dict(cr=cr, cbs=cbs, ct=(cols, Rt, G, gy), hash=_stable_hash("inkling_sconv_pf", self.C, R, G, gy))
+        return P[R]
+
+    def prefill_commit(self, x, n=None):
+        """A prefill chunk: x [1, 1, R, C] bf16 tile (R % 32 == 0) -> y [1, 1, R, C] bf16; the state advances past the
+        first n rows (default R: a padded last chunk passes its real row count). One program + a state copy."""
+        R = int(x.shape[2])
+        n = R if n is None else int(n)
+        if not self._pf_ok(x) or n < 1:
+            y = self.rows(x, commit_all=(n == R))
+            if n != R:
+                self.commit_final(n)
+            return y
+        pr = self._pf_program(R)
+        cols, Rt, G, gy = pr["ct"]
+        cr, stn = pr["cr"], self._pf_stn
+        y = ttnn.allocate_tensor_on_device(
+            ttnn.Shape([1, 1, R, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, ttnn.DRAM_MEMORY_CONFIG
+        )
+        cb_x, cb_s, cb_t, cb_scr, cb_o = 0, 1, 2, 3, 16
+        rd_ct = [cb_x, cb_s, cb_t, cb_scr, cols, Rt, G, gy]
+        for t in (x, self.st, self.taps_tiles, stn):
+            rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
+
+        def kd(source, ct, common, cfg):
+            k = ttnn.KernelDescriptor(
+                kernel_source=str(KERNELS / source), core_ranges=cr, compile_time_args=ct, config=cfg
+            )
+            k.common_runtime_args = common
+            return k
+
+        kernels = [
+            kd(
+                "pf_reader.cpp",
+                rd_ct,
+                [
+                    x.buffer_address(),
+                    self.st.buffer_address(),
+                    self.taps_tiles.buffer_address(),
+                    stn.buffer_address(),
+                    n,
+                ],
+                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0),
+            ),
+            kd(
+                "pf_writer.cpp",
+                wr_ct,
+                [y.buffer_address()],
+                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1),
+            ),
+            kd(
+                "pf_compute.cpp",
+                [cb_x, cb_s, cb_t, cb_o, cols, Rt, G, gy],
+                [],
+                ttnn.ComputeConfigDescriptor(
+                    math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+                ),
+            ),
+        ]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=pr["cbs"])
+        prog.custom_program_hash = pr["hash"]
+        ttnn.generic_op([x, self.st, self.taps_tiles, stn, y], prog)
+        ttnn.copy(stn, self.st)
+        self._last_seq = None
+        return y
 
     def _commit_kernel(self, seq, n):
         cores, cr, cols = self.cores, _range_set(self.cores), self.cols

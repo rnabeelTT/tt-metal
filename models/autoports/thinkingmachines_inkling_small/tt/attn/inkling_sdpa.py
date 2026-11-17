@@ -43,6 +43,7 @@ import struct
 from pathlib import Path
 
 import ttnn
+
 from models.autoports.thinkingmachines_inkling_small.tt import relbias
 from models.demos.blackhole.qwen36.tt.gdn_decode.ops import TILE, _cb, _range_set, _rt
 
@@ -99,8 +100,9 @@ def tree_params(core_id, n):
     return is_root, parent, send, children
 
 
-def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, scale, window, extent, k_chunk_size=0,
-                        out_memory_config=None):
+def inkling_sdpa_decode(
+    q, k_cache, v_cache, cur_pos, page_table, rq, table, scale, window, extent, k_chunk_size=0, out_memory_config=None
+):
     """-> [1, n_items * R, NH, HD] bf16 (freshly allocated; the caller frees it). window: 0 (global) or the sliding
     window; extent: rel_extent E (the table must be relbias.build_tables(proj, scale) for this E).
 
@@ -123,7 +125,9 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     if q.dtype != ttnn.bfloat16 or q.layout != ttnn.TILE_LAYOUT or q.is_sharded():
         raise ValueError(f"rows_sdpa_decode: q must be interleaved bf16 TILE, got {q.dtype} {q.layout}")
     if tuple(rq.shape) != (1, n_items * R, NH, TILE) or rq.dtype != ttnn.bfloat16 or rq.layout != ttnn.TILE_LAYOUT:
-        raise ValueError(f"inkling_sdpa_decode: rq must be [1, {n_items * R}, {NH}, 32] bf16 TILE, got {tuple(rq.shape)}")
+        raise ValueError(
+            f"inkling_sdpa_decode: rq must be [1, {n_items * R}, {NH}, 32] bf16 TILE, got {tuple(rq.shape)}"
+        )
     M_tiles = relbias.n_tiles(extent)
     if tuple(table.shape) != (1, TILE, TILE, M_tiles * TILE) or table.dtype != ttnn.bfloat16:
         raise ValueError(f"inkling_sdpa_decode: table {tuple(table.shape)} for extent {extent}")
@@ -139,6 +143,97 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     G = NH // NKV
     DHt = HD // TILE
     mesh = q.device()
+    if n_items > 1 and _PF_CACHE_ON:  # prefill: the program's static parts per shape (see _PF_CACHE)
+        key = (
+            id(mesh),
+            n_items,
+            R,
+            NH,
+            HD,
+            NKV,
+            block,
+            str(k_cache.dtype),
+            str(v_cache.dtype),
+            window,
+            extent,
+            M_tiles,
+            Sk_fixed,
+            int(page_table.shape[-1]),
+            float(scale),
+            repr(out_memory_config),
+            tuple(repr(t.memory_config()) for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table)),
+        )
+        st = _PF_CACHE.get(key)
+        if st is None:
+            st = _PF_CACHE[key] = _pf_static(
+                q,
+                k_cache,
+                v_cache,
+                cur_pos,
+                page_table,
+                rq,
+                table,
+                scale,
+                window,
+                extent,
+                Sk_fixed,
+                M_tiles,
+                out_memory_config,
+                key,
+            )
+        return _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table)
+    return _build_and_run(
+        q,
+        k_cache,
+        v_cache,
+        cur_pos,
+        page_table,
+        rq,
+        table,
+        scale,
+        window,
+        extent,
+        Sk_fixed,
+        M_tiles,
+        out_memory_config,
+        n_items,
+        R,
+        NH,
+        HD,
+        NKV,
+        block,
+        G,
+        DHt,
+        mesh,
+    )
+
+
+def _build_and_run(
+    q,
+    k_cache,
+    v_cache,
+    cur_pos,
+    page_table,
+    rq,
+    table,
+    scale,
+    window,
+    extent,
+    Sk_fixed,
+    M_tiles,
+    out_memory_config,
+    n_items,
+    R,
+    NH,
+    HD,
+    NKV,
+    block,
+    G,
+    DHt,
+    mesh,
+    static_only=False,
+):
+    """The program for one call (static_only: its static parts, no launch; _pf_static)."""
     grid = mesh.compute_with_storage_grid_size()
     n_units = n_items * NKV
     if n_items == 1:  # decode / verify: groups = kv heads, cpk cores per group split the K span (tree reduction)
@@ -155,9 +250,12 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     cr = _range_set(cores)
     rounds = (cpk - 1).bit_length() if cpk > 1 else 0
 
-    out = ttnn.allocate_tensor_on_device(
-        ttnn.Shape([1, n_items * R, NH, HD]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
-        out_memory_config or (ttnn.L1_MEMORY_CONFIG if n_items == 1 else ttnn.DRAM_MEMORY_CONFIG),
+    out_shape = ttnn.Shape([1, n_items * R, NH, HD])
+    out_mc = out_memory_config or (ttnn.L1_MEMORY_CONFIG if n_items == 1 else ttnn.DRAM_MEMORY_CONFIG)
+    out = (
+        None
+        if static_only
+        else ttnn.allocate_tensor_on_device(out_shape, ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, out_mc)
     )
 
     Sk_cb = Sk_fixed or DST_TILES
@@ -199,10 +297,45 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table):
         rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
     wr_ct = [R, G, DHt, Sk_fixed, DST_TILES, cpk, 0, n_cores, MASK_NEG_BF16, window, NKV]
-    wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
+    if static_only:  # (the output's accessor args from a tensor of the same layout, allocated once and freed)
+        o_ref = ttnn.allocate_tensor_on_device(out_shape, ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, out_mc)
+        wr_ct += ttnn.TensorAccessorArgs(o_ref).get_compile_time_args()
+        ttnn.deallocate(o_ref)
+    else:
+        wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
     cp_ct = [DHt, DHt, Sk_fixed, DST_TILES, cpk, R, struct.unpack("<I", struct.pack("<f", float(scale)))[0], DST_TILES]
     cp_ct += [window, extent]
 
+    if static_only:
+        per_core = []
+        for i in range(n_cores):
+            g, c = divmod(i, cpk)
+            is_root, parent, send, children = tree_params(c, cpk)
+            group = noc[g * cpk : (g + 1) * cpk]
+            per_core.append(
+                (
+                    [pt_stick, g, c],
+                    [g, c, int(is_root), parent, send]
+                    + children
+                    + [p.x for p in group]
+                    + [p.y for p in group]
+                    + [n_groups, n_units],
+                    [c, int(is_root), parent] + children + [g, n_groups, n_units],
+                )
+            )
+        return dict(
+            cores=cores,
+            cr=cr,
+            cbs=cbs,
+            rd_ct=rd_ct,
+            wr_ct=wr_ct,
+            cp_ct=cp_ct,
+            per_core=per_core,
+            n_groups=n_groups,
+            n_units=n_units,
+            out_shape=out_shape,
+            out_mc=out_mc,
+        )
     rd_rt, wr_rt, cp_rt = [], [], []
     for i in range(n_cores):
         g, c = divmod(i, cpk)
@@ -268,5 +401,125 @@ def inkling_sdpa_decode(q, k_cache, v_cache, cur_pos, page_table, rq, table, sca
     ]
     semaphores = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, cr, 0)]
     program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
+    ttnn.generic_op([q, k_cache, v_cache, cur_pos, page_table, rq, table, out], program)
+    return out
+
+
+# INKLING_SDPA_PF_CACHE (default 1): a prefill call's program parts that do not change between calls of the same shape
+# (cores, CBs, compile-time args, the per-core non-address arguments, the compute kernel's arguments) are built once per
+# shape key and the program carries a stable custom hash (generic_op then skips hashing the descriptor). The same
+# program as before: ~1.5 ms of Python per call (473 calls per 16K prompt) was its construction.
+_PF_CACHE_ON = __import__("os").environ.get("INKLING_SDPA_PF_CACHE", "1") == "1"
+_PF_CACHE = {}
+
+
+def _stable_hash(key):
+    import hashlib
+
+    return int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+
+
+def _pf_static(
+    q,
+    k_cache,
+    v_cache,
+    cur_pos,
+    page_table,
+    rq,
+    table,
+    scale,
+    window,
+    extent,
+    Sk_fixed,
+    M_tiles,
+    out_memory_config,
+    key,
+):
+    n_items, R = int(cur_pos.shape[0]), int(cur_pos.shape[-1])
+    NH, HD = int(q.shape[2]), int(q.shape[3])
+    _, NKV, block, _ = (int(s) for s in k_cache.shape)
+    st = _build_and_run(
+        q,
+        k_cache,
+        v_cache,
+        cur_pos,
+        page_table,
+        rq,
+        table,
+        scale,
+        window,
+        extent,
+        Sk_fixed,
+        M_tiles,
+        out_memory_config,
+        n_items,
+        R,
+        NH,
+        HD,
+        NKV,
+        block,
+        NH // NKV,
+        HD // TILE,
+        q.device(),
+        static_only=True,
+    )
+    cores = st["cores"]
+    st["cp_rtargs"] = _rt(cores, [pc[2] for pc in st["per_core"]])
+    gran = min(HD // TILE, DST_TILES)
+    log2g = gran.bit_length() - 1
+    if gran != 1 << log2g:
+        gran, log2g = 1, 0
+    st["compute"] = ttnn.KernelDescriptor(
+        kernel_source=str(KERNEL_DIR / "inkling_sdpa_compute.cpp"),
+        core_ranges=st["cr"],
+        compile_time_args=st["cp_ct"],
+        defines=[
+            ("EXP_APPROX_MODE", "0"),
+            ("DHT_GRANULARITY", str(gran)),
+            ("LOG2_DHT_GRANULARITY", str(log2g)),
+            ("DYNAMIC_CHUNK_SIZE", "1"),
+        ],
+        runtime_args=st["cp_rtargs"],
+        config=ttnn.ComputeConfigDescriptor(
+            math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=False, math_approx_mode=True
+        ),
+    )
+    st["sem"] = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, st["cr"], 0)]
+    st["hash"] = _stable_hash(("inkling_sdpa_pf", key, st["rd_ct"], st["wr_ct"], st["cp_ct"]))
+    return st
+
+
+def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table):
+    mesh = q.device()
+    out = ttnn.allocate_tensor_on_device(st["out_shape"], ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, st["out_mc"])
+    a = [
+        q.buffer_address(),
+        k_cache.buffer_address(),
+        v_cache.buffer_address(),
+        cur_pos.buffer_address(),
+        page_table.buffer_address(),
+    ]
+    rqa, ta, oa = rq.buffer_address(), table.buffer_address(), out.buffer_address()
+    n_groups, n_units = st["n_groups"], st["n_units"]
+    rd_rt = [a + pc[0] + [rqa, ta, n_groups, n_units] for pc in st["per_core"]]
+    wr_rt = [[oa] + pc[1] for pc in st["per_core"]]
+    cores, cr = st["cores"], st["cr"]
+
+    def dm(source, ct, rt, riscv, noc_id):
+        return ttnn.KernelDescriptor(
+            kernel_source=str(KERNEL_DIR / source),
+            core_ranges=cr,
+            compile_time_args=ct,
+            runtime_args=_rt(cores, rt),
+            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc_id),
+        )
+
+    kernels = [
+        dm("inkling_sdpa_reader.cpp", st["rd_ct"], rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
+        dm("inkling_sdpa_writer.cpp", st["wr_ct"], wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
+        st["compute"],
+    ]
+    program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=st["sem"], cbs=st["cbs"])
+    program.custom_program_hash = st["hash"]
     ttnn.generic_op([q, k_cache, v_cache, cur_pos, page_table, rq, table, out], program)
     return out

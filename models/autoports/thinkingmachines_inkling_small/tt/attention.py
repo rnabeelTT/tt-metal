@@ -27,8 +27,8 @@ from __future__ import annotations
 import math
 
 import torch
-
 import ttnn
+
 from models.autoports.thinkingmachines_inkling_small.tt import relbias
 from models.autoports.thinkingmachines_inkling_small.tt.attn.inkling_sdpa import inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
@@ -37,10 +37,48 @@ L1 = ttnn.L1_MEMORY_CONFIG
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
+# A prefill's per-chunk int32 inputs (positions, the KV-fill block list, the global page table) depend on the chunk,
+# not the layer: uploaded once per prefill (key -> device tensor) and shared by every layer's attention (they were
+# ~0.7 s of from_torch per 16K prompt at one upload per layer). prefill_uploads_clear() frees them when the prefill
+# returns (model.prefill_tokens), so none outlives it into trace replays (a buffer allocated after the captures can sit
+# in a trace's freed intermediates). Page-table entries are keyed by the table's contents.
+_PF_UPLOADS = {}
+
+
+def _pf_upload(key, mesh, make):
+    t = _PF_UPLOADS.get(key)
+    if t is None:
+        t = _PF_UPLOADS[key] = ttnn.from_torch(
+            make(),
+            dtype=ttnn.int32,
+            layout=ttnn.ROW_MAJOR_LAYOUT,
+            device=mesh,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
+        )
+    return t
+
+
+def prefill_uploads_clear():
+    for t in _PF_UPLOADS.values():
+        ttnn.deallocate(t)
+    _PF_UPLOADS.clear()
+
+
 class InklingAttention:
-    def __init__(self, mesh, cfg, sd: dict, layer_idx: int, tt_ccl=None, block_size: int = 64, max_seq_len: int = 32768,
-                 weight_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat8_b, own_global_cache: bool = True,
-                 prefill_chunk: int = 2048):
+    def __init__(
+        self,
+        mesh,
+        cfg,
+        sd: dict,
+        layer_idx: int,
+        tt_ccl=None,
+        block_size: int = 64,
+        max_seq_len: int = 32768,
+        weight_dtype=ttnn.bfloat8_b,
+        kv_dtype=ttnn.bfloat8_b,
+        own_global_cache: bool = True,
+        prefill_chunk: int = 2048,
+    ):
         """cfg: the HF text config (InklingTextConfig or a namespace with the same fields). sd: this layer's attention
         weights under the HF module names (q_proj.weight, ..., k_sconv.conv1d.weight, rel_logits_proj.proj)."""
         self.mesh = mesh
@@ -77,16 +115,28 @@ class InklingAttention:
         self.fd = self.qd + 2 * self.kd + self.rd
         shard_cols = lambda w: ttnn.ShardTensorToMesh(mesh, dim=-1)  # noqa: E731
         self.w_qkvr = ttnn.as_tensor(
-            fused.T.contiguous(), dtype=weight_dtype, layout=ttnn.TILE_LAYOUT, device=mesh,
-            memory_config=DRAM, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
+            fused.T.contiguous(),
+            dtype=weight_dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=DRAM,
+            mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1),
         )
         self.w_o = ttnn.as_tensor(
-            sd["o_proj.weight"].to(torch.bfloat16).T.contiguous(), dtype=weight_dtype, layout=ttnn.TILE_LAYOUT,
-            device=mesh, memory_config=DRAM, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2),
+            sd["o_proj.weight"].to(torch.bfloat16).T.contiguous(),
+            dtype=weight_dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=DRAM,
+            mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-2),
         )
         rep = lambda t: ttnn.as_tensor(  # noqa: E731
-            t.reshape(1, 1, 1, -1).to(torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
-            memory_config=DRAM, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
+            t.reshape(1, 1, 1, -1).to(torch.bfloat16),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=DRAM,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
         )
         self.q_norm = rep(sd["q_norm.weight"])
         self.k_norm = rep(sd["k_norm.weight"])
@@ -94,14 +144,22 @@ class InklingAttention:
         # explicit matmul precision (ttnn.linear's default config is low fidelity without fp32 accumulation): HiFi2 for
         # block-float weights (more mantissa than bfp8 holds), HiFi4 for bf16; fp32 accumulation
         self.ckc = ttnn.init_device_compute_kernel_config(
-            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4 if weight_dtype == ttnn.bfloat16 else ttnn.MathFidelity.HiFi2,
-            math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True)
+            mesh.arch(),
+            math_fidelity=ttnn.MathFidelity.HiFi4 if weight_dtype == ttnn.bfloat16 else ttnn.MathFidelity.HiFi2,
+            math_approx_mode=False,
+            fp32_dest_acc_en=True,
+            packer_l1_acc=True,
+        )
         self.k_sconv = ShortConv(mesh, sd["k_sconv.conv1d.weight"].reshape(nkv * HD, -1), kv_shard, NKV * HD)
         self.v_sconv = ShortConv(mesh, sd["v_sconv.conv1d.weight"].reshape(nkv * HD, -1), kv_shard, NKV * HD)
         T = relbias.build_tables(sd["rel_logits_proj.proj"].float(), self.scale)
         self.table = ttnn.as_tensor(
-            T.reshape(1, 32, 32, -1), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
-            memory_config=DRAM, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
+            T.reshape(1, 32, 32, -1),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            device=mesh,
+            memory_config=DRAM,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
         )
         del shard_cols
 
@@ -115,15 +173,22 @@ class InklingAttention:
             self.k_cache, self.v_cache = self._alloc_cache(self.n_ring)
             ring = (torch.arange(self.max_blocks) % self.n_ring).to(torch.int32).reshape(1, -1)
             self.ring_table = ttnn.from_torch(  # read side: logical block b -> physical b mod n_ring (the SDPA op)
-                ring, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM,
+                ring,
+                dtype=ttnn.int32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=mesh,
+                memory_config=DRAM,
                 mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
             )
             # write side: the stock paged_update_cache wants a table no wider than the cache, so writes go through an
             # identity table at position pos mod (n_ring * block) -- the same physical slot as the read side's mapping
             self.ring_period = self.n_ring * block_size
             self.ring_write_table = ttnn.from_torch(
-                torch.arange(self.n_ring, dtype=torch.int32).reshape(1, -1), dtype=ttnn.int32,
-                layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM,
+                torch.arange(self.n_ring, dtype=torch.int32).reshape(1, -1),
+                dtype=ttnn.int32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=mesh,
+                memory_config=DRAM,
                 mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
             )
         elif own_global_cache:
@@ -131,15 +196,22 @@ class InklingAttention:
         else:
             self.k_cache = self.v_cache = None  # bound by the serving engine (bind_cache)
         self._kv_shard = ttnn.create_sharded_memory_config(
-            shape=(ttnn.TILE_SIZE, HD), core_grid=ttnn.CoreGrid(x=1, y=1), strategy=ttnn.ShardStrategy.HEIGHT,
-            orientation=ttnn.ShardOrientation.ROW_MAJOR, use_height_and_width_as_shard_shape=True,
+            shape=(ttnn.TILE_SIZE, HD),
+            core_grid=ttnn.CoreGrid(x=1, y=1),
+            strategy=ttnn.ShardStrategy.HEIGHT,
+            orientation=ttnn.ShardOrientation.ROW_MAJOR,
+            use_height_and_width_as_shard_shape=True,
         )
 
     def _alloc_cache(self, n_blocks):
         """Zeroed [n_blocks, NKV, block, HD] per die (zeros, not garbage: masked positions are read and must be finite)."""
         z = torch.zeros(n_blocks, self.NKV * self.N, self.block, self.HD)
         mk = lambda: ttnn.from_torch(  # noqa: E731
-            z, dtype=self.kv_dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=DRAM,
+            z,
+            dtype=self.kv_dtype,
+            layout=ttnn.TILE_LAYOUT,
+            device=self.mesh,
+            memory_config=DRAM,
             mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=1),
         )
         return mk(), mk()
@@ -194,7 +266,9 @@ class InklingAttention:
         r = ttnn.reshape(r, (1, 1, NH, DR))
         rq = ttnn.pad(r, [1, 1, NH, 32], [0, 0, 0, 0], 0.0, memory_config=DRAM)
         ttnn.deallocate(r)
-        o = inkling_sdpa_decode(q_in, self.k_cache, self.v_cache, cur_pos, pt, rq, self.table, self.scale, self.W, self.E)
+        o = inkling_sdpa_decode(
+            q_in, self.k_cache, self.v_cache, cur_pos, pt, rq, self.table, self.scale, self.W, self.E
+        )
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, 1, NH * HD))
@@ -204,8 +278,9 @@ class InklingAttention:
             return part
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
-        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
-                             memory_config=DRAM)
+        return tt_all_reduce(
+            part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear, memory_config=DRAM
+        )
 
     def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, reduce=True, kv_idx=None):
         """R <= 8 rows at consecutive positions (spec verify / prefill in row groups): x [1, 1, R, H] replicated (normed),
@@ -265,8 +340,9 @@ class InklingAttention:
         rq = ttnn.pad(r, [1, R, NH, 32], [0, 0, 0, 0], 0.0, memory_config=DRAM)
         ttnn.deallocate(r)
         pt_rows = self._rows_page_table(pt, R)
-        o = inkling_sdpa_decode(q_in, self.k_cache, self.v_cache, positions, pt_rows, rq, self.table, self.scale,
-                                self.W, self.E)
+        o = inkling_sdpa_decode(
+            q_in, self.k_cache, self.v_cache, positions, pt_rows, rq, self.table, self.scale, self.W, self.E
+        )
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, R, NH * HD))
@@ -276,8 +352,9 @@ class InklingAttention:
             return part
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
-        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
-                             memory_config=DRAM)
+        return tt_all_reduce(
+            part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear, memory_config=DRAM
+        )
 
     def forward_prefill(self, x, p0: int, page_table_host: torch.Tensor | None = None, reduce=True, valid=None):
         """A prefill chunk in ONE attention launch: x [1, 1, T, H] replicated (normed) at positions p0 .. p0 + T - 1,
@@ -298,11 +375,8 @@ class InklingAttention:
         v = ttnn.slice(p, (0, 0, 0, qd + kd), (1, 1, T, qd + 2 * kd), memory_config=mc)
         r = ttnn.slice(p, (0, 0, 0, qd + 2 * kd), (1, 1, T, self.fd), memory_config=mc)
         ttnn.deallocate(p)
-        k = self.k_sconv.rows(k, commit_all=valid is None)
-        v = self.v_sconv.rows(v, commit_all=valid is None)
-        if valid is not None:
-            self.k_sconv.commit_final(int(valid))
-            self.v_sconv.commit_final(int(valid))
+        k = self.k_sconv.prefill_commit(k, valid)
+        v = self.v_sconv.prefill_commit(v, valid)
         q = ttnn.reshape(q, (1, T, NH, HD))
         q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
         k = ttnn.reshape(k, (1, T, NKV, HD))
@@ -312,8 +386,13 @@ class InklingAttention:
         if self.log_scaling and p0 + T > 128000:  # tau per row (exact host values; a no-op below 128K)
             pos = torch.arange(p0, p0 + T, dtype=torch.float64) + 1.0
             tau = (1.0 + 0.1 * torch.log(torch.clamp(pos / 128000.0, min=1.0))).float().reshape(1, T, 1, 1)
-            tau_t = ttnn.from_torch(tau, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+            tau_t = ttnn.from_torch(
+                tau,
+                dtype=ttnn.float32,
+                layout=ttnn.TILE_LAYOUT,
+                device=self.mesh,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh),
+            )
             q = ttnn.multiply(q, tau_t, memory_config=mc)
             r = ttnn.multiply(r, tau_t, memory_config=mc)
             ttnn.deallocate(tau_t)
@@ -323,8 +402,10 @@ class InklingAttention:
             blocks = (torch.arange(b0, b0 + nb) % self.n_ring).to(torch.int32)
         else:
             blocks = page_table_host.reshape(-1)[b0 : b0 + nb].to(torch.int32)
-        fill_pt = ttnn.from_torch(blocks.reshape(1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
-                                  device=self.mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        ptk = None if self.sliding else page_table_host.reshape(-1).to(torch.int32).numpy().tobytes()
+        fill_pt = _pf_upload(
+            ("fill", self.n_ring if self.sliding else ptk, p0, T), self.mesh, lambda: blocks.reshape(1, -1)
+        )
         for cache, t in ((self.k_cache, k), (self.v_cache, v)):
             tt_ = ttnn.transpose(t, 1, 2, memory_config=mc)  # [1, NKV, T, HD]
             t8 = ttnn.typecast(tt_, self.kv_dtype) if self.kv_dtype != tt_.dtype else tt_
@@ -332,26 +413,22 @@ class InklingAttention:
             if t8 is not tt_:
                 ttnn.deallocate(t8)
             ttnn.deallocate(tt_)
-        ttnn.deallocate(fill_pt)
         ttnn.deallocate(k)
         ttnn.deallocate(v)
         rq = ttnn.pad(r, [1, T, NH, 32], [0, 0, 0, 0], 0.0, memory_config=mc)
         ttnn.deallocate(r)
-        positions = ttnn.from_torch(torch.arange(p0, p0 + T, dtype=torch.int32).reshape(-1, 8), dtype=ttnn.int32,
-                                    layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
-                                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        positions = _pf_upload(
+            ("pos", p0, T), self.mesh, lambda: torch.arange(p0, p0 + T, dtype=torch.int32).reshape(-1, 8)
+        )
         if self.sliding:
             pt = self.ring_table
         else:
-            pt = ttnn.from_torch(page_table_host.reshape(1, -1).to(torch.int32), dtype=ttnn.int32,
-                                 layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
-                                 mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
-        o = inkling_sdpa_decode(q, self.k_cache, self.v_cache, positions, pt, rq, self.table, self.scale, self.W,
-                                self.E)
-        for z in (q, rq, positions):
+            pt = _pf_upload(("pt", ptk), self.mesh, lambda: page_table_host.reshape(1, -1).to(torch.int32))
+        o = inkling_sdpa_decode(
+            q, self.k_cache, self.v_cache, positions, pt, rq, self.table, self.scale, self.W, self.E
+        )
+        for z in (q, rq):
             ttnn.deallocate(z)
-        if not self.sliding:
-            ttnn.deallocate(pt)
         o = ttnn.reshape(o, (1, 1, T, NH * HD))
         part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)
         ttnn.deallocate(o)
@@ -359,8 +436,9 @@ class InklingAttention:
             return part
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
-        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear,
-                             memory_config=DRAM)
+        return tt_all_reduce(
+            part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=ttnn.Topology.Linear, memory_config=DRAM
+        )
 
     def commit_rows(self, n: int):
         """Spec verify: the k/v conv states advance past the first n of the last forward_rows' rows."""
