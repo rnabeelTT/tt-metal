@@ -74,6 +74,14 @@ MOE_PAD_INTER = int(os.environ.get("QWEN35_MOE_PAD_INTER", "0") or 0)
 # optional routed-expert weight source: an object with load(mesh, layer, spec) -> (up_gate, down) | None and
 # store(mesh, layer, spec, up_gate, down) (set by models/experimental/hybrid_moe; None = convert from the checkpoint)
 EXPERT_WEIGHT_HOOK = None
+# optional rounding of the routed experts onto the bfp4 grid before upload: an object with tag(layer) -> cache-key
+# suffix and round_experts(layer, kind, W [E, out, in]) -> grid values | None (models/experimental/hybrid_moe/
+# bfp4_round.py; None = round_sig + the packer's round to nearest)
+EXPERT_ROUND_HOOK = None
+
+
+def _or(a, b):
+    return b if a is None else a
 
 
 def _largest_divisor_at_most(n: int, cap: int) -> int:
@@ -280,6 +288,9 @@ class Qwen35MoE:
         )
         rnd = moe_fused.round_sig if self._fused_ok else (lambda t: t)
         sfx = (f".p{Nlp}" if Nlp != Nl else "") + (moe_fused.CACHE_SUFFIX if self._fused_ok else "")
+        qhook = EXPERT_ROUND_HOOK if layer_num is not None else None
+        if qhook is not None:
+            sfx += qhook.tag(layer_num)
         self.inter_local = Nlp
         # EXPERT_WEIGHT_HOOK (hybrid_moe's raw device-image cache): a layer's routed-expert device tensors without
         # reading or converting the checkpoint, or None; after a conversion the hook may keep the uploaded bytes
@@ -302,6 +313,13 @@ class Qwen35MoE:
             gate_up = state_dict["experts.gate_up_proj"]  # [E, 2N, H]
             down = state_dict["experts.down_proj"]  # [E, H, N]
             assert tuple(gate_up.shape) == (E, 2 * N, H) and tuple(down.shape) == (E, H, N)
+            if (
+                qhook is not None
+            ):  # grid values: round_sig (rnd) leaves them unchanged and the packer keeps them exactly
+                if self.prec.routed_gate_up == ttnn.bfloat4_b:
+                    gate_up = _or(qhook.round_experts(layer_num, "gu", gate_up), gate_up)
+                if self.prec.routed_down == ttnn.bfloat4_b:
+                    down = _or(qhook.round_experts(layer_num, "dn", down), down)
             gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
             up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
 

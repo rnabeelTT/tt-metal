@@ -718,6 +718,10 @@ def install():
 
         HYB.wcache = ExpertImageCache(os.environ["HYB_WCACHE"], resident_fn=lambda L: HYB.resident[L], tag=PORT)
         _port("moe").EXPERT_WEIGHT_HOOK = HYB.wcache
+    if os.environ.get("HYB_BFP4_ROUND"):  # error-aware bfp4 rounding of the routed experts (bfp4_round.py)
+        import bfp4_round
+
+        _port("moe").EXPERT_ROUND_HOOK = bfp4_round
 
     orig_init = od.Qwen35MoEOptimized.__init__
 

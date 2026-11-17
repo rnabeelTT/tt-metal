@@ -91,11 +91,16 @@ def ensure():
         ),
         ("device-format expert copies", dev, [os.path.join(here, "build_dev_experts.py"), snap, dev, cold, layers], {}),
     ):
-        if _done(out, spec, what):
+        want = spec
+        if out == dev and os.environ.get("HYB_BFP4_ROUND"):  # the device copies also depend on the bfp4 rounding
+            import bfp4_round
+
+            want = dict(spec, bfp4_round={str(L): bfp4_round.tag(L) for L in spec["layers"]})
+        if _done(out, want, what):
             continue
         os.makedirs(out, exist_ok=True)
         for tmp in glob.glob(os.path.join(out, "*.tmp*")):  # a write cut off by an earlier interrupted boot
             os.remove(tmp)
         _run(what, [sys.executable, *cmd], dict(env, **extra))
         with open(os.path.join(out, MARKER), "w") as f:
-            json.dump(spec, f)
+            json.dump(want, f)

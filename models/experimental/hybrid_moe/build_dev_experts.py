@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """Device-format copies of the experts that can miss, for HYB_LRU fetches (hybrid/fetch.py): per (layer, expert) the
 TP-sharded fused layout of the port (minimaxai_minimax_m2_7/tt/moe.py: gate|up packed per die as [up_d | gate_d],
-down rows per die), rounded to 5 significant bits like the fused weights (moe_decode.fused.round_sig) and converted to
-bfp4 per die; the 4 die shards are aggregated into one host tensor and dumped as <out>/<L>_<e>_gu.tensorbin /
+down rows per die), rounded to 5 significant bits like the fused weights (moe_decode.fused.round_sig; or first onto the bfp4 grid by
+HYB_BFP4_ROUND, bfp4_round.py, like the port's EXPERT_ROUND_HOOK) and converted to bfp4 per die; the 4 die shards are aggregated into one host tensor and dumped as <out>/<L>_<e>_gu.tensorbin /
 <L>_<e>_dn.tensorbin. ttnn's bfp4 packing needs the cluster (run in the image with the device attached; no mesh is
 opened, but run it while no other job uses the device).
 
@@ -23,6 +23,7 @@ from safetensors import safe_open
 import ttnn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bfp4_round import round_experts  # noqa: E402
 from build_int4_library import dequant  # noqa: E402
 
 TP, SIG_BITS = 4, 5
@@ -81,6 +82,12 @@ def main():
             pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
             gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
             N, H = gate.shape
+            q = round_experts(L, "gu", torch.cat([gate, up])[None])  # HYB_BFP4_ROUND: grid values, or None
+            if q is not None:
+                gate, up = q[0, :N], q[0, N:]
+            q = round_experts(L, "dn", down[None])
+            if q is not None:
+                down = q[0]
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]
             packed = torch.cat(
