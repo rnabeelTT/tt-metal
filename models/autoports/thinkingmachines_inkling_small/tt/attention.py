@@ -43,11 +43,14 @@ DRAM = ttnn.DRAM_MEMORY_CONFIG
 # returns (model.prefill_tokens), so none outlives it into trace replays (a buffer allocated after the captures can sit
 # in a trace's freed intermediates). Page-table entries are keyed by the table's contents.
 _PF_UPLOADS = {}
+_PF_SHARE = __import__("os").environ.get("INKLING_PF_SHARED_UPLOADS", "1") == "1"
 
 
 def _pf_upload(key, mesh, make):
-    t = _PF_UPLOADS.get(key)
+    t = _PF_UPLOADS.get(key) if _PF_SHARE else None
     if t is None:
+        if not _PF_SHARE:
+            key = (key, len(_PF_UPLOADS))  # one upload per call (each freed with the others at the prefill's end)
         t = _PF_UPLOADS[key] = ttnn.from_torch(
             make(),
             dtype=ttnn.int32,

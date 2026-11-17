@@ -14,12 +14,12 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
 | 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
 | 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
-| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-17 built from 21d47b7852f): short chat 49.8 / 47.0 tok/s greedy / sampled, TTFT 0.53-0.54 s; new prompts prefill ~1,150-1,200 tok/s from 15K to 118K (118.6K in 104 s); resent prompt / next chat turn 1.3-2.0 s (engine prefix cache); GSM8K-200 96.0%, IFEval-200 90.0 / 90.0; clean `tt-model stop` (10.9 s) and restart without a board reset. **Multimodal not started.** |
+| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-17 session 7, built from 9e85a433d56 + card): short chat TTFT 0.43 s, 49.8 / 47.1 tok/s greedy / sampled; new prompts prefill ~1,300-1,380 tok/s from 15K to 118K (118.7K in 91 s); resent prompt / next chat turn 1.3-1.8 s (engine prefix cache); GSM8K-200 96.0%, IFEval-200 89.0 / 89.0 (rerun 86.5 / 88.0); clean `tt-model stop` and restart without a board reset. **Multimodal not started.** |
 
-**Open items (2026-11-17, end of session 6).** The published package is the deliverable; these are what is left.
-1. Prefill of new long prompts: ~1,150-1,200 tok/s vs M2.7's ~2,300. Host-bound (dispatch of ~206 ttnn ops per
-   layer-chunk, staging memcpy, CPU experts on 8 cores). Levers: fewer ops per layer-chunk (fused conv / MoE glue),
-   traced attention segments, more device-resident experts. Multi-week; expect at most ~1.5x.
+**Open items (2026-11-17, end of session 7).** The published package is the deliverable; these are what is left.
+1. Prefill of new long prompts: ~1,300-1,380 tok/s (session 7; was ~1,150-1,200) vs M2.7's ~2,300. Now partly
+   bound by the command queue / device (staging copies queued behind compute) and the staging memcpy; levers in the
+   session-7 entry (zero-copy, MoE glue ops, sharded host-rows upload).
 2. Multimodal (vision / audio): not started; the package is text-only.
 3. Prefix cache holds one entry (the last long prompt): interleaved users lose the 1.3-2 s next-turn TTFT. Several
    snapshots cost host RAM for the rings (+ device buffers for the convs) per entry.
@@ -29,6 +29,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
 6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
 7. Not yet tested: sustained multi-hour load, several concurrent clients (single-sequence engine: requests queue).
+8. Served greedy decoding is not run-to-run deterministic (session 7 entry); evals move by a few points per run.
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -527,3 +528,56 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     M2.7's gain comes from DFlash's 16-token blocks, where a long copy span is worth several extra tokens per pass. For
     Inkling that needs wider verify passes on suffix steps only (open item 4).
   - Not republished: the package's behaviour is unchanged (suffix off). Re-served the published package after the A/B.
+
+- **2026-11-17, session 7: prefill host work (9e85a433d56).** Profiled with prefill_bench PF_OPS=1 (new: every ttnn op
+  call by op / call site with its host time) and PF_PROF=1 (cProfile + who calls from_torch / to_torch), 16K tokens of
+  held-out text, served 128K config (1536-token chunks, group 10). Baseline 14.81 s (1,106 tok/s), 199 ttnn ops per
+  layer-chunk.
+  - **Short conv in one program per chunk** (tt/sconv_kernels/pf_*.cpp, ShortConv.prefill_commit,
+    INKLING_SCONV_PF_KERNEL default 1): the ttnn path ran ~15 ops per conv (65 of the 199). The kernel splits a column's
+    row tiles over the grid (the carried 3 rows come from the state for the first tile, else from the previous tile),
+    every argument common (the core's work item from its logical coordinates, so the descriptor costs the same for
+    any core count), the new state rows written to a side buffer (no core reads what another writes) then copied into
+    the state. The SFPU rounds the fp32 sum to bf16 (RNE) before the pack: the packer's own conversion differed from
+    ttnn.typecast in ~0.1% of values (one bf16 ulp). tools/sconv_pf_test.py: output and state identical to the ttnn path
+    and to the fp32 reference, padded last chunks included; host 390 -> 32 us, device 1000 -> 285 us per hidden-width
+    conv. 14.81 -> 13.97 s.
+  - **Per-chunk attention uploads shared by every layer** (attention._pf_upload: positions, KV-fill blocks, the global
+    page table keyed by its contents; freed when prefill_tokens returns, so none outlives the prefill into trace
+    replays) and **the MoE input untilized on the device before its non-blocking read** (HYB_PF_XRM default 1: the
+    host untilize of [1536, 4096] was ~2.2 ms per layer-chunk). -> 13.14 s.
+  - **SDPA prefill program cached per shape** (inkling_sdpa _PF_CACHE, INKLING_SDPA_PF_CACHE default 1: static parts
+    + a custom program hash; tools/sdpa_cache_check.py identical on every prefill case). Within noise (13.07 s): by now
+    the host waits on the device (record_event ~2 ms per call: the command queue full of staging copies queued behind
+    compute; new _pf_pre timers t_pf_pre_ev / _rd / _ops).
+  - Quality gate (128K prefill config, after the conv / uploads / readback changes): 0.8726 / 0.9506 / 0.1998, identical
+    to the shipped config.
+  - **Tried, rejected:** HYB_STREAM_CQ1=1 (staging copies on CQ1 to overlap compute) 13.76 s (slower); INKLING_PREFILL_AHEAD 3
+    no change; HYB_PF_COPY_MS 2 (more streamed) 14.39 s; HYB_PF_COPY_MS 8 (more on the CPU) 12.85 s (+3-5%) but fails
+    the gate: 0.8679 / 0.9476 / 0.2120 (int4 CPU experts are less exact than the streamed bfp4 / bfp8 copies).
+  - **Package (built from 9e85a433d56), through `tt-model serve` at p300x2-128k:** short chat TTFT 0.43 s (was 0.53),
+    49.8 / 47.1 tok/s greedy / sampled; prefill 3.8K 3.7 s, 14.9K 10.8 s (1,376 tok/s), 29.8K 21.5 s (1,383), 62.7K
+    46.2 s (1,355), 118.7K 91.2 s (1,302; was 104.1 s); resent 1.3-1.8 s, next turn 1.4 / 1.8 s; feature checks pass;
+    DRAM free after warm-up 0.72 GiB (unchanged).
+  - **Package evals:** GSM8K-200 96.0% (same); IFEval-200 86.5 / 88.0, rerun 89.0 / 89.0 (earlier packages 90.0 / 90.0,
+    89.0 / 92.0). Both new runs had doc 23 in a greedy repetition loop to the 4096-token cap. Investigated: served
+    greedy decoding is NOT run-to-run deterministic (two runs of the same package share 7-12 of 200 IFEval
+    responses; doc 23 x8 per server start: published package 0 / 1 / 1 loops of 8, new package 3 / 2 / 3, dev server
+    at the published commit 2, at HEAD with every new flag off 3 and on 3), so the loop comes and goes with the
+    prompt's near-tie. The new code changes no numbers: teacher-forced gate identical, SDPA old vs new module
+    bit-identical on every decode / verify / prefill case (jobs/sdpa_decode_ab.py), conv kernel identical, flags-off
+    as unstable as on. New flag INKLING_PF_SHARED_UPLOADS (default 1) for the shared attention uploads (bisect use).
+  - **Where it stands:** 139 ops per layer-chunk; the main thread's remaining time per 16K: ttnn enqueue ~2.9 s, the
+    staging memcpy ~2.7 s (memory-bandwidth bound, single thread; zero-copy would remove it but still loses writes),
+    from_torch ~1.1 s (part of it waiting for command-queue space), host routing 0.7 s. Next levers: zero-copy (a
+    tt-metal pinned-memory bug), fewer MoE glue ops (~40 per layer-chunk in _routed_sorted / _kernel_dispatch), the
+    host-rows upload sharded over the dies (1/4 of the bytes; changes the reduction order: needs the gate).
+  - **Open (decode):** the decode / verify fused conv kernel (sconv_kernels/compute.cpp) packs fp32 -> bf16 with the
+    packer's rounding, so it likely differs from the ttnn path in ~0.1% of values (one ulp), as the prefill kernel did
+    before its RNE typecast. Adding the same typecast changes decode outputs slightly toward the reference: measure
+    before shipping.
+  - **Open (served determinism):** greedy output through the server varies run to run (same prompt, fresh server or
+    not). Not the host expert kernel (hostk.c: every thread owns its output columns, a fixed order). Candidates: the
+    decode fetch (CQ1 copies "resident from the next replay"), the prefill CPU / stream split or the staging-slot reuse
+    across requests (state carried between requests), socket-mode timing. Pre-existing (the published package does it);
+    worth finding: a deterministic server would make evals comparable run to run.

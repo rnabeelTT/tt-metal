@@ -215,29 +215,31 @@ card:
     | --- | --- | --- | --- |
     | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.873 (confident tokens 0.951, KL 0.200) | two BF16 references agree at 0.925 | 8 x 1000 tokens, held out |
     | GSM8K, greedy, reasoning effort none | 96.0% | — | 200 |
-    | IFEval, greedy, reasoning effort none (prompt strict / loose) | 90.0% / 90.0% | — | 200 |
+    | IFEval, greedy, reasoning effort none (prompt strict / loose) | 89.0% / 89.0% (a second run: 86.5% / 88.0%) | — | 200 |
 
     | profile | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
     | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-    | p300x2-128k | ~30 | 128 | 1 | 16 | 0.53 s | — | 49.8 | 3.1 s |
-    | p300x2-128k, temperature 1.0, top-p 0.95, top-k 40 | ~30 | 128 | 1 | 16 | 0.54 s | — | 47.0 | 3.3 s |
-    | p300x2-128k | 3,788 | 128 | 1 | 1 | 4.4 s | 862 | 45.3 | 7.2 s |
-    | p300x2-128k | 14,880 | 128 | 1 | 1 | 12.4 s | 1,197 | 48.9 | 15.0 s |
-    | p300x2-128k | 29,719 | 128 | 1 | 1 | 25.4 s | 1,172 | 48.9 | 27.9 s |
-    | p300x2-128k | 62,570 | 128 | 1 | 1 | 53.3 s | 1,175 | 47.7 | 55.9 s |
-    | p300x2-128k | 118,575 | 128 | 1 | 1 | 104.1 s | 1,139 | 53.9 | 106.5 s |
-    | p300x2-128k, the same prompt resent (prefix cache) | 3,788-118,575 | 128 | 1 | 1 each | 1.3-1.9 s | — | 48-52 | 3.8-4.5 s |
-    | p300x2-128k, next chat turn after a long prompt (prefix cache) | 3,929 / 62,711 | 128 | 1 | 1 each | 1.5 / 2.0 s | — | — | — |
+    | p300x2-128k | ~30 | 128 | 1 | 16 | 0.43 s | — | 49.8 | 3.0 s |
+    | p300x2-128k, temperature 1.0, top-p 0.95, top-k 40 | ~30 | 128 | 1 | 16 | 0.43 s | — | 47.1 | 3.2 s |
+    | p300x2-128k | 3,788 | 128 | 1 | 1 | 3.7 s | 1,020 | 43.0 | 6.7 s |
+    | p300x2-128k | 14,880 | 128 | 1 | 1 | 10.8 s | 1,376 | 49.1 | 13.4 s |
+    | p300x2-128k | 29,750 | 128 | 1 | 1 | 21.5 s | 1,383 | 49.0 | 24.1 s |
+    | p300x2-128k | 62,652 | 128 | 1 | 1 | 46.2 s | 1,355 | 47.0 | 48.9 s |
+    | p300x2-128k | 118,704 | 128 | 1 | 1 | 91.2 s | 1,302 | 52.2 | 93.6 s |
+    | p300x2-128k, the same prompt resent (prefix cache) | 3,788-118,704 | 128 | 1 | 1 each | 1.3-1.8 s | — | 49-56 | 3.6-4.3 s |
+    | p300x2-128k, next chat turn after a long prompt (prefix cache) | 3,929 / 62,793 | 128 | 1 | 1 each | 1.4 / 1.8 s | — | — | — |
 
     Measured on one QB2 through the OpenAI endpoint with `tt-model serve`, warm caches, 2026-11-17 (`serve/card_bench.py`,
     `serve/prefix_check.py`): the ~30-token rows are 8 held-out chat prompts (code, math, prose, three languages) twice
     each at the default reasoning effort; the long rows are this repository's source as the prompt, each followed by
     the same prompt resent and a short request. Decode varies with the text (speculative acceptance, how many of a
-    token's experts are on the device): ~44-54 tok/s across these prompts. The p300x2-32k profile prefills with
-    2048-token chunks and 4x the staging slots: ~1,330 tok/s at 15K tokens in the development server.
+    token's experts are on the device): ~43-56 tok/s across these prompts. The p300x2-32k profile prefills with
+    2048-token chunks and 4x the staging slots: 14,880 tokens in 10.1 s (1,473 tok/s) and 29,750 in 20.0 s (1,485
+    tok/s) in the development server. Greedy decoding through the server is not run-to-run deterministic (the same
+    prompt can take a different path on a near-tie), so IFEval moves by a few points between runs.
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
-    - A new long prompt prefills at ~1,150-1,200 tok/s from ~15K tokens on (a 118K-token prompt takes ~104 s); shorter
+    - A new long prompt prefills at ~1,300-1,380 tok/s from ~15K tokens on (a 118K-token prompt takes ~91 s); shorter
       prompts are slower per token. Only the most recent long prompt is kept as a cached prefix.
     - Requests with min_p, logit_bias, logprobs, bad words or structured outputs decode one token per step (~25 tok/s).
     - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
