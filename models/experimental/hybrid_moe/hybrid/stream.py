@@ -226,6 +226,31 @@ class PrefillStream:
         """The upload of this layer's experts can go on CQ1: pinned zero-copy writes (the other path runs device ops)."""
         return self.cq1 and self.dev.get("gdst") is not None and self.fetch.px is not None and layer in self.fetch.raw
 
+    def can_bg(self, layer):
+        """A round of this layer can be copied by pinx's background writer on CQ1 (the pinned library)."""
+        return (
+            self.dev is not None
+            and self.dev.get("gdst") is not None
+            and self.fetch.px is not None
+            and layer in self.fetch.raw
+        )
+
+    def upload_bg(self, layer, writes, st):
+        """upload() on CQ1 through pinx's background writer (the memcpy leaves the caller's thread). The caller
+        flushes (fetch.px.flush()) before recording a CQ1 event that must cover these writes, and enqueues nothing on
+        CQ1 itself until then."""
+        t0 = time.perf_counter()
+        dg, dd = self.dev["gdst"]
+        fetch = self.fetch
+        ng, nd = fetch.raw[layer][2], fetch.raw[layer][3]
+        for j, e in writes:
+            rid, og, od = fetch.raw_offsets(layer, e)
+            fetch.px.write_async(dg, rid, og, j * ng, ng, cq_id=1)
+            fetch.px.write_async(dd, rid, od, j * nd, nd, cq_id=1)
+        st["t_stream"] += time.perf_counter() - t0
+        st["streamed"] += len(writes)
+        st["streamed_bg"] = st.get("streamed_bg", 0) + len(writes)
+
     def upload(self, layer, writes, st, cq_id=0):
         """A round's copies [(slot, expert)] into the staging (plan / _assign). With the pinned library this is one
         zero-copy write per weight straight into the slot, on queue ``cq_id``. Otherwise each expert lands in the

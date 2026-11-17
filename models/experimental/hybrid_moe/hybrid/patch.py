@@ -46,6 +46,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -160,6 +161,12 @@ class HybridState:
         # on the full model it gains nothing at 512-2K (runs/m27/split_full: the device waits on the CPU).
         self.pf_split = os.environ.get("HYB_PF_SPLIT", "0") == "1"
         self.pf_host_async = os.environ.get("HYB_PF_HOST_ASYNC", "1") == "1"  # prefill host experts on HYB.pool
+        # HYB_PF_PIPE (default 1): the host-routed prefill MoE reads the router logits / MoE input without blocking
+        # (_pf_pre / _pf_post; the port may queue later chunks' layers before planning this one: pf_pipelined)
+        self.pf_pipe_path = os.environ.get("HYB_PF_PIPE", "1") == "1"
+        # HYB_PF_BGSTREAM (default 0): a pipelined prefill step's first staging round is copied by pinx's background
+        # writer on CQ1 while this thread runs other host work (hybrid/stream.py upload_bg)
+        self.pf_bgstream = os.environ.get("HYB_PF_BGSTREAM", "0") == "1"
         self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
         self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
         self.pf_cpu_fixed_ms = [
@@ -1952,6 +1959,8 @@ def _forward(self, x, mode=None, partial=False, logits=None):
                 ttnn.deallocate(h_x)
             ttnn.deallocate(h_lg)
         return _finish(self, out, orig, partial)
+    if mode == "prefill" and _prefill_host_route(self) and not SEG.capturing and HYB.pf_pipe_path:
+        return _pf_post(self, _pf_pre(self, x, mode), mode)()
     if mode == "prefill" and _prefill_host_route(self):
         scores, ids = _route_prefill_host(self, x4, T)
     else:
@@ -2008,79 +2017,10 @@ def _forward(self, x, mode=None, partial=False, logits=None):
     dec = _decide(self, x4, scores, ids, T, mode, defer_host=HYB.pf_host_async)
     # the host experts run on a worker thread (the int4 kernel releases the GIL) while the device computes below
     host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["host"] is None else None
-    t1 = time.perf_counter()
-    stream = list(dec.get("stream") or ())
-    # HYB_STREAM_MERGE: the resident experts and the first staging round in one routed call (_merged_round)
-    merged = (
-        _merged_round(self, dec, stream[0], T) if (stream and HYB.stream.merge and _prefill_sentinel(self, T)) else None
-    )
-    if merged is not None:
-        dec = dict(dec, ids=merged[0], sc=merged[1])
-        stream = stream[1:]
-    n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
-    n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
-    rounds = [
-        (writes, _upload_like(self, sidx, ids, torch.int32), _upload_like(self, ssc, scores, torch.bfloat16))
-        for writes, sidx, ssc in stream
-    ]
+    out = _pf_device(self, x4, dec, ids, scores, T, mode)
     ttnn.deallocate(ids)
     ttnn.deallocate(scores)
-    HYB.st["t_up"] += time.perf_counter() - t1
-    HYB.st["t_pf_prep"] = HYB.st.get("t_pf_prep", 0.0) + time.perf_counter() - t1  # merge layout + uploads
-    HYB._pf_t = time.perf_counter()
-    # sentinel picks are gathered from the dispatch's trailing padding group, which the skip-padding expert matmuls
-    # never write: the sorted path zero-fills its down output for them
-    self._sorted_zero_out = _prefill_sentinel(self, T)
-    cq1 = bool(rounds or merged) and HYB.stream.can_cq1(self.layer_num) and not HYB.profile
-    first = merged[2] if merged is not None else (rounds[0][0] if rounds else None)
-    copied = _stream_copy(self, first) if cq1 else None  # runs on CQ1 during the resident experts below
-    try:
-        if merged is not None:
-            writes0, gids = merged[2], merged[3]
-            if cq1:
-                wait = lambda: ttnn.wait_for_event(0, copied)  # noqa: E731
-            else:
-                wait = lambda: HYB.stream.upload(self.layer_num, writes0, HYB.st)  # noqa: E731
-            st = self._stream_attrs
-            second = (st["up_gate"], st["down"], HYB.stream.NS, gids, wait)
-            routed = self._routed_sorted(x4, n_sc, n_ids, T, second=second)
-            HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + 1
-            if rounds and cq1:
-                copied = _stream_copy(self, rounds[0][0])  # the next round's copy, after the merged call's reads
-        else:
-            routed = _routed(self, x4, n_sc, n_ids, T, mode)
-        ttnn.deallocate(n_sc)
-        ttnn.deallocate(n_ids)
-        _pf_mark(self, "t_pf_routed")
-        for r, (writes, s_ids, s_sc) in enumerate(rounds):  # the streamed experts: the routed call over the staging
-            if cq1:
-                ttnn.wait_for_event(0, copied if r == 0 else _stream_copy(self, writes))
-            else:
-                HYB.stream.upload(self.layer_num, writes, HYB.st)
-            _pf_mark(self, "t_pf_upload")
-            r2 = _routed_with(self, self._stream_attrs, x4, s_sc, s_ids, T, mode)
-            ttnn.deallocate(s_sc)
-            ttnn.deallocate(s_ids)
-            routed = _add(routed, r2)
-            _pf_mark(self, "t_pf_sroute")
-    finally:
-        self._sorted_zero_out = False
-    HYB.stream.mark_read(self.layer_num, self.device)
-    HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + len(rounds)
-    out = _plus_shared(self, routed, x4)
-    if host_fut is not None:
-        t0 = time.perf_counter()
-        dec["host"] = host_fut.result()
-        HYB.st["t_host_wait"] = HYB.st.get("t_host_wait", 0.0) + time.perf_counter() - t0
-    rows_nz = (dec["host"] != 0).any(1).nonzero().reshape(-1)
-    if rows_nz.numel():
-        t0 = time.perf_counter()
-        out = _add(out, _host_rows_dense(self, dec["host"], rows_nz, [int(s) for s in out.shape], out.dtype))
-        HYB.st["t_up"] += time.perf_counter() - t0
-        _pf_mark(self, "t_pf_hostadd")
-    out = _finish(self, out, orig, partial)
-    _pf_mark(self, "t_pf_reduce")
-    return out
+    return _pf_finish(self, out, dec, host_fut, orig, partial)
 
 
 def _nonresident_hot_first(layer):
@@ -2253,6 +2193,197 @@ def _route_prefill_host(self, x4, T):
     ids_t = ttnn.from_torch(torch.from_numpy(ids).reshape(1, 1, T, k).to(torch.int32), dtype=ttnn.uint16, **kw)
     HYB.st["t_pf_route"] = HYB.st.get("t_pf_route", 0.0) + time.perf_counter() - t0
     return scores, ids_t
+
+
+def _pf_device(self, x4, dec, ids, scores, T, mode, first_ev=None):
+    """Prefill MoE, device half 2: the plan's uploads, the resident experts (merged with the first staging round),
+    the remaining staging rounds and the shared expert. ids / scores: shape / dtype / layout references for the
+    uploads. first_ev: a CQ1 event covering the first round's copies, already queued (the background writer).
+    Returns the routed + shared sum (device)."""
+    t1 = time.perf_counter()
+    stream = list(dec.get("stream") or ())
+    # HYB_STREAM_MERGE: the resident experts and the first staging round in one routed call (_merged_round)
+    merged = (
+        _merged_round(self, dec, stream[0], T) if (stream and HYB.stream.merge and _prefill_sentinel(self, T)) else None
+    )
+    if merged is not None:
+        dec = dict(dec, ids=merged[0], sc=merged[1])
+        stream = stream[1:]
+    n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
+    n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
+    rounds = [
+        (writes, _upload_like(self, sidx, ids, torch.int32), _upload_like(self, ssc, scores, torch.bfloat16))
+        for writes, sidx, ssc in stream
+    ]
+    HYB.st["t_up"] += time.perf_counter() - t1
+    HYB.st["t_pf_prep"] = HYB.st.get("t_pf_prep", 0.0) + time.perf_counter() - t1  # merge layout + uploads
+    HYB._pf_t = time.perf_counter()
+    # sentinel picks are gathered from the dispatch's trailing padding group, which the skip-padding expert matmuls
+    # never write: the sorted path zero-fills its down output for them
+    self._sorted_zero_out = _prefill_sentinel(self, T)
+    cq1 = first_ev is not None or (bool(rounds or merged) and HYB.stream.can_cq1(self.layer_num) and not HYB.profile)
+    first = merged[2] if merged is not None else (rounds[0][0] if rounds else None)
+    if first_ev is not None:
+        copied = first_ev
+    else:
+        copied = _stream_copy(self, first) if cq1 else None  # runs on CQ1 during the resident experts below
+    try:
+        if merged is not None:
+            writes0, gids = merged[2], merged[3]
+            if cq1:
+                wait = lambda: ttnn.wait_for_event(0, copied)  # noqa: E731
+            else:
+                wait = lambda: HYB.stream.upload(self.layer_num, writes0, HYB.st)  # noqa: E731
+            st = self._stream_attrs
+            second = (st["up_gate"], st["down"], HYB.stream.NS, gids, wait)
+            routed = self._routed_sorted(x4, n_sc, n_ids, T, second=second)
+            HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + 1
+            if rounds and cq1:
+                copied = _stream_copy(self, rounds[0][0])  # the next round's copy, after the merged call's reads
+        else:
+            routed = _routed(self, x4, n_sc, n_ids, T, mode)
+        ttnn.deallocate(n_sc)
+        ttnn.deallocate(n_ids)
+        _pf_mark(self, "t_pf_routed")
+        for r, (writes, s_ids, s_sc) in enumerate(rounds):  # the streamed experts: the routed call over the staging
+            if cq1:
+                ttnn.wait_for_event(0, copied if r == 0 else _stream_copy(self, writes))
+            else:
+                HYB.stream.upload(self.layer_num, writes, HYB.st)
+            _pf_mark(self, "t_pf_upload")
+            r2 = _routed_with(self, self._stream_attrs, x4, s_sc, s_ids, T, mode)
+            ttnn.deallocate(s_sc)
+            ttnn.deallocate(s_ids)
+            routed = _add(routed, r2)
+            _pf_mark(self, "t_pf_sroute")
+    finally:
+        self._sorted_zero_out = False
+    HYB.stream.mark_read(self.layer_num, self.device)
+    HYB.st["stream_rounds"] = HYB.st.get("stream_rounds", 0) + len(rounds)
+    return _plus_shared(self, routed, x4)
+
+
+def _pf_finish(self, out, dec, host_fut, orig, partial):
+    """Prefill MoE, end: the CPU experts' rows (waited for) added to out, then the reduction."""
+    if host_fut is not None:
+        t0 = time.perf_counter()
+        dec["host"] = host_fut.result()
+        HYB.st["t_host_wait"] = HYB.st.get("t_host_wait", 0.0) + time.perf_counter() - t0
+    rows_nz = (dec["host"] != 0).any(1).nonzero().reshape(-1)
+    if rows_nz.numel():
+        t0 = time.perf_counter()
+        out = _add(out, _host_rows_dense(self, dec["host"], rows_nz, [int(s) for s in out.shape], out.dtype))
+        HYB.st["t_up"] += time.perf_counter() - t0
+        _pf_mark(self, "t_pf_hostadd")
+    out = _finish(self, out, orig, partial)
+    _pf_mark(self, "t_pf_reduce")
+    return out
+
+
+def pf_pipelined(moe):
+    """Whether a prefill MoE call of this module can run split (_pf_pre / _pf_post: the host-routed hybrid path)."""
+    return (
+        getattr(moe, "_hyb_on", True)
+        and HYB.pf_pipe_path
+        and _prefill_host_route(moe)
+        and HYB.enabled
+        and HYB.C < HYB.E
+    )
+
+
+def _pf_pre(self, x, mode="prefill"):
+    """Prefill MoE, device half 1: the router's fp32 logits and non-blocking reads of them and of the MoE input rows
+    (die 0), then an event. Returns the context for _pf_post. Queuing this for the next chunks before _pf_post of the
+    current one lets the host plan a chunk while the device computes the chunks around it (the reads complete in
+    queue order, without waiting for work queued after them)."""
+    t0 = time.perf_counter()
+    orig = list(x.shape)
+    H = orig[-1]
+    T = math.prod(orig[:-1])
+    if self.num_devices > 1 and x.is_sharded():
+        x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
+    x4 = x if (len(orig) == 4 and orig[2] == T) else ttnn.reshape(x, (1, 1, T, H))
+    lg_t = self._router_logits(x4, ttnn.DRAM_MEMORY_CONFIG, dtype=ttnn.float32)
+    # row-major on the device first: a host readback of a tile tensor untilizes [T, 320] fp32 on the host (~10 ms)
+    lg_rm = ttnn.to_layout(lg_t, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    ttnn.deallocate(lg_t)
+    ctx = dict(
+        orig=orig,
+        T=T,
+        x4=x4,
+        lg_rm=lg_rm,
+        h_lg=ttnn.from_device(_die0(lg_rm), blocking=False),
+        h_x=ttnn.from_device(_die0(x4), blocking=False),
+        ev=ttnn.record_event(self.device, 0),
+    )
+    HYB.st["t_pf_pre"] = HYB.st.get("t_pf_pre", 0.0) + time.perf_counter() - t0
+    return ctx
+
+
+def _pf_post(self, ctx, mode="prefill"):
+    """_pf_plan, then its device experts queued at once: -> finish()."""
+    return _pf_plan(self, ctx, mode)()
+
+
+def _pf_plan(self, ctx, mode="prefill"):
+    """Prefill MoE, half 2: wait for _pf_pre's reads, select on the host, plan (static / staged / CPU), start the CPU
+    experts (and, HYB_PF_BGSTREAM, the first staging copies on the background writer). Returns go() -> queues the
+    device experts and the shared expert -> finish() -> the layer's MoE output (waits for the CPU experts, adds their
+    rows, reduces). Between the calls the caller may queue other CQ0 work; finish() after the next chunk's go() keeps
+    the device busy while the CPU experts finish."""
+    T, x4, orig = ctx["T"], ctx["x4"], ctx["orig"]
+    t0 = time.perf_counter()
+    ttnn.event_synchronize(ctx["ev"])
+    t1 = time.perf_counter()
+    lg = ttnn.to_torch(ctx["h_lg"]).reshape(T, -1).float().numpy()
+    ttnn.deallocate(ctx["lg_rm"])
+    HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + time.perf_counter() - t0
+    HYB.st["t_pf_wait"] = HYB.st.get("t_pf_wait", 0.0) + t1 - t0
+    t1 = time.perf_counter()
+    ids_np, sc_np = _select_host(self, lg)
+    k = ids_np.shape[1]
+    # the same values the device round trip gave (_route_prefill_host -> _decide): bf16 scores, integer ids
+    idh = torch.from_numpy(ids_np).long()
+    sch = torch.from_numpy(sc_np).to(torch.bfloat16).float()
+    HYB.st["t_pf_route_sel"] = HYB.st.get("t_pf_route_sel", 0.0) + time.perf_counter() - t1
+    HYB.st["t_pf_route"] = HYB.st.get("t_pf_route", 0.0) + time.perf_counter() - t0
+    # the next hybrid layer's prefetch goes on CQ1 before this step's routing
+    HYB.stream.step(self.layer_num, _nonresident_hot_first, HYB.st)
+    t1 = time.perf_counter()
+    xh_fn = lambda: ttnn.to_torch(ctx["h_x"]).reshape(T, -1)  # noqa: E731 (read already complete: the event above)
+    dec = _decide_core(self, x4, idh, sch, mode, defer_host=HYB.pf_host_async, xh_fn=xh_fn)
+    HYB.st["t_pf_decide"] = HYB.st.get("t_pf_decide", 0.0) + time.perf_counter() - t1
+    ref_ids = SimpleNamespace(shape=(1, 1, T, k), dtype=ttnn.uint16, layout=ttnn.TILE_LAYOUT)
+    ref_sc = SimpleNamespace(shape=(1, 1, T, k), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+    # the CPU experts on the pool (the int4 kernel releases the GIL) while the device runs the queued work
+    host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["host"] is None else None
+    # HYB_PF_BGSTREAM: the first staging round's copies go to pinx's background writer on CQ1 now; the caller may run
+    # other host work (CQ0 only) before go() flushes them and queues the device experts behind their event
+    bg = False
+    stream = dec.get("stream")
+    if HYB.pf_bgstream and stream and stream[0][0] and HYB.stream.can_bg(self.layer_num) and not HYB.profile:
+        px = HYB.stream.fetch.px
+        px.flush()  # (decode fetch writes) the worker idle before this thread enqueues on CQ1
+        # the staging's previous readers are the CQ0 commands queued so far
+        ttnn.wait_for_event(1, ttnn.record_event(self.device, cq_id=0))
+        HYB.stream.upload_bg(self.layer_num, stream[0][0], HYB.st)
+        bg = True
+
+    def go():
+        ev = None
+        if bg:
+            t2 = time.perf_counter()
+            HYB.stream.fetch.px.flush()
+            HYB.st["t_bg_flush"] = HYB.st.get("t_bg_flush", 0.0) + time.perf_counter() - t2
+            ev = ttnn.record_event(self.device, cq_id=1)
+        out = _pf_device(self, x4, dec, ref_ids, ref_sc, T, mode, first_ev=ev)
+
+        def finish():
+            return _pf_finish(self, out, dec, host_fut, orig, partial=False)
+
+        return finish
+
+    return go
 
 
 def _upload_like(self, t_host, ref, dtype_torch):
@@ -2555,8 +2686,9 @@ def _cpu_split(L, idh, miss):
     return torch.tensor(pick, dtype=idh.dtype)
 
 
-def _decide_core(self, x4, idh, sch, mode, defer_host=False):
-    """Routing on the host (ids/scores [rows, k]) -> static / dynamic / host split and the host part (see _decide)."""
+def _decide_core(self, x4, idh, sch, mode, defer_host=False, xh_fn=None):
+    """Routing on the host (ids/scores [rows, k]) -> static / dynamic / host split and the host part (see _decide).
+    xh_fn: returns the MoE input rows on the host (torch [rows, H]) instead of a blocking read of x4."""
     L = self.layer_num
     k = self.top_k
     t0 = time.perf_counter()
@@ -2633,7 +2765,10 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
                 stream.append((writes, sidx, torch.where(rmask, sch[:valid], torch.zeros_like(sch[:valid]))))
     if bool(v_miss.any()):
         t1 = time.perf_counter()
-        xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
+        if xh_fn is not None:
+            xh = xh_fn()[:valid].to(torch.bfloat16)
+        else:
+            xh = ttnn.to_torch(_die0(x4)).reshape(-1, x4.shape[-1])[:valid].to(torch.bfloat16)
         HYB.st["t_read"] += time.perf_counter() - t1
         job = (L, xh, idh[:valid], sch[:valid], v_miss)
         host = None if defer_host else HYB.host_compute(*job)

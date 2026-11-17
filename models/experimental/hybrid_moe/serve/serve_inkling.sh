@@ -8,7 +8,7 @@
 #                 outside the device's 191 built on first use, plans/inkling_plan.npz)
 #        CTX (max model len, default 32768), K (MTP drafts per verify pass, 2), PORT (8000),
 #        TRACE (1: verify / drafter traces), TRACE_MIB (trace region, default 400; fast 320), HYB_IMAGE, WCACHE, LIB, FP32ACC (1), PREFETCH (1), STREAM (1: prefill
-#                 streaming; 0 = the CPU computes every missed expert), NS (staging slots: 32 at CTX > 32768, else 128), PGROUP (16),
+#                 streaming; 0 = the CPU computes every missed expert), NS (staging slots: 32 at CTX > 32768, else 128), PCHUNK / PGROUP (prefill chunk / group: 1536 / 10 at CTX > 32768, else 2048 / 8),
 #        EXTRA (more docker -e flags)
 # Code: this checkout's Inkling port, the M2.7 port, qwen36 and hybrid_moe are mounted over the image's copies.
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)   # models/experimental/hybrid_moe
@@ -19,7 +19,7 @@ PLAN=/opt/tt-metal/models/experimental/hybrid_moe/plans/inkling_plan.npz
 case $PROFILE in
   # fast: little DRAM beside the experts -> 1024-row prefill launches (half the 2048-row transients)
   fast) K=${K:-2}; POLICY=early_gu4dn8; S=192; LIB=${LIB:-/hyblib/inkling_int4_fb191}
-        PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-1024} -e HYB_SOCKET=1"
+        PENV="-e HYB_FUSED=1 -e HYB_ROWS=$((K + 1)) -e INKLING_PREFILL_CHUNK=${PCHUNK:-$([ "$CTX" -gt 32768 ] && echo 1536 || echo 2048)} -e HYB_SOCKET=1"
         # 4-page host -> device socket FIFOs (L1 on the socket cores): 8 left the FP32-accumulation prefill matmuls' circular
         # buffers 32 KB short (TT_THROW static CB clash at warm-up)
         PENV="$PENV -e HYB_SOCKET_H2D_DEPTH=${H2D_DEPTH:-4}"
@@ -38,7 +38,7 @@ case $PROFILE in
           PENV="$PENV -e HYB_DEV_POLICY=/opt/tt-metal/models/autoports/thinkingmachines_inkling_small/doc/precision/all_gu4dn8.json"
           PENV="$PENV -e HYB_STREAM_ROUNDS=${SROUNDS:-3} -e HYB_STREAM_MIN=${SMIN:-4} -e HYB_STREAM_MIN_LONG=1"
           PENV="$PENV -e HYB_STREAM_LONG_FROM=${SLONG:-1024} -e HYB_STREAM_CQ1=${CQ1:-0} -e HYB_PF_PREFETCH_MIN=${PFMIN:-0} -e HYB_LRU=0"
-          PENV="$PENV -e INKLING_PREFILL_GROUP=${PGROUP:-16}"
+          PENV="$PENV -e INKLING_PREFILL_GROUP=${PGROUP:-$([ "$CTX" -gt 32768 ] && echo 10 || echo 8)}"
           # split: the fewest-token missed experts of a prefill step on the CPU while the rest stream (1-4K prompts:
           # 7% faster); costs for Inkling's experts: an 18.4 MB copy ~0.65 ms, an int4 expert ~0.5 ms + 0.05 per token
           PENV="$PENV -e HYB_PF_SPLIT=${PFSPLIT:-1} -e HYB_PF_COPY_MS=${COPY_MS:-4} -e HYB_PF_CPU_MS=0.5,0.05 -e HYB_HOSTK_THREADS=${HK_THREADS:-8}"

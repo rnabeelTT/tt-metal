@@ -4,7 +4,7 @@
 the hybrid overlay's host counters per chunk (t_* keys of HYB.st). Dev signal.
 
 usage (hybrid env as tools/eval_hybrid.sh, TOOL=prefill_bench.py): prefill_bench.py [N=8192]
-env: PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures),
+env: PF_PROF (1: cProfile of the timed prefill's main thread), PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures),
      PF_TEXT (a json of token-id documents: real text instead of spread synthetic ids)
 """
 
@@ -78,10 +78,23 @@ def main():
             print(f"earlier request: {n_prev} prompt tokens in {time.time() - t0:.1f} s", flush=True)
         st0 = dict(HYB.st) if HYB is not None else {}
         eng._reset()
+        prof = None
+        if os.environ.get("PF_PROF") == "1":  # the main thread's time by function (where the host blocks or works)
+            import cProfile
+
+            prof = cProfile.Profile()
+            prof.enable()
         t0 = time.time()
         eng._prefill(ids)
         ttnn.synchronize_device(mesh)
         dt = time.time() - t0
+        if prof is not None:
+            import pstats
+
+            prof.disable()
+            for key in ("tottime", "cumulative"):
+                pstats.Stats(prof, stream=sys.stdout).sort_stats(key).print_stats(45)
+            sys.stdout.flush()
         nch = -(-N // eng.chunk)
         print(
             f"prefill {N} tokens: {dt:.2f} s ({N / dt:.0f} tok/s), {nch} chunks of {eng.chunk}: "

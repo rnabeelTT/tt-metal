@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import time
 
+import numpy as np
 import torch
 import ttnn
 from loguru import logger
@@ -154,6 +155,27 @@ class InklingSpecServing:
             for layer in model.layers
             for c in (layer.attention.k_sconv, layer.attention.v_sconv, layer.attn_sconv, layer.mlp_sconv)
         ]
+        # Prefix cache (INKLING_PREFIX_CACHE, default 1; vLLM's own prefix caching stays off: the engine keeps every
+        # cache itself). The global layers' paged KV is indexed by position, so a new prompt that shares the previous
+        # prompt's first b tokens can keep it; the per-sequence state at b is the 4 short-conv states of every layer
+        # (device copies taken during the prefill, when a layer's chunk ends at b) and the sliding layers' rings (read to
+        # host after the prefill: a ring holds the window + a chunk + a block, so the 512 positions before b, the last
+        # chunk boundary before the prompt's end, are still in it). The next prompt with the same first b tokens
+        # restores both and prefills from b. INKLING_PREFIX_MIN (default 2048): the shortest prefix snapshotted.
+        self.px_on = os.environ.get("INKLING_PREFIX_CACHE", "1") == "1"
+        self.px_min = int(os.environ.get("INKLING_PREFIX_MIN", "2048"))
+        self._px = None
+        if self.px_on:
+            blocks = list(model.layers) + ([self.mtp.depths[0].block] if self.mtp_prompt else [])
+            convs = lambda bl: (bl.attention.k_sconv, bl.attention.v_sconv, bl.attn_sconv, bl.mlp_sconv)  # noqa: E731
+            # snapshot buffers allocated here, before any trace capture (a buffer allocated after the captures can land
+            # in a trace's freed intermediates); copies into / out of them run the program reset() compiles
+            self._px_convs = [
+                [(c, ttnn.clone(c._zero, memory_config=c.st.memory_config())) for c in convs(bl)] for bl in blocks
+            ]
+            self._px_rings = [
+                t for bl in blocks if bl.attention.sliding for t in (bl.attention.k_cache, bl.attention.v_cache)
+            ]
         # global layers scale q / the relative bias by tau(pos) = 1 + alpha log(max(pos / n_floor, 1)) past n_floor
         # positions (128000): with a context beyond it, every verify pass carries a per-row tau tensor (ones below)
         self.n_floor = args.inkling.get("log_scaling_n_floor")
@@ -448,9 +470,10 @@ class InklingSpecServing:
         return drafts, (None if smp.greedy else qs)
 
     # ------------------------------------------------------------------ warm-up / capture
-    def _mtp_prompt_hook(self, ids):
+    def _mtp_prompt_hook(self, ids, start=0, snap=None):
         """on_chunk for prefill_tokens: drafter depth 0 over the chunk's rows t (the target's normed hidden of t, the
-        token at t + 1), committed past the real rows; ids = every prompt token (the one after the prefilled part too).
+        token at t + 1), committed past the real rows; ids = every prompt token (the one after the prefilled part too),
+        start = the prefill's first position (the chunk offsets are relative to it); snap = the prefix-snapshot position.
         """
         from models.tt_transformers.tt.common import Mode
 
@@ -458,6 +481,7 @@ class InklingSpecServing:
         dp = mtp.depths[0]
 
         def hook(c0, n, Tp, x):
+            c0 = start + c0
             with mtp.own_ccl():
                 h = ttnn.multiply(model.norm(x, mode=Mode.PREFILL), self.mup)
                 if h.is_sharded():
@@ -475,19 +499,34 @@ class InklingSpecServing:
                 out = dp.block.forward_prefill(xm, c0, self.pt_host, valid=(n if n < Tp else None))
                 for t in (xm, out):
                     ttnn.deallocate(t)
+            if snap is not None and c0 + n == snap:
+                self._px_save(len(self._px_convs) - 1)
 
         return hook
 
-    def _prefill(self, ids):
-        """The target's prefill of ids[:-1] (+ the drafter's prompt pass)."""
+    def _prefill(self, ids, start=0, snap=None):
+        """The target's prefill of ids[start:-1] (+ the drafter's prompt pass); the states must hold ids[:start].
+        snap: a position (a chunk boundary past start) at which every layer's conv states are copied (prefix cache)."""
         hyb = _hyb()
         if hyb is not None and hyb.enabled:
-            hyb.stream.begin_prefill(len(ids) - 1)  # the streaming threshold / prefetch banking by prompt length
+            hyb.stream.begin_prefill(
+                len(ids) - 1 - start
+            )  # the streaming threshold / prefetch banking by prompt length
             if hyb.hostk:
                 hyb.hostk_threads = 0  # prefill: the host kernel's whole pool (compute-bound)
-        hook = self._mtp_prompt_hook(ids) if self.mtp_prompt else None
+        hook = self._mtp_prompt_hook(ids, start, snap) if self.mtp_prompt else None
+        on_layer = None
+        if snap is not None:
+            on_layer = lambda li, end, part: self._px_save(li, part) if end == snap else None  # noqa: E731
         try:
-            self.model.prefill_tokens(torch.as_tensor(ids[:-1]), self.pt_host, buckets=self.buckets, on_chunk=hook)
+            self.model.prefill_tokens(
+                torch.as_tensor(ids[start:-1]),
+                self.pt_host,
+                start=start,
+                buckets=self.buckets,
+                on_chunk=hook,
+                on_layer=on_layer,
+            )
         finally:
             if self.captured and self.guard.purge():
                 self.stats["cache_purges"] = self.stats.get("cache_purges", 0) + 1
@@ -495,6 +534,29 @@ class InklingSpecServing:
                 # decode: INKLING_DECODE_HOSTK_THREADS (default 6; bandwidth-bound, the rest leave DRAM bandwidth to
                 # the uploads)
                 hyb.hostk_threads = int(os.environ.get("INKLING_DECODE_HOSTK_THREADS", "6"))
+
+    def _px_save(self, i, part=None):
+        """Block i's conv states -> its snapshot buffers (block i = target layer i; the last = drafter depth 0).
+        part: "attn" (k, v, attn convs), "mlp" (the MLP conv) or None (all four)."""
+        convs = self._px_convs[i]
+        for c, buf in convs[:3] if part == "attn" else convs[3:] if part == "mlp" else convs:
+            ttnn.copy(c.st, buf)
+
+    def _px_restore(self, px):
+        for blk in self._px_convs:
+            for c, buf in blk:
+                ttnn.copy(buf, c.st)
+        for h, t in zip(px["rings"], self._px_rings):
+            ttnn.copy_host_to_device_tensor(h, t)
+
+    def _px_match(self, prompt_ids):
+        """The prefix-cache entry whose first b tokens begin this prompt (b < len(prompt)), else None."""
+        px = self._px
+        if px is None or px["b"] > len(prompt_ids) - 1:
+            return None
+        b = px["b"]
+        a = np.asarray(px["ids"][:b], dtype=np.int64)
+        return px if np.array_equal(a, np.asarray(prompt_ids[:b], dtype=np.int64)) else None
 
     def _reset(self):
         self.model.reset_sequence_state()
@@ -506,6 +568,7 @@ class InklingSpecServing:
         `prompt_len` tokens covers the full chunks too), the verify rows at every width 1..8, the drafter at every
         accepted-row width and depth. Then the sequence state is reset."""
         t0 = time.time()
+        self._px = None
         hyb = _hyb()
         if hyb is not None and hyb.enabled:
             for li in list(hyb.lib):  # the hybrid layers' host library RAM copies (loading since the build)
@@ -577,6 +640,7 @@ class InklingSpecServing:
         if not self.trace or self.captured:
             return
         t0 = time.time()
+        self._px = None  # the eager passes below write KV rows of the global caches
         p = self.buckets[-1]
         for R in range(1, self.k + 2):
             if R not in self.bufs:  # (kept across a re-capture)
@@ -727,8 +791,16 @@ class InklingSpecServing:
         self.adopt_next = False
         self._pending = []
         self._reset()
-        if P > 1:
-            self._prefill(list(prompt_ids))
+        px, self._px = self._px_match(prompt_ids) if P > 1 else None, None  # (invalid until this prefill completes)
+        b0 = px["b"] if px is not None else 0
+        snap = ((P - 2) // self.chunk) * self.chunk if self.px_on and P > 1 else 0
+        snap = snap if snap >= self.px_min else 0
+        if b0:
+            self._px_restore(px)
+            self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
+            self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
+        if P - 1 > b0:
+            self._prefill(list(prompt_ids), start=b0, snap=(snap if snap > b0 else None))
             if self._new_programs() and self.recaptures < int(os.environ.get("INKLING_MAX_RECAPTURES", "4")):
                 # programs compiled after the captures (see _new_programs): fresh traces whose intermediates avoid the
                 # new binaries, then the prompt again (the captures' eager passes reset the sequence state)
@@ -741,7 +813,20 @@ class InklingSpecServing:
                 self._release_traces()
                 self.capture()
                 self._reset()
-                self._prefill(list(prompt_ids))
+                b0 = 0
+                self._prefill(list(prompt_ids), snap=(snap or None))
+        if snap and snap > b0:
+            self._px = {
+                "ids": list(prompt_ids[:snap]),
+                "b": snap,
+                "rings": [ttnn.from_device(t) for t in self._px_rings],
+            }
+        elif snap and px is not None:
+            self._px = px  # the same boundary: the restored snapshot still holds
+        if b0 or self._px is not None:
+            logger.info(
+                f"Inkling prefix cache: prompt of {P} tokens, reused {b0}, snapshot at {self._px['b'] if self._px else '-'}"
+            )
         nxt = self._first(int(prompt_ids[-1]), P - 1, self._smp)
         self.stats["t_prefill"] += time.time() - t0
         self.stats["prefills"] += 1

@@ -17,8 +17,8 @@ from __future__ import annotations
 import os
 
 import torch
-
 import ttnn
+
 from models.autoports.minimaxai_minimax_m2_7.tt.layer import Qwen35MoeDecoderLayer as _M27Layer
 from models.autoports.thinkingmachines_inkling_small.tt.attention import InklingAttention
 from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
@@ -34,9 +34,21 @@ class _HFConfigView:
         L = args.n_layers_total if hasattr(args, "n_layers_total") else len(args.attention_type_list)
         local = set(r["local_layer_ids"])
         self.layer_types = ["hybrid_sliding" if i in local else "hybrid" for i in range(max(L, 64))]
-        for k in ("hidden_size", "head_dim", "num_attention_heads", "num_key_value_heads", "swa_head_dim",
-                  "swa_num_attention_heads", "swa_num_key_value_heads", "d_rel", "rel_extent", "sliding_window_size",
-                  "log_scaling_n_floor", "log_scaling_alpha", "rms_norm_eps"):
+        for k in (
+            "hidden_size",
+            "head_dim",
+            "num_attention_heads",
+            "num_key_value_heads",
+            "swa_head_dim",
+            "swa_num_attention_heads",
+            "swa_num_key_value_heads",
+            "d_rel",
+            "rel_extent",
+            "sliding_window_size",
+            "log_scaling_n_floor",
+            "log_scaling_alpha",
+            "rms_norm_eps",
+        ):
             setattr(self, k, r[k])
 
 
@@ -49,14 +61,24 @@ class InklingDenseMLP:
         self.mesh, self.args, self.tt_ccl = mesh, args, tt_ccl
         self.N = mesh.get_num_devices()
         col, row = ttnn.ShardTensorToMesh(mesh, dim=-1), ttnn.ShardTensorToMesh(mesh, dim=-2)
-        up = lambda t, m: ttnn.as_tensor(t.to(torch.bfloat16).T.contiguous(), dtype=dtype, layout=ttnn.TILE_LAYOUT,  # noqa
-                                         device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=m)
+        up = lambda t, m: ttnn.as_tensor(
+            t.to(torch.bfloat16).T.contiguous(),
+            dtype=dtype,
+            layout=ttnn.TILE_LAYOUT,  # noqa
+            device=mesh,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            mesh_mapper=m,
+        )
         self.w1 = up(sd["gate_proj.weight"], col)
         self.w3 = up(sd["up_proj.weight"], col)
         self.w2 = up(sd["down_proj.weight"], row)
-        self.ckc = ttnn.init_device_compute_kernel_config(mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4,
-                                                          math_approx_mode=False, fp32_dest_acc_en=True,
-                                                          packer_l1_acc=True)
+        self.ckc = ttnn.init_device_compute_kernel_config(
+            mesh.arch(),
+            math_fidelity=ttnn.MathFidelity.HiFi4,
+            math_approx_mode=False,
+            fp32_dest_acc_en=True,
+            packer_l1_acc=True,
+        )
 
     def forward(self, x, mode="decode"):
         if x.is_sharded():
@@ -73,8 +95,15 @@ class InklingDenseMLP:
             return part
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
-        return tt_all_reduce(part, self.mesh, self.tt_ccl, cluster_axis=0, dim=3, topology=self.args.ccl_topology(),
-                             memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        return tt_all_reduce(
+            part,
+            self.mesh,
+            self.tt_ccl,
+            cluster_axis=0,
+            dim=3,
+            topology=self.args.ccl_topology(),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
 
 
 class InklingDecoderLayer(_M27Layer):
@@ -91,14 +120,21 @@ class InklingDecoderLayer(_M27Layer):
         self._fuse_norm_agmm = False
         self._fuse_ff_agmm = False
         self._addnorm = None
-        self.attention_norm = self._make_norm(mesh_device, args, state_dict, layer_num, "input_layernorm",
-                                              tensor_cache_path, tt_ccl, "attention_norm")
-        self.ffn_norm = self._make_norm(mesh_device, args, state_dict, layer_num, "post_attention_layernorm",
-                                        tensor_cache_path, tt_ccl, "ff_norm")
+        self.attention_norm = self._make_norm(
+            mesh_device, args, state_dict, layer_num, "input_layernorm", tensor_cache_path, tt_ccl, "attention_norm"
+        )
+        self.ffn_norm = self._make_norm(
+            mesh_device, args, state_dict, layer_num, "post_attention_layernorm", tensor_cache_path, tt_ccl, "ff_norm"
+        )
         attn_sd = substate(state_dict, f"layers.{layer_num}.self_attn")
         self.attention = InklingAttention(
-            mesh_device, _HFConfigView(args), {k: attn_sd[k] for k in attn_sd}, layer_num, tt_ccl=tt_ccl,
-            block_size=int(getattr(args, "kv_block_size", 64)), max_seq_len=int(args.max_seq_len),
+            mesh_device,
+            _HFConfigView(args),
+            {k: attn_sd[k] for k in attn_sd},
+            layer_num,
+            tt_ccl=tt_ccl,
+            block_size=int(getattr(args, "kv_block_size", 64)),
+            max_seq_len=int(args.max_seq_len),
             weight_dtype=getattr(args, "attn_weight_dtype", None) or ttnn.bfloat8_b,
             kv_dtype=getattr(args, "inkling_kv_dtype", None) or getattr(args, "kv_dtype", None) or ttnn.bfloat8_b,
             own_global_cache=bool(getattr(args, "inkling_own_kv", True)),
@@ -108,12 +144,15 @@ class InklingDecoderLayer(_M27Layer):
         )
         H, N = args.dim, self.num_devices
         shard = ttnn.ShardTensorToMesh(mesh_device, dim=-1) if N > 1 else None
-        self.attn_sconv = ShortConv(mesh_device, state_dict[f"layers.{layer_num}.attn_sconv.weight"].reshape(H, -1),
-                                    shard, H // N)
-        self.mlp_sconv = ShortConv(mesh_device, state_dict[f"layers.{layer_num}.mlp_sconv.weight"].reshape(H, -1),
-                                   shard, H // N)
-        self.feed_forward = self._build_feed_forward(mesh_device, args, state_dict, layer_num, tensor_cache_path,
-                                                     tt_ccl)
+        self.attn_sconv = ShortConv(
+            mesh_device, state_dict[f"layers.{layer_num}.attn_sconv.weight"].reshape(H, -1), shard, H // N
+        )
+        self.mlp_sconv = ShortConv(
+            mesh_device, state_dict[f"layers.{layer_num}.mlp_sconv.weight"].reshape(H, -1), shard, H // N
+        )
+        self.feed_forward = self._build_feed_forward(
+            mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl
+        )
 
     def _build_feed_forward(self, mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl):
         if not args.is_moe_layer(layer_num):  # dense SwiGLU (global_scale folded into down_proj by the state dict)
@@ -129,9 +168,22 @@ class InklingDecoderLayer(_M27Layer):
         self.attn_sconv.reset()
         self.mlp_sconv.reset()
 
-    def forward(self, x, cos=None, sin=None, mode="decode", chunk_size=128, position_tensor=None, page_table=None,
-                chunk_page_table=None, chunk_start_idx=None, chunk_start_idx_tensor=None, valid_len=None,
-                gdn_collect=False, tau=None):
+    def forward(
+        self,
+        x,
+        cos=None,
+        sin=None,
+        mode="decode",
+        chunk_size=128,
+        position_tensor=None,
+        page_table=None,
+        chunk_page_table=None,
+        chunk_start_idx=None,
+        chunk_start_idx_tensor=None,
+        valid_len=None,
+        gdn_collect=False,
+        tau=None,
+    ):
         if mode == "rows":
             return self.forward_rows(x, position_tensor, page_table, tau=tau)
         if mode != "decode":
@@ -185,6 +237,70 @@ class InklingDecoderLayer(_M27Layer):
         self.attention.commit_rows(n)
         self.attn_sconv.commit_rows(n)
         self.mlp_sconv.commit_rows(n)
+
+    def prefill_pipelined(self):
+        """Whether this layer's prefill can run split (prefill_pre / prefill_moe): a hybrid MoE layer on the host-routed
+        path (hybrid.patch.pf_pipelined)."""
+        import sys
+
+        pm = sys.modules.get("hybrid.patch")
+        return pm is not None and hasattr(self.feed_forward, "_router_logits") and pm.pf_pipelined(self.feed_forward)
+
+    def prefill_pre(self, x, p0: int, page_table_host=None, valid=None):
+        """forward_prefill, part 1 (queued on the device, no host wait): attention, its convs (committed), the MoE input
+        and its router logits with their non-blocking reads. -> the context for prefill_moe."""
+        import sys
+
+        mc = Mode.PREFILL
+        norm_cfg = self.args.get_norm_config("attn", mc) if self.num_devices > 1 else None
+        attn_in = self.attention_norm(x, mode=mc, norm_config=norm_cfg)
+        if attn_in.is_sharded():
+            attn_in = ttnn.sharded_to_interleaved(attn_in, ttnn.DRAM_MEMORY_CONFIG)
+        a = self.attention.forward_prefill(attn_in, p0, page_table_host, valid=valid)
+        ttnn.deallocate(attn_in)
+        a2 = self.attn_sconv.rows(a, commit_all=valid is None)
+        if valid is not None:
+            self.attn_sconv.commit_final(int(valid))
+        ttnn.deallocate(a)
+        h = ttnn.add(x, a2)
+        ttnn.deallocate(a2)
+        ff_cfg = self.args.get_norm_config("ff", mc) if self.num_devices > 1 else None
+        ff_in = self.ffn_norm(h, mode=mc, norm_config=ff_cfg)
+        if ff_in.is_sharded():
+            ff_in = ttnn.sharded_to_interleaved(ff_in, ttnn.DRAM_MEMORY_CONFIG)
+        ctx = sys.modules["hybrid.patch"]._pf_pre(self.feed_forward, ff_in)
+        return dict(h=h, ff_in=ff_in, ctx=ctx, valid=valid)
+
+    def prefill_moe(self, pre):
+        """forward_prefill, part 2: the host plans the MoE step; returns go() -> queues the device experts -> done() ->
+        the layer output (waits for the CPU experts, then the MLP conv (committed) and the residual add)."""
+        import sys
+
+        go_moe = sys.modules["hybrid.patch"]._pf_plan(self.feed_forward, pre["ctx"])
+
+        def go():
+            fin = go_moe()
+
+            def done():
+                return self._prefill_moe_done(pre, fin)
+
+            return done
+
+        return go
+
+    def _prefill_moe_done(self, pre, fin):
+        """prefill_moe's end: the MoE output (fin), the MLP conv (committed), the residual add."""
+        valid = pre["valid"]
+        f = fin()
+        ttnn.deallocate(pre["ff_in"])
+        f2 = self.mlp_sconv.rows(f, commit_all=valid is None)
+        if valid is not None:
+            self.mlp_sconv.commit_final(int(valid))
+        ttnn.deallocate(f)
+        out = ttnn.add(pre["h"], f2)
+        ttnn.deallocate(pre["h"])
+        ttnn.deallocate(f2)
+        return out
 
     def forward_prefill(self, x, p0: int, page_table_host=None, valid=None):
         """A prefill chunk (T rows, T % 64 == 0, p0 % block == 0): x [1, 1, T, H/N] fractured -> same. One attention

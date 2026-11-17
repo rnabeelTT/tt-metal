@@ -74,7 +74,16 @@ class Qwen35MoeModel(_M27Model):
         )
 
     def prefill_tokens(
-        self, ids, page_table_host, start=0, chunk=None, logits_rows="last", buckets=None, on_chunk=None, group=None
+        self,
+        ids,
+        page_table_host,
+        start=0,
+        chunk=None,
+        logits_rows="last",
+        buckets=None,
+        on_chunk=None,
+        group=None,
+        on_layer=None,
     ):
         """Eager chunked prefill of token ids [T] (torch) from position `start` (a multiple of the chunk; the conv
         states must hold the sequence up to start). Chunks of `chunk` rows (default the layers' prefill_chunk). A
@@ -89,7 +98,10 @@ class Qwen35MoeModel(_M27Model):
 
         Returns the logits of the last real row ([V] torch fp32) or, logits_rows="all", of every real row ([T, V]).
         on_chunk(c0, n, Tp, x): called after each chunk's layers with the chunk's final hidden x [1, 1, Tp, H/N]
-        (fractured, before the final norm; e.g. the MTP drafter's prompt pass), n real rows of Tp."""
+        (fractured, before the final norm; e.g. the MTP drafter's prompt pass), n real rows of Tp.
+        on_layer(li, end, part): called when layer li's conv states hold the sequence up to end (the absolute position
+        after a chunk's real rows): part "attn" for the attention-side convs (k, v, attn), "mlp" for the MLP conv
+        (pipelined layers advance the attention side ahead of the MLP side; e.g. the engine's prefix snapshots)."""
         import os
         import sys
 
@@ -98,6 +110,10 @@ class Qwen35MoeModel(_M27Model):
 
         chunk = chunk or self.layers[0].attention.prefill_chunk
         group = int(group or os.environ.get("INKLING_PREFILL_GROUP", "8"))
+        # INKLING_PREFILL_PIPE (default 1): a hybrid layer's chunks overlap -- the device runs the next chunks'
+        # attention (INKLING_PREFILL_AHEAD of them, default 2) and the current chunk's experts while the host plans
+        pipe = os.environ.get("INKLING_PREFILL_PIPE", "1") == "1"
+        ahead = max(1, int(os.environ.get("INKLING_PREFILL_AHEAD", "2")))
         hyb = getattr(sys.modules.get("hybrid.patch"), "HYB", None)
         rep = ttnn.ReplicateTensorToMesh(self.mesh_device)
         V = int(getattr(self.args, "unpadded_vocab_size", self.args.vocab_size))
@@ -135,6 +151,9 @@ class Qwen35MoeModel(_M27Model):
                         f" MiB, largest block {mv.largest_contiguous_bytes_free_per_bank / 2**20:.0f} MiB/bank",
                         flush=True,
                     )
+                if pipe and hyb is not None and layer.prefill_pipelined():
+                    self._prefill_layer_pipelined(layer, li, grp, xs, start, page_table_host, hyb, on_layer, ahead)
+                    continue
                 for i, (c0, n, Tp, valid) in enumerate(grp):
                     if hyb is not None:
                         hyb.pf_valid = valid
@@ -143,6 +162,9 @@ class Qwen35MoeModel(_M27Model):
                     finally:
                         if hyb is not None:
                             hyb.pf_valid = None
+                    if on_layer is not None:
+                        on_layer(li, start + c0 + n, "attn")
+                        on_layer(li, start + c0 + n, "mlp")
             for (c0, n, Tp, _), x in zip(grp, xs):
                 if on_chunk is not None:
                     on_chunk(c0, n, Tp, x)
@@ -166,6 +188,50 @@ class Qwen35MoeModel(_M27Model):
                 ttnn.deallocate(x)
         res = torch.cat(out)
         return res[-1] if logits_rows == "last" else res
+
+    @staticmethod
+    def _prefill_layer_pipelined(layer, li, grp, xs, start, page_table_host, hyb, on_layer, ahead):
+        """One hybrid layer over a group's chunks, overlapped: part 1 (device only) of chunk i + ahead is queued before
+        the host plans chunk i, and chunk i - 1 completes (its CPU experts waited for) after chunk i's experts are
+        queued. Every conv state still advances chunk by chunk in order."""
+        pre, pending = {}, None
+
+        def issue(j):
+            c0, n, Tp, valid = grp[j]
+            pre[j] = layer.prefill_pre(xs[j], start + c0, page_table_host, valid=valid)
+            if on_layer is not None:
+                on_layer(li, start + c0 + n, "attn")
+
+        def complete(item):
+            j, done = item
+            hyb.pf_valid = grp[j][3]
+            try:
+                xs[j] = done()
+            finally:
+                hyb.pf_valid = None
+            if on_layer is not None:
+                on_layer(li, start + grp[j][0] + grp[j][1], "mlp")
+
+        for j in range(min(ahead, len(grp))):
+            issue(j)
+        for i in range(len(grp)):
+            hyb.pf_valid = grp[i][3]
+            try:
+                go = layer.prefill_moe(pre.pop(i))  # host plan (background expert copies start)
+            finally:
+                hyb.pf_valid = None
+            # CQ0 work while the copies run: the next chunk's part 1, the previous chunk's end
+            if i + ahead < len(grp):
+                issue(i + ahead)
+            if pending is not None:
+                complete(pending)
+            hyb.pf_valid = grp[i][3]
+            try:
+                done = go()  # this chunk's device experts
+            finally:
+                hyb.pf_valid = None
+            pending = (i, done)
+        complete(pending)
 
     def warm_last_row_slices(self, buckets):
         """Compile prefill_tokens' last-row logits slice at every 32-row offset of every bucket (its offset follows the

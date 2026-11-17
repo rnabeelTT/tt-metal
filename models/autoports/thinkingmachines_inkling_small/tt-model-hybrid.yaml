@@ -113,7 +113,6 @@ serve:
     HYB_FETCH_MAX: "2"
     HYB_FETCH_DN_EXPERTS: /weight-cache/dev_dn4_s175
     HYB_FETCH_DN_LAYERS: "18-41"
-    INKLING_PREFILL_GROUP: "16"
     # the fewest-token missed experts of a prefill step on the CPU (bf16 int4 kernel) while the rest stream; the host
     # kernel runs its whole 8-thread pool in prefill and 6 threads in decode (bandwidth-bound there)
     HYB_PF_SPLIT: "1"
@@ -141,7 +140,8 @@ serve:
     HYB_RAM_CHECK: error
     HYB_WCACHE: /weight-cache/wcache_inkling   # device images of the resident experts, written on the first boot
     QWEN35_MOE_FP32_ACC: "1"   # FP32 accumulation in the prefill expert matmuls (quality: see the card)
-    INKLING_PREFILL_CHUNK: "1024"
+    # prefill chunk / group per profile (below): longer chunks halve the host's per-chunk work (op dispatch, routing,
+    # uploads), the host being the prefill's bottleneck; the 128K profile's KV caches leave room for 1536-token chunks
     INKLING_SPEC_K: "2"
 
 # Two profiles share the downloads and the caches: the KV caches of a 128K context leave room for 32 prefill staging
@@ -155,6 +155,8 @@ serve_profiles:
     max_model_len: 131072
     env:
       HYB_STREAM_SLOTS: "32"
+      INKLING_PREFILL_CHUNK: "1536"
+      INKLING_PREFILL_GROUP: "10"
   - name: p300x2-32k
     description: >
       Up to 32K tokens; more prefill staging slots (faster prompts of several thousand tokens).
@@ -163,6 +165,8 @@ serve_profiles:
     max_model_len: 32768
     env:
       HYB_STREAM_SLOTS: "128"
+      INKLING_PREFILL_CHUNK: "2048"
+      INKLING_PREFILL_GROUP: "8"
 default_profile: p300x2-128k
 
 card:
@@ -202,7 +206,10 @@ card:
     high). Greedy and sampled decoding are both exact with respect to the target model: the MTP drafter only proposes
     tokens. Temperature / top-p / top-k / seed and the presence / frequency / repetition penalties run inside the
     speculative step; min_p, logit_bias, logprobs, bad words and structured outputs (json_schema) work too, decoding
-    one token per step (~25 tok/s).
+    one token per step (~25 tok/s). Prefix cache: a prompt that begins with the previous long prompt (2048 tokens or
+    more), e.g. the same prompt again or the next turn of a conversation, resumes from the last prefill-chunk boundary
+    of that prompt (TTFT ~1.3-2 s however long the shared part); any other request in between replaces the cached
+    prefix.
   performance: |
     | eval | this package | reference | prompts |
     | --- | --- | --- | --- |
@@ -226,8 +233,8 @@ card:
     (speculative acceptance, how many of a token's experts are on the device): ~41-50 tok/s across these prompts.
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
-    - Prefill runs at ~870-930 tok/s from ~15K tokens on (a 118K-token prompt takes ~137 s); shorter prompts are
-      slower per token.
+    - A new long prompt prefills at ~1200-1300 tok/s from ~15K tokens on (a 118K-token prompt takes ~100 s); shorter
+      prompts are slower per token. Only the most recent long prompt is kept as a cached prefix.
     - Requests with min_p, logit_bias, logprobs, bad words or structured outputs decode one token per step (~25 tok/s).
     - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
       does not convert it); `tool_choice: "auto"` returns proper tool_calls.

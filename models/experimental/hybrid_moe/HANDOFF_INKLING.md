@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
 | 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
 | 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k). 2026-11-16 package (fetch, prefetcher fix, LM-head / drafter speedups): 48.2 / 47.1 tok/s greedy / sampled at 128K, prefill ~900 tok/s to 118K, GSM8K-200 96.5%, IFEval-200 89.0 / 92.0; clean `tt-model stop` (11.7 s) and restart without a board reset. Multimodal not started. |
+| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k). 2026-11-16 package (fetch, prefetcher fix, LM-head / drafter speedups): 48.2 / 47.1 tok/s greedy / sampled at 128K, prefill ~900 tok/s to 118K (2026-11-17: engine prefix cache, resent / next turn 1.3-2 s; pipelined prefill + 1536 / 2048-token chunks, ~1200-1300 tok/s, 118K in ~100 s), GSM8K-200 96.5%, IFEval-200 89.0 / 92.0; clean `tt-model stop` (11.7 s) and restart without a board reset. Multimodal not started. |
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -456,3 +456,37 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     92.0; every feature check passes (reasoning split, tool call, streaming, json_schema, min_p, logprobs, penalties).
     `tt-model stop` shut down cleanly in 11.7 s and the next `tt-model serve` came up without a board reset (220 s
     warm). DRAM free after warm-up at 128K: 0.74 GiB.
+
+- **2026-11-17, session 5: TTFT (prefix cache, pipelined prefill, longer chunks).**
+  - **vs M2.7:** short-prompt TTFT already matched (0.54-0.59 s vs 0.60-0.71 s). Long prompts: M2.7 prefills at
+    ~2300 tok/s and serves a resent prompt from vLLM's prefix cache in 1.1-1.8 s; Inkling had no prefix cache (a
+    resent 118K prompt took 135 s) and prefilled at ~900 tok/s.
+  - **Prefix cache** (tt/inkling_serve.py, INKLING_PREFIX_CACHE=1 default, INKLING_PREFIX_MIN 2048): engine-side,
+    vLLM's stays off. The global layers' KV is position-indexed and kept; the per-sequence state at the last chunk
+    boundary b before the prompt's end is snapshotted: the 4 short-conv states of every layer (+ MTP depth 0) copied
+    into device buffers allocated before the captures (ttnn.copy, the reset program) when the layer's chunk ending at
+    b runs (prefill_tokens on_layer; pipelined layers advance the attention-side convs ahead of the MLP conv, hence
+    the "attn" / "mlp" parts), and the sliding rings read to host after the prefill (a ring holds window + chunk +
+    block, so b's 512-row window is still in it). A prompt whose first b tokens match restores both and prefills from
+    b. Invalidated by warm-up / captures (their eager passes write KV) and replaced by every prefill. Served: resent /
+    next chat turn 1.3-2.0 s at 4K-118K. First-token top-5 logprobs fresh vs cached differ no more than fresh vs fresh
+    (the CPU / device expert split varies run to run; top-1 identical in every check; serve/prefix_check.py).
+  - **Prefill profile** (prefill_bench PF_PROF=1, cProfile of the main thread): the host is the bottleneck, not the
+    device. Per 16K prompt: ~132K ttnn op calls (206 per layer-chunk, ~34 us of dispatch each: 8 s), the staging
+    memcpy 3.5 s, from_torch uploads 2.1 s, reads 1 s. 8-core host: the CPU experts, the memcpy and Python share it.
+  - **Pipelined prefill** (INKLING_PREFILL_PIPE=1 default, INKLING_PREFILL_AHEAD 2): a hybrid layer's chunks overlap.
+    hybrid/patch.py splits the host-routed prefill MoE into _pf_pre (router logits + non-blocking reads of them and the
+    MoE input + event), _pf_plan (select / decide / CPU experts) -> go() (_pf_device: uploads, resident + staged
+    experts, shared) -> finish (_pf_finish: CPU rows, all-reduce); tt/layer.py prefill_pre / prefill_moe; tt/model.py
+    _prefill_layer_pipelined queues chunk i + 2's attention before planning chunk i and completes chunk i - 1 after.
+    Teacher-forced gate bit-identical (0.8726 / 0.9506 / 0.1998 = the shipped config). ~+10% alone (host-bound).
+  - **Longer prefill chunks** (per profile in the package): 128K 1536 rows / group 10 (2048 OOMs: a 191 MB dispatch
+    buffer; 2048 with 16 slots streams 3x more and is slower), 32K 2048 / group 8 (128 slots). Gate: 1536 = shipped;
+    2048 0.867 / 0.946 / 0.205. Served (dev server): 128K profile 3.8K 4.2 s, 15K 12.0 s, 30K 23.5 s (1266 tok/s),
+    63K 49.6 s, 118.6K 99.4 s (1193 tok/s; was 137 s); 32K profile 15K 11.2 s (1332 tok/s), 30K 23.8 s.
+  - **Tried, no gain:** HYB_PF_COPY_MS 8 / 12 (fewer copies, more CPU: -2%), INKLING_PREFILL_GROUP 32, lookahead 4,
+    HYB_PF_BGSTREAM=1 (first staging round copied by pinx's background writer on CQ1: implemented, off; the memcpy
+    then competes with the CPU experts: 32K 1172 vs 1335 tok/s), zero-copy pinned writes (still lose ~85% of writes on
+    every die after the prefetcher fix: hybrid/pin/test_zerocopy.py; the copy path 0 of 200).
+  - **Remaining gap to M2.7's prefill** (~1.2-1.3K vs ~2.3K tok/s): host work per chunk. Next levers: fewer ops per
+    layer-chunk (fused conv / MoE glue), traced attention segments, more device-resident experts (DRAM).
