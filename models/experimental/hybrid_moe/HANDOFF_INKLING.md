@@ -11,10 +11,24 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 0. env / disk | done. Watch disk: the expert-image cache `~/.cache/inkling/wcache` grows by ~130 GB per precision profile (a full disk killed the 12:38 queue on 2026-11-14). |
 | 1. CPU reference + routing | done. fp32 router as vLLM computes it. Noise floor between two valid references: top-1 0.925 / conf 0.978 / kl32 0.081 (`compare_refs.py`). |
 | 2. TT port | done for text: decode, 8-row verify and chunked prefill all match the fixtures per layer (prefill PCC = decode; 1000-token prefill ≈ 4 s warm). |
-| 3. hybrid integration | done. **Profile chosen: all bfp8, C=106 slots, S=106 int4 library**: 0.862 / 0.945 / 0.218 (prefill path), at parity with M2.7 (0.848 / 0.933 / 0.196). Decode path matches prefill path. |
-| 4. spec decode | native MTP, verify + drafter both traced, exact (greedy byte-identical to plain decode; exact speculative sampling). Dev-harness best k=1: 15.3 tok/s (15.9 with `HYB_HOST_ROUTE=1`, quality-checked). **Not yet in vLLM**: lives in `tools/spec_bench.py`. DSpark CPU reference only. |
-| 5. optimisation | chunked prefill done. Decode (all dev-harness, `tools/spec_bench.py`): traced verify + commit + drafter, one-program KV row update, row-major short conv, device-untilized logits, opt-in host routing. Bottleneck: host int4 experts (~55 of ~104 ms per k=1 step; DDR bandwidth-bound). |
-| 6. vLLM serving, package, multimodal | **published** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k). 2026-11-16 package (fetch, prefetcher fix, LM-head / drafter speedups): 48.2 / 47.1 tok/s greedy / sampled at 128K, prefill ~900 tok/s to 118K (2026-11-17: engine prefix cache, resent / next turn 1.3-2 s; pipelined prefill + 1536 / 2048-token chunks, ~1200-1300 tok/s, 118K in ~100 s), GSM8K-200 96.5%, IFEval-200 89.0 / 92.0; clean `tt-model stop` (11.7 s) and restart without a board reset. Multimodal not started. |
+| 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
+| 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
+| 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
+| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-17 built from 21d47b7852f): short chat 49.8 / 47.0 tok/s greedy / sampled, TTFT 0.53-0.54 s; new prompts prefill ~1,150-1,200 tok/s from 15K to 118K (118.6K in 104 s); resent prompt / next chat turn 1.3-2.0 s (engine prefix cache); GSM8K-200 96.0%, IFEval-200 90.0 / 90.0; clean `tt-model stop` (10.9 s) and restart without a board reset. **Multimodal not started.** |
+
+**Open items (2026-11-17, end of session 6).** The published package is the deliverable; these are what is left.
+1. Prefill of new long prompts: ~1,150-1,200 tok/s vs M2.7's ~2,300. Host-bound (dispatch of ~206 ttnn ops per
+   layer-chunk, staging memcpy, CPU experts on 8 cores). Levers: fewer ops per layer-chunk (fused conv / MoE glue),
+   traced attention segments, more device-resident experts. Multi-week; expect at most ~1.5x.
+2. Multimodal (vision / audio): not started; the package is text-only.
+3. Prefix cache holds one entry (the last long prompt): interleaved users lose the 1.3-2 s next-turn TTFT. Several
+   snapshots cost host RAM for the rings (+ device buffers for the convs) per entry.
+4. Speculative decode: k=2 MTP. Wider passes lose on host-expert cost per verify row; suffix drafts at k=2 give
+   nothing (session 6). A suffix win needs wider verify widths used only on long copy matches (traces for widths up to
+   ~8, HYB_ROWS / socket FIFOs and trace region sized for them, DRAM is ~0.7 GiB free at 128K).
+5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
+6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
+7. Not yet tested: sustained multi-hour load, several concurrent clients (single-sequence engine: requests queue).
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -494,3 +508,22 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     tok/s greedy / 47.0 sampled, TTFT 0.53-0.54 s; prefill 862 tok/s at 3.8K, ~1,140-1,200 tok/s from 15K to 118K
     (118.6K: 104 s, was 137 s); resent prompts 1.3-1.9 s, next chat turn 1.5-2.0 s. GSM8K-200 96.0%, IFEval-200
     90.0 / 90.0; feature checks pass; DRAM free after warm-up 0.72 GiB; ready in 280 s.
+
+- **2026-11-17, session 6: prompt-lookup (suffix) drafts from M2.7 (65f8c420c5f on raahem/qwen35-397b-hybrid-moe);
+  status / open items refreshed.**
+  - Ported: hybrid/suffix_draft.py (M2.7's SuffixIndex + Chooser, unchanged) and InklingEngine._device_step: the
+    continuation of the longest earlier match of the context's last 3+ tokens replaces the k=2 MTP drafts (same
+    verify width, point-mass q when sampling) when the request's per-match-length head-to-head tally favours it.
+    INKLING_SUFFIX, **default 0**. Also a per-request log line ("Inkling request: tokens/step, suffix steps, verify +
+    draft ms") written when the next request starts.
+  - Served A/B (dev server, 128K profile, K=2, FETCH=1; jobs/sfx1.sh + ab_suffix.py: 8 workloads x greedy / sampled,
+    800 output tokens: code rename / docstrings / small edit, a quote, an explanation, a summary, two chats): the
+    suffix was chosen on **0 steps** in every request; tokens/step off vs on within noise (greedy: rename 2.13 / 2.09,
+    docstrings 2.23 / 2.24, small edit 2.36 / 2.27, quote 2.32 / 2.24, explain 2.31 / 2.29, summary 1.99 / 1.95, story
+    1.74 / 1.74, tech 2.03 / 2.04; outputs differ slightly run to run through the prefill's CPU / device split).
+  - Why (offline replay of the recorded greedy outputs through the same lookup, jobs/sfx_sim.py): matches exist (both
+    suffix drafts right on 41% of steps for the rename, 59% for the quote, 1-7% for chat), but MTP at k=2 already
+    takes 2.1-2.4 tokens per step on exactly those workloads (max 3), so the head-to-head never favours the suffix.
+    M2.7's gain comes from DFlash's 16-token blocks, where a long copy span is worth several extra tokens per pass. For
+    Inkling that needs wider verify passes on suffix steps only (open item 4).
+  - Not republished: the package's behaviour is unchanged (suffix off). Re-served the published package after the A/B.

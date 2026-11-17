@@ -150,6 +150,13 @@ class InklingSpecServing:
         # INKLING_MTP_PROMPT (default 1): drafter depth 0 also runs over the prompt in prefill (its KV / conv state then
         # holds the prompt, as vLLM's MTP does), instead of starting each request from an empty cache
         self.mtp_prompt = self.mtp is not None and os.environ.get("INKLING_MTP_PROMPT", "1") == "1"
+        # INKLING_SUFFIX (default 0): prompt-lookup ("suffix") drafts, M2.7's hybrid/suffix_draft.py. The continuation
+        # of the longest earlier occurrence of the context's last tokens replaces the MTP drafts (same verify width)
+        # when the request's head-to-head tally for that match length favours it; the drafter still runs every pass.
+        # Off: at k=2 MTP already takes the copy spans (2.1-2.4 tokens/step on code edits and quotes), the tally never
+        # switched (served A/B, 2026-11-17, HANDOFF_INKLING.md); its gain needs wider verify passes than k + 1
+        self.sfx_on = self.mtp is not None and os.environ.get("INKLING_SUFFIX", "0") == "1"
+        self._sfx = self._choose = None
         self.sconvs = [
             c
             for layer in model.layers
@@ -787,6 +794,7 @@ class InklingSpecServing:
             raise ValueError("empty prompt")
         if P + self.k + 1 > self.max_seq_len:
             raise ValueError(f"prompt of {P} tokens + the verify window exceeds the context ({self.max_seq_len})")
+        self._log_request()
         self._smp = self._sampler(sampling, prompt_ids, self.V)
         self.adopt_next = False
         self._pending = []
@@ -828,9 +836,28 @@ class InklingSpecServing:
                 f"Inkling prefix cache: prompt of {P} tokens, reused {b0}, snapshot at {self._px['b'] if self._px else '-'}"
             )
         nxt = self._first(int(prompt_ids[-1]), P - 1, self._smp)
+        if self.sfx_on:
+            from hybrid.suffix_draft import Chooser, SuffixIndex
+
+            self._sfx, self._choose = SuffixIndex(list(prompt_ids) + [nxt]), Chooser()
         self.stats["t_prefill"] += time.time() - t0
         self.stats["prefills"] += 1
         return nxt
+
+    def _log_request(self):
+        """The previous request's speculative-decode summary (logged when the next one starts)."""
+        st, prev = self.stats, getattr(self, "_rq0", None)
+        keys = ("steps", "emitted", "sfx_steps", "sfx_acc", "t_verify", "t_draft")
+        now = {k: st.get(k, 0) for k in keys}
+        self._rq0 = now
+        if prev is None or now["steps"] == prev["steps"]:
+            return
+        d = {k: now[k] - prev[k] for k in keys}
+        logger.info(
+            f"Inkling request: {d['emitted'] / d['steps']:.3f} tokens/step over {d['steps']} steps, suffix drafts "
+            f"{d['sfx_steps']} steps ({d['sfx_acc'] / max(1, d['sfx_steps']):.2f} accepted), verify "
+            f"{1e3 * d['t_verify'] / d['steps']:.1f} + draft {1e3 * d['t_draft'] / d['steps']:.1f} ms per step"
+        )
 
     @staticmethod
     def _sampler(sampling, prompt_ids, V):
@@ -900,6 +927,7 @@ class InklingSpecServing:
                 f"Inkling host-sampled step at position {pos}; the engine's continuation is at {self._pos}"
             )
         self._pending, self._drafts, self._qs = [], [], None
+        self._sfx_at(int(pos), int(tok))
         a = time.time()
         L, h = self._verify([int(tok)], int(pos))
         self._last_h = h
@@ -914,12 +942,36 @@ class InklingSpecServing:
         st["t_verify"] += time.time() - a
         return L[0]
 
+    def _sfx_at(self, pos, tok):
+        """The suffix index holds the context through `tok` at `pos` (the token the next verify pass starts from)."""
+        if self._sfx is None:
+            return
+        if self._sfx.n < pos:  # (a gap: positions the engine never saw; not expected) no more lookups this request
+            self._sfx = None
+            return
+        self._sfx.n = pos
+        self._sfx.extend([tok])
+
     def _device_step(self) -> list[int]:
         """One verify pass (+ commit, + the next drafts): -> the new tokens (ends at the end of turn)."""
         x, p, drafts, qs, smp = self._tok, self._pos, self._drafts, self._qs, self._smp
         if p + len(drafts) + 1 > self.max_seq_len:  # the context's last positions: no drafts past it
             drafts = drafts[: max(0, self.max_seq_len - p - 1)]
             qs = qs[: len(drafts)] if qs is not None else None
+        # prompt-lookup drafts: picked from the match length and the request's tally before either draft is compared
+        self._sfx_at(p, x)
+        sfx_n, sfx, dfl, use_sfx = 0, None, drafts, False
+        if self._sfx is not None and drafts:
+            sfx_n, cont = self._sfx.lookup(len(drafts))
+            if sfx_n:
+                sfx = cont + drafts[len(cont) :]  # a continuation shorter than the drafts: the drafter's after it
+                use_sfx = self._choose.pick(sfx_n)
+                if use_sfx:
+                    drafts = sfx
+                    if qs is not None:  # the suffix rows are point-mass proposals
+                        qs = [torch.nn.functional.one_hot(torch.tensor(d), qs[0].numel()).float() for d in cont] + list(
+                            qs[len(cont) :]
+                        )
         rows = [x] + drafts
         a = time.time()
         L, h = self._verify(rows, p)
@@ -932,6 +984,11 @@ class InklingSpecServing:
         if hit is not None:
             new = new[: hit + 1]
         smp.observe(new)
+        if sfx is not None:
+            self._choose.record(sfx_n, sfx, dfl, use_sfx, n, nxt)
+            if use_sfx:
+                self.stats["sfx_steps"] = self.stats.get("sfx_steps", 0) + 1
+                self.stats["sfx_acc"] = self.stats.get("sfx_acc", 0) + n
         self._drafts, self._qs = [], None
         if self.mtp is not None and hit is None and p + n + 1 < self.max_seq_len - 1:
             with self.mtp.own_ccl():
@@ -946,7 +1003,8 @@ class InklingSpecServing:
             logger.info(
                 f"Inkling spec: {st['emitted'] / st['steps']:.2f} tokens/step over {st['steps']} steps, "
                 f"verify {1e3 * st['t_verify'] / st['steps']:.1f} ms, draft "
-                f"{1e3 * st['t_draft'] / st['steps']:.1f} ms per step"
+                f"{1e3 * st['t_draft'] / st['steps']:.1f} ms per step, suffix drafts {st.get('sfx_steps', 0)} steps "
+                f"({st.get('sfx_acc', 0) / max(1, st.get('sfx_steps', 0)):.2f} accepted)"
             )
         return new
 
