@@ -89,6 +89,14 @@ Pieces (all traced, per-prompt re-capture):
   slices were allocated first-fit into the largest free block, leaving the concat output no contiguous room although
   _gather_fits had passed. gather() now reserves the output's block before slicing and frees it right before the
   concat. 3 x (56K prompt, resend, short) on the served 128K profile: no OOM, HYB_GATHER_CHECK identical every time.
+- ADDED (2026-11-17): prompt-lookup ("suffix") drafts, suffix_draft.py + DFlashServing.step (DFLASH_SUFFIX, default 1).
+  Host lookup of the longest earlier occurrence of the context's last 3+ tokens (~0.1 ms at 130K); its continuation
+  replaces the drafter's block when the request's per-match-length head-to-head tally has the suffix ahead (starts on
+  DFlash; counted while unused). Fixed-text A/B (scratch ab_force.py: the same recorded text decoded off / on in one
+  process, 13 workloads, full length): tokens per pass code edits +35 / +6 / +6%, document quotes +16%, code explain
+  +0.4%, chat +0.2% (no workload outside +-1.5% noise below off). Usage-weighted: general assistant mix +3%, coding
+  mix +7.5%. A first rule (suffix on ties) lost up to 1.6% on chat; the committed rule was picked offline on logged
+  per-pass drafts (policy_sim.py), min 0.0%.
 - OPEN (2026-11-16): long prefills after a demotion run 2048-token segments (~20% slower: 56K TTFT ~33-35 s vs 26 s
   at 4096). Tried and reverted (diff: ~/m27-pkg/prefill_room_experiment.diff): a demotion that holds a 72 MB/bank block for the prefill
   (Elastic._hold_room) plus a gather that frees the full tensor before its final concat (ttnn.concat runs > 47

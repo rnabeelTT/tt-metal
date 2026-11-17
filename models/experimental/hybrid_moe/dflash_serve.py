@@ -15,6 +15,11 @@ drafter's paged cache (`end_prefill`). The traces are captured per request after
 next one: eager device work after trace replays hung the next replay (2026-11-06). Every persistent buffer (drafter,
 verify inputs) exists before the first capture: a buffer allocated after a capture can reuse a trace's intermediates.
 
+Prompt-lookup drafts (suffix_draft.py, DFLASH_SUFFIX, default 1): the continuation of the longest earlier occurrence of
+the context's last tokens replaces the drafter's block when the request's head-to-head tally favours it for that match
+length (the drafter still runs every pass). Fixed-text A/B on 13 workloads (2026-11-17): code edits +6..+35% tokens
+per pass, document quotes +16%, chat and code explanations unchanged (within +-1.5%).
+
 The drafter sees the last DFLASH_WINDOW (default 1024) context tokens: its acceptance falls with its context
 (window_oracle.py on an 8K prompt: 2.03 tokens per pass at 1024, 1.47 at 4096, 1.10 with the whole context). When the
 window is full, the drafter cache is refilled from host copies of the last window's features and the traces re-captured.
@@ -50,12 +55,14 @@ import ttnn
 from dflash_tt import DFlashDrafterPaged, argmax_max, cands_body, read_argmax, read_cands, read_logits
 from hybrid import hfpath
 from hybrid.patch import HYB, _port
+from suffix_draft import Chooser, SuffixIndex
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 WARMUP_PROMPT = "Write a haiku about the sea."
 # DFLASH_SAMPLED_DRAFTS=0: sampled requests keep the drafter's argmax drafts (point-mass proposals)
 _SAMPLED_DRAFTS = os.environ.get("DFLASH_SAMPLED_DRAFTS", "1") == "1"
 _SAMPLE_DEBUG = int(os.environ.get("DFLASH_SAMPLE_DEBUG", "0") or 0)  # log the first N sampled passes
+_SUFFIX = os.environ.get("DFLASH_SUFFIX", "1") == "1"  # prompt-lookup drafts (suffix_draft.py) besides the drafter's
 LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
 
@@ -697,6 +704,9 @@ class DFlashServing:
         self._sampler, self._sampling = None, None  # the request's SpecSampler (created by its first sampled step)
         self._out_counts = collections.Counter([] if tok0 is None else [int(tok0)])  # emitted tokens (penalties)
         self._pen_prompt = None  # the prompt's distinct ids, built by the request's first penalized row
+        # the context ids through the step's next input token (suffix_draft.py)
+        self._sfx = SuffixIndex(self._ids + ([] if tok0 is None else [int(tok0)])) if _SUFFIX else None
+        self._choose = Chooser()
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
@@ -733,6 +743,8 @@ class DFlashServing:
                 raise RuntimeError(f"DFlash step at plugin pos {pos} after a host-sampled token at pos {self._pos}")
             self._tok = int(tok)
             self._out_counts.update([self._tok])
+            if self._sfx is not None:
+                self._sfx.extend([self._tok])
         elif host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
             raise RuntimeError(
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
@@ -791,6 +803,17 @@ class DFlashServing:
                 qs.append(self._dist(smp, dc[0][j], dc[1][j], dc[2][j], drafts, full))
                 drafts.append(_draw(smp, qs[-1]))
             self.stats["sample"] = self.stats.get("sample", 0.0) + time.perf_counter() - c0
+        # prompt-lookup drafts: chosen from the match length and the request's tally before either draft is compared
+        sfx_n, sfx, dfl, use_sfx = 0, None, drafts, False
+        if self._sfx is not None and not host_logits:
+            sfx_n, cont = self._sfx.lookup(K)
+            if sfx_n:
+                sfx = cont + drafts[len(cont) :]  # a continuation shorter than K: the drafter's rows after it
+                use_sfx = self._choose.pick(sfx_n)
+                if use_sfx:
+                    drafts = sfx
+                    if qs is not None:  # the suffix rows are point-mass proposals
+                        qs = [(torch.tensor([d]), torch.ones(1)) for d in cont] + qs[len(cont) :]
         a1 = time.perf_counter()
         ver.stage([t] + drafts, list(range(p, p + R)), self._row)
         s2 = time.perf_counter()
@@ -851,6 +874,11 @@ class DFlashServing:
                 tl, ti = lp.topk(32, dim=-1)
                 self._lp.append((lp.gather(1, tgt[:, None])[:, 0], ti.int(), tl.half()))
             self._force_i += a + 1
+        if sfx is not None:
+            self._choose.record(sfx_n, sfx, dfl, use_sfx, a, top[a])
+            if use_sfx:
+                self.stats["sfx_passes"] = self.stats.get("sfx_passes", 0) + 1
+                self.stats["sfx_acc"] = self.stats.get("sfx_acc", 0) + a
         rows_h = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)[: a + 1]
         self.hist.append(rows_h)
         self.n_hist += rows_h.shape[0]
@@ -866,6 +894,8 @@ class DFlashServing:
         else:
             self._out_counts.update(out)
             self._tok, self._pos = top[a], p + a + 1
+            if self._sfx is not None:
+                self._sfx.extend(out)
         st = self.stats
         st["passes"] += 1
         st["tokens"] += len(out)
@@ -944,7 +974,8 @@ class DFlashServing:
                 f"{st['hist']}, draft {1e3 * st['draft'] / n:.1f} + verify {1e3 * st['verify'] / n:.1f} ms per pass, "
                 f"{st['refills']} refills, sampling {1e3 * st.get('sample', 0.0) / n:.1f} ms per pass "
                 f"({st.get('full_rows', 0)} full-row reads; drafter cands {1e3 * st.get('t_dcand', 0.0) / n:.2f}, verify "
-                f"cands {1e3 * st.get('t_vcand', 0.0) / n:.2f} ms), stage {1e3 * st['stage'] / n:.1f} ms -> "
+                f"cands {1e3 * st.get('t_vcand', 0.0) / n:.2f} ms), suffix drafts {st.get('sfx_passes', 0)} passes "
+                f"({st.get('sfx_acc', 0) / max(1, st.get('sfx_passes', 0)):.2f} accepted), stage {1e3 * st['stage'] / n:.1f} ms -> "
                 f"{st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
             )
 
@@ -1030,6 +1061,8 @@ class DFlashServing:
             },
             "prefill_s": round(t_pf, 2),
             "drafter_refills": st["refills"],
+            "suffix_passes": st.get("sfx_passes", 0),
+            "suffix_accepted": st.get("sfx_acc", 0),
         }
 
 
