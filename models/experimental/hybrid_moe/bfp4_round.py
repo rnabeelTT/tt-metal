@@ -91,33 +91,35 @@ def rtne(W):
 
 
 def gptq(W, H, damp, block=128):
-    """W [rows, in] (rows: any number of `out` groups of 16, e.g. many experts stacked) with one shared H [in, in]."""
-    W = W.float().clone()
+    """W [rows, in] (rows: any number of `out` groups of 16, e.g. many experts stacked) with one shared H [in, in].
+    Works on W transposed, so the column being rounded and the ones its error updates are contiguous rows (2x faster
+    than the row-major loop, same values)."""
+    Wt = W.float().t().contiguous()  # [in, rows]
     H = H.double().clone()
     n = H.shape[0]
     dead = torch.diag(H) == 0
     if dead.all():
         raise ValueError(f"gptq: the Hessian is all zero ({n} columns): no calibration tokens reached this weight")
     H[dead, dead] = 1
-    W[:, dead] = 0
+    Wt[dead] = 0
     H += damp * torch.mean(torch.diag(H)) * torch.eye(n, dtype=H.dtype)
     Hinv = torch.linalg.cholesky(torch.cholesky_inverse(torch.linalg.cholesky(H)), upper=True).float()
-    Q = torch.zeros_like(W)
-    R = W.shape[0]
+    Qt = torch.empty_like(Wt)
+    R = Wt.shape[1]
     for i1 in range(0, n, block):
         i2 = min(i1 + block, n)
-        W1 = W[:, i1:i2].clone()
-        Err1 = torch.zeros_like(W1)
+        W1 = Wt[i1:i2].clone()
+        Err1 = torch.empty_like(W1)
         Hi = Hinv[i1:i2, i1:i2]
         for i in range(i2 - i1):
-            w = W1[:, i]
-            q = q_groups(w.reshape(R // 16, 16)).reshape(R)
-            Q[:, i1 + i] = q
+            w = W1[i]
+            q = q_groups(w.view(R // 16, 16)).view(R)
+            Qt[i1 + i] = q
             err = (w - q) / Hi[i, i]
-            W1[:, i:] -= err.unsqueeze(1) * Hi[i, i:].unsqueeze(0)
-            Err1[:, i] = err
-        W[:, i2:] -= Err1 @ Hinv[i1:i2, i2:]
-    return Q
+            W1[i:] -= Hi[i, i:, None] * err[None]
+            Err1[i] = err
+        Wt[i2:] -= Hinv[i1:i2, i2:].t() @ Err1
+    return Qt.t()
 
 
 def round_experts(layer, kind, W, cfg=None, chunk=32):
