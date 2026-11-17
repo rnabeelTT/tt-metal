@@ -238,6 +238,18 @@ Pieces (all traced, per-prompt re-capture):
   fixed: per core ~10 us per 128-token chunk of compute (QK, softmax, PV; the reader runs ~3.5 GB/s per core) and a
   ~30 us six-round tree reduction over 55 cores. Not pursued (user, 2026-11-16): a cheaper tree ~3-4% at 44K;
   approx exp / lower fidelity needs the quality gate.
+- v1.10 BUILT, SERVING HERE, NOT PUSHED TO HF (2026-11-17, image 84de706535cf from e39472160b3; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.9's kept as serve_default_running_v19.cmd): v1.9 + the suffix drafts. The first build
+  (f0c990a4a674, from 65f8c420c5f) failed at engine start: the manifest did not list suffix_draft.py. Served card
+  (128K, ~/m27-pkg/card110*_128k.out): 44.7K first 44.7 tok/s (TTFT 20.8 s), resent 50.8; 85K first 34.3 (TTFT 56.1
+  s), resent 41.3; sampled short 65.2, 44.7K 41.3. Short-prompt decode, same day, 3-5 x 8 runs each: v1.9 79.6-80.9,
+  v1.10 78.4-81.1 (the v1.9 card's 82.3 was a different day). A served code edit (code_edit_hints, 1500 tokens):
+  147 of 576 passes used the suffix proposal (2.95 tokens accepted each), and the request's running average rose
+  from ~69 to 80.8 tok/s once the copy began; chat requests used it on 0-2 passes.
+- bfp4 packer (2026-11-17, ~/m27-pkg/bfp4q/t_pack.py on one p300 board; one chip alone fails: the CUSTOM cluster type
+  needs a mesh descriptor): ttnn.from_torch(bfloat4_b) keeps values already on the bfp4 grid exactly (exponent-search
+  RTN and GPTQ outputs), so a better rounding needs no packer or kernel change; it only replaces round_sig + the
+  packer's RTN in build_dev_experts.py and the fused-weight build.
 - v1.9 PUBLISHED (2026-11-16, image b07f953e02c9 from 2d154a47974, serving here; launch cmd ~/m27-pkg/
   serve_default_running.cmd, v1.8's kept as serve_default_running_v18.cmd): + the dispatch kernel rewrite and the
   gate|up column split. Served card (~/m27-pkg/card_run_v19.out, greedy / sampled): 128K short 82.3 / 67.1 tok/s,
