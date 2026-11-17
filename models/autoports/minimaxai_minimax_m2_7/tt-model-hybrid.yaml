@@ -36,6 +36,7 @@ source:
     - models/experimental/hybrid_moe/serve/sitecustomize.py
     - models/experimental/hybrid_moe/dflash_serve.py
     - models/experimental/hybrid_moe/dflash_tt.py
+    - models/experimental/hybrid_moe/suffix_draft.py
     - models/experimental/hybrid_moe/ref_m27.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py

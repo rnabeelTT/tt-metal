@@ -309,6 +309,8 @@ Pieces (all traced, per-prompt re-capture):
     tokens): 70-100% of rows fell back to full logits (10 ms); 64 per 32K chunk never does.
   - Greedy is not bit-reproducible across requests: the experts' device (bfp4) / host (int4) placement follows earlier
     requests, so near-tied tokens can flip; every variant is coherent after the fix.
+  - Packaging: the manifest lists the hybrid_moe top-level modules one by one (code paths): a new module imported at
+    serve time (suffix_draft.py, 2026-11-17) must be added there, or the engine fails with ModuleNotFoundError.
   - Packaging: tt-model-hybrid.yaml packages from the ~/m27-hybrid worktree (source.tt_metal): move it to the commit to
     ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
     old package images + `docker builder prune -af` freed ~130 GB.
