@@ -70,7 +70,14 @@ void kernel_main() {
     const auto s0 = TensorAccessor(in0_args, in0_tensor_addr);
 
     for (uint32_t b = 0; b < batch; ++b) {
-        if (ids[start_batch + b] >= num_experts) {  // padding group: nothing to read
+#ifdef GROUP_COLS
+        // work unit u = a column block of compact group u % NUM_GROUPS (the in1 writer's GROUP_COLS): its activations
+        const uint32_t g = (start_batch + b) % NUM_GROUPS;
+        in0_tensor_start_tile_id = g * MtKt;
+#else
+        const uint32_t g = start_batch + b;
+#endif
+        if (ids[g] >= num_experts) {  // padding group: nothing to read
             in0_tensor_start_tile_id += MtKt;
             continue;
         }
