@@ -4,6 +4,7 @@
 
 #include "unary.hpp"
 #include "device/unary_device_operation.hpp"
+#include "ttnn/operations/eltwise/unary/common/unary_op_utils.hpp"
 #include "ttnn/operation.hpp"
 #include "ttnn/operations/eltwise/complex/complex.hpp"
 #include "ttnn/operations/eltwise/binary/binary.hpp"
@@ -34,7 +35,14 @@ Tensor unary_impl(
     DataType output_dtype = input_dtype;
     if (op_chain.back().type() == unary::UnaryOpType::TYPECAST ||
         op_chain.back().type() == unary::UnaryOpType::BITCAST) {
-        output_dtype = static_cast<DataType>(*op_chain.back().get_param_if<float>(1));
+        // The cast's parameters may be float, int32_t or uint32_t backed; a float-only read would
+        // dereference an empty optional for an integer-backed cast.
+        const auto target_dtype = unary::utils::typecast_target_dtype(op_chain.back());
+        TT_FATAL(
+            target_dtype.has_value(),
+            "Unary: {} needs two parameters (input and target dtype).",
+            op_chain.back().type());
+        output_dtype = *target_dtype;
         if (optional_output_tensor.has_value()) {
             TT_FATAL(
                 output_dtype == optional_output_tensor->dtype(),
@@ -56,7 +64,7 @@ Tensor unary_impl(
     bool preserve_fp32_precision = (input_dtype == DataType::FLOAT32);
     bool fp32_dest_acc_en = preserve_fp32_precision || output_dtype == DataType::UINT32 ||
                             output_dtype == DataType::INT32 || output_dtype == DataType::FLOAT32 ||
-                            output_dtype == DataType::UINT8 || input_dtype == DataType::UINT8 ||
+                            is_8_bit_int(output_dtype) || is_8_bit_int(input_dtype) ||
                             input_dtype == DataType::UINT32 || input_dtype == DataType::INT32;
     bool bfp8_pack_precise =
         (op_chain.back().type() == unary::UnaryOpType::TYPECAST && output_dtype == DataType::BFLOAT8_B);

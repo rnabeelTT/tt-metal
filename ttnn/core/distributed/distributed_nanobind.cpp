@@ -4,6 +4,9 @@
 
 #include "ttnn/distributed/distributed_nanobind.hpp"
 
+#include <tt-metalium/tt_metal.hpp>
+#include <nanobind/stl/map.h>
+
 #include <tt_stl/reflection.hpp>
 #include <cstddef>
 #include <memory>
@@ -26,6 +29,7 @@
 #include "ttnn-nanobind/small_vector_caster.hpp"
 #include <tt-metalium/distributed.hpp>
 #include <tt-metalium/experimental/device.hpp>
+#include <tt-metalium/experimental/dispatch_context.hpp>
 #include <tt-metalium/hal.hpp>
 #include <tt-metalium/mesh_coord.hpp>
 #include <tt-metalium/mesh_device_view.hpp>
@@ -33,7 +37,9 @@
 #include <tt-metalium/system_mesh.hpp>
 #include <tt-metalium/maybe_remote.hpp>
 #include <tt-metalium/distributed_host_buffer.hpp>
-#include <ttnn/api/ttnn/types.hpp>
+#include <internal/mesh_device.hpp>
+#include <tt_stl/assert.hpp>
+#include "ttnn/types.hpp"
 #include "ttnn/distributed/distributed_tensor.hpp"
 #include "ttnn/distributed/api.hpp"
 #include "ttnn/distributed/types.hpp"
@@ -41,7 +47,31 @@
 #include "distribution_mode.hpp"
 
 #include "ttnn/tensor/types.hpp"
+#include "ttnn/tensor/tensor_ops.hpp"
 #include "ttnn-nanobind/pipeline_module_nanobind.hpp"
+
+namespace {
+
+// The device a mesh coordinate names, or the mesh's first local device when none is given.
+// MeshDevice::get_device returns nullptr for a coordinate outside the mesh, and the raw L1
+// accessors would dereference it, so that is refused here with the coordinate in the message.
+tt::tt_metal::IDevice* device_at(
+    tt::tt_metal::distributed::MeshDevice* mesh,
+    const std::optional<tt::tt_metal::distributed::MeshCoordinate>& coord) {
+    if (!coord.has_value()) {
+        for (const auto& c : tt::tt_metal::distributed::MeshCoordinateRange(mesh->shape())) {
+            if (mesh->is_local(c)) {
+                return tt::tt_metal::internal::get_device(*mesh, c);
+            }
+        }
+        TT_THROW("Mesh of shape {} has no local devices", mesh->shape());
+    }
+    tt::tt_metal::IDevice* device = tt::tt_metal::internal::get_device(*mesh, *coord);
+    TT_FATAL(device != nullptr, "MeshCoordinate {} is outside the mesh of shape {}", *coord, mesh->shape());
+    return device;
+}
+
+}  // namespace
 
 // note from nanobind docs:
 // We strongly recommend that you replace all use of std::unique_ptr<T> by
@@ -239,17 +269,32 @@ void py_module(nb::module_& mod) {
                 return nb::make_iterator<nb::rv_policy::reference_internal>(
                     nb::type<MeshCoordinateRange>(), "iterator", mcr.begin(), mcr.end());
             },
-            nb::keep_alive<0, 1>());
+            nb::keep_alive<0, 1>())
+        .def("__hash__", [](const MeshCoordinateRange& r) { return std::hash<MeshCoordinateRange>{}(r); })
+        .def(
+            "__eq__",
+            [](const MeshCoordinateRange& a, const MeshCoordinateRange& b) { return a == b; },
+            nb::is_operator());
 
-    static_cast<nb::class_<MeshCoordinateRangeSet>>(mod.attr("MeshCoordinateRangeSet"))
-        .def(nb::init<>(), "Default constructor for an empty MeshCoordinateRangeSet.")
+    auto mesh_coordinate_range_set =
+        static_cast<nb::class_<MeshCoordinateRangeSet>>(mod.attr("MeshCoordinateRangeSet"));
+    mesh_coordinate_range_set.def(nb::init<>(), "Default constructor for an empty MeshCoordinateRangeSet.")
         .def(nb::init<const MeshCoordinateRange&>(), "Constructor with specified range.", nb::arg("range"))
         .def("merge", &MeshCoordinateRangeSet::merge, nb::arg("range"))
-        .def("__repr__", [](const MeshCoordinateRangeSet& mcrs) {
-            std::ostringstream str;
-            str << mcrs;
-            return str.str();
-        });
+        .def(
+            "__repr__",
+            [](const MeshCoordinateRangeSet& mcrs) {
+                std::ostringstream str;
+                str << mcrs;
+                return str.str();
+            })
+        .def(
+            "__eq__",
+            [](const MeshCoordinateRangeSet& a, const MeshCoordinateRangeSet& b) { return a == b; },
+            nb::is_operator());
+    // merge() mutates the set in place, so like Python's own set it compares by value but is unhashable;
+    // nanobind would otherwise keep object.__hash__ and equal sets would hash differently.
+    mesh_coordinate_range_set.attr("__hash__") = nb::none();
 
     static_cast<nb::class_<SystemMeshDescriptor>>(mod.attr("SystemMeshDescriptor"))
         .def(nb::init<>())
@@ -266,7 +311,7 @@ void py_module(nb::module_& mod) {
         .def(
             "get_device_id",
             [](MeshDevice& self, const MeshCoordinate& coord) {
-                auto* device = self.get_device(coord);
+                auto* device = tt::tt_metal::internal::get_device(self, coord);
                 TT_FATAL(device, "Device ID requested for MeshCoord {} not found.", coord);
                 return device->id();
             })
@@ -517,6 +562,46 @@ void py_module(nb::module_& mod) {
                     >>> logical_core = ttnn.CoreCoord(0, 0)
                     >>> worker_core = device.worker_core_from_logical_core(logical_core)
                     >>> print(f"Worker core: x={worker_core.x}, y={worker_core.y}")
+            )doc")
+        .def(
+            "dram_core_from_logical_core",
+            [](MeshDevice* device, const CoreCoord& logical_core) {
+                return device->virtual_core_from_logical_core(logical_core, tt::CoreType::DRAM);
+            },
+            nb::arg("logical_core"),
+            R"doc(
+                Convert a logical DRAM coordinate to a virtual (NoC) coordinate.
+
+                The DRAM counterpart of worker_core_from_logical_core, for building NoC
+                addresses on the host -- e.g. the runtime binary-reload stage table, whose
+                entries name a source by NoC coordinates and an address.
+
+                Args:
+                    logical_core (CoreCoord): Logical DRAM coordinate, x = bank index.
+
+                Returns:
+                    CoreCoord: The virtual coordinate of that DRAM bank.
+            )doc")
+        .def(
+            "logical_core_from_worker_core",
+            &MeshDevice::logical_core_from_worker_core,
+            nb::arg("virtual_core"),
+            R"doc(
+                Convert a virtual/translated worker coordinate to a logical coordinate.
+
+                The inverse of worker_core_from_logical_core.
+
+                Args:
+                    virtual_core (CoreCoord): The virtual/translated coordinate to convert.
+
+                Returns:
+                    CoreCoord: The logical coordinate of the worker core.
+
+                Example:
+                    >>> device = ttnn.open_device(device_id=0)
+                    >>> virtual_core = ttnn.CoreCoord(1, 1)
+                    >>> logical_core = device.logical_core_from_worker_core(virtual_core)
+                    >>> print(f"Logical core: x={logical_core.x}, y={logical_core.y}")
             )doc");
 
     // Per-device optimal DRAM-bank-to-logical-worker assignment. Bound as an overload of the same
@@ -590,7 +675,19 @@ void py_module(nb::module_& mod) {
     auto py_mesh_device_view = static_cast<nb::class_<MeshDeviceView>>(mod.attr("MeshDeviceView"));
     py_mesh_device_view.def("shape", &MeshDeviceView::shape, nb::rv_policy::reference_internal)
         .def("num_devices", &MeshDeviceView::num_devices)
-        .def("is_local", &MeshDeviceView::is_local, nb::arg("coord"));
+        .def("is_local", &MeshDeviceView::is_local, nb::arg("coord"))
+        .def(
+            "get_local_mesh_coord_range",
+            &MeshDeviceView::get_local_mesh_coord_range,
+            R"doc(
+            Returns the bounding box of the coordinates of the devices that this process owns.
+
+            The range is the smallest box that holds every local coordinate. If the local
+            devices do not form a box, the range also holds coordinates of remote devices.
+
+            Raises:
+                RuntimeError: If no device in the view is local.
+            )doc");
 
     auto py_tensor_to_mesh = static_cast<nb::class_<TensorToMesh>>(mod.attr("CppTensorToMesh"));
     py_tensor_to_mesh.def(
@@ -851,6 +948,31 @@ void py_module(nb::module_& mod) {
            List[Tensor]: The shards of the tensor corresponding to the devices.
            )doc");
     mod.def(
+        "cpu_shards",
+        &ttnn::cpu_shards,
+        nb::arg("tensor"),
+        nb::arg("coords"),
+        nb::arg("blocking") = true,
+        nb::arg("cq_id") = nb::none(),
+        nb::call_guard<nb::gil_scoped_release>(),
+        R"doc(
+       Read the shards of a device tensor at the given mesh coordinates to the host, in one command-queue batch.
+
+       The function form of ``Tensor.cpu_shards``. Returns one single-device host tensor per coordinate, in the order
+       given, as ``get_device_tensors`` returns a host tensor's shards. Every coordinate must be one the tensor holds a
+       shard at (``tensor.device_coords()``), and none may repeat. The device tensor and its topology label are
+       untouched.
+
+       Args:
+           tensor (Tensor): The device tensor to read.
+           coords (List[MeshCoordinate]): The coordinates to read, in the order the results are returned.
+           blocking (bool): Wait for the read to finish. Defaults to True.
+           cq_id (int, optional): The command queue to read on. Defaults to None, the current command queue.
+
+       Returns:
+           List[Tensor]: One single-device host tensor per coordinate.
+           )doc");
+    mod.def(
         "replicate_tensor_to_mesh_mapper",
         [](MeshDevice& mesh_device) -> nbh::unique_ptr<TensorToMesh> {
             return nbh::steal_rewrap_unique<TensorToMesh>(replicate_tensor_to_mesh_mapper(mesh_device));
@@ -896,6 +1018,23 @@ void py_module(nb::module_& mod) {
        Args:
            mesh_device (MeshDevice): The mesh to create the mapper for.
            config (MeshMapperConfig): A config object representing a set of placements.
+
+       Returns:
+           TensorToMesh: A mapper providing the desired sharding.
+   )doc");
+    mod.def(
+        "create_mesh_mapper",
+        [](const MeshShape& mesh_shape, const MeshMapperConfig& config) -> nbh::unique_ptr<TensorToMesh> {
+            return nbh::steal_rewrap_unique<TensorToMesh>(create_mesh_mapper(mesh_shape, config));
+        },
+        nb::arg("mesh_shape"),
+        nb::arg("config"),
+        R"doc(
+       Returns an ND mapper that constructs every host shard without a device.
+
+       Args:
+           mesh_shape (MeshShape): The full logical mesh shape.
+           config (MeshMapperConfig): The placements, distribution shape, and mesh offset.
 
        Returns:
            TensorToMesh: A mapper providing the desired sharding.
@@ -994,6 +1133,30 @@ void py_module(nb::module_& mod) {
             Args:
                 tensors (List[Tensor]): The tensor shards to aggregate.
                 mesh_shape (MeshShape): The shape of the mesh to aggregate the shards over.
+
+            Returns:
+                Tensor: The multi-device host tensor.
+            )doc");
+    mod.def(
+        "from_local_host_shards",
+        &from_local_host_shards,
+        nb::arg("shards"),
+        nb::arg("mesh_device"),
+        nb::arg("topology"),
+        R"doc(
+            Creates a multi-device host tensor from the shards this host holds, labelled exactly as given.
+
+            Unlike ``from_host_shards``, which needs one shard per coordinate of the whole mesh and spells a 1-D
+            label of its own, this takes the ``TensorTopology`` the tensor should carry and one host shard per
+            coordinate it lists on this host (on a single-host mesh, every coordinate it lists). Coordinates that
+            belong to other hosts of a multi-host mesh, or that the label does not list (a tensor can live on part
+            of the mesh), stay unpopulated, so the result can be moved to the device with ``to``.
+
+            Args:
+                shards (Dict[MeshCoordinate, Tensor]): One host shard per local coordinate the topology lists; all
+                    with the same spec.
+                mesh_device (MeshDevice): The mesh the tensor is destined for; decides which coordinates are local.
+                topology (TensorTopology): The label the tensor carries, as the live tensor it will be placed into has it.
 
             Returns:
                 Tensor: The multi-device host tensor.
@@ -1116,6 +1279,7 @@ void py_module(nb::module_& mod) {
             if (!DistributedContext::is_initialized()) {
                 throw std::runtime_error("Distributed context not initialized. Call init_distributed_context() first.");
             }
+            nb::gil_scoped_release release;
             DistributedContext::get_current_world()->barrier();
         },
         R"doc(
@@ -1170,7 +1334,11 @@ void py_module(nb::module_& mod) {
             const auto& ctx = DistributedContext::get_current_world();
             // MPI send does not modify the buffer; const_cast is safe here.
             auto* ptr = const_cast<std::byte*>(reinterpret_cast<const std::byte*>(data.c_str()));
-            ctx->send(ttsl::Span<std::byte>(ptr, data.size()), Rank(dest), Tag(tag));
+            const auto size = data.size();
+            {
+                nb::gil_scoped_release release;
+                ctx->send(ttsl::Span<std::byte>(ptr, size), Rank(dest), Tag(tag));
+            }
         },
         nb::arg("data"),
         nb::arg("dest"),
@@ -1196,8 +1364,13 @@ void py_module(nb::module_& mod) {
             }
             std::vector<char> buf(size);
             const auto& ctx = DistributedContext::get_current_world();
-            ctx->recv(
-                ttsl::Span<std::byte>(reinterpret_cast<std::byte*>(buf.data()), buf.size()), Rank(source), Tag(tag));
+            {
+                nb::gil_scoped_release release;
+                ctx->recv(
+                    ttsl::Span<std::byte>(reinterpret_cast<std::byte*>(buf.data()), buf.size()),
+                    Rank(source),
+                    Tag(tag));
+            }
             return nb::bytes(buf.data(), buf.size());
         },
         nb::arg("size"),
@@ -1358,6 +1531,107 @@ void py_module(nb::module_& mod) {
             Total number of ranks in MPI_COMM_WORLD (the un-split world).
         )doc");
     auto m_experimental = mod.def_submodule("experimental", "experimental distributed operations");
+    // Host support for the runtime binary reload (Blaze): raw L1 access, launch-message readback
+    // and the configure-only dispatch mode. Experimental, like the C++ APIs behind them.
+    m_experimental.def(
+        "set_configure_only",
+        [](MeshDevice* device, bool enable) {
+            tt::tt_metal::experimental::DispatchContext::get().set_configure_only(device, enable);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("enable"),
+        R"doc(
+            Slow Dispatch only: while enabled, dispatching a program writes its kernel binaries,
+            circular-buffer configs, runtime args and launch message to L1 but never sends the go
+            signal -- so nothing runs. Used to capture a reloadable image off L1 without executing
+            it, and therefore without tearing the pipeline down to do it.
+
+            Experimental API; may change.
+        )doc");
+    m_experimental.def(
+        "read_core_l1",
+        [](MeshDevice* device,
+           const CoreCoord& logical_core,
+           uint32_t address,
+           uint32_t size,
+           const std::optional<MeshCoordinate>& coord) {
+            std::vector<uint32_t> data;
+            tt::tt_metal::detail::ReadFromDeviceL1(device_at(device, coord), logical_core, address, size, data);
+            return data;
+        },
+        nb::arg("mesh_device"),
+        nb::arg("logical_core"),
+        nb::arg("address"),
+        nb::arg("size"),
+        nb::arg("coord") = nb::none(),
+        R"doc(
+                Read raw L1 words from one core.
+
+                For capturing state the device wrote and the host has no other view of --
+                the runtime binary reload uses it to copy a stage's kernel-config block
+                (CB configs, runtime args, semaphores and text) after that stage has run
+                once, and to read the launch message describing it.
+
+                Args:
+                    mesh_device (MeshDevice): The mesh.
+                    logical_core (CoreCoord): Core whose L1 to read.
+                    address (int): Byte address in L1.
+                    size (int): Bytes to read; must be a multiple of 4.
+
+                Returns:
+                    List[int]: The words read.
+            )doc");
+    m_experimental.def(
+        "write_core_l1",
+        [](MeshDevice* device,
+           const CoreCoord& logical_core,
+           uint32_t address,
+           std::vector<uint32_t> words,
+           const std::optional<MeshCoordinate>& coord) {
+            tt::tt_metal::detail::WriteToDeviceL1(device_at(device, coord), logical_core, address, words);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("logical_core"),
+        nb::arg("address"),
+        nb::arg("words"),
+        nb::arg("coord") = nb::none(),
+        R"doc(
+                Write raw L1 words to one core.
+
+                The writer for read_core_l1: host-set state that is not a tensor and not part
+                of a program's kernel-config block. The semaphore pool uses it to give a slot
+                its initial value without rewriting the whole pool region, whose other slots
+                may belong to a program that is running.
+
+                Args:
+                    mesh_device (MeshDevice): The mesh.
+                    logical_core (CoreCoord): Core whose L1 to write.
+                    address (int): Byte address in L1; 4-byte aligned.
+                    words (List[int]): The words to write.
+                    coord (MeshCoordinate, optional): Which device of the mesh; the first when omitted.
+            )doc");
+    m_experimental.def(
+        "capture_kernel_config",
+        [](MeshDevice* device, const CoreCoord& logical_core, const std::optional<MeshCoordinate>& coord) {
+            auto cfg = tt::tt_metal::experimental::CaptureKernelConfig(device_at(device, coord), logical_core);
+            const auto& launch_kernel_config = cfg.launch_kernel_config();
+            nb::dict out;
+            out["kernel_config_base"] = cfg.kernel_config_base();
+            out["kernel_config_size"] = cfg.kernel_config_size();
+            out["launch_kernel_config"] =
+                nb::bytes(reinterpret_cast<const char*>(launch_kernel_config.data()), launch_kernel_config.size());
+            return out;
+        },
+        nb::arg("mesh_device"),
+        nb::arg("logical_core"),
+        nb::arg("coord") = nb::none(),
+        R"doc(
+                Capture the kernel config a core is running.
+
+                Returns the L1 base and size of the relocatable kernel-config block plus an
+                opaque copy of the launch kernel config. Its detailed layout remains private
+                to Metal.
+            )doc");
     m_experimental.def(
         "get_worker_noc_hop_distance",
         [](MeshDevice& mesh_device, const CoreCoord& logical_src, const CoreCoord& logical_dst, NOC noc) {
@@ -1416,6 +1690,36 @@ void py_module(nb::module_& mod) {
 
             Returns:
                 int: Hop count on the selected NOC.
+        )doc");
+    m_experimental.def(
+        "worker_core_from_logical_core",
+        [](MeshDevice& mesh_device, const MeshCoordinate& mesh_coord, const CoreCoord& logical_core) {
+            return tt::tt_metal::experimental::Device::worker_core_from_logical_core(
+                mesh_device, mesh_coord, logical_core);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("mesh_coord"),
+        nb::arg("logical_core"),
+        R"doc(
+            Virtual NoC coordinate of a logical worker core on the device at ``mesh_coord``.
+
+            Unlike ``MeshDevice.worker_core_from_logical_core``, this does not require every device in
+            the mesh to share a logical-to-virtual mapping, so it is exact on a heterogeneously
+            harvested mesh.
+
+            Experimental API; may change.
+
+            Args:
+                mesh_device (MeshDevice): Mesh device.
+                mesh_coord (MeshCoordinate): Coordinate of the chip to query.
+                logical_core (CoreCoord): Logical worker-core coordinate on that chip.
+
+            Returns:
+                CoreCoord: The virtual NoC coordinate for the selected device.
+
+            Raises:
+                RuntimeError: If ``mesh_coord`` is outside the mesh's shape, or names a device this
+                    rank does not drive.
         )doc");
     ttnn::pipeline_module::bind_blitz_decode_pipeline(m_experimental);
     ttnn::pipeline_module::bind_pipeline_builder(m_experimental);

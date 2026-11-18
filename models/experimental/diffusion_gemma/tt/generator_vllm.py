@@ -63,6 +63,7 @@ import torch
 from loguru import logger
 
 import ttnn
+from models.common.hf_layer_type_attention import layer_type_attention
 from models.experimental.diffusion_gemma.checkpoint import build_tt_model_from_checkpoint_dir
 from models.experimental.diffusion_gemma.config import DiffusionConfig
 from models.experimental.diffusion_gemma.tt.generate import fixed_prefill_chunks_enabled, prefill_prompt_tokens
@@ -621,8 +622,8 @@ class DiffusionGemmaForCausalLM(HybridAttentionForCausalLM):
         """Per-layer KV spec (copied from the gemma4 bridge geometry).
 
         DiffusionGemma's text backbone == Gemma-4 26B-A4B: sliding layers use
-        ``head_dim`` (256) / ``num_key_value_heads``; full-attention layers use
-        ``global_head_dim`` (512) / ``num_global_key_value_heads``. Every layer emits
+        head dim 256, full-attention layers 512, each with its own KV head
+        count, all read through ``layer_type_attention``. Every layer emits
         a ``FullAttentionSpec`` (uniform type) so vLLM merges them into ONE KV-cache
         group backed by the whole block pool — hybrid groups are disabled
         (``_HYBRID_KV_CACHE_GROUPS_ENABLED = False``) and the diffusion forward uses
@@ -645,11 +646,8 @@ class DiffusionGemmaForCausalLM(HybridAttentionForCausalLM):
         if layer_types is None:
             raise ValueError(f"{cls.__name__}.get_kv_cache_spec requires text_config.layer_types")
 
-        sliding_kv_heads = text_config.num_key_value_heads
-        sliding_head_dim = text_config.head_dim
+        sliding_kv_heads, sliding_head_dim, full_kv_heads, full_head_dim = layer_type_attention(text_config)
         sliding_window = getattr(text_config, "sliding_window", None)
-        full_kv_heads = getattr(text_config, "num_global_key_value_heads", None) or sliding_kv_heads
-        full_head_dim = getattr(text_config, "global_head_dim", None) or sliding_head_dim
 
         tp = parallel_config.tensor_parallel_size
         # Match Gemma4 split_qkv/cache allocation: when KV heads < TP, each
@@ -1739,31 +1737,32 @@ class DiffusionGemmaForCausalLM(HybridAttentionForCausalLM):
         Call immediately before mesh close; continuing inference after this terminal release is
         unsupported because the startup capture is intentionally not rebuilt mid-process.
         """
-        for row in list(getattr(self, "_sessions", {})):
-            try:
-                self.release_request(row)
-            except BaseException as cleanup_error:
-                logger.error(f"failed to detach active request {row} during persistent release: {cleanup_error}")
+        try:
+            for row in list(getattr(self, "_sessions", {})):
+                try:
+                    self.release_request(row)
+                except BaseException as cleanup_error:
+                    logger.error(f"failed to detach active request {row} during persistent release: {cleanup_error}")
 
-        adapter = getattr(self, "_persistent_adapter", None)
-        self._persistent_adapter = None
-        if adapter is None:
-            return
-
-        attr = "_upfront_traced_denoise_controller"
-        controller = getattr(adapter, attr, None)
-        if controller is not None:
-            try:
-                controller.release()
-            except BaseException as cleanup_error:
-                logger.error(f"failed to release persistent serving controller {attr}: {cleanup_error}")
-            finally:
-                delattr(adapter, attr)
-        if hasattr(adapter, "reset"):
-            try:
-                adapter.reset()
-            except BaseException as cleanup_error:
-                logger.error(f"failed to release persistent serving adapter: {cleanup_error}")
+            adapter = getattr(self, "_persistent_adapter", None)
+            self._persistent_adapter = None
+            if adapter is not None:
+                attr = "_upfront_traced_denoise_controller"
+                controller = getattr(adapter, attr, None)
+                if controller is not None:
+                    try:
+                        controller.release()
+                    except BaseException as cleanup_error:
+                        logger.error(f"failed to release persistent serving controller {attr}: {cleanup_error}")
+                    finally:
+                        delattr(adapter, attr)
+                if hasattr(adapter, "reset"):
+                    try:
+                        adapter.reset()
+                    except BaseException as cleanup_error:
+                        logger.error(f"failed to release persistent serving adapter: {cleanup_error}")
+        finally:
+            super().release_persistent_capture()
 
     def __del__(self):
         """Release DiffusionGemma-owned traces before inherited model/mesh teardown."""

@@ -4,9 +4,13 @@
 
 #include "unified_routed_expert_ffn_nanobind.hpp"
 
+#include <limits>
+
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/vector.h>
+
+#include <tt-metalium/core_coord.hpp>
 
 #include "ttnn-nanobind/bind_function.hpp"
 #include "unified_routed_expert_ffn.hpp"
@@ -19,7 +23,13 @@ void bind_unified_routed_expert_ffn(nb::module_& mod) {
     nb::enum_<RoutedExpertActivation>(mod, "RoutedExpertActivation")
         .value("Silu", RoutedExpertActivation::Silu)
         .value("SwiGluOai", RoutedExpertActivation::SwiGluOai)
-        .value("SituGlu", RoutedExpertActivation::SituGlu);
+        .value("SituGlu", RoutedExpertActivation::SituGlu)
+        .value("ClampedSiluGlu", RoutedExpertActivation::ClampedSiluGlu);
+
+    // The worker rectangle this op fixes regardless of device grid. Exported so a hybrid forward can
+    // pass moe_fused_swiglu the same grid -- that op defaults to the whole device instead -- without
+    // a second copy of the numbers on the Python side.
+    mod.attr("UNIFIED_ROUTED_EXPERT_CORE_GRID") = CoreCoord{kCoreGridX, kCoreGridY};
 
     ttnn::bind_function<"unified_routed_expert_moe", "ttnn.experimental.deepseek_prefill.">(
         mod,
@@ -51,7 +61,20 @@ void bind_unified_routed_expert_ffn(nb::module_& mod) {
             compute_kernel_config (ttnn.DeviceComputeKernelConfig, optional)
             activation (ttnn.RoutedExpertActivation, optional):
                 Silu (default, DeepSeek), SwiGluOai (clamped, MiniMax-M3 / gpt-oss),
-                or SituGlu (tanh-capped, Kimi K3; Blackhole only).
+                SituGlu (tanh-capped, Kimi K3; Blackhole only), or ClampedSiluGlu
+                (silu(min(gate,10)) * clamp(up,+/-10), DeepSeek V4; Blackhole only).
+
+            l1_end (int, optional): L1 address the op's circular buffers must end below; 0 (default)
+                uses the whole L1. Pass the lowest address of buffers kept resident in L1
+                (MeshDevice.lowest_occupied_compute_l1_address()) to fit the blocking around them.
+            x_row_index (ttnn.Tensor, optional): UINT32 ROW_MAJOR row of one entry per buffer row. With it,
+                dispatched_buffer is the token-ordered ROW_MAJOR input and buffer row r reads its row
+                x_row_index[r] (no dispatch gather); the output has one row per entry. An entry past the
+                input's last row is not read (that output row is garbage).
+            output_row_major (bool, optional): ROW_MAJOR bf16 output instead of TILE bf8 (ROW_MAJOR
+                dispatched_buffer only). Rows outside every expert region stay uninitialized.
+            zero_output_row (int, optional): with output_row_major, one output row the op sets to zeros.
+                It must not hold a routed token (it is never written with expert output).
 
         Each per-expert FFN picks its chunk_M_tiles / per_core_M / num_chunks at
         RUNTIME from the device-resident token count, so there is no expected-token
@@ -74,7 +97,13 @@ void bind_unified_routed_expert_ffn(nb::module_& mod) {
         nb::arg("activation") = RoutedExpertActivation::Silu,
         nb::arg("gate_biases") = nb::none(),
         nb::arg("up_biases") = nb::none(),
-        nb::arg("down_biases") = nb::none());
+        nb::arg("down_biases") = nb::none(),
+        nb::arg("min_active_tokens") = 0,
+        nb::arg("max_active_tokens") = std::numeric_limits<uint32_t>::max(),
+        nb::arg("l1_end") = 0,
+        nb::arg("x_row_index") = nb::none(),
+        nb::arg("output_row_major") = false,
+        nb::arg("zero_output_row") = std::numeric_limits<uint32_t>::max());
 }
 
 }  // namespace ttnn::operations::experimental::deepseek_prefill::unified_routed_expert_ffn::detail

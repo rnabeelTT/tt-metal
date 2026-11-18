@@ -14,6 +14,7 @@
 #include <nanobind/stl/vector.h>
 
 #include "internal/blitz_decode_pipeline.hpp"
+#include <tt-metalium/mesh_device.hpp>
 #include <tt-metalium/experimental/fabric/pipeline_builder.hpp>
 
 namespace ttnn::pipeline_module {
@@ -163,6 +164,35 @@ void bind_pipeline_builder(nb::module_& mod) {
 
     mod.def(
         "get_forwarding_direction",
+        [](const tt::tt_metal::distributed::MeshDevice& mesh_device,
+           const FabricNodeId& src,
+           const FabricNodeId& dst) -> std::optional<RoutingDirection> {
+            return tt::tt_fabric::pipeline_get_forwarding_direction(mesh_device, src, dst);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("src"),
+        nb::arg("dst"),
+        R"(
+            Return the direction in which data should be forwarded from *src* to reach *dst*.
+
+            Returns ``None`` if *dst* is not reachable from *src*.  When *src* and *dst* are
+            directly connected by a single ethernet cable, this is the direction of that cable.
+            For multi-hop paths the first-hop direction is returned; callers that need to verify
+            a *direct* (single-hop) connection should follow up with ``get_chip_neighbors``.
+
+            ``mesh_device`` selects the context the fabric is resolved in.
+
+            Args:
+                mesh_device: The mesh device whose fabric is queried.
+                src: FabricNodeId of the source chip.
+                dst: FabricNodeId of the destination chip.
+
+            Returns:
+                RoutingDirection or None.
+        )");
+
+    mod.def(
+        "get_forwarding_direction",
         [](const FabricNodeId& src, const FabricNodeId& dst) -> std::optional<RoutingDirection> {
             return tt::tt_fabric::pipeline_get_forwarding_direction(src, dst);
         },
@@ -170,6 +200,10 @@ void bind_pipeline_builder(nb::module_& mod) {
         nb::arg("dst"),
         R"(
             Return the direction in which data should be forwarded from *src* to reach *dst*.
+
+            .. deprecated::
+                Pass ``mesh_device`` as the first argument instead. This overload resolves the
+                default context and will be removed after 2026-12-31.
 
             Returns ``None`` if *dst* is not reachable from *src*.  When *src* and *dst* are
             directly connected by a single ethernet cable, this is the direction of that cable.
@@ -199,6 +233,8 @@ void bind_pipeline_builder(nb::module_& mod) {
             exit_col:   Column of the exit chip in *src*'s submesh.
             entry_row:  Row of the entry chip in *dst*'s submesh.
             entry_col:  Column of the entry chip in *dst*'s submesh.
+            exit_core_slot: Abstract pipeline-core slot on the exit chip, assigned by the resolver.
+            entry_core_slot: Abstract pipeline-core slot on the entry chip, assigned by the resolver.
     )")
         .def_ro("src", &tt::tt_fabric::ResolvedEdge::src)
         .def_ro("dst", &tt::tt_fabric::ResolvedEdge::dst)
@@ -207,6 +243,8 @@ void bind_pipeline_builder(nb::module_& mod) {
         .def_ro("exit_col", &tt::tt_fabric::ResolvedEdge::exit_col)
         .def_ro("entry_row", &tt::tt_fabric::ResolvedEdge::entry_row)
         .def_ro("entry_col", &tt::tt_fabric::ResolvedEdge::entry_col)
+        .def_ro("exit_core_slot", &tt::tt_fabric::ResolvedEdge::exit_core_slot)
+        .def_ro("entry_core_slot", &tt::tt_fabric::ResolvedEdge::entry_core_slot)
         .def("__repr__", [](const tt::tt_fabric::ResolvedEdge& e) {
             return std::string("ResolvedEdge(") + e.src + " -> " + e.dst + (e.is_loopback ? " [loopback]" : "") +
                    " exit=(" + std::to_string(e.exit_row) + "," + std::to_string(e.exit_col) + ")" + " entry=(" +
@@ -222,31 +260,84 @@ void bind_pipeline_builder(nb::module_& mod) {
             resolved_edges:  One ResolvedEdge per input edge, with discovered physical coords.
             h2d_entry_row:   Row of the H2D entry chip in stage-0's submesh.
             h2d_entry_col:   Column of the H2D entry chip in stage-0's submesh.
+            h2d_core_slot:   Abstract pipeline-core slot for H2D, assigned by the resolver.
             d2h_exit_row:    Row of the D2H exit chip in stage-0's submesh.
             d2h_exit_col:    Column of the D2H exit chip in stage-0's submesh.
+            d2h_core_slot:   Abstract pipeline-core slot for D2H, assigned by the resolver.
     )")
         .def_ro("stage_order", &tt::tt_fabric::GraphLayoutResult::stage_order)
         .def_ro("node_to_submesh", &tt::tt_fabric::GraphLayoutResult::node_to_submesh)
         .def_ro("resolved_edges", &tt::tt_fabric::GraphLayoutResult::resolved_edges)
         .def_ro("h2d_entry_row", &tt::tt_fabric::GraphLayoutResult::h2d_entry_row)
         .def_ro("h2d_entry_col", &tt::tt_fabric::GraphLayoutResult::h2d_entry_col)
+        .def_ro("h2d_core_slot", &tt::tt_fabric::GraphLayoutResult::h2d_core_slot)
         .def_ro("d2h_exit_row", &tt::tt_fabric::GraphLayoutResult::d2h_exit_row)
-        .def_ro("d2h_exit_col", &tt::tt_fabric::GraphLayoutResult::d2h_exit_col);
+        .def_ro("d2h_exit_col", &tt::tt_fabric::GraphLayoutResult::d2h_exit_col)
+        .def_ro("d2h_core_slot", &tt::tt_fabric::GraphLayoutResult::d2h_core_slot);
+
+    mod.def(
+        "resolve_graph_layout",
+        [](const tt::tt_metal::distributed::MeshDevice& mesh_device,
+           const std::vector<std::string>& nodes,
+           const std::vector<tt::tt_fabric::EdgeInputTuple>& edges,
+           const std::vector<std::vector<tt::tt_fabric::ChipTuple>>& submesh_chips,
+           const std::map<std::string, uint32_t>& node_chip_counts,
+           const std::map<std::string, uint32_t>& node_pipeline_core_counts,
+           std::optional<uint32_t> pipeline_core_count) -> tt::tt_fabric::GraphLayoutResult {
+            return tt::tt_fabric::resolve_graph_layout(
+                mesh_device,
+                nodes,
+                edges,
+                submesh_chips,
+                node_chip_counts,
+                node_pipeline_core_counts,
+                pipeline_core_count);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("nodes") = std::vector<std::string>{},
+        nb::arg("edges"),
+        nb::arg("submesh_chips"),
+        nb::arg("node_chip_counts") = std::map<std::string, uint32_t>{},
+        nb::arg("node_pipeline_core_counts") = std::map<std::string, uint32_t>{},
+        nb::arg("pipeline_core_count") = nb::none(),
+        R"(
+            Auto-discover the physical layout of a pipeline graph, with the ethernet links
+            discovered in ``mesh_device``'s context.
+
+            Takes the same arguments as the overload without ``mesh_device``, which has the full
+            description.
+
+            Args:
+                mesh_device:   The mesh device whose fabric is used to discover the links.
+
+            Returns:
+                GraphLayoutResult with physical coordinates and
+                abstract core slots for every edge and H2D/D2H.
+        )");
 
     mod.def(
         "resolve_graph_layout",
         [](const std::vector<std::string>& nodes,
            const std::vector<tt::tt_fabric::EdgeInputTuple>& edges,
            const std::vector<std::vector<tt::tt_fabric::ChipTuple>>& submesh_chips,
-           const std::map<std::string, uint32_t>& node_chip_counts) -> tt::tt_fabric::GraphLayoutResult {
-            return tt::tt_fabric::resolve_graph_layout(nodes, edges, submesh_chips, node_chip_counts);
+           const std::map<std::string, uint32_t>& node_chip_counts,
+           const std::map<std::string, uint32_t>& node_pipeline_core_counts,
+           std::optional<uint32_t> pipeline_core_count) -> tt::tt_fabric::GraphLayoutResult {
+            return tt::tt_fabric::resolve_graph_layout(
+                nodes, edges, submesh_chips, node_chip_counts, node_pipeline_core_counts, pipeline_core_count);
         },
         nb::arg("nodes") = std::vector<std::string>{},
         nb::arg("edges"),
         nb::arg("submesh_chips"),
         nb::arg("node_chip_counts") = std::map<std::string, uint32_t>{},
+        nb::arg("node_pipeline_core_counts") = std::map<std::string, uint32_t>{},
+        nb::arg("pipeline_core_count") = nb::none(),
         R"(
             Auto-discover the physical layout of a pipeline graph.
+
+            .. deprecated::
+                Pass ``mesh_device`` as the first argument instead. This overload resolves the
+                default context and will be removed after 2026-12-31.
 
             Uses ``get_forwarding_direction`` and ``get_chip_neighbors`` to find the
             direct ethernet link for each logical edge in the graph, then performs a
@@ -270,10 +361,45 @@ void bind_pipeline_builder(nb::module_& mod) {
                                so e.g. a 4x2 stage cannot land on a 1x2 submesh. Nodes
                                absent from the map are unconstrained; an empty map (default)
                                disables the shape filter.
+                node_pipeline_core_counts: Optional {node_name: cores_per_chip} map. When
+                               supplied, the resolver jointly assigns links and abstract
+                               endpoint slots while enforcing each node's per-chip capacity.
+                               Overrides pipeline_core_count for the listed nodes.
+                pipeline_core_count: Optional uniform available pipeline-core slots per chip.
+                               Unspecified capacities default to 1 slot per chip on the
+                               chosen submesh if it has at least 8 chips, or 2 otherwise.
+                               Core-slot results are always assigned.
 
             Returns:
-                GraphLayoutResult with physical coords for every edge and the H2D/D2H
-                chip coords in stage-0's submesh.
+                GraphLayoutResult with physical coordinates and
+                abstract core slots for every edge and H2D/D2H.
+        )");
+
+    mod.def(
+        "get_chip_neighbors",
+        [](const tt::tt_metal::distributed::MeshDevice& mesh_device,
+           const FabricNodeId& src,
+           RoutingDirection direction) -> std::map<uint32_t, std::vector<uint32_t>> {
+            return tt::tt_fabric::pipeline_get_chip_neighbors(mesh_device, src, direction);
+        },
+        nb::arg("mesh_device"),
+        nb::arg("src"),
+        nb::arg("direction"),
+        R"(
+            Return the chips directly connected to *src* via an ethernet cable in *direction*,
+            in ``mesh_device``'s context.
+
+            Includes both intra-mesh and inter-mesh neighbors.  The result is a ``dict``
+            mapping ``mesh_id`` (int) to a list of ``chip_id`` (int) values for chips that
+            share a direct ethernet link with *src* in the given direction.
+
+            Args:
+                mesh_device: The mesh device whose fabric is queried.
+                src:       FabricNodeId of the chip to query.
+                direction: RoutingDirection to look in.
+
+            Returns:
+                dict[int, list[int]] — {mesh_id: [chip_id, ...]} of direct neighbors.
         )");
 
     mod.def(
@@ -285,6 +411,10 @@ void bind_pipeline_builder(nb::module_& mod) {
         nb::arg("direction"),
         R"(
             Return the chips directly connected to *src* via an ethernet cable in *direction*.
+
+            .. deprecated::
+                Pass ``mesh_device`` as the first argument instead. This overload resolves the
+                default context and will be removed after 2026-12-31.
 
             Includes both intra-mesh and inter-mesh neighbors.  The result is a ``dict``
             mapping ``mesh_id`` (int) to a list of ``chip_id`` (int) values for chips that

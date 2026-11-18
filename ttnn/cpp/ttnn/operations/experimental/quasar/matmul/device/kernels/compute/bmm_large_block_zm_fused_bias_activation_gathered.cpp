@@ -27,6 +27,8 @@ FORCE_INLINE void reload_from_cb_to_dst(
     uint32_t out_subblock_h,
     uint32_t in0_block_w) {
     CircularBuffer mm_partials_cb(mm_partials_cb_id);
+    // Undo the MxFp4 2x src format matmul_init latched (see mm_uninit); no-op otherwise.
+    mm_uninit(in0_cb_id, in1_cb_id);
     // Reconfigure input
     reconfig_data_format_srca(in1_cb_id, mm_partials_cb_id);
     copy_init(mm_partials_cb_id);
@@ -283,12 +285,17 @@ void kernel_main() {
 #ifdef PACK_RELU
         // for each batch we start we relu disabled so that intermediate results are not relu'd
         if constexpr (batch > 1) {
-            PACK((llk_pack_relu_config(ReluConfig::none())));
+            pack_relu_config(ReluConfig::none());
         }
 #endif
 
         if constexpr (batch > 1) {
-            PACK((pack_reconfig_data_format(mm_partials_cb_id)));
+            pack_reconfig_data_format(mm_partials_cb_id);
+#ifdef ARCH_QUASAR
+            // Quasar: the pack destination (BFD) is baked at pack_init; pack_reconfig_data_format is gasket-only,
+            // so every output switch needs a pack_init (same idiom as the metal2 kernel).
+            pack_init(mm_partials_cb_id);
+#endif
         }
 
         // Wait to receive in1
@@ -311,7 +318,7 @@ void kernel_main() {
 #if not defined FUSE_BIAS and defined PACK_RELU
             if (last_out) {
                 // if last block we pack the final result with relu enabled
-                PACK((llk_pack_relu_config(ReluConfig::zero())));
+                pack_relu_config(ReluConfig::zero());
             }
 #endif
 
@@ -405,12 +412,20 @@ void kernel_main() {
 #endif
 
 #if defined FP32_DEST_ACC_EN or defined PACKER_L1_ACC
-                        PACK((pack_reconfig_data_format(mm_out_cb_id)));
+                        pack_reconfig_data_format(mm_out_cb_id);
+#endif
+#ifdef ARCH_QUASAR
+                        // Quasar: retarget the pack BFD to mm_out_cb for the final block (reconfig is gasket-only).
+                        // untilize_out re-inits via pack_untilize_dest_init above, so only the tiled path needs this.
+                        if constexpr (!untilize_out) {
+                            pack_reconfig_data_format(mm_out_cb_id);
+                            pack_init(mm_out_cb_id);
+                        }
 #endif
 
 #ifdef PACKER_L1_ACC
 
-                        PACK((llk_pack_reconfig_l1_acc(0)));
+                        pack_reconfig_l1_acc(0);
 #endif
 
                         uint32_t start_dst_index = 0;
@@ -434,9 +449,9 @@ void kernel_main() {
 
 #ifdef PACKER_L1_ACC
                         if (block == 0) {  // no accumulation for first iteration
-                            PACK((llk_pack_reconfig_l1_acc(0)));
+                            pack_reconfig_l1_acc(0);
                         } else if (block == 1) {
-                            PACK((llk_pack_reconfig_l1_acc(1)));
+                            pack_reconfig_l1_acc(1);
                         }
 #endif
 

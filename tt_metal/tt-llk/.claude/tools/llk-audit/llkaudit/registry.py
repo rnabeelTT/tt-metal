@@ -171,10 +171,19 @@ GPR_WRITE_KINDS = {"regfile_gpr"}
 # Consumers must be genuine instruction macros; require a TTI_/TT_ prefix so that
 # address macros (TENSIX_MOP_CFG_BASE) are never mistaken for a MOP run.
 INSTR_PREFIXES = ("TTI_", "TT_")  # a genuine Tensix instruction macro
+#: An opcode VALUE, not an issued instruction — it shares the `TT_` prefix but is
+#: destined for a MOP slot / replay buffer and executes where the expander issues
+#: it. It must never earn an instruction ROLE (stall / ordered_write / consumer_*),
+#: because every consumer of those roles reasons about the fact's own LINE.
+OPCODE_VALUE_PREFIX = "TT_OP_"
+#: Extractor fact family carrying those words. Kept OUT of the "macro" family so
+#: the instruction-consuming checks cannot see one at all; only mop-replay reads
+#: it. Must match `f.family` in extractor/llk_extract.cpp's MacroPass.
+OPCODE_VALUE_FAMILY = "opcode_value"
 
 
 def _instr(name: str) -> bool:
-    return name.startswith(INSTR_PREFIXES)
+    return name.startswith(INSTR_PREFIXES) and not is_mop_word(name)
 
 
 def is_thread_config_write(macro_name: str) -> bool:
@@ -254,6 +263,161 @@ DRAIN_CALLS = {
     "mop_sync": "mop_sync",  # drains in-flight MOPs
     "tensix_sync": "tensix_sync",  # drains the whole Tensix thread
 }
+
+# --- MOP Expander / Replay Expander: a word's SLOT, not its line --------------
+# A `TT_OP_*` value is an opcode VALUE installed into a MOP slot or a replay
+# buffer and issued by an expander, so its execution position, its repeat count
+# and its neighbours come from the MOP/replay program, never from source order.
+# Both expanders sit in the frontend (MOP first, then Replay, then the Wait
+# Gate): a MOP may emit REPLAY, but a REPLAY expansion may not contain MOP.
+
+#: Replay buffer depth per Tensix thread, in instructions. The expander indexes
+#: it as `(Index + i) % REPLAY_BUF_SIZE`, so an over-long load wraps and
+#: overwrites its own earlier entries (see ckernel_structs.h REPLAY_BUF_SIZE).
+REPLAY_BUF_SIZE = 32
+
+#: ckernel_template (MOP template 1) slot setters -> the expander slot filled.
+#: Per outer iteration the expander issues START_OP, then the inner loop, then
+#: END_OP0, then END_OP1 — the latter only when END_OP0 is not a plain NOP. So
+#: whichever of those is the last live word is immediately followed by the NEXT
+#: outer iteration's START_OP, an adjacency that exists nowhere in the source
+#: text. set_end_op installs a plain-NOP END_OP1, leaving END_OP0 that word.
+#: LOOP0_LAST / LOOP1_LAST override the LAST inner iteration (LOOP0_LAST when it
+#: is also the last outer iteration, LOOP1_LAST when it is not), so the executed
+#: stream is not uniform across iterations.
+MOP_SLOT_SETTERS = {
+    "set_start_op": "START_OP",
+    "set_end_op": "END_OP0",
+    "set_end_ops": "END_OP0/END_OP1",
+    "set_loop_op0": "LOOP_OP0",
+    "set_loop_op1": "LOOP_OP1",
+    "set_last_inner_loop_instr": "LOOP1_LAST",
+    "set_last_outer_loop_instr": "LOOP0_LAST",
+}
+
+#: Replay Expander entry points. A record LOADS the following `Count`
+#: instructions into the buffer and issues them only when Exec is set; both
+#: `lltt::record` and `load_replay_buf` default to NoExec, i.e. the instructions
+#: written after the call do NOT execute there.
+REPLAY_RECORD_CALLS = ("record", "load_replay_buf")
+#: `replay` issues an expansion inline; `replay_insn` BUILDS the REPLAY word for
+#: a MOP slot, so its expansion happens wherever that slot is issued.
+REPLAY_EXPAND_CALLS = ("replay", "replay_insn")
+#: A bare `record` / `replay` is too generic to match on the callee name alone
+#: (cf. KNOWN_GAPS X4); require the lltt namespace or the ckernel wrapper name.
+_REPLAY_CALL_QUALIFIERS = ("lltt", "load_replay_buf")
+
+#: Matrix-Unit ops whose clear/CLR operand hands a Src bank back to the
+#: unpackers (`MatrixUnit.Src?Bank ^= 1`), per CLEARDVALID's functional model.
+SRC_FLIP_OP_SUBSTR = (
+    "SETRWC",
+    "MVMUL",
+    "ELWADD",
+    "ELWSUB",
+    "ELWMUL",
+    "GAPOOL",
+    "GMPOOL",
+    "DOTPV",
+)
+#: A clear selector that hands a Src bank back, matched on word boundaries. The
+#: in-tree alias `CLR_SRC` resolves to `CLR_A` or `CLR_AB` and must match; the
+#: longer `CLR_SRC_*` / `CLR_SRC?_VLD` spellings name a clear VALUE or a dvalid
+#: clear, not a bank hand-back, and must not. `CLR_NONE` flips nothing.
+SRC_FLIP_CLR_RE = re.compile(r"\bCLR_(?:A|B|AB|SRC)\b")
+
+#: Opcode-value words whose SLOT changes another audit's verdict: a Src bank
+#: flip, an inter-thread sync op (balance is per MOP ITERATION, not per source
+#: line), or a wait. Deliberately NOT every `TT_OP_*` — an arithmetic word only
+#: matters to instruction-latency, which widens its own enumeration instead.
+MOP_WORD_SYNC_SUBSTR = (
+    "SEMPOST",
+    "SEMWAIT",
+    "SEMGET",
+    "SEMINIT",
+    "ATGETM",
+    "ATRELM",
+    "STALLWAIT",
+)
+
+
+def mop_slot_of(fact: dict):
+    """Return (slot, word_text) for a MOP slot-setter call, else (None, None).
+
+    `word_text` is the instruction word being installed (arg0 source text); it
+    is what executes at `slot`, not at this call's line.
+    """
+    if fact.get("family") != "call":
+        return None, None
+    slot = MOP_SLOT_SETTERS.get(fact.get("name", ""))
+    if not slot:
+        return None, None
+    return slot, fact.get("arg0", "")
+
+
+def replay_op_of(fact: dict):
+    """Return (op, exec_mode) for a Replay Expander call, else (None, None).
+
+    `op` is "record" (Load=1) or "expand" (Load=0). `exec_mode` applies to a
+    record only: "NOEXEC" (the default — the following instructions are captured
+    but not issued here), "EXEC", or "UNRESOLVED" when the Exec template
+    argument is itself dependent (`lltt::ExecBool(Exec)` inside a wrapper).
+    """
+    if fact.get("family") != "call":
+        return None, None
+    name = fact.get("name", "")
+    text = fact.get("text", "") or ""
+    if not any(q in text for q in _REPLAY_CALL_QUALIFIERS):
+        return None, None
+    if name in REPLAY_RECORD_CALLS:
+        return "record", _record_exec_mode(text)
+    if name in REPLAY_EXPAND_CALLS:
+        return "expand", ""
+    return None, None
+
+
+def _record_exec_mode(text: str) -> str:
+    """Exec mode of a record call from its callee source text.
+
+    Order matters: "NoExec" CONTAINS "Exec", so the negative form is tested
+    first, and a dependent `ExecBool(...)` argument is unresolvable either way.
+    """
+    if "NoExec" in text:
+        return "NOEXEC"
+    if "ExecBool" in text:
+        return "UNRESOLVED"
+    if "Exec" in text:
+        return "EXEC"
+    if "<" not in text:
+        return "NOEXEC"  # no explicit template argument -> lltt/ckernel default
+    return "UNRESOLVED"
+
+
+def is_mop_word(macro_name: str) -> bool:
+    """True if `macro_name` is an opcode-VALUE macro (`TT_OP_*`) rather than an
+    issued instruction — the form that gets slotted into a MOP or a replay
+    buffer. Anchored, not a substring test.
+
+    This is the Python half of a contract with the extractor: it selects the same
+    prefix the C++ MacroPass files under `OPCODE_VALUE_FAMILY`. If one side stops
+    matching what the other emits, the hint goes silently dead — enforced by a
+    test, since a name-level tool/skill sync check cannot see it.
+    """
+    return (macro_name or "").startswith(OPCODE_VALUE_PREFIX)
+
+
+def mop_word_flips_src(text: str) -> bool:
+    """True if a slotted word hands a Src bank back / flips the bank pointer.
+
+    A flip in the last live END slot lands immediately before the next outer
+    iteration's START_OP, which is what makes a textual reading of the flip's
+    position wrong.
+    """
+    up = (text or "").upper()
+    if "CLEARDVALID" in up:
+        return True
+    if not any(t in up for t in SRC_FLIP_OP_SUBSTR):
+        return False
+    return bool(SRC_FLIP_CLR_RE.search(up))
 
 
 def classify_macro(name: str):
@@ -461,7 +625,7 @@ def stallwait_wait_operand(text: str) -> str:
 CFG_DEFINES_REL = {
     "wormhole": "tt_metal/hw/inc/internal/tt-1xx/wormhole/wormhole_b0_defines/cfg_defines.h",
     "blackhole": "tt_metal/hw/inc/internal/tt-1xx/blackhole/cfg_defines.h",
-    "quasar": "tt_metal/hw/inc/internal/tt-2xx/quasar/cfg_defines.h",
+    "quasar": "tt_metal/tt-llk/tt_llk_quasar/common/inc/cfg_defines.h",
 }
 
 # NAME -> integer literal (decimal OR hex), tolerating an integer-suffix
@@ -618,6 +782,185 @@ def resolve_word(text: str, addr32: dict):
 # WRITE INSTRUCTION, not the field-name prefix — see cfg_word_overlap.py. THCON
 # is a sub-range of the Config array (per tt-isa-docs BackendConfiguration.md),
 # NOT a separate file, so a field-name/THCON split would be wrong.
+
+
+# --- Tensix write vs a later RISC store of the same register (tensix-risc-order) ---
+# A RISC core that polls a semaphore (`while (semaphore_read(semaphore::X) > 0)`, the
+# body of wait_for_idle / wait_for_next_context) and then stores to CONFIG over MMIO
+# is ordered only against the Tensix instructions that come BEFORE the SEMGET that
+# released X. A Tensix config write the same thread issued AFTER that SEMGET can
+# still be queued (e.g. behind a STALLWAIT) when the RISC store lands, and then
+# overwrites it.
+RISC_POLL_CALLS = ("semaphore_read",)
+# A poll wrapper that returns while `arg0 - 1` releases may still be pending:
+# wait_for_next_context(n) spins on `count >= n`, so with n = 2 the SEMGET of the
+# most recent call may not have executed. Only n = 1 waits for every release.
+PARTIAL_POLL_CALLS = ("wait_for_next_context",)
+
+
+def poll_is_full(call_fact: dict) -> bool:
+    """True if a poll call waits until every release issued so far has executed."""
+    if call_fact.get("name", "") not in PARTIAL_POLL_CALLS:
+        return True
+    return (call_fact.get("arg0", "") or "").strip() == "1"
+
+
+# Config words that hold one unpacker context's state only. With two contexts that
+# alternate per call, a wait_for_next_context(2) poll proves the release of the
+# call that last used THIS context, so it orders writes to these words (and only
+# these). The unprefixed Base_address is context 0's L1 base.
+_CNTX_RE = re.compile(r"_cntx(\d+)_")
+_BASE0_RE = re.compile(r"_REG\d+_Base_address_ADDR32$")
+
+
+def _context_of_field(name: str):
+    m = _CNTX_RE.search(name)
+    if m:
+        return int(m.group(1))
+    return 0 if _BASE0_RE.search(name) else None
+
+
+def is_per_context_word(tok: str, addr32: dict) -> bool:
+    """True if the config word `tok` names holds fields of a single context only.
+    With cfg_defines, every field on the word must belong to the same context
+    (Dest_cntx0/1_address share one word, so that word is not per-context).
+    Without it, only the full-word Base addresses count."""
+    w, field = resolve_word(tok, addr32) if addr32 else (None, None)
+    if w is None:
+        name = re.sub(r"[+\-]\d+$", "", tok)
+        return bool(re.search(r"_Base(_cntx\d+)?_address_ADDR32$", name))
+    ctxs = {
+        _context_of_field(n)
+        for n, v in addr32.items()
+        if n.endswith("_ADDR32") and v == w
+    }
+    return len(ctxs) == 1 and None not in ctxs
+
+
+# Only the decrementing op releases a "wait until the count drops" poll — the
+# context-release idiom. An `== 0` poll released by a SEMPOST is a blind spot.
+RELEASE_SEMAPHORE_OPS = ("get",)
+# Keeps a literal GPR offset (`p_gpr_pack::TILE_HEADER + 1` is the next GPR).
+_GPR_TOKEN_RE = re.compile(
+    r"p_gpr\w*::\s*[A-Za-z_]\w*(?:\s*[+\-]\s*(?:0[xX][0-9a-fA-F]+|\d+)\b)?"
+)
+_GPR_OFFSET_RE = re.compile(r"(p_gpr\w*::[A-Za-z_]\w*)([+\-])(0[xX][0-9a-fA-F]+|\d+)$")
+# Keeps a literal word offset (`FIELD_ADDR32 + 2`), so the token resolves to the
+# word actually written; a runtime offset (`+ i`) stays outside the token.
+_ADDR32_TOKEN_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*_ADDR32\b(?:\s*[+\-]\s*(?:0[xX][0-9a-fA-F]+|\d+)\b)?"
+)
+# A register's name up to its REG index (THCON_SEC0_REG2_Out_data_format ->
+# THCON_SEC0_REG2), to relate a `FIELD_ADDR32 + i` store to the words it spans.
+_REG_PREFIX_RE = re.compile(r"^(.*?_REG_?\d+)_")
+
+
+def _norm_tok(tok: str) -> str:
+    """`F_ADDR32 + 0x2` / `F_ADDR32+2` -> `F_ADDR32+2`; `F_ADDR32 + 0` -> `F_ADDR32`."""
+    m = _WORD_OFFSET_RE.match(tok)
+    if not m or not m.group(3):
+        return tok
+    try:
+        off = int(m.group(3), 0)
+    except ValueError:
+        return re.sub(r"\s+", "", tok)
+    if off == 0:
+        return m.group(1)
+    return f"{m.group(1)}{m.group(2)}{off}"
+
+
+def _norm_gpr(tok: str) -> str:
+    """`p_gpr::X + 0x1` -> `p_gpr::X+1`; `p_gpr::X + 0` -> `p_gpr::X`."""
+    tok = re.sub(r"\s+", "", tok)
+    m = _GPR_OFFSET_RE.match(tok)
+    if not m:
+        return tok
+    try:
+        off = int(m.group(3), 0)
+    except ValueError:
+        return tok
+    return m.group(1) if off == 0 else f"{m.group(1)}{m.group(2)}{off}"
+
+
+def ordered_write_target(fact: dict):
+    """(namespace, token) of the register an in-stream Tensix write targets:
+    namespace "cfg" (Config), "thread" (ThreadConfig, written by SETC16) or "gpr";
+    token is the *_ADDR32 word name (cfg/thread) or the p_gpr_*::NAME (gpr).
+    (None, None) when it does not resolve (e.g. a SETADC address-counter write)."""
+    name = fact.get("name", "")
+    text = fact.get("text", "")
+    if fact.get("family") == "call":
+        if CFG_RMW_TEMPLATE_CALL not in text:
+            return None, None
+        m = _ADDR32_TOKEN_RE.search(text)
+        if m:
+            return "cfg", _norm_tok(m.group(0))
+        a = _RMW_ALIAS_RE.search(text)
+        return ("cfg", a.group(1) + "_ADDR32") if a else (None, None)
+    if is_gpr_source_write(name):
+        toks = _GPR_TOKEN_RE.findall(text)
+        return ("gpr", _norm_gpr(toks[-1])) if toks else (None, None)
+    m = _ADDR32_TOKEN_RE.search(text)
+    if not m:
+        return None, None
+    return ("thread" if is_thread_config_write(name) else "cfg"), _norm_tok(m.group(0))
+
+
+def risc_store_target(pw: dict):
+    """(namespace, token, runtime_offset) of a RISC MMIO store (a pointer_write)."""
+    idx = pw.get("index_text", "") or ""
+    kind, _ = classify_write(pw)
+    if kind in GPR_WRITE_KINDS:
+        toks = _GPR_TOKEN_RE.findall(idx)
+        return ("gpr", _norm_gpr(toks[-1]), False) if toks else (None, None, False)
+    if kind in CFG_WRITE_KINDS:
+        m = _ADDR32_TOKEN_RE.search(idx)
+        return (
+            ("cfg", _norm_tok(m.group(0)), has_runtime_word_offset(idx))
+            if m
+            else (None, None, False)
+        )
+    return None, None, False
+
+
+# Direct config/GPR array stores (`cfg[...]`, `regfile[...]`) whose index names no
+# register: a local holding the word (`cfg[upk0_reg]`) or a wrapper parameter.
+# Generic MMIO pointers (MOP template, reg_write) are not config stores.
+_DIRECT_STORE_NS = {
+    "cfg32": "cfg",
+    "cfg16": "cfg",
+    "cfg_ptr": "cfg",
+    "regfile_gpr": "gpr",
+}
+
+
+def unresolved_store_ns(pw: dict):
+    """The namespace of a direct cfg/GPR store whose target does not resolve to a
+    named register, else None."""
+    ns = _DIRECT_STORE_NS.get(classify_write(pw)[0])
+    if ns is None or risc_store_target(pw)[0]:
+        return None
+    return ns
+
+
+def same_register(
+    write_tok: str, store_tok: str, store_runtime_off: bool, addr32: dict
+) -> bool:
+    """True if a Tensix write to `write_tok` can hit the word a RISC store to
+    `store_tok` writes. Resolves both through cfg_defines when available; a store
+    with a runtime offset (`FIELD_ADDR32 + i`) covers the words after its base that
+    belong to the same REG (its span is not known statically)."""
+    if write_tok == store_tok:
+        return True
+    w, _ = resolve_word(write_tok, addr32) if addr32 else (None, None)
+    s, _ = resolve_word(store_tok, addr32) if addr32 else (None, None)
+    if w is not None and s is not None and w == s:
+        return True
+    if store_runtime_off:
+        wp, sp = _REG_PREFIX_RE.match(write_tok), _REG_PREFIX_RE.match(store_tok)
+        if wp and sp and wp.group(1) == sp.group(1):
+            return w is None or s is None or w >= s
+    return False
 
 
 # --- reconfig-stall -----------------------------------------------------------
@@ -963,14 +1306,12 @@ def required_vld_token(name: str):
 # A Src bank flip re-arms the hazard the MATH drain was taken to settle: the drain
 # proves the FPU pipe was empty AT THE STALL, so a flipping op issued after it
 # re-introduces exactly the in-flight-epilogue race. SETRWC with CLR_A/CLR_B/CLR_AB
-# and a matrix op with clr_src both flip; CLR_NONE does not (and is the common case
-# in-tree, so it must not be mistaken for one). Non-flipping FPU ops - including the
-# MOVD2A/MOVD2B of the same burst - do NOT re-arm it.
-_CLR_FLIP_RE = re.compile(r"\bCLR_(?:A|B|AB|SRC)\b")
-
-
+# (or the in-tree CLR_SRC alias for one of them) and a matrix op with clr_src both
+# flip; CLR_NONE does not (and is the common case in-tree, so it must not be
+# mistaken for one). Non-flipping FPU ops - including the MOVD2A/MOVD2B of the
+# same burst - do NOT re-arm it.
 def is_bank_flip_macro(text: str) -> bool:
-    return bool(_CLR_FLIP_RE.search(text))
+    return bool(SRC_FLIP_CLR_RE.search(text))
 
 
 def is_dest_to_src_move(name: str) -> bool:

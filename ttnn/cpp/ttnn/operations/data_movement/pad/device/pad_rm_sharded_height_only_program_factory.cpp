@@ -4,19 +4,18 @@
 
 #include "pad_rm_sharded_height_only_program_factory.hpp"
 
-#include <tt-metalium/experimental/metal2_host_api/program_run_args.hpp>
-#include <tt-metalium/experimental/metal2_host_api/program_spec.hpp>
+#include <tt-metalium/workload/run_args/program_run_args.hpp>
+#include <tt-metalium/workload/specification/program_spec.hpp>
 #include <tt-metalium/work_split.hpp>
 #include "ttnn/operations/core/data_movement_kernel/datamovement_kernel_config.hpp"
 #include "ttnn/operations/data_movement/common/common.hpp"
 
 using namespace tt::tt_metal;
-using namespace tt::tt_metal::experimental;
+using tt::tt_metal::experimental::AdvancedKernelRunArgs;
 using namespace tt::constants;
 
 namespace ttnn::prim {
-using ttnn::operations::data_movement::float_to_uint16;
-using ttnn::operations::data_movement::pack_two_uint16_into_uint32;
+using ttnn::operations::data_movement::pack_scalar_into_uint32;
 
 namespace {
 // Names are prefixed per factory: all seven pad factories land in one unity-build
@@ -80,7 +79,7 @@ inline std::vector<ShardedHeightPerCoreArgs> get_pad_runtime_args_rm_sharded(
     uint32_t shard_height_padded,
     uint32_t shard_height_unpadded,
     const std::vector<CoreCoord>& unpadded_cores) {
-    tt::tt_metal::IDevice* device = input_tensor.device();
+    tt::tt_metal::distributed::MeshDevice* device = input_tensor.device();
 
     auto input_shape = input_tensor.padded_shape();
     auto output_shape = output_tensor.padded_shape();
@@ -137,16 +136,30 @@ inline std::vector<ShardedHeightPerCoreArgs> get_pad_runtime_args_rm_sharded(
             }
         }
 
-        // figure out the stick id in a shard, and the core id for the stick.
-        std::map<std::pair<uint32_t, uint32_t>, std::vector<uint32_t>> core_stick_map;
-        auto first_core = device->worker_core_from_logical_core(unpadded_cores.front());
-        std::pair<uint32_t, uint32_t> prev_xy_pair = std::make_pair(first_core.x, first_core.y);
+        // Gather plan for this output core: the source cores in the order their sticks appear in the
+        // output shard, each with the stick ids to read from it. The reader copies the chunks
+        // sequentially in this order, so it has to be the traversal order of the sticks and not a
+        // sorted order of the source cores' coordinates: on a multi-range grid the shard-order
+        // successor of a core can sit at smaller physical coordinates than the core itself.
+        using NocXY = std::pair<uint32_t, uint32_t>;
+        const auto noc_xy_of = [&](const CoreCoord& logical_core) -> NocXY {
+            const auto physical = device->worker_core_from_logical_core(logical_core);
+            return row_major ? std::make_pair(physical.y, physical.x) : std::make_pair(physical.x, physical.y);
+        };
+        std::vector<std::pair<NocXY, std::vector<uint32_t>>> core_sticks_in_order;
+        const auto push_stick = [&](const NocXY& xy, uint32_t value) {
+            if (core_sticks_in_order.empty() || core_sticks_in_order.back().first != xy) {
+                core_sticks_in_order.emplace_back(xy, std::vector<uint32_t>{});
+            }
+            core_sticks_in_order.back().second.push_back(value);
+        };
+        NocXY prev_xy_pair = noc_xy_of(unpadded_cores.front());
         for (uint32_t j = 0; j < num_sticks_per_core_padded; ++j) {
             int stick_id = stick_ids_per_core[j];
 
             // if it is pad stick, we need to leave a gap between the previous non-pad stick and next non-pad stick.
             if (stick_id == -2 || stick_id == -1) {  // front or end padding
-                core_stick_map[prev_xy_pair].push_back(stick_id);
+                push_stick(prev_xy_pair, static_cast<uint32_t>(stick_id));
             } else {
                 uint32_t shard_id = stick_id / num_sticks_per_core_unpadded;
                 uint32_t stick_id_in_shard = stick_id - (shard_id * num_sticks_per_core_unpadded);
@@ -156,23 +169,19 @@ inline std::vector<ShardedHeightPerCoreArgs> get_pad_runtime_args_rm_sharded(
                 // a sharded tensor may live on a non-contiguous grid (e.g. {[1-0 - 3-7],
                 // [5-0 - 6-7]}), whose bounding box also covers cores that hold no shard.
                 if (shard_id < unpadded_cores.size()) {
-                    auto core_physical = device->worker_core_from_logical_core(unpadded_cores[shard_id]);
-                    // save stick id in a shard, and core coord into a map
-                    std::pair<uint32_t, uint32_t> xy_pair = row_major
-                                                                ? std::make_pair(core_physical.y, core_physical.x)
-                                                                : std::make_pair(core_physical.x, core_physical.y);
-                    core_stick_map[xy_pair].push_back(stick_id_in_shard);
+                    const NocXY xy_pair = noc_xy_of(unpadded_cores[shard_id]);
+                    push_stick(xy_pair, stick_id_in_shard);
                     prev_xy_pair = xy_pair;
                 }
             }
         }
 
         // reader varargs: the whole gather plan except num_cores, which is a named arg.
-        core_args.num_cores_read = core_stick_map.size();
+        core_args.num_cores_read = core_sticks_in_order.size();
         std::vector<uint32_t>& reader_varargs = core_args.reader_varargs;
-        reader_varargs.reserve(3 * core_stick_map.size() + 2 * num_sticks_per_core_padded);
+        reader_varargs.reserve(3 * core_sticks_in_order.size() + 2 * num_sticks_per_core_padded);
 
-        for (const auto& core_stick_pair : core_stick_map) {
+        for (const auto& core_stick_pair : core_sticks_in_order) {
             auto xy_pair = core_stick_pair.first;
             if (row_major) {
                 reader_varargs.push_back((std::uint32_t)xy_pair.second);  // noc x
@@ -185,8 +194,8 @@ inline std::vector<ShardedHeightPerCoreArgs> get_pad_runtime_args_rm_sharded(
 
         // coalesce the sticks into chunks
         std::vector<std::vector<std::vector<uint32_t>>> stick_chunks_per_core;
-        stick_chunks_per_core.reserve(core_stick_map.size());
-        for (auto core_stick_pair : core_stick_map) {
+        stick_chunks_per_core.reserve(core_sticks_in_order.size());
+        for (auto& core_stick_pair : core_sticks_in_order) {
             auto stick_chunks = group_contiguous_and_repeated_values(core_stick_pair.second);
             reader_varargs.push_back(stick_chunks.size());  // num_chunks for current core
             stick_chunks_per_core.push_back(std::move(stick_chunks));
@@ -244,8 +253,6 @@ ttnn::device_operation::ProgramArtifacts PadRmShardedHeightOnlyProgramFactory::c
 
     tt::DataFormat dfb_data_format = tt::tt_metal::datatype_to_dataformat_converter(a.dtype());
     tt::DataFormat dst_dfb_data_format = tt::tt_metal::datatype_to_dataformat_converter(output.dtype());
-
-    IDevice* device = a.device();
 
     // input shard spec
     auto shard_spec_unpadded = a.shard_spec().value();
@@ -313,14 +320,7 @@ ttnn::device_operation::ProgramArtifacts PadRmShardedHeightOnlyProgramFactory::c
     // construct const buffer with the pad_value
     bool not_pad_by_zero = pad_value != 0;
 
-    uint32_t packed_pad_value;
-    if (a.dtype() == DataType::INT32 || a.dtype() == DataType::UINT32) {
-        packed_pad_value = pad_value;
-    } else if (a.dtype() == DataType::UINT16) {
-        packed_pad_value = pack_two_uint16_into_uint32({float_to_uint16(pad_value), float_to_uint16(pad_value)});
-    } else {
-        packed_pad_value = pack_two_bfloat16_into_uint32({bfloat16(pad_value), bfloat16(pad_value)});
-    }
+    uint32_t packed_pad_value = pack_scalar_into_uint32(a.dtype(), pad_value);
 
     auto all_runtime_args = get_pad_runtime_args_rm_sharded(
         a,
@@ -368,7 +368,7 @@ ttnn::device_operation::ProgramArtifacts PadRmShardedHeightOnlyProgramFactory::c
                 {"num_sticks_padded", shard_height_padded},
             },
         .runtime_arg_schema = {.runtime_arg_names = {"num_cores_read"}},
-        .hw_config = ttnn::create_reader_datamovement_config(device->arch()),
+        .hw_config = ttnn::create_reader_datamovement_config(),
         .advanced_options = {.num_runtime_varargs = num_reader_varargs},
     };
 
@@ -421,7 +421,7 @@ ttnn::device_operation::ProgramArtifacts PadRmShardedHeightOnlyProgramFactory::c
                      "start_dim_offset_c",
                      "start_dim_offset_n"},
             },
-        .hw_config = ttnn::create_writer_datamovement_config(device->arch()),
+        .hw_config = ttnn::create_writer_datamovement_config(),
     };
 
     KernelRunArgs reader_run_args{.kernel = SH_H_READER};

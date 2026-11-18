@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 
-"""Sparse-attention (DSA) prefill adapters: the shared ``SparseMLAPrefillAdapter`` base + DeepSeek-V3.2-Exp.
+"""Sparse-attention (DSA) prefill adapters: the shared ``SparseMLAPrefillAdapter`` base and DeepSeek-V3.2-Exp.
 
-GLM-5.1 / GLM-5.2 have their own serving adapters (``adapters/glm_5_1.py`` / ``adapters/glm_5_2.py``);
+GLM-5.3 and Kimi-K3.1 have their own serving adapters (``adapters/glm_5_3.py``, ``adapters/kimi_k3_1.py``);
 what remains here is the test-only base + DeepSeek-V3.2-Exp.
 
-Both add a lightning indexer (DeepSeek Sparse Attention) on top of the MLA + MoE
-family. Two things set them apart from the dense ``DeepSeekV3Adapter`` / ``KimiK26Adapter``:
+The variants here add a lightning indexer (DeepSeek Sparse Attention) on top of the MLA + MoE
+family. Two things set them apart from the dense ``DeepSeekV3Adapter`` / ``KimiK27Adapter``:
 
   * Their HF ``model_type`` (``deepseek_v32`` / ``glm_moe_dsa``) is NOT registered with
     transformers, so ``AutoConfig`` cannot load them — the config is HAND-BUILT via

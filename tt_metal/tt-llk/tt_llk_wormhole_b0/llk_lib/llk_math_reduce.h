@@ -471,6 +471,12 @@ inline void reduce_configure_addrmod(const ckernel::TensorShape& tensor_shape)
 template <PoolType type, ReduceDim dim, bool is_fp32_dest_acc_en, MathFidelity math_fidelity>
 inline void _llk_math_reduce_init_(const ckernel::TensorShape& tensor_shape)
 {
+    // There is no min-pool instruction - the FPU has GMPOOL (max) and GAPOOL (average/sum).
+    static_assert(
+        type != PoolType::MIN,
+        "The FPU reduce has no MIN: the hardware provides GMPOOL (max) and GAPOOL (average) only. "
+        "Use the SFPU reduce instead (ckernel_sfpu_reduce.h::calculate_reduce).");
+
     reduce_configure_addrmod<type, dim, math_fidelity>(tensor_shape);
     reduce_configure_mop<type, dim, math_fidelity>(tensor_shape);
 
@@ -482,7 +488,7 @@ inline void _llk_math_reduce_init_(const ckernel::TensorShape& tensor_shape)
     // _llk_math_matmul_init_ / _llk_math_eltwise_binary_init_. A preceding copy_init that left
     // PRESERVE (keep denormals) would otherwise leak "keep" into the pool GMPOOL — harmless on HW
     // when fp32 DEST accumulation is enabled (the flag is ignored), but a real invariant violation.
-    math::_configure_default_zero_flag_state_();
+    math::_configure_default_zero_flag_state_<math::ZeroFlagAt::init_holds>();
 }
 
 /**

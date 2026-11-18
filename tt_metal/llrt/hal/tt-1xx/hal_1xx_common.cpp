@@ -5,6 +5,7 @@
 #include "hal_1xx_common.hpp"
 #include "hal_types.hpp"
 #include "rtoptions.hpp"
+
 #include <enchantum/enchantum.hpp>
 
 namespace tt::tt_metal::hal_1xx {
@@ -27,7 +28,20 @@ std::vector<std::string> HalJitBuildQueryBase::defines(const HalJitBuildQueryInt
             switch (params.processor_class) {
                 case HalProcessorClassType::DM:
                     switch (params.processor_id) {
-                        case 0: defines.push_back("COMPILE_FOR_BRISC"); break;
+                        case 0:
+                            defines.push_back("COMPILE_FOR_BRISC");
+                            if (params.is_fw && params.rtoptions.get_brisc_firmware_variant() ==
+                                                    tt::llrt::BriscFirmwareVariant::Blaze) {
+                                defines.push_back("BLAZE_RUNTIME_RELOAD");
+                            }
+                            // BRISC firmware writes RISC_PREFETCH_CTRL once at boot, before it releases the other
+                            // RISCs on the core. Skipped on ttsim, whose pinned release refuses writes to it.
+                            if (params.is_fw and not params.rtoptions.get_simulator_enabled()) {
+                                if (const auto risc_prefetch_ctrl = default_risc_prefetch_ctrl()) {
+                                    defines.push_back(fmt::format("RISC_PREFETCH_CTRL_VALUE={}", *risc_prefetch_ctrl));
+                                }
+                            }
+                            break;
                         case 1: defines.push_back("COMPILE_FOR_NCRISC"); break;
                         default: TT_THROW("Invalid processor id {}", params.processor_id);
                     }
@@ -71,8 +85,7 @@ std::vector<std::string> HalJitBuildQueryBase::defines(const HalJitBuildQueryInt
 
     // Index into kernel_config_base[] / mailboxes for the core type of this build.
     defines.push_back(fmt::format(
-        "PROGRAMMABLE_CORE_TYPE={}",
-        static_cast<int>(hal_.get_programmable_core_type_index(params.core_type))));
+        "PROGRAMMABLE_CORE_TYPE={}", static_cast<int>(hal_.get_programmable_core_type_index(params.core_type))));
 
     return defines;
 }

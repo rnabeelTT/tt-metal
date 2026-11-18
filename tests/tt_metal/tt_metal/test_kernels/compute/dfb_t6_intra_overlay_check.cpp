@@ -36,6 +36,7 @@
 #include "ckernel_trisc_common.h"
 #include "dev_mem_map.h"
 #include "experimental/kernel_args.h"
+#include "risc_common.h"
 
 namespace {
 // Host may pass fewer steps; a zero tile count ends the series.
@@ -120,6 +121,12 @@ void kernel_main() {
 
     DataflowBuffer dfb(dfb::out);
 
+    // dummy_pack's PACR_STRIDE validates a pack-partition bd_table entry; compute_kernel_hw_startup
+    // is what runs llk_pack_init and programs that entry. dummy_unpack is UNPACR_NOP and does not
+    // need a descriptor, but startup is a call-once API that all three TRISC threads must enter
+    // together.
+    compute_kernel_hw_startup(dfb::out, dfb::out);
+
 #ifdef UCK_CHLKC_PACK
     // Firmware already programmed ClientL capacity + remapper alias. Snapshot mirrored DM TCs before
     // any INTRA push so a leaked capacity/credit write would already show up here.
@@ -159,12 +166,14 @@ void kernel_main() {
 #ifdef UCK_CHLKC_UNPACK
     WAYPOINT("URW");
     while (*scratch_ptr(scratch_l1_address, ready_idx) != handshake_ready) {
+        invalidate_l1_cache();
     }
     WAYPOINT("URD");
 
     // Wait for the full push series so the pop arithmetic is a deterministic function of tiles popped.
     WAYPOINT("UPW");
     while (*scratch_ptr(scratch_l1_address, pushes_done_idx) != handshake_pushes_done) {
+        invalidate_l1_cache();
     }
     WAYPOINT("UPR");
 

@@ -4,11 +4,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "binary.hpp"
+#include <cmath>
 #include <tt-metalium/sub_device_types.hpp>
 #include <tt-logger/tt-logger.hpp>
 
 #include "ttnn/tensor/tensor.hpp"
+#include <tt-metalium/constants.hpp>
+#include "ttnn/operations/data_movement/fill_pad/fill_pad.hpp"
 #include "ttnn/operations/data_movement/repeat/repeat.hpp"
+#include "ttnn/operations/eltwise/binary/common/binary_op_utils.hpp"
 #include "ttnn/operations/eltwise/binary_ng/device/binary_ng_device_operation.hpp"
 #include "ttnn/operations/eltwise/unary/unary.hpp"
 #include "ttnn/operations/copy/typecast/typecast.hpp"
@@ -117,6 +121,40 @@
         const Tensor& b = rhs_cast.has_value() ? *rhs_cast : rhs;                                             \
         return operations::binary::relational_binary<operations::binary::BinaryOpType::OP_TYPE>(              \
             lhs, b, dtype, memory_config, output);                                                            \
+    }
+
+// scalar OP tensor. Operands are passed to the primitive swapped, because slot a must hold a
+// tensor, and scalar_is_lhs tells the kernel to read them in the caller's order. MODE is the op's own
+// fast_and_approximate_mode policy, spelled at each instantiation rather than baked into two
+// near-identical macros: it is the one thing that differs per op, and the one thing that has
+// drifted from the tensor-first overloads before.
+#define TTNN_BINARY_OP_SCALAR_TENSOR_IMPL(NAME, OP_TYPE, MODE)                       \
+    Tensor NAME(                                                                     \
+        operations::unary::ScalarVariant lhs,                                        \
+        const Tensor& rhs,                                                           \
+        const std::optional<const DataType>& output_dtype,                           \
+        const std::optional<MemoryConfig>& memory_config,                            \
+        const std::optional<Tensor>& output,                                         \
+        ttsl::Span<const operations::unary::EltwiseUnaryWithParam> post_activations, \
+        ttsl::Span<const operations::unary::EltwiseUnaryWithParam> lhs_activations,  \
+        ttsl::Span<const operations::unary::EltwiseUnaryWithParam> rhs_activations,  \
+        const std::optional<bool>& fast_and_approximate_mode,                        \
+        const std::optional<CoreRangeSet>& sub_core_grids,                           \
+        const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id) {             \
+        return ttnn::detail::invoke_binary_ng(                                       \
+            rhs,                                                                     \
+            lhs,                                                                     \
+            operations::binary::BinaryOpType::OP_TYPE,                               \
+            output_dtype,                                                            \
+            memory_config,                                                           \
+            output,                                                                  \
+            post_activations,                                                        \
+            lhs_activations,                                                         \
+            rhs_activations,                                                         \
+            MODE,                                                                    \
+            sub_core_grids,                                                          \
+            sub_device_id,                                                           \
+            /*scalar_is_lhs=*/true);                                                 \
     }
 
 #define TTNN_BINARY_OP_TENSOR_SCALAR_IMPL(NAME, OP_TYPE)                             \
@@ -454,16 +492,29 @@ inline bool is_layout_or_scalar([[maybe_unused]] unary::ScalarVariant input, [[m
     return true;
 }
 
-inline Tensor to_layout(const Tensor& input, Layout layout) {
+inline Tensor to_layout(
+    const Tensor& input, Layout layout, const std::optional<CoreRangeSet>& sub_core_grids = std::nullopt) {
     if (detail::is_layout_or_scalar(input, layout)) {
         return input;
     }
 
-    return ttnn::to_layout(input, layout);
+    // A sharded tensor is converted where its shards live; the tilize/untilize factories reject a grid for it.
+    return ttnn::to_layout(
+        input, layout, std::nullopt, std::nullopt, input.is_sharded() ? std::nullopt : sub_core_grids);
 }
 
-inline float to_layout(float input, [[maybe_unused]] Layout layout) { return input; }
-inline unary::ScalarVariant to_layout(unary::ScalarVariant input, [[maybe_unused]] Layout layout) { return input; }
+inline float to_layout(
+    float input,
+    [[maybe_unused]] Layout layout,
+    [[maybe_unused]] const std::optional<CoreRangeSet>& sub_core_grids = std::nullopt) {
+    return input;
+}
+inline unary::ScalarVariant to_layout(
+    unary::ScalarVariant input,
+    [[maybe_unused]] Layout layout,
+    [[maybe_unused]] const std::optional<CoreRangeSet>& sub_core_grids = std::nullopt) {
+    return input;
+}
 
 constexpr bool is_associative(BinaryOpType op) {
     return op == BinaryOpType::ADD || op == BinaryOpType::MUL || op == BinaryOpType::EQ || op == BinaryOpType::NE ||
@@ -517,6 +568,16 @@ inline Tensor binary_impl(
     }
     if (binary_op_type == BinaryOpType::EQ) {
         return ttnn::eqz(ttnn::sub_sfpu(lhs, rhs, memory_config), memory_config, output);
+    }
+    // s > t is t < s: reuse the tensor-scalar compare instead of subtracting.
+    if (binary_op_type == BinaryOpType::GT) {
+        return ttnn::lt_unary(rhs, lhs, memory_config, output);
+    }
+    if (binary_op_type == BinaryOpType::LT) {
+        return ttnn::gt_unary(rhs, lhs, memory_config, output);
+    }
+    if (binary_op_type == BinaryOpType::NE) {
+        return ttnn::ne_unary(rhs, lhs, memory_config, output);
     }
 
     TT_THROW("Unsupported operation");
@@ -604,7 +665,8 @@ inline auto invoke_binary_ng_impl(
     ttsl::Span<const ttnn::operations::unary::EltwiseUnaryWithParam> rhs_activations,
     const std::optional<bool>& fast_and_approximate_mode,
     const std::optional<CoreRangeSet>& sub_core_grids,
-    const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id) {
+    const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id,
+    bool scalar_is_lhs = false) {
     const auto a_dtype = lhs.dtype();
     const DataType b_dtype = [&] {
         if constexpr (requires { rhs.dtype(); }) {
@@ -614,8 +676,37 @@ inline auto invoke_binary_ng_impl(
         }
     }();
     const auto output_preallocated = output.has_value();
+    const auto is_32bit_int = [](DataType dt) { return dt == DataType::INT32 || dt == DataType::UINT32; };
+    const bool is_float_arith = (binary_op_type == operations::binary::BinaryOpType::DIV) ||
+                                (binary_op_type == operations::binary::BinaryOpType::MUL);
+    // pack_scalar_runtime_arg encodes the scalar with a static_cast to int32_t/uint32_t, which is
+    // faithful only for a finite integer inside the destination's range. Fractional values are
+    // truncated, and out-of-range or non-finite ones are undefined: measured before this check,
+    // inf reached an int32 kernel as INT32_MIN and 2^32 reached a uint32 one as 0, both silently.
+
+    // A float scalar cannot survive pack_scalar_runtime_arg against a 32-bit integer tensor: it is
+    // cast to int32/uint32 there, so 2.5 arrives as 2 and 0.5 as 0, silently. The tensor-tensor path
+    // below already handles the equivalent mismatch by promoting for DIV/MUL and rejecting for the
+    // rest; do the same for a scalar rather than truncating it.
+    //
+    // Promotion keys off the scalar's type, not its value, which is what torch does and what
+    // ttnn::div already does for its rounding modes (promote_int32_scalar_input). Deciding by value
+    // would keep 2.0 on the integer path and so keep int32 results exact past 2^24, where float32's
+    // 24-bit mantissa cannot represent them -- but it would also make the output dtype depend on a
+    // runtime value, and it costs nothing to give up: an integer scalar stays on the integer path
+    // in either scheme, so multiply(int32_tensor, 2) is still exact above 2^24. 2.0 says float, and
+    // returning float is the honest answer to it.
+    const bool scalar_needs_promotion = [&] {
+        if constexpr (requires { rhs.dtype(); }) {
+            return false;
+        } else {
+            return is_float_arith && is_32bit_int(a_dtype) && std::holds_alternative<float>(rhs);
+        }
+    }();
+
     const auto is_integer_division = (binary_op_type == operations::binary::BinaryOpType::DIV) &&
-                                     (a_dtype == DataType::INT32) && (b_dtype == DataType::INT32);
+                                     (a_dtype == DataType::INT32) && (b_dtype == DataType::INT32) &&
+                                     !scalar_needs_promotion;
     if (is_integer_division) {
         // For integer division, output dtype should be float32
         if (dtype.has_value() || output_preallocated) {
@@ -629,15 +720,35 @@ inline auto invoke_binary_ng_impl(
     // fp32 mode, producing inf / garbage (e.g. div(bf16, uint32) -> inf). Promote the integer operand
     // to the floating compute dtype, matching PyTorch type promotion and the existing UINT8->UINT16 and
     // integer-division handling. Scoped to DIV/MUL, the arithmetic ops where this corruption occurs.
-    const auto is_32bit_int = [](DataType dt) { return dt == DataType::INT32 || dt == DataType::UINT32; };
     const auto float_promote_target = [](DataType float_dtype) {
         return float_dtype == DataType::FLOAT32 ? DataType::FLOAT32 : DataType::BFLOAT16;
     };
     std::optional<Tensor> lhs_promoted;
     std::optional<Tensor> rhs_promoted;
+    if constexpr (!requires { rhs.dtype(); }) {
+        if (scalar_needs_promotion) {
+            log_debug(
+                tt::LogOp,
+                "Binary: typecasting lhs from integer dtype {} to {} to match the floating scalar operand",
+                a_dtype,
+                DataType::FLOAT32);
+            lhs_promoted = ttnn::typecast(lhs, DataType::FLOAT32);
+        } else if (is_32bit_int(a_dtype) && std::holds_alternative<float>(rhs)) {
+            // ADD/SUB and friends reject a mixed int/float tensor pair rather than promoting, so a
+            // scalar they cannot represent has to be rejected too instead of being truncated.
+            const float scalar_value = std::get<float>(rhs);
+            TT_FATAL(
+                operations::binary::utils::scalar_fits_integer_dtype(scalar_value, a_dtype),
+                "Binary operation {} with a {} tensor cannot represent the scalar {}: only a finite integer within "
+                "the range of {} survives being packed as one, and this value would be changed silently. Typecast "
+                "the input to a floating-point dtype first.",
+                binary_op_type,
+                a_dtype,
+                scalar_value,
+                a_dtype);
+        }
+    }
     if constexpr (requires { rhs.dtype(); }) {
-        const bool is_float_arith = (binary_op_type == operations::binary::BinaryOpType::DIV) ||
-                                    (binary_op_type == operations::binary::BinaryOpType::MUL);
         if (is_float_arith) {
             if (is_32bit_int(a_dtype) && tt::tt_metal::is_floating_point(b_dtype)) {
                 const auto target = float_promote_target(b_dtype);
@@ -658,6 +769,40 @@ inline auto invoke_binary_ng_impl(
                     a_dtype);
                 rhs_promoted = ttnn::typecast(rhs, target);
             }
+        }
+    }
+    const std::optional<DataType> requested_dtype =
+        output_preallocated ? std::optional<DataType>{output->dtype()} : std::optional<DataType>{dtype};
+    const bool widen_uint16 = [&] {
+        using enum operations::binary::BinaryOpType;
+        switch (binary_op_type) {
+            case ADD:
+            case SUB:
+            case MUL:
+            case EQ:
+            case NE:
+            case GT:
+            case GE:
+            case LT:
+            case LE:
+            case LOGICAL_AND:
+            case LOGICAL_OR:
+            case LOGICAL_XOR:
+            case MAXIMUM:
+            case MINIMUM: return true;
+            default: return false;
+        }
+    }();
+    if (widen_uint16 && a_dtype == DataType::UINT16 && b_dtype == DataType::UINT16 && requested_dtype.has_value() &&
+        (is_32bit_int(*requested_dtype) || *requested_dtype == DataType::FLOAT32)) {
+        const bool unsigned_result =
+            *requested_dtype == DataType::UINT32 ||
+            (*requested_dtype == DataType::FLOAT32 && (binary_op_type == operations::binary::BinaryOpType::MUL ||
+                                                       binary_op_type == operations::binary::BinaryOpType::ADD));
+        const auto wide = unsigned_result ? DataType::UINT32 : DataType::INT32;
+        lhs_promoted = ttnn::typecast(lhs, wide);
+        if constexpr (requires { rhs.dtype(); }) {
+            rhs_promoted = ttnn::typecast(rhs, wide);
         }
     }
     const Tensor& lhs_eff = lhs_promoted.has_value() ? *lhs_promoted : lhs;
@@ -693,48 +838,87 @@ inline auto invoke_binary_ng_impl(
     TT_FATAL(
         !(output_preallocated && input_a_rm && input_b_rm),
         "Optional output tensor with Row Major input is not supported right now for Elementwise operations");
-    if (input_a_rm and input_b_rm and not input_a_sharded and not input_b_sharded) {
-        auto result = ttnn::prim::binary_ng(
-            lhs_eff,
-            rhs_eff,
-            binary_op_type,
-            out_dtype,
-            memory_config,
-            output,
-            fast_and_approximate_mode,
-            lhs_activations,
-            rhs_activations,
-            post_activations,
-            std::nullopt,
-            sub_core_grids,
-            sub_device_id);
+    // The two prim::binary_ng overloads take different trailing parameters: the tensor-tensor one
+    // ends with isclose's rtol/atol/equal_nan, the scalar one with scalar_is_lhs. No single call
+    // can satisfy both, and while these were two separate call sites the flag was passed on one and
+    // forgotten on the other. This lambda is the only place either overload is invoked.
+    auto dispatch = [&](const auto& a, const auto& b, DataType dt, const std::optional<Tensor>& out) {
+        if constexpr (requires { b.dtype(); }) {
+            return ttnn::prim::binary_ng(
+                a,
+                b,
+                binary_op_type,
+                dt,
+                memory_config,
+                out,
+                fast_and_approximate_mode,
+                lhs_activations,
+                rhs_activations,
+                post_activations,
+                std::nullopt,
+                sub_core_grids,
+                sub_device_id);
+        } else {
+            return ttnn::prim::binary_ng(
+                a,
+                b,
+                binary_op_type,
+                dt,
+                memory_config,
+                out,
+                fast_and_approximate_mode,
+                lhs_activations,
+                rhs_activations,
+                post_activations,
+                std::nullopt,
+                sub_core_grids,
+                sub_device_id,
+                scalar_is_lhs);
+        }
+    };
 
-        return result;
+    if (input_a_rm and input_b_rm and not input_a_sharded and not input_b_sharded) {
+        // is_layout_or_scalar reports a scalar as row-major, so a scalar first operand reaches here too.
+        return dispatch(lhs_eff, rhs_eff, out_dtype, output);
     }
     // Either one or both are tiles
-    const auto input_a = operations::binary::detail::to_layout(lhs_eff, Layout::TILE);
-    const auto input_b = operations::binary::detail::to_layout(rhs_eff, Layout::TILE);
+    const auto input_a = operations::binary::detail::to_layout(lhs_eff, Layout::TILE, sub_core_grids);
+    const auto input_b = operations::binary::detail::to_layout(rhs_eff, Layout::TILE, sub_core_grids);
 
-    auto result = ttnn::prim::binary_ng(
-        input_a,
-        input_b,
-        binary_op_type,
-        out_dtype,
-        memory_config,
-        output,
-        fast_and_approximate_mode,
-        lhs_activations,
-        rhs_activations,
-        post_activations,
-        std::nullopt,
-        sub_core_grids,
-        sub_device_id);
+    std::optional<Tensor> repadded;
+    if (binary_op_type == operations::binary::BinaryOpType::DIV &&
+        operations::binary::detail::is_block_format(out_dtype) && !sub_core_grids.has_value() &&
+        !sub_device_id.has_value() && !input_a.is_sharded() &&
+        !(memory_config.has_value() && memory_config->is_sharded()) && !(output.has_value() && output->is_sharded())) {
+        std::optional<DataType> wide;
+        if constexpr (requires { rhs.dtype(); }) {
+            const auto rhs_width = rhs_eff.logical_shape()[-1];
+            if (!input_b.is_sharded() && rhs_width % tt::constants::FACE_WIDTH != 0 &&
+                (rhs_width != 1 || lhs_eff.logical_shape()[-1] == 1)) {
+                wide = lhs_eff.dtype() == DataType::FLOAT32 || rhs_eff.dtype() == DataType::FLOAT32
+                           ? DataType::FLOAT32
+                           : DataType::BFLOAT16;
+            }
+        } else {
+            if (scalar_is_lhs && lhs_eff.logical_shape()[-1] % tt::constants::FACE_WIDTH != 0) {
+                wide = lhs_eff.dtype() == DataType::FLOAT32 ? DataType::FLOAT32 : DataType::BFLOAT16;
+            }
+        }
+        if (wide.has_value()) {
+            repadded = ttnn::typecast(
+                ttnn::fill_implicit_tile_padding(dispatch(input_a, input_b, *wide, std::nullopt), 0.0f),
+                out_dtype,
+                memory_config,
+                output);
+        }
+    }
+    auto result = repadded.has_value() ? *repadded : dispatch(input_a, input_b, out_dtype, output);
 
     // if both inputs are in row major, convert the output to row major
     // since there's no consensus here, avoiding the conversion if we have an excuse to is likely the best option
     // since it leads to better perf
     if (input_a_rm and input_b_rm) {
-        return operations::binary::detail::to_layout(result, Layout::ROW_MAJOR);
+        return operations::binary::detail::to_layout(result, Layout::ROW_MAJOR, sub_core_grids);
     }
 
     return result;
@@ -780,7 +964,8 @@ Tensor invoke_binary_ng(
     ttsl::Span<const ttnn::operations::unary::EltwiseUnaryWithParam> rhs_activations,
     const std::optional<bool>& fast_and_approximate_mode,
     const std::optional<CoreRangeSet>& sub_core_grids,
-    const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id) {
+    const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id,
+    bool scalar_is_lhs) {
     return invoke_binary_ng_impl(
         lhs,
         rhs,
@@ -793,7 +978,8 @@ Tensor invoke_binary_ng(
         rhs_activations,
         fast_and_approximate_mode,
         sub_core_grids,
-        sub_device_id);
+        sub_device_id,
+        scalar_is_lhs);
 }
 
 bool resolve_fast_and_approximate_mode(const std::optional<bool>& fast_and_approximate_mode) {
@@ -840,8 +1026,8 @@ Tensor invoke_binary_ng_isclose(
             equal_nan);
     }
 
-    const auto input_a = operations::binary::detail::to_layout(fa, Layout::TILE);
-    const auto input_b = operations::binary::detail::to_layout(fb, Layout::TILE);
+    const auto input_a = operations::binary::detail::to_layout(fa, Layout::TILE, sub_core_grids);
+    const auto input_b = operations::binary::detail::to_layout(fb, Layout::TILE, sub_core_grids);
     auto result = ttnn::prim::binary_ng(
         input_a,
         input_b,
@@ -864,7 +1050,7 @@ Tensor invoke_binary_ng_isclose(
     // since there's no consensus here, avoiding the conversion if we have an excuse to is likely the best option
     // since it leads to better perf
     if (input_a_rm && input_b_rm) {
-        return operations::binary::detail::to_layout(result, Layout::ROW_MAJOR);
+        return operations::binary::detail::to_layout(result, Layout::ROW_MAJOR, sub_core_grids);
     }
     return result;
 }
@@ -1106,9 +1292,12 @@ namespace ttnn {
 
 TTNN_BINARY_OP_TENSOR_TENSOR_FAST_APPROX_IMPL(add, ADD)
 TTNN_BINARY_OP_TENSOR_SCALAR_FAST_APPROX_IMPL(add, ADD)
+TTNN_BINARY_OP_SCALAR_TENSOR_IMPL(add, ADD, ttnn::detail::resolve_fast_and_approximate_mode(fast_and_approximate_mode))
 TTNN_BINARY_OP_INPLACE_FAST_APPROX_IMPL(add_, ADD)
 TTNN_BINARY_OP_TENSOR_TENSOR_FAST_APPROX_IMPL(subtract, SUB)
 TTNN_BINARY_OP_TENSOR_SCALAR_FAST_APPROX_IMPL(subtract, SUB)
+TTNN_BINARY_OP_SCALAR_TENSOR_IMPL(
+    subtract, SUB, ttnn::detail::resolve_fast_and_approximate_mode(fast_and_approximate_mode))
 TTNN_BINARY_OP_INPLACE_FAST_APPROX_IMPL(subtract_, SUB)
 TTNN_BINARY_OP_TENSOR_TENSOR_UINT8_IMPL(eq, EQ)
 TTNN_BINARY_OP_TENSOR_SCALAR_UINT8_IMPL(eq, EQ)
@@ -1261,6 +1450,92 @@ Tensor divide_(
         sub_core_grids,
         sub_device_id);
 }
+namespace {
+
+// Fused SFPU ops for multiply(activation(gate), up), one row per op, board and form of the activation's call.
+struct FusedActivationRoute {
+    operations::unary::UnaryOpType gate_activation;
+    // The activation's one parameter, where it selects a mode of the same function (GELU_TANH's fast form); none
+    // for the plain call.
+    std::optional<float> gate_parameter;
+    operations::binary::BinaryOpType op;
+    tt::ARCH arch;
+};
+
+constexpr std::array fused_activation_routes{
+    FusedActivationRoute{
+        operations::unary::UnaryOpType::GELU_TANH,
+        std::nullopt,
+        operations::binary::BinaryOpType::GEGLU_TANH,
+        tt::ARCH::BLACKHOLE},
+    FusedActivationRoute{
+        operations::unary::UnaryOpType::GELU_TANH,
+        0.0f,
+        operations::binary::BinaryOpType::GEGLU_TANH,
+        tt::ARCH::BLACKHOLE},
+    FusedActivationRoute{
+        operations::unary::UnaryOpType::GELU_TANH,
+        1.0f,
+        operations::binary::BinaryOpType::GEGLU_TANH,
+        tt::ARCH::BLACKHOLE},
+};
+
+struct FusedActivationOperands {
+    operations::binary::BinaryOpType op;
+    bool lhs_is_gate;
+};
+
+std::optional<FusedActivationOperands> fused_activation_operands(
+    const Tensor& lhs,
+    const Tensor& rhs,
+    const std::optional<const DataType>& output_dtype,
+    const std::optional<MemoryConfig>& memory_config,
+    const std::optional<Tensor>& output,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> post_activations,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> lhs_activations,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> rhs_activations,
+    const std::optional<bool>& fast_and_approximate_mode) {
+    // The kernels read BF16 data in DEST: BFLOAT16 tiles, and BFLOAT8_B tiles, which unpack to BF16. The packer
+    // stores the BF16 result in either.
+    const auto bf16_dest = [](DataType dtype) { return dtype == DataType::BFLOAT16 || dtype == DataType::BFLOAT8_B; };
+    if (lhs.device() == nullptr || lhs.dtype() != rhs.dtype() || !bf16_dest(lhs.dtype()) ||
+        !bf16_dest(output_dtype.value_or(lhs.dtype())) || output.has_value() || !post_activations.empty() ||
+        fast_and_approximate_mode.value_or(false)) {
+        return std::nullopt;
+    }
+    const auto arch = lhs.device()->arch();
+    const auto routed = [arch](
+                            ttsl::Span<const operations::unary::EltwiseUnaryWithParam> gate,
+                            ttsl::Span<const operations::unary::EltwiseUnaryWithParam> up)
+        -> std::optional<operations::binary::BinaryOpType> {
+        if (gate.size() != 1 || !up.empty()) {
+            return std::nullopt;
+        }
+        const auto parameters = gate[0].get_params_if<float>();
+        for (const auto& route : fused_activation_routes) {
+            const bool same_call = route.gate_parameter.has_value()
+                                       ? parameters.size() == 1 && parameters[0] == *route.gate_parameter
+                                       : !gate[0].has_parameter();
+            if (route.gate_activation == gate[0].type() && route.arch == arch && same_call) {
+                return route.op;
+            }
+        }
+        return std::nullopt;
+    };
+    if (const auto op = routed(lhs_activations, rhs_activations)) {
+        return FusedActivationOperands{*op, true};
+    }
+    // Operand A sets the output's placement when memory_config is unset, so the swapped order needs equal ones.
+    if (memory_config.has_value() || lhs.memory_config() == rhs.memory_config()) {
+        if (const auto op = routed(rhs_activations, lhs_activations)) {
+            return FusedActivationOperands{*op, false};
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 Tensor multiply(
     const Tensor& lhs,
     const Tensor& rhs,
@@ -1273,6 +1548,30 @@ Tensor multiply(
     const std::optional<bool>& fast_and_approximate_mode,
     const std::optional<CoreRangeSet>& sub_core_grids,
     const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id) {
+    if (const auto fused = fused_activation_operands(
+            lhs,
+            rhs,
+            output_dtype,
+            memory_config,
+            output,
+            post_activations,
+            lhs_activations,
+            rhs_activations,
+            fast_and_approximate_mode)) {
+        return ttnn::detail::invoke_binary_ng(
+            fused->lhs_is_gate ? lhs : rhs,
+            fused->lhs_is_gate ? rhs : lhs,
+            fused->op,
+            output_dtype,
+            memory_config,
+            std::nullopt,
+            {},
+            {},
+            {},
+            std::nullopt,
+            sub_core_grids,
+            sub_device_id);
+    }
     bool is_block_fmt_inp = (is_block_float(lhs.dtype()) || is_block_float(rhs.dtype()));
     bool fast_and_approx = is_block_fmt_inp ? true : fast_and_approximate_mode.value_or(false);
     return ttnn::detail::invoke_binary_ng(
@@ -1345,6 +1644,39 @@ Tensor multiply(const Tensor& lhs, operations::unary::ScalarVariant rhs, bool fa
         fast_and_approximate_mode,
         std::nullopt);
 }
+Tensor multiply(
+    operations::unary::ScalarVariant lhs,
+    const Tensor& rhs,
+    const std::optional<const DataType>& output_dtype,
+    const std::optional<MemoryConfig>& memory_config,
+    const std::optional<Tensor>& output,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> post_activations,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> lhs_activations,
+    ttsl::Span<const operations::unary::EltwiseUnaryWithParam> rhs_activations,
+    const std::optional<bool>& fast_and_approximate_mode,
+    const std::optional<CoreRangeSet>& sub_core_grids,
+    const std::optional<tt::tt_metal::SubDeviceId>& sub_device_id) {
+    // Block-float arithmetic runs on the FPU only, so the tensor's format forces the mode
+    // here exactly as it does for the other operand orders. Not shared with the scalar-first
+    // macro because MUL is the only op with this override.
+    bool is_block_fmt_inp = (is_block_float(rhs.dtype()));
+    bool fast_and_approx = is_block_fmt_inp ? true : fast_and_approximate_mode.value_or(false);
+    return ttnn::detail::invoke_binary_ng(
+        rhs,
+        lhs,
+        operations::binary::BinaryOpType::MUL,
+        output_dtype,
+        memory_config,
+        output,
+        post_activations,
+        lhs_activations,
+        rhs_activations,
+        fast_and_approx,
+        sub_core_grids,
+        sub_device_id,
+        /*scalar_is_lhs=*/true);
+}
+TTNN_BINARY_OP_SCALAR_TENSOR_IMPL(divide, DIV, fast_and_approximate_mode)
 Tensor multiply_(
     const Tensor& lhs,
     const Tensor& rhs,
