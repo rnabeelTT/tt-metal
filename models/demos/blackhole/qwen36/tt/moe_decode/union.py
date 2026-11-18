@@ -484,7 +484,8 @@ class ExpertDownRows:
         # cores each read the whole activation block
         self.dst_full = self.groups > 1
         # QWEN35_MOE_DN_READERS / QWEN35_MOE_DN_CHUNK: per-model overrides (MiniMax-M2.7, 4 rows, H 3072, 384 per die:
-        # 4 readers per bank with 4-slot chunks 137 vs 157 us per MoE call, hybrid_moe/bench_moe_rows.py)
+        # 4 readers per bank with 4-slot chunks 137 vs 157 us per MoE call, hybrid_moe/bench_moe_rows.py; 6 readers with
+        # 2-slot chunks: the down op 48.8 vs 57.5 us at a 23-expert union, 12 readers do not fit near the banks)
         if readers is None and os.environ.get("QWEN35_MOE_DN_READERS"):
             readers = int(os.environ["QWEN35_MOE_DN_READERS"])
         if os.environ.get("QWEN35_MOE_DN_CHUNK"):
