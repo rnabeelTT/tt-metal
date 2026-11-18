@@ -38,10 +38,13 @@ source:
     - models/experimental/hybrid_moe/dflash_tt.py
     - models/experimental/hybrid_moe/suffix_draft.py
     - models/experimental/hybrid_moe/bfp4_round.py
+    - models/experimental/hybrid_moe/bfp4_calib.py
     - models/experimental/hybrid_moe/ref_m27.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py
     - models/experimental/hybrid_moe/plans/m27_plan.npz
+    - models/experimental/hybrid_moe/plans/bfp4_cal_tokens.npy
+    - models/experimental/hybrid_moe/plans/bfp4_recipe.json
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet

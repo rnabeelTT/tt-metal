@@ -75,7 +75,7 @@ def test_config_methods_and_tag(tmp_path, monkeypatch):
     monkeypatch.delenv("HYB_BFP4_ROUND", raising=False)
     assert B.round_experts(0, "gu", W) is None and B.tag(0) == ""
     monkeypatch.setenv("HYB_BFP4_ROUND", "rtne")
-    assert torch.equal(B.round_experts(0, "gu", W), B.rtne(W))
+    assert torch.equal(B.round_experts(0, "gu", W), B.rtne(W)) and not B.uses_cal()
     assert B.tag(0).startswith(".q")
     torch.save(
         {"h": torch.randn(256, 16).bfloat16(), "idx": torch.zeros(256, 2, dtype=torch.uint8)}, tmp_path / "cal_3.pt"
@@ -84,7 +84,7 @@ def test_config_methods_and_tag(tmp_path, monkeypatch):
     (tmp_path / "r.json").write_text(json.dumps(cfg))
     monkeypatch.setenv("HYB_BFP4_ROUND", str(tmp_path / "r.json"))
     monkeypatch.setenv("HYB_BFP4_CAL", str(tmp_path))
-    assert B.method(3, "gu") == "gptq0.1" and B.method(3, "dn") == "rtne"
+    assert B.method(3, "gu") == "gptq0.1" and B.method(3, "dn") == "rtne" and B.uses_cal()
     assert B.round_experts(5, "gu", W) is None and B.tag(5) == ""
     assert B.tag(3) != B.tag(0) and on_grid(B.round_experts(3, "gu", W))
     Wb = W.bfloat16()

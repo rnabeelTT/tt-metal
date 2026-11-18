@@ -54,6 +54,17 @@ def method(layer, kind, cfg=None):
     return cfg["layers"].get(str(layer), {}).get(kind, d[kind] if isinstance(d, dict) else d)
 
 
+def uses_cal(cfg=None):
+    """Whether any layer's method needs the calibration capture (a gptq method)."""
+    cfg = cfg if cfg is not None else _cfg()
+    if cfg is None:
+        return False
+    d = cfg["default"]
+    ms = list(d.values()) if isinstance(d, dict) else [d]
+    ms += [m for kinds in cfg["layers"].values() for m in kinds.values()]
+    return any(m.startswith("gptq") for m in ms)
+
+
 def tag(layer, cfg=None):
     """Cache-key suffix of a layer's rounding ('' for the default conversion): a changed method or Hessian is a new key."""
     cfg = cfg if cfg is not None else _cfg()
