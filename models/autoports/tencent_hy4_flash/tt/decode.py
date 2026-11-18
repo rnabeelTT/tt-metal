@@ -82,6 +82,8 @@ class Hy4Decoder:
         self.pos = None
         self.traces = {}
         self.out = {}
+        # HY4_DECODE_L1=1: the step's intermediates in L1 (interleaved) instead of DRAM
+        self.mem = ttnn.L1_MEMORY_CONFIG if os.environ.get("HY4_DECODE_L1", "1") == "1" else ttnn.DRAM_MEMORY_CONFIG
 
     # ------------------------------------------------------------------ persistent inputs
     def _dev(self, t, dtype, layout):
@@ -231,13 +233,13 @@ class Hy4Decoder:
         self.si.sparse, self.si.bucket = sparse, bucket
         key = (R, sparse, bucket)
         if not self.trace:
-            lg = self.model.step(self.si, R)
+            lg = self.model.step(self.si, R, mem=self.mem)
             out = self.model.read_logits(lg, R)
             ttnn.deallocate(lg)
         else:
             if key not in self.traces:
                 # compile eagerly first (this pass's result is the real one), then capture for the next passes
-                lg = self.model.step(self.si, R)
+                lg = self.model.step(self.si, R, mem=self.mem)
                 out = self.model.read_logits(lg, R)
                 ttnn.deallocate(lg)
                 self._capture(key, ids, p0)
@@ -258,7 +260,7 @@ class Hy4Decoder:
         does not change the state."""
         logger.info(f"capturing decode trace {key} ...")
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        self.out[key] = self.model.step(self.si, key[0])
+        self.out[key] = self.model.step(self.si, key[0], mem=self.mem)
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
         self.traces[key] = tid
         logger.info(f"captured decode trace {key}")

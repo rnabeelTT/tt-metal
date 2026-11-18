@@ -203,7 +203,7 @@ class Hy4Attention:
             q2 = ttnn.concat([qcat, self._zeros((1, self.Hp - self.Hd, Tp, self.width))], dim=1, memory_config=mem)
             ttnn.deallocate(qcat)
             qcat = q2
-        q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # sparse_sdpa: DRAM
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
                                          k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc)  # [1,Hp,Tp,512] RM
@@ -281,7 +281,7 @@ class Hy4Attention:
         ttnn.deallocate(b)
         ttnn.copy(new, self.stage)
         ttnn.deallocate(new)
-        st_rm = ttnn.to_layout(self.stage, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        st_rm = ttnn.to_layout(self.stage, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         offs = si.off_sparse if self.kind == "sparse" else si.off_swa
         for j in range(2):
             ttnn.experimental.deepseek_prefill.update_padded_kv_cache(

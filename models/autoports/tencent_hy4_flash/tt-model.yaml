@@ -1,0 +1,64 @@
+# tt-model container (v5.1) manifest: tencent/Hy4-flash (220B MoE, ~11.3B active, BF16 checkpoint) on one QB2
+# (2 x p300 = 4 Blackhole dies). Every expert is resident on the device (bfp4); only the Engram n-gram tables stay on
+# the host (FP8 rows, lossless for this model: it reads them through an FP8 round trip). Single user.
+# Build: tt-model package --container models/autoports/tencent_hy4_flash/tt-model.yaml
+schema: "5.1"
+repo: raahemnabeel/hy4-flash-qb2
+name: hy4-flash-qb2
+weights: {repo: tencent/Hy4-flash, revision: d88c9dfd96ba4f2e6b92adba0b8e8f1c8696f959}
+kind: vllm-plugin
+arch: blackhole
+image:
+  registry: hf
+source:
+  tt_metal: /home/raahem/hy4-flash   # worktree, branch raahem/hy4-flash-hybrid
+  code:
+    - models/autoports/tencent_hy4_flash/__init__.py
+    - models/autoports/tencent_hy4_flash/tt
+    - models/autoports/tencent_hy4_flash/serving
+    - models/autoports/tencent_hy4_flash/vllm_bundle
+    - models/experimental/hybrid_moe/engram_store.py
+    - models/autoports/minimaxai_minimax_m2_7/__init__.py
+    - models/autoports/minimaxai_minimax_m2_7/tt
+    - models/demos/blackhole/qwen36
+    - models/tt_transformers
+    - models/common
+  ubuntu: "22.04"
+  python: "3.12"
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # e0e2952, branch dflash
+  extra_models_dir: models/autoports/tencent_hy4_flash/vllm_bundle
+serve:
+  block_size: 64
+  max_num_seqs: 1
+  capabilities:
+    tool_parser: hy_v4
+    reasoning_parser: hy_v4
+  additional_config:
+    tt:
+      trace_mode: none
+      sample_on_device_mode: all
+      trace_region_size: 419430400
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: tencent/Hy4-flash
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    PYTHONPATH: /opt/tt-metal/models/autoports/tencent_hy4_flash/serving:/opt/tt-metal
+    HY4_TENSOR_CACHE: /weight-cache/hy4_tt        # bfp4 experts + other device tensors, written on the first boot
+    HY4_ENGRAM_DIR: /weight-cache/hy4_engram      # FP8 Engram tables (~65 GB), built on the first boot
+    HY4_TRACE_REGION: "419430400"
+serve_profiles:
+  - name: p300x2-32k
+    description: Up to 32K tokens of context.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 32768
+default_profile: p300x2-32k
+card:
+  attribution: >
+    Serves [tencent/Hy4-flash](https://huggingface.co/tencent/Hy4-flash) by Tencent (Tencent Hy License).
+  description: >
+    Hy4-flash on one QB2, text only, single user. Work in progress (day 0).

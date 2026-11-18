@@ -63,6 +63,8 @@ def main():
     ap.add_argument("--ctx", type=int, default=8192)
     ap.add_argument("--chunk", type=int, default=2048)
     ap.add_argument("--no-engram", action="store_true")
+    ap.add_argument("--trace", action="store_true", help="profile a trace replay of the whole step (op names from a "
+                    "graph capture of the eager pass)")
     args = ap.parse_args()
     from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
     from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder
@@ -81,11 +83,30 @@ def main():
             dec.run([int(ids[args.prompt_len + i])])
         ttnn.synchronize_device(mesh)
         ttnn.ReadDeviceProfiler(mesh)
+        if args.trace:
+            h, sparse, bucket = dec._host_inputs([int(ids[args.prompt_len + 2])], dec.pos)
+            dec._copy_inputs(h)
+            dec.si.sparse, dec.si.bucket = sparse, bucket
+            ttnn.graph.begin_graph_capture(ttnn.graph.RunMode.NORMAL)
+            lg = model.step(dec.si, 1)
+            names.append(("step", graph_ops(ttnn.graph.end_graph_capture())))
+            ttnn.deallocate(lg)
+            tid = ttnn.begin_trace_capture(mesh, cq_id=0)
+            lg = model.step(dec.si, 1)
+            ttnn.end_trace_capture(mesh, tid, cq_id=0)
+            for _ in range(2):
+                ttnn.execute_trace(mesh, tid, cq_id=0, blocking=True)
+            ttnn.synchronize_device(mesh)
+            ttnn.ReadDeviceProfiler(mesh)
+            args.show = "step"
+            show = []
         # the profiled step: the same body as model.step, captured per layer
         h, sparse, bucket = dec._host_inputs([int(ids[args.prompt_len + 2])], dec.pos)
         dec._copy_inputs(h)
         dec.si.sparse, dec.si.bucket = sparse, bucket
         si, cfg = dec.si, model.cfg
+        if args.trace:
+            raise SystemExit(0)
         ttnn.graph.begin_graph_capture(ttnn.graph.RunMode.NORMAL)
         x = ttnn.embedding(si.tok, model.emb, layout=ttnn.TILE_LAYOUT)
         x = ttnn.reshape(x, (1, 1, 32, cfg.hidden))
@@ -103,6 +124,8 @@ def main():
         names.append(("head", graph_ops(ttnn.graph.end_graph_capture())))
         ttnn.synchronize_device(mesh)
         ttnn.ReadDeviceProfiler(mesh)
+    except SystemExit:
+        pass
     finally:
         ttnn.close_mesh_device(mesh)
     progs = programs()
@@ -118,7 +141,7 @@ def main():
         o += len(ops)
         tot = sum(d for _, d in seg)
         totals.append((label, len(ops), tot))
-        if label in [f"layer {L}" for L in show]:
+        if label in [f"layer {L}" for L in show] or (label == "step" and os.environ.get("HY4_PROF_LIST") == "1"):
             print(f"== {label}: {len(ops)} ops, {tot:.0f} us")
             for name, (_, d) in zip(ops, seg):
                 print(f"   {d:8.1f} us  {name}")

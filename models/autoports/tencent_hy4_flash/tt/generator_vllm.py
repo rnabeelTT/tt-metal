@@ -81,8 +81,13 @@ class HYV4FlashForConditionalGeneration:
         from models.experimental.hybrid_moe.engram_store import EngramRows
 
         cfg = Hy4Config.load()
-        engram = EngramRows(os.environ.get("HY4_ENGRAM_DIR", os.path.expanduser("~/.cache/hybrid-moe/hy4_engram")),
-                             checkpoint_dir())
+        from models.experimental.hybrid_moe import engram_store
+
+        edir = os.environ.get("HY4_ENGRAM_DIR", os.path.expanduser("~/.cache/hybrid-moe/hy4_engram"))
+        engram_store.OUT = edir
+        engram_store._SNAP = checkpoint_dir()
+        engram_store.convert()  # first boot: the FP8 tables (~65 GB, idempotent: converted layers are skipped)
+        engram = EngramRows(edir, checkpoint_dir())
         cache_dir = os.environ.get("HY4_TENSOR_CACHE", os.path.expanduser("~/.cache/hybrid-moe/hy4_tt"))
         model = Hy4Model(mesh_device, cfg, max_ctx=max_seq_len + 64, chunk=int(os.environ.get("HY4_PREFILL_CHUNK", "2048")),
                          engram=engram, cache_dir=cache_dir)

@@ -73,23 +73,28 @@ class Hy4Layer:
         return X3
 
     def step(self, X, si, R, mem=None):
-        """Trace-safe rows pass (tt/decode.py): every position-dependent input in si."""
+        """Trace-safe rows pass (tt/decode.py): every position-dependent input in si. HY4_L1_PARTS (default all):
+        which parts keep their intermediates in `mem` (the rest DRAM)."""
+        import os as _os
+
+        parts = _os.environ.get("HY4_L1_PARTS", "hc,attn,moe,norm").split(",")  # engram in L1 drifts (PCC 0.993): DRAM
+        m = lambda k: mem if k in parts else ttnn.DRAM_MEMORY_CONFIG  # noqa: E731
         if self.engram is not None and self.li in si.engram:
-            X2 = self.engram.forward(X, si.engram[self.li], mem)
+            X2 = self.engram.forward(X, si.engram[self.li], m("engram"))
             ttnn.deallocate(X)
             X = X2
-        a_in, post = self.attn_hc.pre(X, mem)
-        a = self.attn.step(self.in_norm(a_in, mem), si, mem)
+        a_in, post = self.attn_hc.pre(X, m("hc"))
+        a = self.attn.step(self.in_norm(a_in, m("norm")), si, m("attn"))
         ttnn.deallocate(a_in)
-        X2 = self.attn_hc.post(X, a, post, mem)
+        X2 = self.attn_hc.post(X, a, post, m("hc"))
         for t_ in (X, a, post):
             ttnn.deallocate(t_)
-        f_in, post = self.ffn_hc.pre(X2, mem)
-        f_n = self.post_norm(f_in, mem)
+        f_in, post = self.ffn_hc.pre(X2, m("hc"))
+        f_n = self.post_norm(f_in, m("norm"))
         ttnn.deallocate(f_in)
-        f = self.mlp.forward(f_n, R, mem) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, mem)
+        f = self.mlp.forward(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"))
         ttnn.deallocate(f_n)
-        X3 = self.ffn_hc.post(X2, f, post, mem)
+        X3 = self.ffn_hc.post(X2, f, post, m("hc"))
         for t_ in (X2, f, post):
             ttnn.deallocate(t_)
         return X3
