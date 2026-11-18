@@ -243,6 +243,9 @@ class Hy4Model:
         boundary first (so every later chunk selects with device-built index lists), then HY4_PREFILL_CHUNK tokens
         (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary."""
         ids = ids.reshape(-1)
+        if (self.pos == 0 and os.environ.get("HY4_PF_TRACE", "1") == "1" and self.N > 1
+                and 0 < ids.numel() <= self.cfg.idx_candidate_topk and self.engram_keep_all(ids)):
+            return self._prefill_traced(ids)
         big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
         dense_end = self.cfg.idx_candidate_topk
         lg, i = None, 0
@@ -253,6 +256,86 @@ class Hy4Model:
             lg = self.forward(ids[i : i + n])
             i += n
         return lg
+
+    # ------------------------------------------------------------------ traced first chunk (TTFT of short prompts)
+    PF_BUCKETS = (128, 256, 512, 1024, 2048)
+
+    def engram_keep_all(self, ids) -> bool:
+        return self.engram is None or bool(self.engram.mask(ids.reshape(-1)).all())
+
+    def _chunk_layers(self, X, p0, T, cos_sin, eng, mem=None):
+        for layer in self.layers:
+            X = layer.forward_split(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
+        return X
+
+    def _prefill_traced(self, ids: torch.Tensor) -> torch.Tensor:
+        """A prompt of <= 2048 tokens at position 0 as one captured trace per bucket (the chunk's every position-
+        dependent input is constant at p0 = 0: RoPE tables, index lists, slab offsets; the token ids and Engram rows go
+        through persistent buffers). Padding rows run as real rows (their KV / group keys sit past the prompt and are
+        rewritten by decode). The head and the indexers' host views follow the replay, at the real length."""
+        cfg, mesh = self.cfg, self.mesh
+        T = int(ids.numel())
+        Tb = next(b for b in self.PF_BUCKETS if b >= T)
+        st = self.__dict__.setdefault("_pf_traces", {}).get(Tb)
+        rep = ttnn.ReplicateTensorToMesh(mesh)
+        tok = torch.zeros(1, Tb, dtype=torch.int32)
+        tok[0, :T] = ids.to(torch.int32)
+        tok_h = ttnn.from_torch(tok, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=1))
+        eng_h = {}
+        for layer in self.layers:
+            if layer.engram is not None and self.engram is not None:
+                rows = self.engram.rows(layer.li, ids, 0)
+                full = torch.zeros(1, 1, Tb, rows.shape[-1], dtype=torch.bfloat16)
+                full[0, 0, :T] = rows
+                eng_h[layer.li] = ttnn.from_torch(full, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                                  mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=2))
+        for layer in self.layers:
+            if layer.attn.indexer is not None:
+                layer.attn.indexer._traced_pf = True
+        try:
+            if st is None:
+                st = {"tok": ttnn.to_device(tok_h, mesh),
+                      "eng": {li: ttnn.to_device(t, mesh) for li, t in eng_h.items()},
+                      "cos_sin": {k: self.rope.tables(torch.arange(0, Tb), cfg.rope_theta[k]) for k in ("sparse", "swa")}}
+                body = lambda: self._chunk_layers(self._embed_split(st["tok"], Tb), 0, Tb, st["cos_sin"], st["eng"])  # noqa
+                X = body()  # the eager pass: compiles every program, creates every cached constant
+                ttnn.deallocate(X)
+                self._reset_for_trace()
+                tid = ttnn.begin_trace_capture(mesh, cq_id=0)
+                st["X"] = body()
+                ttnn.end_trace_capture(mesh, tid, cq_id=0)
+                st["tid"] = tid
+                self._pf_traces[Tb] = st
+                self._reset_for_trace()
+                for layer in self.layers:  # the engram store advanced in the eager pass: rewind for the replay
+                    pass
+            ttnn.copy_host_to_device_tensor(tok_h, st["tok"])
+            for li, t in eng_h.items():
+                ttnn.copy_host_to_device_tensor(t, st["eng"][li])
+            ttnn.execute_trace(mesh, st["tid"], cq_id=0, blocking=False)
+        finally:
+            for layer in self.layers:
+                if layer.attn.indexer is not None:
+                    layer.attn.indexer._traced_pf = False
+        self.pos = T
+        for layer in self.layers:
+            if layer.attn.indexer is not None:
+                layer.attn.indexer.after_traced_prefill(T, Tb)
+        return self._head_split(st["X"], T, Tb, "last", None)
+
+    def _embed_split(self, tok_t, Tp):
+        cfg = self.cfg
+        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT)
+        x = ttnn.reshape(x, (1, 1, Tp // self.N, cfg.hidden))
+        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
+        ttnn.deallocate(x)
+        return X
+
+    def _reset_for_trace(self):
+        for layer in self.layers:
+            if layer.attn.indexer is not None:
+                layer.attn.indexer.reset()
 
     def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None) -> torch.Tensor:
         """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows).
@@ -282,21 +365,54 @@ class Hy4Model:
                 X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
         for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
             ttnn.deallocate(t_)
-        if split:  # the head on every row: gather the rows back (bf16 [1, hc, Tp, H] is small next to a layer's work)
-            Xg = ttnn.all_gather(X, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear)
-            ttnn.deallocate(X)
-            X = Xg
         self.pos = p0 + T
+        if split:
+            out = self._head_split(X, T, Tp, logits_rows, mem)
+            ttnn.deallocate(X)
+            return out
         h, _ = self.head_hc.pre(X, mem)
         ttnn.deallocate(X)
         if logits_rows == "last":
             r = ((T - 1) // 32) * 32
             h = ttnn.slice(h, (0, 0, r, 0), (1, 1, r + 32, cfg.hidden))
-        h = self.norm(h, mem)
-        lg = ttnn.matmul(h, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
-        out = to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:, : cfg.vocab].float()
-        ttnn.deallocate(lg)
+        out = self._logits(h, mem)
         ttnn.deallocate(h)
         if logits_rows == "last":
             return out[(T - 1) - ((T - 1) // 32) * 32]
         return out[:T]
+
+    def _logits(self, h, mem):
+        hn = self.norm(h, mem)
+        lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        out = to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:, : self.cfg.vocab].float()
+        ttnn.deallocate(lg)
+        ttnn.deallocate(hn)
+        return out
+
+    def _head_split(self, X, T, Tp, logits_rows, mem):
+        """Head of a row-split chunk: X [1, hc, Tp/N, H] per die. Each die takes the same local 32-row block, the blocks
+        are gathered and die d's block kept: only the rows asked for cross the dies and run the fp32 head HC."""
+        cfg, N = self.cfg, self.N
+        loc = Tp // N
+        if logits_rows == "last":
+            d, lr = (T - 1) // loc, (T - 1) % loc
+            blocks = [(d, (lr // 32) * 32)]
+        else:
+            blocks = [(None, b) for b in range(0, loc, 32)]
+        rows = {}
+        for d_, b in blocks:
+            xs = ttnn.slice(X, (0, 0, b, 0), (1, cfg.hc_mult, b + 32, cfg.hidden), memory_config=mem)
+            xg = ttnn.all_gather(xs, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, hc, 32 N, H]
+            ttnn.deallocate(xs)
+            h, _ = self.head_hc.pre(xg, mem)
+            ttnn.deallocate(xg)
+            lg = self._logits(h, mem)  # [32 N, V]: die d's rows at d * 32
+            ttnn.deallocate(h)
+            for dd in range(N) if d_ is None else [d_]:
+                for j in range(32):
+                    g = dd * loc + b + j
+                    if g < T:
+                        rows[g] = lg[dd * 32 + j]
+        if logits_rows == "last":
+            return rows[T - 1]
+        return torch.stack([rows[g] for g in range(T)])

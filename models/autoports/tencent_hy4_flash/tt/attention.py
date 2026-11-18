@@ -331,7 +331,7 @@ class Hy4Attention:
         key = (id(self.mesh), self.kind, p0, T, Tp, self.rows, self.sink_row)
         t = Hy4Attention._IDX_DEV.get(key)
         if t is None:
-            stale = [k for k in Hy4Attention._IDX_DEV if k[1] == self.kind]
+            stale = [k for k in Hy4Attention._IDX_DEV if k[1] == self.kind and k[2] != 0]  # p0 = 0: traced chunks
             for k in stale:  # one chunk at a time per kind
                 ttnn.deallocate(Hy4Attention._IDX_DEV.pop(k))
             t = Hy4Attention._IDX_DEV[key] = upload(self.mesh, self.index_lists(p0, T, None, Tp), ttnn.uint32,
