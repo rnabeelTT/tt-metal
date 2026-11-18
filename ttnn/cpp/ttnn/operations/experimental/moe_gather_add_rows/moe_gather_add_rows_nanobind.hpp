@@ -7,5 +7,6 @@
 #include "ttnn-nanobind/nanobind_fwd.hpp"
 
 namespace ttnn::operations::experimental::moe_gather_nb::detail {
+namespace nb = nanobind;
 void bind_experimental_moe_gather_add_rows_operation(nb::module_& mod);
 }  // namespace ttnn::operations::experimental::moe_gather_nb::detail
