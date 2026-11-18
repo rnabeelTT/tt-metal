@@ -80,6 +80,33 @@ per-stream gates) runs on the device.
 - Next after correctness: traces (position-dependent inputs from the host as one-hot / index tensors), fused HC
   (qwen38's gr_* kernels), device-side index lists, the DFly2 drafter, B = 2..4.
 
+## Prefill (2026-11-18, branch raahem/hy4-prefill)
+
+Borrowed from M2.7 (expert-sorted MoE) and tt-metal PR 61548 (rows split over chips, larger chunks):
+- `tt/prefill_moe.py` SortedExperts: moe_sorted_dispatch + grouped sparse matmuls (padding groups skipped) + gather /
+  gather-add rows, Hy4's clamped SwiGLU in the 1536 latent. MoE 327 -> 17 ms per layer at 2048 rows; sub-chunks of
+  2048 rows (HY4_MOE_SUB: the dispatch admits ~3K rows at top-16 of 512).
+- Row split (HY4_ROW_SPLIT_MIN=128): `Hy4Layer.forward_split` keeps each die's quarter of the rows for the HC / norms /
+  Engram; sublayer inputs all-gathered, partials reduce-scattered (`Hy4Attention.forward_part`, `Hy4MoE.forward_part`,
+  `Hy4DenseMLP.forward_part`). Prefill row counts are multiples of 128.
+- Index lists: position-only lists (SWA, dense) uploaded once per chunk and shared by the layers
+  (`Hy4Attention._idx_device`); selecting chunks (p0 >= 2048) build them on the device from the top-512
+  (`Hy4Indexer._expand` + the per-chunk tail `_idx_tail`): no readback.
+- Group pooling on the device for prefill (`Hy4Indexer._pool_prefill_device`, HY4_PF_DEVICE_POOL=1; decode's fp32
+  math): no token-key readback. The host views decode's `init_stage` reads (`mirror`, `tk_hist`, `open_keys`) are
+  properties now, read back lazily from the device.
+- `Hy4Model.prefill(ids)`: the dense-regime chunk (to 2048) first, then HY4_PREFILL_CHUNK chunks (<= the model's
+  `chunk`, which sizes the SWA rings): the engine should call it instead of looping forward() in fixed chunks, and build
+  the model with chunk=8192.
+- Head only on the rows asked for (`Hy4Model._head_split`, 32-row blocks): the full gather before the head OOMed
+  (3 GiB) at 8K / 16K chunks.
+- Traced first chunk (`Hy4Model._prefill_traced`, HY4_PF_TRACE=1, buckets 128..2048 at p0 = 0; needs
+  HY4_TRACE_REGION ~1e9): last-row logits bit-equal to eager (PCC 1.0, same top-1 at 200 / 1000 / 2000) but no
+  faster (0.389 vs 0.38 s, 0.94 vs 0.94, 1.68 vs 1.68): prefill is device-bound, so it is off by default. The time is
+  data movement (repeat / slice / typecast / sum, the fp32 HC), not dispatch.
+- Not touched (decode owner): `tt/hc.py` (in prefill `ttnn.sum(dim=1)` over the streams costs transpose + reduce +
+  transpose on [1, 4, T/4, 3072] fp32; `ttnn.experimental.fast_reduce_nc(dims=[1])` is one op).
+
 ## Log
 
 - 2026-11-18: plan approved; branch + worktree `~/hy4-flash`; BF16 download started (`~/m27-work/logs/hy4_download.log`).

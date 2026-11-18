@@ -42,8 +42,7 @@ def main():
             for r in range(args.reps):
                 model.reset()
                 t0 = time.time()
-                for c0 in range(0, L, args.chunk):
-                    lg = model.forward(ids[c0 : c0 + args.chunk])
+                lg = model.prefill(ids, args.chunk)
                 ttnn.synchronize_device(mesh)
                 ts.append(time.time() - t0)
             res[L] = ts[-1]
@@ -53,8 +52,7 @@ def main():
             model.reset()
             pr = cProfile.Profile()
             pr.enable()
-            for c0 in range(0, ids.numel(), args.chunk):
-                model.forward(ids[c0 : c0 + args.chunk])
+            model.prefill(ids, args.chunk)
             ttnn.synchronize_device(mesh)
             pr.disable()
             s = io.StringIO()
