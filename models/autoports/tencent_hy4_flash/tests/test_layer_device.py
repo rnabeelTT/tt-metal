@@ -108,12 +108,10 @@ def test_layer(env):
     # ---------------- device
     layer = Hy4Layer(mesh, cfg, w, li, max_ctx=4096, chunk=256)
     Tp = -(-T // 32) * 32
-    xs = []
-    for i in range(cfg.hc_mult):
-        t = torch.zeros(1, 1, Tp, cfg.hidden, dtype=torch.bfloat16)
-        t[0, 0, :T] = X[:, i]
-        xs.append(upload(mesh, t, ttnn.bfloat16))
-    a_in_d, post_d = layer.attn_hc.pre(xs)
+    t = torch.zeros(1, cfg.hc_mult, Tp, cfg.hidden, dtype=torch.bfloat16)
+    t[0, :, :T] = X.transpose(0, 1)
+    Xd = upload(mesh, t, ttnn.bfloat16)
+    a_in_d, post_d = layer.attn_hc.pre(Xd)
     got = to_torch0(a_in_d)[0, 0, :T]
     print(f"attn HC pre: pcc {pcc(got, a_in[0]):.6f} max {float((got.float() - a_in[0].float()).abs().max()):.4g}")
     rope = DeviceRope(mesh, cfg.qk_rope)
@@ -126,8 +124,8 @@ def test_layer(env):
     layer.reset()
     layer2 = layer
     layer2.attn.indexer and layer2.attn.indexer.reset()
-    out = layer2.forward(xs, 0, T, cos_sin)
-    got = torch.stack([to_torch0(o)[0, 0, :T] for o in out], dim=1)
+    out = layer2.forward(Xd, 0, T, cos_sin)
+    got = to_torch0(out)[0, :, :T].transpose(0, 1)
     pl = pcc(got, ref_full[0])
     print(f"layer {li}: pcc {pl:.6f} max {float((got.float() - ref_full[0].float()).abs().max()):.4g}")
     assert pa > 0.98 and pl > 0.98

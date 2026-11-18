@@ -8,9 +8,13 @@ q = RoPE(W_q q_resid) (16 heads x 128), w = W_hw x / sqrt(16 * 128); score(g) = 
 position p keeps the 511 best complete groups g < p // 4 plus its own group (tt/attention.index_lists expands them).
 Rows with p < 2048 attend densely (all of their 511-or-fewer visible groups are kept), so they skip the scoring.
 
-Day 0: the token keys are read back and the groups pooled on the host (exactly the reference's fp32 torch ops), the
-group keys mirrored into a device cache; scoring (indexer_score_dsa) and the top-512 (topk_large_indices) run on the
-device and the group ids are read back for the index lists.
+The group keys live in a TILE device cache [1, 1, gcap, 128] (indexer_score_dsa's k).
+- Prefill (eager, `forward`): token keys are read back and the groups pooled on the host (exactly the reference's
+  fp32 torch ops); the host keeps a mirror of every group key and writes whole 32-group slabs of it.
+- Decode (trace-safe, `step`): a 64-row token-key staging window and a 64-group group staging window, updated by
+  exact one-hot matmuls the host supplies; the window's 16 groups are pooled on the device (fp32) every step and two
+  32-group slabs are written. Scoring runs against a context bucket (kv_len fixed per trace) with the visibility of each
+  row masked on the device; the top-512 groups expand to token indices on the device.
 """
 
 from __future__ import annotations
@@ -42,25 +46,39 @@ class Hy4Indexer:
         self.whw = upload(mesh, bf(sd[p + "head_weight_projection.weight"]).T.reshape(1, 1, cfg.hidden, self.nh))
         self.wtk = upload(mesh, bf(sd[p + "token_key_projection.weight"]).T.reshape(1, 1, cfg.hidden, self.d))
         self.tk_norm = RMSNorm(mesh, sd[p + "token_key_norm.weight"], cfg.rms_eps)
-        # host pooling weights (fp32, as the reference keeps them)
+        # pooling weights (fp32, as the reference keeps them): host copies (prefill) and device copies (decode)
         self.Wv = sd[p + "key_value_projection.weight"].float()
         self.Wg = sd[p + "key_gate_projection.weight"].float()
         self.ape = sd[p + "intra_group_ape"].float()  # [4, 128]
         self.kn_w = sd[p + "key_norm.weight"].float()
         self.eps = cfg.rms_eps
         self.hw_scale = (self.nh**-0.5) * (self.d**-0.5)
-        # host state: token keys of the open group, every group key (bf16, roped) for the device mirror
-        self.gcap = -(-(max_ctx // self.r) // 32) * 32 + 32  # + the spare tile
-        self.n_tok = 0
-        self.open_keys = torch.zeros(0, self.d, dtype=torch.bfloat16)
-        self.n_groups = 0
-        self.gkeys = upload(mesh, torch.zeros(1, 1, self.gcap, self.d, dtype=torch.bfloat16), ttnn.bfloat16,
-                            ttnn.ROW_MAJOR_LAYOUT)
+        self.dWvT = upload(mesh, self.Wv.T.contiguous().reshape(1, 1, self.d, self.d), ttnn.float32)
+        self.dWgT = upload(mesh, self.Wg.T.contiguous().reshape(1, 1, self.d, self.d), ttnn.float32)
+        self.dape = [upload(mesh, self.ape[j].reshape(1, 1, 1, self.d), ttnn.float32) for j in range(self.r)]
+        self.dkn = upload(mesh, self.kn_w.reshape(1, 1, 1, self.d), ttnn.float32)
+        # slot j of window group g' = token row r * g' + j: E_j [32, 64] (rows 16..31 zero)
+        E = torch.zeros(self.r, 32, 64)
+        for j in range(self.r):
+            for g in range(64 // self.r):
+                E[j, g, self.r * g + j] = 1.0
+        self.E = [upload(mesh, E[j].reshape(1, 1, 32, 64), ttnn.float32) for j in range(self.r)]
+        # group cache (TILE) + host mirror
+        # + 64: the decode group window's two 32-group slabs past the context; + 32: the spare tile scoring reads
+        self.gcap = -(-(max_ctx // self.r) // 32) * 32 + 96
+        self.gkeys = upload(mesh, torch.zeros(1, 1, self.gcap, self.d, dtype=torch.bfloat16), ttnn.bfloat16)
+        self.mirror = torch.zeros(self.gcap, self.d, dtype=torch.bfloat16)
         self.iota = upload(mesh, torch.arange(self.gcap, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
+        self.offs4 = upload(mesh, torch.arange(self.r, dtype=torch.float32).reshape(1, 1, 1, self.r), ttnn.float32)
+        self.tk_stage = None
+        self.g_stage = None
+        self.reset()
 
     def reset(self):
         self.n_tok, self.n_groups = 0, 0
         self.open_keys = torch.zeros(0, self.d, dtype=torch.bfloat16)
+        self.tk_hist = torch.zeros(0, self.d, dtype=torch.bfloat16)  # the last token keys (staging init)
+        self.tk_hist_base = 0
 
     # ------------------------------------------------------------------ host pooling (reference-exact)
     def _pool(self, tk: torch.Tensor, g0: int) -> torch.Tensor:
@@ -77,22 +95,77 @@ class Hy4Indexer:
         rot = rope_torch(keys[:, self.d - self.rope_d :], cos, sin)
         return torch.cat([keys[:, : self.d - self.rope_d], rot], dim=-1)
 
+    def _write_mirror(self, g0: int, g1: int):
+        """Device group cache <- host mirror for groups [g0, g1) (whole 32-group slabs)."""
+        a, b = (g0 // 32) * 32, -(-g1 // 32) * 32
+        for s0 in range(a, b, 32):  # 32-group slabs: the op wants the cache length a multiple of the written chunk
+            slab = upload(self.mesh, self.mirror[s0 : s0 + 32].reshape(1, 1, 32, self.d), ttnn.bfloat16)
+            ttnn.experimental.deepseek_prefill.update_padded_kv_cache(self.gkeys, slab, 0, 0, 1, s0, 0)
+            ttnn.deallocate(slab)
+
     def _append_tokens(self, tk: torch.Tensor, p0: int):
         """Token keys of positions p0.. (in order, continuing the sequence) -> pool and mirror complete groups."""
         assert p0 == self.n_tok, (p0, self.n_tok)
         allk = torch.cat([self.open_keys, tk])
         n_complete = allk.shape[0] // self.r
         if n_complete:
-            gk = self._pool(allk[: n_complete * self.r], self.n_groups)
-            g_rm = upload(self.mesh, gk.reshape(1, 1, n_complete, self.d), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
-            ttnn.experimental.slice_write(g_rm, self.gkeys, [0, 0, self.n_groups, 0],
-                                          [1, 1, self.n_groups + n_complete, self.d], [1, 1, 1, 1])
-            ttnn.deallocate(g_rm)
+            self.mirror[self.n_groups : self.n_groups + n_complete] = self._pool(allk[: n_complete * self.r],
+                                                                                 self.n_groups)
+            self._write_mirror(self.n_groups, self.n_groups + n_complete)
             self.n_groups += n_complete
         self.open_keys = allk[n_complete * self.r :]
         self.n_tok = p0 + tk.shape[0]
+        hist = torch.cat([self.tk_hist, tk])
+        keep = min(hist.shape[0], 128)
+        self.tk_hist = hist[-keep:]
+        self.tk_hist_base = self.n_tok - keep
 
-    # ------------------------------------------------------------------ forward
+    # ------------------------------------------------------------------ scoring (shared)
+    def _query(self, x, q_resid, cos, sin, mem):
+        """-> roped index query [1, 16, Tp, 128] and head weights [1, 1, Tp, 16]."""
+        Tp = int(x.shape[-2])
+        q = ttnn.matmul(q_resid, self.wq, compute_kernel_config=self.ckc, memory_config=mem)
+        q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
+        qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
+        qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)
+        ttnn.deallocate(q)
+        qr2 = self.rope(qr, cos, sin, mem)
+        ttnn.deallocate(qr)
+        q = ttnn.concat([qp, qr2], dim=-1, memory_config=mem)
+        ttnn.deallocate(qp)
+        ttnn.deallocate(qr2)
+        w = ttnn.multiply(ttnn.matmul(x, self.whw, compute_kernel_config=self.ckc, memory_config=mem), self.hw_scale,
+                          memory_config=mem)
+        return q, w
+
+    def _topk(self, q, w, kv_len, vis, mem):
+        """Masked scores against the first kv_len groups -> top-512 group ids [1, 1, rows, 512] uint32 RM."""
+        sc = ttnn.experimental.indexer_score_dsa(q, self.gkeys, w, chunk_start_idx=kv_len, kv_len=kv_len + 32)
+        rows = int(sc.shape[-2])
+        if int(sc.shape[-1]) != kv_len + 32:  # the op's output spans the whole cache; only [0, kv_len) is written
+            sc2 = ttnn.slice(sc, (0, 0, 0, 0), (1, 1, rows, kv_len + 32), memory_config=mem)
+            ttnn.deallocate(sc)
+            sc = sc2
+        sc32 = ttnn.typecast(sc, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(sc)
+        iota1 = ttnn.slice(self.iota, (0, 0, 0, 0), (1, 1, 1, kv_len + 32))
+        iota = ttnn.repeat(iota1, ttnn.Shape((1, 1, rows, 1)), memory_config=mem)  # (no row x col broadcast in one op)
+        ttnn.deallocate(iota1)
+        vfull = ttnn.repeat(vis, ttnn.Shape((1, 1, 1, kv_len + 32)), memory_config=mem)  # same-shape compare
+        hide = ttnn.ge(iota, vfull, memory_config=mem)  # [1, 1, rows, kv_len + 32]: not visible to the row
+        ttnn.deallocate(vfull)
+        m = ttnn.where(hide, float("-inf"), sc32, memory_config=mem)
+        for t_ in (sc32, iota, hide):
+            ttnn.deallocate(t_)
+        mb = ttnn.typecast(m, ttnn.bfloat16, memory_config=mem)
+        ttnn.deallocate(m)
+        rm = ttnn.to_layout(mb, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        ttnn.deallocate(mb)
+        ids = ttnn.experimental.topk_large_indices(rm, k=TOPK)
+        ttnn.deallocate(rm)
+        return ids
+
+    # ------------------------------------------------------------------ eager (prefill)
     def forward(self, x, q_resid, p0: int, T: int, mem):
         """Updates the group keys with these T tokens; returns selected group ids [T, 512] (numpy, sorted by score) for
         the rows that need them (rows with p < 2048 get none), or None when no row does."""
@@ -104,52 +177,134 @@ class Hy4Indexer:
         self._append_tokens(tk_host, p0)
         if p0 + T - 1 < cfg.idx_candidate_topk:
             return None
-        # ---- scoring: q [1, 16, Tp, 128] roped, w [1, 1, Tp, 16]
-        q = ttnn.matmul(q_resid, self.wq, compute_kernel_config=self.ckc, memory_config=mem)
-        q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
-        qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
-        qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)
-        ttnn.deallocate(q)
-        pos = torch.arange(p0, p0 + Tp)
-        cos, sin = self.rope.tables(pos, self.theta)
-        qr = self.rope(qr, cos, sin, mem)
-        q = ttnn.concat([qp, qr], dim=-1, memory_config=mem)
-        ttnn.deallocate(qp)
-        ttnn.deallocate(qr)
-        w = ttnn.multiply(ttnn.matmul(x, self.whw, compute_kernel_config=self.ckc, memory_config=mem), self.hw_scale,
-                          memory_config=mem)
+        cos, sin = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta)
+        q, w = self._query(x, q_resid, cos, sin, mem)
         n_vis_max = (p0 + T - 1) // self.r  # visible complete groups of the last row
         kv_len = -(-n_vis_max // 32) * 32
-        # one spare tile past kv_len: indexer_score_dsa wants a tile-aligned chunk_start < its kv_len, and with
-        # chunk_start = kv_len every real key is causally visible to every row (visibility is masked below)
-        k = ttnn.slice(self.gkeys, (0, 0, 0, 0), (1, 1, kv_len + 32, self.d))
-        k = ttnn.to_layout(k, ttnn.TILE_LAYOUT, memory_config=mem)
-        vis = torch.tensor([(p0 + s) // self.r for s in range(Tp)], dtype=torch.float32).reshape(1, 1, Tp, 1)
-        vis_t = upload(self.mesh, vis, ttnn.float32)
-        iota = ttnn.slice(self.iota, (0, 0, 0, 0), (1, 1, 1, kv_len + 32))
+        vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
+        vis_t = upload(self.mesh, vis.reshape(1, 1, Tp, 1), ttnn.float32)
         out = np.full((T, TOPK), 0xFFFFFFFF, dtype=np.uint32)
-        for r0 in range(0, Tp, SCORE_ROWS):
+        for r0 in range(0, min(Tp, -(-T // 32) * 32), SCORE_ROWS):
             r1 = min(Tp, r0 + SCORE_ROWS)
-            if r0 >= T:
-                break
-            qs = ttnn.slice(q, (0, 0, r0, 0), (1, self.nh, r1, self.d), memory_config=mem) if Tp > SCORE_ROWS else q
-            ws = ttnn.slice(w, (0, 0, r0, 0), (1, 1, r1, self.nh), memory_config=mem) if Tp > SCORE_ROWS else w
-            sc = ttnn.experimental.indexer_score_dsa(qs, k, ws, chunk_start_idx=kv_len, kv_len=kv_len + 32)
-            sc = ttnn.typecast(sc, ttnn.float32, memory_config=mem)
+            qs = ttnn.slice(q, (0, 0, r0, 0), (1, self.nh, r1, self.d), memory_config=mem)
+            ws = ttnn.slice(w, (0, 0, r0, 0), (1, 1, r1, self.nh), memory_config=mem)
             vs = ttnn.slice(vis_t, (0, 0, r0, 0), (1, 1, r1, 1), memory_config=mem)
-            hide = ttnn.ge(iota, vs, memory_config=mem)  # [1,1,rows,kv_len]: group not visible to the row
-            sc = ttnn.where(hide, float("-inf"), sc, memory_config=mem)
-            sc = ttnn.typecast(sc, ttnn.bfloat16, memory_config=mem)
-            sc_rm = ttnn.to_layout(sc, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
-            k_eff = TOPK if kv_len >= TOPK else max(16, (kv_len // 16) * 16)
-            ids = ttnn.experimental.topk_large_indices(sc_rm, k=k_eff)
-            ids_h = to_torch0(ids).reshape(r1 - r0, -1).numpy().view(np.uint32) if ids.dtype != ttnn.uint32 else \
-                ttnn.to_torch(ttnn.get_device_tensors(ids)[0]).reshape(r1 - r0, -1).numpy().astype(np.int64).astype(np.uint32)
+            ids = self._topk(qs, ws, kv_len, vs, mem)
+            ids_h = ttnn.to_torch(ttnn.get_device_tensors(ids)[0]).reshape(r1 - r0, -1).numpy().astype(np.int64)
             n = min(T, r1) - r0
-            out[r0 : r0 + n, : ids_h.shape[1]] = ids_h[:n]
-            for t_ in (sc, sc_rm, ids, hide):
+            out[r0 : r0 + n] = ids_h[:n].astype(np.uint32)
+            for t_ in (qs, ws, vs, ids):
                 ttnn.deallocate(t_)
+        for t_ in (q, w, vis_t, cos, sin):
+            ttnn.deallocate(t_)
+        return out
+
+    # ------------------------------------------------------------------ trace-safe step (decode / verify rows)
+    def init_stage(self, base: int, gbase: int):
+        """After a prefill: token staging = token keys of positions [base, base + 64) (those written so far), group
+        staging = group keys [gbase, gbase + 64)."""
+        tk = torch.zeros(64, self.d, dtype=torch.bfloat16)
+        for i in range(64):
+            pos = base + i
+            j = pos - self.tk_hist_base
+            if pos < self.n_tok and 0 <= j < self.tk_hist.shape[0]:
+                tk[i] = self.tk_hist[j]
+        t = upload(self.mesh, tk.reshape(1, 1, 64, self.d), ttnn.bfloat16)
+        g = upload(self.mesh, self.mirror[gbase : gbase + 64].reshape(1, 1, 64, self.d).contiguous(), ttnn.bfloat16)
+        if self.tk_stage is None:
+            self.tk_stage, self.g_stage = t, g
+        else:
+            ttnn.copy(t, self.tk_stage)
+            ttnn.copy(g, self.g_stage)
+            ttnn.deallocate(t)
+            ttnn.deallocate(g)
+
+    def _pool_device(self, mem, gcos, gsin):
+        """The 16 groups of the token staging window -> roped bf16 group keys [1, 1, 32, 128] (rows 16..31 junk)."""
+        K = ttnn.typecast(self.tk_stage, ttnn.float32, memory_config=mem)
+        vals, gates = [], []
+        for j in range(self.r):
+            S = ttnn.matmul(self.E[j], K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+            vals.append(ttnn.matmul(S, self.dWvT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem))
+            g = ttnn.matmul(S, self.dWgT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+            gates.append(ttnn.add(g, self.dape[j], memory_config=mem))
+            ttnn.deallocate(S)
+            ttnn.deallocate(g)
+        ttnn.deallocate(K)
+        m = ttnn.maximum(ttnn.maximum(gates[0], gates[1], memory_config=mem),
+                         ttnn.maximum(gates[2], gates[3], memory_config=mem), memory_config=mem)
+        num = den = None
+        for j in range(self.r):
+            e = ttnn.exp(ttnn.subtract(gates[j], m, memory_config=mem), memory_config=mem)
+            ev = ttnn.multiply(e, vals[j], memory_config=mem)
+            num = ev if num is None else ttnn.add(num, ev, memory_config=mem)
+            den = e if den is None else ttnn.add(den, e, memory_config=mem)
+        for t_ in gates + vals + [m]:
+            ttnn.deallocate(t_)
+        pooled = ttnn.div(num, den, memory_config=mem)
+        ttnn.deallocate(num)
+        ttnn.deallocate(den)
+        n = ttnn.rms_norm(pooled, epsilon=self.eps, compute_kernel_config=self.ckc, memory_config=mem)
+        keys = ttnn.typecast(ttnn.multiply(n, self.dkn, memory_config=mem), ttnn.bfloat16, memory_config=mem)
+        ttnn.deallocate(pooled)
+        ttnn.deallocate(n)
+        kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, 32, self.d - self.rope_d), memory_config=mem)
+        kr = ttnn.slice(keys, (0, 0, 0, self.d - self.rope_d), (1, 1, 32, self.d), memory_config=mem)
+        ttnn.deallocate(keys)
+        kr2 = self.rope(kr, gcos, gsin, mem)
+        ttnn.deallocate(kr)
+        out = ttnn.concat([kp, kr2], dim=-1, memory_config=mem)
+        ttnn.deallocate(kp)
+        ttnn.deallocate(kr2)
+        return out
+
+    def step(self, x, q_resid, si, mem):
+        """Token / group staging updates and slab writes; in the sparse regime the index lists of the rows
+        [1, 1, 32, K] uint32 RM (device-built), else si.idx_dense."""
+        tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
+        a = ttnn.matmul(si.A, self.tk_stage, compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.P, tk, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(tk)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, self.tk_stage)
+        ttnn.deallocate(new)
+        gk = self._pool_device(mem, si.gcos, si.gsin)
+        a = ttnn.matmul(si.Ag, self.g_stage, compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.Pg, gk, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(gk)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, self.g_stage)
+        ttnn.deallocate(new)
+        for j in range(2):
+            ttnn.experimental.deepseek_prefill.update_padded_kv_cache(
+                self.gkeys, self.g_stage, si.slot, si.off_grp[j], 0, 1, 0, input_row_offset=32 * j, input_rows=32)
+        if not si.sparse:
+            return si.idx_dense
+        cos, sin = si.cos_sin["sparse"]
+        q, w = self._query(x, q_resid, cos, sin, mem)
+        ids = self._topk(q, w, si.bucket, si.vis, mem)
         ttnn.deallocate(q)
         ttnn.deallocate(w)
-        ttnn.deallocate(k)
-        return out
+        # group ids -> token rows: the first 511 groups x 4 (+ the tail: sink, own group up to p, sentinels)
+        it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(ids)
+        f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(it)
+        n_sel = self.cfg.idx_group_topk - 1
+        f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
+        ttnn.deallocate(f)
+        e = ttnn.add(ttnn.reshape(ttnn.multiply(f511, float(self.r), memory_config=mem), (1, 32, n_sel, 1)),
+                     self.offs4, memory_config=mem)  # [1, 32, 511, 4]
+        ttnn.deallocate(f511)
+        e = ttnn.reshape(e, (1, 1, 32, n_sel * self.r))
+        u = ttnn.typecast(e, ttnn.uint32, memory_config=mem)
+        ttnn.deallocate(e)
+        urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        ttnn.deallocate(u)
+        idx = ttnn.concat([urm, si.idx_tail], dim=-1, memory_config=mem)
+        ttnn.deallocate(urm)
+        return idx

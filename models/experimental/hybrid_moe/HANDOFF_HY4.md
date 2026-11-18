@@ -113,3 +113,40 @@ per-stream gates) runs on the device.
     Engine interface: per verify pass keep, for the last accepted row, the final normalized hidden and the recalled
     positions of layers 25/29/33/37/41 (<= 2048 each; all positions < anchor below 2048 tokens); the draft's block
     latents may go to a 6-row scratch instead of the target cache (equivalent: the next verify overwrites them).
+
+### 2026-11-18: CPU BF16 reference + Engram host store (reference worker)
+
+- venv `~/m27-work/venv-hy4` (torch 2.15 cpu, transformers 5.24.0.dev0 = PR 50903 @c2ec850).
+- `engram_store.py`: `convert` writes the 4 tables as FP8 e4m3 rows + a bf16 scale per row to
+  `~/.cache/hybrid-moe/hy4_engram/` (`L<li>_fp8.npy` 15.8 GB + `L<li>_scale.npy` 0.33 GB each, 64.7 GB total; ~1-4 min per
+  table). `EngramRows(store_dir, ckpt_dir).rows(li, ids, p0)` returns the Engram layer's `embeddings` after the per-head
+  norms and the flatten (bf16 [T, 1536], the value_proj / key_projs input); keeps the last 2 tokens per sequence itself.
+  `python engram_store.py test`: hash ids, n-gram tokens (incl. incremental), rows after the fp8 round trip AND the
+  normed rows bit-identical to the HF code on all 4 layers (4096 random tokens, 40 pads). Two traps found:
+  (1) the reference returns `x + (q - x)`, which is +0 where q is -0: dequant adds +0.0; (2) `nn.RMSNorm(96, eps=None)`
+  on bf16 input computes in fp32 with eps = finfo(**fp32**).eps = 1.19e-7 (not bf16's 7.8e-3) and applies the weight
+  in fp32 before one rounding. Lookup: 0.4 ms (1 token, 4 layers, warm), EngramRows 0.9 ms (1 token) / 1.3 ms (3);
+  8K tokens 0.29 s warm. Engram mask: only pad (120002) / image / video tokens zero the WHOLE Engram output.
+- `ref_hy4.py`: runs HF's own `HYV4FlashTextModel.forward` (masks, indexer, caches) with the non-expert weights in RAM
+  (14.8 GB anon) and the experts / Engram tables memory-mapped from the shards (page cache). `tf` (teacher forced,
+  chunked through the HF cache, REF_GOLD streams) and `gen` (greedy). Attention: REF_ATTN=fp32 (default: HF's eager
+  math with fp32 q/k/v; HF's own softmax runs in bf16) | hf. Router fp32 as HF; LM head fp32 as HF.
+- `compare_hy4.py`: device `lp_<tag>_<name>.npy` [T, V] or `dev_<tag>_<name>.npz` (top1, lp_at_ref) vs ref_<name>.npz.
+- Reference outputs `~/m27-work/hy4/ref/`: texts.json (8 held-out 1000-token texts, quality_texts.py with the Hy4
+  tokenizer), prompts.json (4 chat prompts, reasoning_effort no_think), gen.json, tf_texts.json (the 8 texts + the 4
+  prompts with their greedy continuations), ref_<name>.npz, routing_T<T>.npz, gold_<name>.pt (streams entering every
+  layer [42, T, 4, 3072] + final hidden, for math_gsm8k and the 4 chat sequences).
+- Greedy (no_think): "Hello! I'm Hunyuan, a large model developed by Tencent. ...", "72 km/h" (correct), a Fibonacci
+  function, fluent Chinese on the Great Wall. Teacher forced on its own continuations: top-1 0.96-1.0, NLL 0.07-0.09.
+  Held-out texts (nll / top-1): gsm8k 3.52/0.60, mbpp 5.04/0.47, en 5.55/0.37, zh 5.16/0.43, fr 4.40/0.49,
+  py file 2.02/0.61, markdown 3.42/0.46, livecodebench 4.29/0.39: a very peaked model (top-1 p 0.84 on gsm8k), so the
+  misses cost 10-19 nats each; top-1 / KL are the metrics to watch, not NLL.
+- Timing (8 cores, warm page cache): 8 x 1000 tokens 407 s (9.7 s per layer); greedy 1.1-1.5 s/token warm (7.7 cold).
+- Checks: layer 0 (indexed attention + compressed indexer) in float64, one 3000-token pass vs 1024-token chunks through
+  the HF cache: bit-identical (0.0) incl. past 2048 where the indexer selects. Noise floor of the BF16 reference:
+  fp32-vs-bf16 attention softmax + batch 1 vs 8: top-1 agreement 0.928 (gsm8k) / 0.96-1.0 (chat); full model single
+  pass vs chunked over 3000 tokens: 0.97 / 0.91 / 0.86 (positions 0-1K / 1-2K / 2-3K). A TT port within ~0.9 top-1
+  of this reference is at the reference's own noise level.
+- Note: config.json spells the attention types `deepseek_sparse_attention` / `sliding_attention`; transformers
+  remaps the first to `indexed_attention` (its rope_parameters key too). `mrope_interleaved` is ignored with a warning
+  (the interleave is always applied); for text the 3 M-RoPE planes are equal, so it is plain 1-D RoPE.

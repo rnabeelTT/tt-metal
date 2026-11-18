@@ -50,22 +50,49 @@ class Hy4Layer:
         self.mlp = Hy4MoE(mesh, cfg, sd.sub("mlp."), li, cache_dir) if cfg.is_moe(li) else Hy4DenseMLP(mesh, cfg, sd.sub("mlp."))
         self.engram = Hy4EngramDevice(mesh, cfg, sd.sub("engram_layer.")) if li in cfg.engram_layers else None
 
-    def forward(self, xs, p0, T, cos_sin, engram_emb=None, mem=None):
+    def forward(self, X, p0, T, cos_sin, engram_emb=None, mem=None, engram_keep=None):
+        """X: the residual streams [1, hc, Tp, H] bf16 (replicated). Returns the updated streams."""
         if self.engram is not None and engram_emb is not None:
-            xs = self.engram.forward(xs, engram_emb, mem)
-        a_in, post = self.attn_hc.pre(xs, mem)
+            X2 = self.engram.forward(X, engram_emb, mem, engram_keep)
+            ttnn.deallocate(X)
+            X = X2
+        a_in, post = self.attn_hc.pre(X, mem)
         a = self.attn.forward(self.in_norm(a_in, mem), p0, T, cos_sin, mem)
         ttnn.deallocate(a_in)
-        xs = self.attn_hc.post(xs, a, post, mem)
-        ttnn.deallocate(a)
-        f_in, post = self.ffn_hc.pre(xs, mem)
+        X2 = self.attn_hc.post(X, a, post, mem)
+        for t_ in (X, a, post):
+            ttnn.deallocate(t_)
+        f_in, post = self.ffn_hc.pre(X2, mem)
         f_n = self.post_norm(f_in, mem)
         ttnn.deallocate(f_in)
         f = self.mlp.forward(f_n, T, mem) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, mem)
         ttnn.deallocate(f_n)
-        xs = self.ffn_hc.post(xs, f, post, mem)
-        ttnn.deallocate(f)
-        return xs
+        X3 = self.ffn_hc.post(X2, f, post, mem)
+        for t_ in (X2, f, post):
+            ttnn.deallocate(t_)
+        return X3
+
+    def step(self, X, si, R, mem=None):
+        """Trace-safe rows pass (tt/decode.py): every position-dependent input in si."""
+        if self.engram is not None and self.li in si.engram:
+            X2 = self.engram.forward(X, si.engram[self.li], mem)
+            ttnn.deallocate(X)
+            X = X2
+        a_in, post = self.attn_hc.pre(X, mem)
+        a = self.attn.step(self.in_norm(a_in, mem), si, mem)
+        ttnn.deallocate(a_in)
+        X2 = self.attn_hc.post(X, a, post, mem)
+        for t_ in (X, a, post):
+            ttnn.deallocate(t_)
+        f_in, post = self.ffn_hc.pre(X2, mem)
+        f_n = self.post_norm(f_in, mem)
+        ttnn.deallocate(f_in)
+        f = self.mlp.forward(f_n, R, mem) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, mem)
+        ttnn.deallocate(f_n)
+        X3 = self.ffn_hc.post(X2, f, post, mem)
+        for t_ in (X2, f, post):
+            ttnn.deallocate(t_)
+        return X3
 
     def reset(self):
         if self.attn.indexer is not None:
@@ -85,9 +112,11 @@ class Hy4Model:
         self.engram = engram
         self.ag = AllGather(mesh)
         t0 = time.time()
-        # embedding (replicated bf16 table, row-major for ttnn.embedding)
+        # embedding (replicated bf16 table, row-major for ttnn.embedding; tensor-cached: a plain upload of the 742 MB
+        # table took minutes)
         self.emb = upload(mesh, w.get("model.embed_tokens.weight").to(torch.bfloat16), ttnn.bfloat16,
-                          ttnn.ROW_MAJOR_LAYOUT)
+                          ttnn.ROW_MAJOR_LAYOUT, cache=os.path.join(cache_dir, "embed_tokens.rm") if cache_dir else None)
+        logger.info(f"embedding loaded ({time.time() - t0:.0f} s)")
         self.layers = []
         for li in self.layer_ids:
             self.layers.append(Hy4Layer(mesh, cfg, w, li, max_ctx, chunk, cache_dir))
@@ -99,12 +128,42 @@ class Hy4Model:
         lm = torch.zeros(cfg.hidden, self.Vp, dtype=torch.bfloat16)
         lm[:, :V] = w.get("lm_head.weight").to(torch.bfloat16).T
         lm_dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b}[os.environ.get("HY4_LM_DTYPE", "bf16")]
-        self.lm = upload(mesh, lm.reshape(1, 1, cfg.hidden, self.Vp), lm_dt, mapper=("shard", -1))
+        self.lm = upload(mesh, lm.reshape(1, 1, cfg.hidden, self.Vp), lm_dt, mapper=("shard", -1),
+                         cache=os.path.join(cache_dir, f"lm_head.{lm_dt}") if cache_dir else None)
         del lm
         self.ckc = ckc(mesh, fp32=True)
         self.rope = DeviceRope(mesh, cfg.qk_rope)
         self.pos = 0  # next position of the sequence
-        logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s")
+        logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}")
+
+    def dram_report(self) -> str:
+        mv = ttnn.get_memory_view(self.mesh, ttnn.BufferType.DRAM)
+        free = mv.total_bytes_free_per_bank * mv.num_banks / 2**30
+        used = mv.total_bytes_allocated_per_bank * mv.num_banks / 2**30
+        return f"DRAM per die: {used:.2f} GiB used, {free:.2f} GiB free (largest block {mv.largest_contiguous_bytes_free_per_bank / 2**20:.0f} MiB/bank)"
+
+    def engram_li(self):
+        return [l.li for l in self.layers if l.engram is not None] if self.engram is not None else []
+
+    def step(self, si, R, mem=None):
+        """Trace-safe rows pass over si (tt/decode.StepInputs) -> logits [1, 1, 32, Vp / N] fp32 per die."""
+        cfg = self.cfg
+        x = ttnn.embedding(si.tok, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
+        x = ttnn.reshape(x, (1, 1, 32, cfg.hidden))
+        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
+        ttnn.deallocate(x)
+        for layer in self.layers:
+            X = layer.step(X, si, R, mem)
+        h, _ = self.head_hc.pre(X, mem)
+        ttnn.deallocate(X)
+        hn = self.norm(h, mem)
+        ttnn.deallocate(h)
+        lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(hn)
+        return lg
+
+    def read_logits(self, lg, R) -> torch.Tensor:
+        return to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:R, : self.cfg.vocab].float()
 
     def reset(self):
         self.pos = 0
@@ -125,6 +184,11 @@ class Hy4Model:
             full = torch.zeros(Tp, rows.shape[-1], dtype=torch.bfloat16)
             full[: rows.shape[0]] = rows
             out[layer.li] = upload(self.mesh, full.reshape(1, 1, Tp, -1), ttnn.bfloat16)
+        keep = self.engram.mask(ids).reshape(-1)
+        if out and not bool(keep.all()):
+            k = torch.zeros(Tp, 1, dtype=torch.bfloat16)
+            k[: keep.numel(), 0] = keep.to(torch.bfloat16)
+            out["keep"] = upload(self.mesh, k.reshape(1, 1, Tp, 1), ttnn.bfloat16)
         return out
 
     def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None) -> torch.Tensor:
@@ -140,18 +204,18 @@ class Hy4Model:
         x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(tok_t)
         x = ttnn.reshape(x, (1, 1, Tp, cfg.hidden))
-        xs = [x] + [ttnn.clone(x) for _ in range(cfg.hc_mult - 1)]
+        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))  # the 4 streams start equal
+        ttnn.deallocate(x)
         pos = torch.arange(p0, p0 + Tp)
         cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
         eng = self._engram_rows(ids.reshape(-1), p0, Tp)
         for layer in self.layers:
-            xs = layer.forward(xs, p0, T, cos_sin, eng.get(layer.li), mem)
+            X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
         for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
             ttnn.deallocate(t_)
         self.pos = p0 + T
-        h, _ = self.head_hc.pre(xs, mem)
-        for x_ in xs:
-            ttnn.deallocate(x_)
+        h, _ = self.head_hc.pre(X, mem)
+        ttnn.deallocate(X)
         if logits_rows == "last":
             r = ((T - 1) // 32) * 32
             h = ttnn.slice(h, (0, 0, r, 0), (1, 1, r + 32, cfg.hidden))

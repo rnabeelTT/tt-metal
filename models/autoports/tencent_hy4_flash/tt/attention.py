@@ -99,12 +99,13 @@ class Hy4Attention:
         for d in range(N):
             qs[d, :Hd, 0] = s_hi[d * Hd : (d + 1) * Hd]
             qs[d, :Hd, 1] = s_lo[d * Hd : (d + 1) * Hd]
-        self.q_sink = upload(mesh, qs.reshape(N, self.Hp, 1, SINK_COLS), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT,
+        self.q_sink = upload(mesh, qs[:, :Hd].reshape(N, Hd, 1, SINK_COLS), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                              mapper=("shard", 0))
+        self.stage = None  # the decode staging window (init_stage)
         # caches (row-major bf16, replicated): sparse layers hold every position + a sink block at the end; SWA layers
         # a ring of `ring` rows + the sink block
         if self.kind == "sparse":
-            self.rows = -(-max_ctx // 32) * 32
+            self.rows = -(-max_ctx // 32) * 32 + 64  # + the decode staging window's lookahead (two 32-row slabs)
         else:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
         self.sink_row = self.rows
@@ -151,16 +152,21 @@ class Hy4Attention:
         # padding rows (s >= T) attend to the sink only: a defined (zero) output
         return torch.from_numpy(out.view(np.int32)).reshape(1, 1, Tp, K)
 
-    # ------------------------------------------------------------------ forward
-    def forward(self, x, p0: int, T: int, cos_sin, mem=None):
-        """x: [1, 1, Tp, 3072] bf16 replicated (normed attention input), rows p0 .. p0 + T - 1 real (Tp = T padded to
-        32). cos_sin: {kind: (cos, sin)} fp32 [1, 1, Tp, 64] device tables of these positions (shared by the layers).
-        Returns [1, 1, Tp, 3072] bf16 replicated."""
-        cfg, mesh = self.cfg, self.mesh
-        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+    # ------------------------------------------------------------------ shared pieces
+    _ZEROS = {}
+
+    def _zeros(self, shape):
+        """A persistent zero tensor of this shape (shared by the layers; created outside any trace capture: the decode
+        path's first pass of each shape is eager)."""
+        key = (id(self.mesh), tuple(shape))
+        z = Hy4Attention._ZEROS.get(key)
+        if z is None:
+            z = Hy4Attention._ZEROS[key] = ttnn.zeros(tuple(shape), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                                       device=self.mesh)
+        return z
+    def _q(self, x, cos, sin, mem):
+        """-> (q_lat [1,Hd,Tp,512], q_rope [1,Hd,Tp,64] roped, q_resid [1,1,Tp,1024])."""
         Tp = int(x.shape[-2])
-        cos, sin = cos_sin[self.kind]
-        # ---- q
         qa = ttnn.matmul(x, self.wqa, compute_kernel_config=self.ckc, memory_config=mem)
         q_resid = self.q_norm(qa, mem)
         ttnn.deallocate(qa)
@@ -172,45 +178,40 @@ class Hy4Attention:
         q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,512]
         ttnn.deallocate(q_nope)
         q_rope = self.rope(q_rope, cos, sin, mem)
-        # ---- kv latent row of these tokens -> the cache
+        return q_lat, q_rope, q_resid
+
+    def _kv_row(self, x, cos, sin, mem):
+        """-> the cache rows of these tokens [1,1,Tp,608] TILE: [norm(c) | rope(k_rope) | 0]."""
+        Tp = int(x.shape[-2])
         kv = ttnn.matmul(x, self.wkva, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,576]
         c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
-        kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, cfg.latent_width), memory_config=mem), cos, sin, mem)
+        kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
+                       cos, sin, mem)
         ttnn.deallocate(kv)
-        zeros = ttnn.zeros((1, 1, Tp, SINK_COLS), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
-                           memory_config=mem)
-        row = ttnn.concat([c, kr, zeros], dim=-1, memory_config=mem)  # [1,1,Tp,608] TILE
+        row = ttnn.concat([c, kr, self._zeros((1, 1, Tp, SINK_COLS))], dim=-1, memory_config=mem)
         ttnn.deallocate(c)
         ttnn.deallocate(kr)
-        row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
-        ttnn.deallocate(row)
-        self._write_rows(row_rm, p0, T)
-        ttnn.deallocate(row_rm)
-        # ---- indexer (sparse layers past the dense regime)
-        selected = None
-        if self.indexer is not None:
-            selected = self.indexer.forward(x, q_resid, p0, T, mem)
-        ttnn.deallocate(q_resid)
-        # ---- sparse attention over the index lists
-        qcat = ttnn.concat([q_lat, q_rope, ttnn.zeros((1, self.Hd, Tp, SINK_COLS), dtype=ttnn.bfloat16,
-                                                      layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=mem)],
-                           dim=-1, memory_config=mem)
-        ttnn.deallocate(q_lat)
-        ttnn.deallocate(q_rope)
+        return row
+
+    def _attend(self, x, q_lat, q_rope, idx, mem):
+        """sparse_sdpa over idx [1,1,Tp,K] uint32, then V-up, output gate, o_proj, all-reduce, post norm."""
+        Tp = int(x.shape[-2])
+        qs = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)  # [1,Hd,Tp,32]
+        qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)  # [1,Hd,Tp,608]
+        ttnn.deallocate(qs)
+        if self.Hp != self.Hd:
+            q2 = ttnn.concat([qcat, self._zeros((1, self.Hp - self.Hd, Tp, self.width))], dim=1, memory_config=mem)
+            ttnn.deallocate(qcat)
+            qcat = q2
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
         ttnn.deallocate(qcat)
-        q_rm = self._add_sink_cols(q_rm, Tp, mem)
-        if self.Hp != self.Hd:
-            pad = ttnn.zeros((1, self.Hp - self.Hd, Tp, self.width), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
-                             device=mesh, memory_config=mem)
-            q_rm = ttnn.concat([q_rm, pad], dim=1, memory_config=mem)
-        idx = upload(mesh, self.index_lists(p0, T, selected), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
                                          k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc)  # [1,Hp,Tp,512] RM
         ttnn.deallocate(q_rm)
-        ttnn.deallocate(idx)
-        o = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
-        o = ttnn.to_layout(o, ttnn.TILE_LAYOUT, memory_config=mem)
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
+        ttnn.deallocate(o)
+        o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(o2)
         ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
@@ -224,13 +225,80 @@ class Hy4Attention:
         ttnn.deallocate(part)
         return self.post_norm(full, mem)
 
-    def _add_sink_cols(self, q_rm, Tp, mem):
-        """q's sink columns (cols 576..607, zero so far) += this die's [s_hi, s_lo] per head (broadcast over rows)."""
-        lead = ttnn.slice(q_rm, (0, 0, 0, 0), (1, self.Hd, Tp, self.cfg.latent_width), memory_config=mem)
-        qs = ttnn.slice(self.q_sink, (0, 0, 0, 0), (1, self.Hd, 1, SINK_COLS))
-        qs = ttnn.repeat(qs, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)
-        out = ttnn.concat([lead, qs], dim=-1, memory_config=mem)
-        ttnn.deallocate(q_rm)
+    # ------------------------------------------------------------------ eager (prefill)
+    def forward(self, x, p0: int, T: int, cos_sin, mem=None):
+        """x: [1, 1, Tp, 3072] bf16 replicated (normed attention input), rows p0 .. p0 + T - 1 real (Tp = T padded to
+        32). cos_sin: {kind: (cos, sin)} fp32 [1, 1, Tp, 64] device tables of these positions (shared by the layers).
+        Returns [1, 1, Tp, 3072] bf16 replicated."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        cos, sin = cos_sin[self.kind]
+        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
+        row = self._kv_row(x, cos, sin, mem)
+        row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        ttnn.deallocate(row)
+        self._write_rows(row_rm, p0, T)
+        ttnn.deallocate(row_rm)
+        selected = self.indexer.forward(x, q_resid, p0, T, mem) if self.indexer is not None else None
+        ttnn.deallocate(q_resid)
+        idx = upload(self.mesh, self.index_lists(p0, T, selected), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        out = self._attend(x, q_lat, q_rope, idx, mem)
+        for t_ in (q_lat, q_rope, idx):
+            ttnn.deallocate(t_)
+        return out
+
+    # ------------------------------------------------------------------ trace-safe step (decode / verify rows)
+    def init_stage(self, base: int):
+        """After a prefill: the 64-row staging window starting at position `base` (32-aligned) from the cache."""
+        r0 = base if self.kind == "sparse" else base % self.rows
+        if r0 + 64 <= self.rows:
+            w = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, r0 + 64, self.width))
+        else:  # the SWA ring wraps inside the window
+            a = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, self.rows, self.width))
+            b = ttnn.slice(self.cache, (0, 0, 0, 0), (1, 1, r0 + 64 - self.rows, self.width))
+            w = ttnn.concat([a, b], dim=2)
+            ttnn.deallocate(a)
+            ttnn.deallocate(b)
+        wt = ttnn.to_layout(w, ttnn.TILE_LAYOUT)
+        ttnn.deallocate(w)
+        if self.stage is None:
+            self.stage = wt
+        else:
+            ttnn.copy(wt, self.stage)
+            ttnn.deallocate(wt)
+
+    def step(self, x, si, mem=None):
+        """Trace-safe rows pass. si: the step inputs (tt/decode.StepInputs): cos/sin, staging maps, slab offsets,
+        index lists. The KV rows go through the staging window and two 32-row slab writes."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        cos, sin = si.cos_sin[self.kind]
+        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
+        row = self._kv_row(x, cos, sin, mem)
+        a = ttnn.matmul(si.A, self.stage, compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(row)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, self.stage)
+        ttnn.deallocate(new)
+        st_rm = ttnn.to_layout(self.stage, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        offs = si.off_sparse if self.kind == "sparse" else si.off_swa
+        for j in range(2):
+            ttnn.experimental.deepseek_prefill.update_padded_kv_cache(
+                self.cache, st_rm, si.slot, offs[j], 0, 1, 0, input_row_offset=32 * j, input_rows=32)
+        ttnn.deallocate(st_rm)
+        if self.kind == "swa":
+            idx = si.idx_swa
+        elif self.indexer is not None:
+            idx = self.indexer.step(x, q_resid, si, mem)  # the selection, or si.idx_dense in the dense regime
+        else:
+            idx = si.idx_dense
+        ttnn.deallocate(q_resid)
+        out = self._attend(x, q_lat, q_rope, idx, mem)
+        ttnn.deallocate(q_lat)
+        ttnn.deallocate(q_rope)
+        if idx is not si.idx_swa and idx is not si.idx_dense:
+            ttnn.deallocate(idx)
         return out
 
     def _write_rows(self, row_rm, p0: int, T: int):

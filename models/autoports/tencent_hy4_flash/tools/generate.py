@@ -52,13 +52,14 @@ def main():
     ap.add_argument("--layers", default="")
     ap.add_argument("--no-engram", action="store_true")
     ap.add_argument("--teacher", default="")
+    ap.add_argument("--eager", action="store_true")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     from transformers import AutoTokenizer
 
     from models.autoports.tencent_hy4_flash.tt.config import checkpoint_dir
 
-    tok = AutoTokenizer.from_pretrained(checkpoint_dir())
+    tok_ = AutoTokenizer.from_pretrained(checkpoint_dir())
     mesh = open_mesh()
     try:
         t0 = time.time()
@@ -75,32 +76,31 @@ def main():
             torch.save({"ids": ids, "logits": lg.to(torch.float32)}, args.out or "tt_logits.pt")
             return
         if args.raw:
-            ids = torch.tensor(tok(args.prompt)["input_ids"])
+            ids = torch.tensor(tok_(args.prompt)["input_ids"])
         else:
-            text = tok.apply_chat_template([{"role": "user", "content": args.prompt}], tokenize=False,
+            text = tok_.apply_chat_template([{"role": "user", "content": args.prompt}], tokenize=False,
                                            add_generation_prompt=True,
                                            reasoning_effort="high" if args.think else "no_think")
-            ids = torch.tensor(tok(text, add_special_tokens=False)["input_ids"])
+            ids = torch.tensor(tok_(text, add_special_tokens=False)["input_ids"])
         logger.info(f"prompt {ids.numel()} tokens")
+        from models.autoports.tencent_hy4_flash.tt.engine import Hy4Engine
+
+        eng = Hy4Engine(model, 0, trace=not args.eager)
         t0 = time.time()
-        lg = None
-        for c0 in range(0, ids.numel(), args.chunk):
-            lg = model.forward(ids[c0 : c0 + args.chunk])
+        tok = eng.prefill(ids.tolist())
         t_pf = time.time() - t0
-        out = []
-        t0 = time.time()
-        for _ in range(args.max_new):
-            nxt = int(torch.argmax(lg))
-            out.append(nxt)
-            if nxt == model.cfg.eos:
-                break
-            lg = model.forward(torch.tensor([nxt]))
-        t_dec = time.time() - t0
+        out = [tok]
+        ts = []
+        while len(out) < args.max_new and out[-1] != model.cfg.eos:
+            t1 = time.time()
+            out += eng.step()
+            ts.append(time.time() - t1)
         print("=" * 80)
-        print(tok.decode(out))
+        print(tok_.decode(out))
         print("=" * 80)
-        print(f"prefill {ids.numel()} tok in {t_pf:.2f} s; decode {len(out)} tok in {t_dec:.2f} s "
-              f"({len(out) / max(t_dec, 1e-9):.2f} tok/s)")
+        warm = ts[2:] or ts
+        print(f"prefill {ids.numel()} tok in {t_pf:.2f} s; decode {len(out)} tok, warm step "
+              f"{1e3 * sum(warm) / max(1, len(warm)):.1f} ms ({len(warm) / max(sum(warm), 1e-9):.2f} tok/s)")
     finally:
         ttnn.close_mesh_device(mesh)
 

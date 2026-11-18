@@ -50,8 +50,11 @@ class Hy4Engine:
     adaptive = False
     in_trace = False
 
-    def __init__(self, model, k: int = 0, trace: bool = False):
+    def __init__(self, model, k: int = 0, trace: bool = True):
+        from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder
+
         self.model, self.cfg = model, model.cfg
+        self.dec = Hy4Decoder(model, trace=trace)
         self.k = int(k)
         assert self.k == 0, "the DFly2 drafter is not wired yet (HY4_SPEC_K=0)"
         self.trace = bool(trace)
@@ -71,12 +74,14 @@ class Hy4Engine:
         self.model.reset()
         n = min(int(prompt_len or 64), self.chunk)
         self.model.forward(torch.full((n,), int(self.cfg.bos), dtype=torch.long))
-        self.model.forward(torch.tensor([int(self.cfg.bos)]))
+        self.dec.start(n)
+        self.dec.run([int(self.cfg.bos)])
+        self.dec.run([int(self.cfg.bos)])  # (traced: the first pass compiles + captures, the second replays)
         self.model.reset()
         logger.info(f"Hy4 engine warm-up {time.time() - t0:.1f} s")
 
     def capture(self):
-        """Traces come with the traced decode path; day 0 runs eagerly."""
+        """Decode traces are captured on first use per (rows, regime, context bucket) by tt/decode.Hy4Decoder."""
 
     # ------------------------------------------------------------------ prefill / decode
     def prefill(self, prompt_ids, sampling=None) -> int:
@@ -87,6 +92,7 @@ class Hy4Engine:
         for c0 in range(0, ids.numel(), self.chunk):
             lg = self.model.forward(ids[c0 : c0 + self.chunk])
         self.last_logits = lg
+        self.dec.start(int(ids.numel()))
         self._smp = HostSampler(sampling)
         tok = self._smp(lg)
         self._tok, self._pos = tok, int(ids.numel())
@@ -99,7 +105,7 @@ class Hy4Engine:
 
     def _decode(self, tok: int) -> torch.Tensor:
         t0 = time.time()
-        lg = self.model.forward(torch.tensor([int(tok)]))
+        lg = self.dec.run([int(tok)])
         self.stats["t_step"] += time.time() - t0
         self.stats["steps"] += 1
         return lg

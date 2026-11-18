@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Hy4 hyper-connections (HF HYV4FlashHyperConnection / HYV4FlashHyperHead), fp32 like the reference.
 
-The residual is a list of hc_mult (4) replicated bf16 streams X_i [1, 1, T, H]. One sublayer:
+The residual is ONE replicated bf16 tensor X [1, hc, T, H] (the 4 streams stacked on dim 1). One sublayer:
 
-    r     = rsqrt(mean(concat(X)^2) + eps)                 (fp32, over all 4 * H)
-    mix   = (concat(X) @ fn^T) * r                          [T, 2 * hc]
+    r     = rsqrt(mean(X^2 over all hc * H) + eps)          (fp32)
+    mix   = (sum_i X_i @ fn_i^T) * r                         [T, 2 * hc]   (fn_i: stream i's columns of fn)
     pre   = sigmoid(mix[:hc] * s_pre + b_pre) + hc_eps
     post  = mag * sigmoid(mix[hc:] * s_post + b_post) + hc_eps
-    in    = bf16(sum_i pre_i * X_i)                         -> the sublayer (after its own RMSNorm)
-    X_i'  = bf16(post_i * out + X_i)                        (fp32 math)
+    in    = bf16(sum_i pre_i * X_i)                          -> the sublayer (after its own RMSNorm)
+    X_i'  = bf16(post_i * out + X_i)                         (fp32 math)
 
-The head (HyperHead) is the `pre` half only (no post), with its own fn / base / scale.
+As batched ops over the stream dim: one batched matmul for the mixes, one broadcast multiply + stream-sum for the
+input, one broadcast multiply-add for the update. The head (HyperHead) is the `pre` half only, with its own weights.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from __future__ import annotations
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import TILE, ckc, rms_scale_fp32, upload
+from models.autoports.tencent_hy4_flash.tt.common import TILE, ckc, upload
 
 
 class HyperConnection:
@@ -31,12 +32,10 @@ class HyperConnection:
         M = int(fn.shape[0])
         self.M = M
         fn = fn.float()
-        # per-stream transposed slices, columns padded to one tile: X_i @ fnT_i summed over i == concat(X) @ fn^T
-        self.fnT = []
+        w = torch.zeros(1, hc, hidden, TILE, dtype=torch.float32)
         for i in range(hc):
-            w = torch.zeros(hidden, TILE, dtype=torch.float32)
-            w[:, :M] = fn[:, i * hidden : (i + 1) * hidden].T
-            self.fnT.append(upload(mesh, w.reshape(1, 1, hidden, TILE), ttnn.float32))
+            w[0, i, :, :M] = fn[:, i * hidden : (i + 1) * hidden].T
+        self.fnT = upload(mesh, w, ttnn.float32)  # [1, hc, H, 32]
         sc = torch.zeros(TILE, dtype=torch.float32)
         bs = torch.zeros(TILE, dtype=torch.float32)
         scale = scale.float().reshape(-1)
@@ -47,53 +46,52 @@ class HyperConnection:
         bs[:M] = base.float().reshape(-1)
         self.sc = upload(mesh, sc.reshape(1, 1, 1, TILE), ttnn.float32)
         self.bs = upload(mesh, bs.reshape(1, 1, 1, TILE), ttnn.float32)
+        # post = mag * sig + eps, pre = sig + eps on the mixing columns: one fused affine on the sigmoid row
+        a = torch.ones(TILE, dtype=torch.float32)
+        if M == 2 * hc:
+            a[hc:M] = float(magnitude)
+        self.aff_a = upload(mesh, a.reshape(1, 1, 1, TILE), ttnn.float32)
         self.ckc = ckc(mesh, fp32=True)
+        self.inv_n = 1.0 / float(hc * hidden)
 
-    def _weights(self, xs_f32, mem):
-        """-> sig [1, 1, T, 32] fp32 = sigmoid(mix * scale + base) (pad columns meaningless)."""
-        mix = None
-        for x, w in zip(xs_f32, self.fnT):
-            m = ttnn.matmul(x, w, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
-            mix = m if mix is None else ttnn.add(mix, m, memory_config=mem)
-        r = rms_scale_fp32(xs_f32, self.eps, self.hc * self.H, mem)
+    def _weights(self, xf, mem):
+        """xf fp32 [1, hc, T, H] -> w [1, 1, T, 32] fp32: cols 0..hc-1 = pre, hc..2hc-1 = post (pad meaningless)."""
+        mix = ttnn.matmul(xf, self.fnT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        mix = ttnn.sum(mix, dim=1, keepdim=True, memory_config=mem)  # [1, 1, T, 32]
+        ss = ttnn.sum(ttnn.sum(ttnn.multiply(xf, xf, memory_config=mem), dim=-1, keepdim=True, memory_config=mem),
+                      dim=1, keepdim=True, memory_config=mem)  # [1, 1, T, 1]
+        r = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss, self.inv_n, memory_config=mem), self.eps, memory_config=mem),
+                       memory_config=mem)
         mix = ttnn.multiply(mix, r, memory_config=mem)
-        mix = ttnn.add(ttnn.multiply(mix, self.sc, memory_config=mem), self.bs, memory_config=mem)
-        return ttnn.sigmoid(mix, memory_config=mem)
+        sig = ttnn.sigmoid(ttnn.add(ttnn.multiply(mix, self.sc, memory_config=mem), self.bs, memory_config=mem),
+                           memory_config=mem)
+        return ttnn.add(ttnn.multiply(sig, self.aff_a, memory_config=mem), self.hc_eps, memory_config=mem)
 
-    def _col(self, sig, j, mem):
-        T = int(sig.shape[-2])
-        return ttnn.slice(sig, (0, 0, 0, j), (1, 1, T, j + 1), memory_config=mem)
+    def _per_stream(self, w, c0, mem):
+        """columns c0 .. c0 + hc - 1 of w [1, 1, T, 32] -> [1, hc, T, 1] (stream on dim 1)."""
+        T = int(w.shape[-2])
+        cols = ttnn.slice(w, (0, 0, 0, c0), (1, 1, T, c0 + self.hc), memory_config=mem)  # [1, 1, T, hc]
+        return ttnn.permute(cols, (0, 3, 2, 1), memory_config=mem)  # [1, hc, T, 1]
 
-    def pre(self, xs, mem=None):
-        """-> (sublayer input bf16 [1, 1, T, H], post weights list of [1, 1, T, 1] fp32 or None for the head)."""
+    def pre(self, X, mem=None):
+        """X [1, hc, T, H] bf16 -> (sublayer input bf16 [1, 1, T, H], post weights [1, hc, T, 1] fp32 or None)."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
-        xf = [ttnn.typecast(x, ttnn.float32, memory_config=mem) for x in xs]
-        sig = self._weights(xf, mem)
-        acc = None
-        for i, x in enumerate(xf):
-            p = ttnn.add(self._col(sig, i, mem), self.hc_eps, memory_config=mem)
-            t = ttnn.multiply(x, p, memory_config=mem)
-            acc = t if acc is None else ttnn.add(acc, t, memory_config=mem)
-        out = ttnn.typecast(acc, ttnn.bfloat16, memory_config=mem)
-        post = None
-        if self.M == 2 * self.hc:
-            post = [
-                ttnn.add(ttnn.multiply(self._col(sig, self.hc + i, mem), self.mag, memory_config=mem), self.hc_eps,
-                         memory_config=mem)
-                for i in range(self.hc)
-            ]
+        xf = ttnn.typecast(X, ttnn.float32, memory_config=mem)
+        w = self._weights(xf, mem)
+        pre = self._per_stream(w, 0, mem)
+        s = ttnn.sum(ttnn.multiply(xf, pre, memory_config=mem), dim=1, keepdim=True, memory_config=mem)
+        ttnn.deallocate(xf)
+        out = ttnn.typecast(s, ttnn.bfloat16, memory_config=mem)
+        post = self._per_stream(w, self.hc, mem) if self.M == 2 * self.hc else None
         return out, post
 
-    def post(self, xs, out, post, mem=None):
-        """X_i' = bf16(post_i * out + X_i) (fp32 math)."""
+    def post(self, X, out, post, mem=None):
+        """X' = bf16(post * out + X) (fp32 math): X [1, hc, T, H], out [1, 1, T, H], post [1, hc, T, 1]."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         of = ttnn.typecast(out, ttnn.float32, memory_config=mem)
-        res = []
-        for x, p in zip(xs, post):
-            y = ttnn.add(ttnn.multiply(of, p, memory_config=mem), ttnn.typecast(x, ttnn.float32, memory_config=mem),
-                         memory_config=mem)
-            res.append(ttnn.typecast(y, ttnn.bfloat16, memory_config=mem))
-        return res
+        y = ttnn.add(ttnn.multiply(post, of, memory_config=mem), ttnn.typecast(X, ttnn.float32, memory_config=mem),
+                     memory_config=mem)
+        return ttnn.typecast(y, ttnn.bfloat16, memory_config=mem)
 
 
 def sublayer_hc(mesh, sd, prefix, cfg):
