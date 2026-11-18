@@ -150,7 +150,13 @@ class ShortConv:
                 mesh_mapper=mesh_mapper,
             )
             self.cols = c_local // 32
-            self.cores = _cores(mesh, self.cols)
+            # one core per 32-column tile, or (more columns than cores: the full-width replicated convs) cpc tiles per
+            # core; the kernels take (first column, count) per core
+            grid = mesh.compute_with_storage_grid_size()
+            cap = grid.x * grid.y
+            ncores = self.cols if self.cols <= cap else max(d for d in range(1, cap + 1) if self.cols % d == 0)
+            self.cpc = self.cols // ncores
+            self.cores = _cores(mesh, ncores)
         self._seq_tile = None
 
     def reset(self):
@@ -209,12 +215,13 @@ class ShortConv:
         for t in (x, self.st, self.taps_tiles, seq_t):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         seq_addr = seq.buffer_address() if seq is not None else 0
+        cpc = self.cpc
         rd_rt = [
-            [x.buffer_address(), self.st.buffer_address(), self.taps_tiles.buffer_address(), seq_addr, i, 1]
-            for i in range(cols)
+            [x.buffer_address(), self.st.buffer_address(), self.taps_tiles.buffer_address(), seq_addr, i * cpc, cpc]
+            for i in range(len(cores))
         ]
         wr_ct = [cb_o] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
-        wr_rt = [[y.buffer_address(), i, 1] for i in range(cols)]
+        wr_rt = [[y.buffer_address(), i * cpc, cpc] for i in range(len(cores))]
         kernels = [
             _dm("reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             _dm("writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
@@ -222,7 +229,7 @@ class ShortConv:
                 kernel_source=str(KERNELS / "compute.cpp"),
                 core_ranges=cr,
                 compile_time_args=[cb_x, cb_s, cb_t, cb_o],
-                runtime_args=_rt(cores, [[1]] * cols),
+                runtime_args=_rt(cores, [[cpc]] * len(cores)),
                 config=ttnn.ComputeConfigDescriptor(
                     math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
                 ),
@@ -348,7 +355,7 @@ class ShortConv:
         ct = [cb_scr, cols, int(n)]
         for t in (seq, self.st):
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        rt = [[seq.buffer_address(), self.st.buffer_address(), i, 1] for i in range(cols)]
+        rt = [[seq.buffer_address(), self.st.buffer_address(), i * self.cpc, self.cpc] for i in range(len(cores))]
         k = _dm("commit.cpp", cores, ct, rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)
         ttnn.generic_op(
             [seq, self.st],
