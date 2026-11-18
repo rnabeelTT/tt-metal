@@ -340,7 +340,53 @@ class ExpertGateUpRows:
             }
             self.mesh = mesh_device
         else:
-            placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
+            # a two-bank group (nb = 2) whose banks' optimal readers share a NOC row (banks 0 / 4 on row 9 of these chips)
+            # streams both banks' responses over that one row's links: its readers ran ~45% longer than the other groups'
+            # (M2.7 shapes, 4 rows: 103 vs 60-72 us per core) and set the op's time. QWEN35_MOE_GU_OFFROW: such a group's
+            # readers read on NOC1 (Y first), 2: spread over the rows free of bank readers, so the two banks' responses
+            # spread over the rows (M2.7, union 23: gate|up 100.4 -> 76.7 us, bit-identical); 1: all on the next row
+            # inward (no better: the responses converge on that row instead); 0 (default; untested on the other models'
+            # shapes): on the bank row (the old placement)
+            self.offrow = set()
+            used = set()
+            placed = {}
+            mode = os.environ.get("QWEN35_MOE_GU_OFFROW", "0")
+            if self.nb == 2 and mode in ("1", "2"):
+                workers = bank_workers(mesh_device)
+                grid = mesh_device.compute_with_storage_grid_size()
+                bank_rows = {w.y for w in workers}
+                for q in range(self.ngroups):
+                    w, w2 = workers[q], workers[q + self.ngroups]
+                    if w.y != w2.y:
+                        continue
+                    if mode == "1":  # all on the next row inward
+                        rows = [w.y - 1 if w.y > 0 else w.y + 1] * readers
+                    else:  # one reader per free row (no bank's reader row), nearest first: the responses spread
+                        free = sorted((y for y in range(grid.y) if y not in bank_rows), key=lambda y: abs(y - w.y))
+                        if not free:
+                            continue
+                        rows = [free[i % len(free)] for i in range(readers)]  # (more readers than free rows: reuse)
+                    cores = []
+                    for y in rows:
+                        for d in range(grid.x):
+                            hit = next(
+                                (
+                                    w.x + dx
+                                    for dx in ((d, -d) if d else (0,))
+                                    if 0 <= w.x + dx < grid.x and (w.x + dx, y) not in used
+                                ),
+                                None,
+                            )
+                            if hit is not None:
+                                used.add((hit, y))
+                                cores.append(ttnn.CoreCoord(hit, y))
+                                break
+                    assert len(cores) == readers, f"no room for {readers} cores off bank {q}'s row"
+                    placed[q] = cores
+                    self.offrow.add(q)
+            placed.update(
+                place_along_rows(mesh_device, {q: readers for q in range(self.ngroups) if q not in placed}, used=used)
+            )
             self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
@@ -447,9 +493,22 @@ class ExpertGateUpRows:
                 )
             semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
         else:
-            kernels = _kernels(
-                self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
-            )
+            kernels = []
+            for noc1 in (False, True):
+                sel = [c for c, q, _ in self.assign if (q in self.offrow) == noc1]
+                if not sel:
+                    continue
+                keys = {(c.x, c.y) for c in sel}
+                kernels += _kernels(
+                    _range_set(sel),
+                    "gur",
+                    (rd_ct, {k: v for k, v in rd_rt.items() if k in keys}),
+                    (wr_ct, {k: v for k, v in wr_rt.items() if k in keys}),
+                    (cp_ct, None),
+                    defines,
+                    dst_full=self.dst_full,
+                    reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
+                )
         program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
         return ttnn.generic_op(io, program)
