@@ -110,34 +110,60 @@ class RouteRows:
     """(logits [M, E + 32] BF16 (softmax) / [M, E] FP32 (sigb), table) -> table, one core per row (NCRISC and BRISC
     each take half the logits)."""
 
-    def __init__(self, mesh_device, num_experts, k, rows, router="softmax"):
+    def __init__(self, mesh_device, num_experts, k, rows, router="softmax", split=None):
+        """split: cores per row (QWEN35_ROUTE_SPLIT, default 1): each takes E / split experts and the part-0 core merges
+        (kernels/route_rows_reader.cpp ROUTE_SPLIT); the same selection and weights as one core per row. The sigmoid +
+        bias router costs ~100 cycles per expert on these FPU-less cores: M2.7 (E 256, 4 rows) 31 us at 1 core per row.
+        """
         assert router in ROUTERS, router
         self.router = router
         self.E, self.k, self.rows = num_experts, k, rows
+        if split is None:
+            split = int(os.environ.get("QWEN35_ROUTE_SPLIT", "1"))
+        while split > 1 and (num_experts % (2 * split) or rows * split > 32):
+            split //= 2  # whole even parts (the softmax router reads 2 BF16 logits per word); at most 32 cores
+        self.split = split
         gx = mesh_device.compute_with_storage_grid_size().x
-        self.assign = [ttnn.CoreCoord(r % gx, r // gx) for r in range(rows)]
+        n = rows * split  # core i = row i // split, part i % split
+        self.assign = [ttnn.CoreCoord(i % gx, i // gx) for i in range(n)]
         self.cores = _range_set(self.assign)
+        self.noc = [mesh_device.worker_core_from_logical_core(c) for c in self.assign] if split > 1 else None
 
     def __call__(self, logits, table, bias=None):
         """bias: the sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
         assert (bias is not None) == (self.router == "sigb")
         cb_scr, cb_part, cb_lg = 0, 1, 2
         lg_bytes = logits_row_bytes(self.E, self.router)
+        cb_gather = 3
+        P = self.split
         cbs = [
             _cb(self.cores, cb_scr, ttnn.uint16, lg_bytes + 64, 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
         ]
+        if P > 1:
+            cbs.append(_cb(self.cores, cb_gather, ttnn.uint32, 8 * self.k * P, 1))
         rd_rt, wr_rt = ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
         bias_arg = [] if bias is None else [bias.buffer_address()]
-        for r, c in enumerate(self.assign):
-            rd_rt[c.x][c.y] = [logits.buffer_address(), table.buffer_address(), r] + bias_arg
-            wr_rt[c.x][c.y] = [logits.buffer_address(), r] + bias_arg
+        part_e = self.E // P
+        for i, c in enumerate(self.assign):
+            r, p = divmod(i, P)
+            rd = [logits.buffer_address(), table.buffer_address(), r] + bias_arg
+            wr = [logits.buffer_address(), r] + bias_arg
+            if P > 1:
+                e0, e1 = p * part_e, (p + 1) * part_e
+                lead = self.noc[r * P]
+                rd += [e0, e1, p, lead.x, lead.y]
+                wr += [(e0 + e1) // 2, e1]
+            rd_rt[c.x][c.y] = rd
+            wr_rt[c.x][c.y] = wr
         lg_ct = ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct + ttnn.TensorAccessorArgs(table).get_compile_time_args()
+        rd_ct += [cb_gather] if P > 1 else []
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
         defines = [("ROUTER_SIGB", "1")] if self.router == "sigb" else []
+        defines += [("ROUTE_SPLIT", str(P))] if P > 1 else []
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),
@@ -157,7 +183,8 @@ class RouteRows:
             ),
         ]
         io = [logits, table] + ([bias] if bias is not None else [])
-        ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        sems = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, self.cores, 0)] if P > 1 else []
+        ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs))
         return table
 
 
@@ -168,7 +195,7 @@ class RouteScores(RouteRows):
     build every width before trace capture): the caller must not deallocate them."""
 
     def __init__(self, mesh_device, num_experts, k, router="sigb"):
-        super().__init__(mesh_device, num_experts, k, 32, router=router)
+        super().__init__(mesh_device, num_experts, k, 32, router=router, split=1)
         self.mesh_device = mesh_device
         self._out = {}
 

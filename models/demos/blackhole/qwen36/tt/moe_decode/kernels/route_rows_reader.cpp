@@ -13,7 +13,13 @@
 // ROUTE_TILES (a port's own expert paths, moe_decode/topk.py RouteScores): the k ids / weights go to row `row` of
 // [1, 1, M, k] UINT16 / BF16 TILE outputs instead of the route table (the second tensor accessor = the ids).
 //
-// runtime args: [logits_addr, table_or_ids_addr, row, (ROUTER_SIGB) bias_addr, (ROUTE_TILES) scores_addr]
+// ROUTE_SPLIT = P (RouteRows split): P cores per row, part p = experts [p E / P, (p + 1) E / P) (this NCRISC the lower
+// half of it, the BRISC the upper); part p > 0 writes its merged top-k (k keys, k ids) into slot p of the part-0
+// core's cb_gather and increments its program semaphore 0; part 0 waits for the P - 1 parts, merges them in part order
+// (ties keep the lower ids, as the one-core order) and writes the route record. The selection is the one-core result.
+//
+// runtime args: [logits_addr, table_or_ids_addr, row, (ROUTER_SIGB) bias_addr, (ROUTE_TILES) scores_addr,
+// (ROUTE_SPLIT) e0, e1, part, leader noc x, leader noc y]
 
 #include <stdint.h>
 
@@ -35,6 +41,14 @@ void kernel_main() {
     constexpr uint32_t a_scores = 4;
 #else
     constexpr uint32_t a_scores = 3;
+#endif
+#ifdef ROUTE_SPLIT
+    constexpr uint32_t a_split = a_scores;  // (RouteRows: no ROUTE_TILES)
+    const uint32_t e0 = get_arg_val<uint32_t>(a_split), e1 = get_arg_val<uint32_t>(a_split + 1);
+    const uint32_t part_idx = get_arg_val<uint32_t>(a_split + 2);
+    constexpr uint32_t cb_gather = get_compile_time_arg_val(table_args.next_compile_time_args_offset());
+#else
+    constexpr uint32_t e0 = 0, e1 = num_experts, part_idx = 0;
 #endif
 
     const auto s_lg = TensorAccessor(lg_args, logits_addr, moe_topk::LG_PAGE);
@@ -68,12 +82,38 @@ void kernel_main() {
     invalidate_l1_cache();
 
     uint32_t keys[topk], ids[topk];
-    moe_topk::route_select<topk>(lg, bias, 0, num_experts / 2, keys, ids);
+    moe_topk::route_select<topk>(lg, bias, e0, (e0 + e1) / 2, keys, ids);
     cb_wait_front(cb_part, 1);
     invalidate_l1_cache();
     const uint32_t* part = reinterpret_cast<const uint32_t*>(get_read_ptr(cb_part));
     moe_topk::merge<topk>(keys, ids, part, part + topk);
     cb_pop_front(cb_part, 1);
+#ifdef ROUTE_SPLIT
+    {
+        const uint32_t gather = get_write_ptr(cb_gather);  // the same address on every core of the program
+        volatile tt_l1_ptr uint32_t* sem = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(0));
+        if (part_idx != 0) {
+            const uint32_t lx = get_arg_val<uint32_t>(a_split + 3), ly = get_arg_val<uint32_t>(a_split + 4);
+            volatile tt_l1_ptr uint32_t* out = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(gather);
+            for (uint32_t j = 0; j < topk; ++j) {
+                out[j] = keys[j];
+                out[topk + j] = ids[j];
+            }
+            const uint32_t slot = gather + part_idx * 8 * topk;
+            noc_async_write(gather, get_noc_addr(lx, ly, slot), 8 * topk);
+            noc_async_write_barrier();
+            noc_semaphore_inc(get_noc_addr(lx, ly, get_semaphore(0)), 1);
+            noc_async_atomic_barrier();
+            return;
+        }
+        noc_semaphore_wait_min(sem, ROUTE_SPLIT - 1);
+        invalidate_l1_cache();
+        for (uint32_t p = 1; p < ROUTE_SPLIT; ++p) {
+            const uint32_t* g = reinterpret_cast<const uint32_t*>(gather + p * 8 * topk);
+            moe_topk::merge<topk>(keys, ids, g, g + topk);
+        }
+    }
+#endif
     uint16_t w[topk];
     const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
 
