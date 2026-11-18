@@ -98,6 +98,12 @@ Borrowed from M2.7 (expert-sorted MoE) and tt-metal PR 61548 (rows split over ch
 - `Hy4Model.prefill(ids)`: the dense-regime chunk (to 2048) first, then HY4_PREFILL_CHUNK chunks (<= the model's
   `chunk`, which sizes the SWA rings): the engine should call it instead of looping forward() in fixed chunks, and build
   the model with chunk=8192.
+- Head only on the rows asked for (`Hy4Model._head_split`, 32-row blocks): the full gather before the head OOMed
+  (3 GiB) at 8K / 16K chunks.
+- Traced first chunk (`Hy4Model._prefill_traced`, HY4_PF_TRACE=1, buckets 128..2048 at p0 = 0; needs
+  HY4_TRACE_REGION ~1e9): last-row logits bit-equal to eager (PCC 1.0, same top-1 at 200 / 1000 / 2000) but no
+  faster (0.389 vs 0.38 s, 0.94 vs 0.94, 1.68 vs 1.68): prefill is device-bound, so it is off by default. The time is
+  data movement (repeat / slice / typecast / sum, the fp32 HC), not dispatch.
 - Not touched (decode owner): `tt/hc.py` (in prefill `ttnn.sum(dim=1)` over the streams costs transpose + reduce +
   transpose on [1, 4, T/4, 3072] fp32; `ttnn.experimental.fast_reduce_nc(dims=[1])` is one op).
 

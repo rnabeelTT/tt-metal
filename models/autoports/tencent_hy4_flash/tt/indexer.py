@@ -229,10 +229,9 @@ class Hy4Indexer:
         ttnn.deallocate(kr2)
         if getattr(self, "_traced_pf", False):  # keep the token keys in a persistent buffer for after the replay
             buf = self.__dict__.setdefault("_tk_keep", {}).get(Tp)
-            if buf is None:
+            if buf is None:  # (allocated in the eager pass; the copy below then compiles there too)
                 buf = self._tk_keep[Tp] = ttnn.clone(tk)
-            else:
-                ttnn.copy(tk, buf)
+            ttnn.copy(tk, buf)
         g0 = p0 // r
         blk = 32  # the largest power-of-two slab dividing the offset and the group count (fewer, larger writes)
         while blk < 2048 and g0 % (2 * blk) == 0 and G % (2 * blk) == 0:

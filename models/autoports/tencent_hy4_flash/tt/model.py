@@ -243,7 +243,7 @@ class Hy4Model:
         boundary first (so every later chunk selects with device-built index lists), then HY4_PREFILL_CHUNK tokens
         (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary."""
         ids = ids.reshape(-1)
-        if (self.pos == 0 and os.environ.get("HY4_PF_TRACE", "1") == "1" and self.N > 1
+        if (self.pos == 0 and os.environ.get("HY4_PF_TRACE", "0") == "1" and self.N > 1
                 and 0 < ids.numel() <= self.cfg.idx_candidate_topk and self.engram_keep_all(ids)):
             return self._prefill_traced(ids)
         big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
