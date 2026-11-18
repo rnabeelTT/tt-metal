@@ -3,6 +3,7 @@
 Read this first when resuming. Code: `~/FORK-tt-metal/models/experimental/hybrid_moe` on branch
 `raahem/qwen35-397b-hybrid-moe` (fork rnabeelTT/tt-metal, based on `fusion_all`); `~/hybrid-moe-poc` is a symlink to it.
 Run data (`runs/`, `logs/`, `cache/`, `ref397/`) is gitignored. Formal plan: `docs/PLAN.md`; deviations under **Deviations**.
+M2.7 roadmap (bottlenecks, long-context attention, multi-user serving, drafter): `docs/M27_ROADMAP.md`.
 The plugin fork `~/FORK-vllm-tt-plugin` has the same branch (no changes yet; the demo uses the image's plugin).
 
 ## Current focus: MiniMax-M2.7 hybrid + DFlash (updated 2026-11-08)
@@ -754,9 +755,10 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - vLLM eager: `--override-tt-config '{"trace_mode":"none"}'`; overlay enters via `serve/sitecustomize.py` (HYB_ENABLE=1).
 
 ## Next
-- Finish M2 (full 397B coherent), then re-run with HYB_PLAN from its recorded routing.
-- M5 vLLM eager serving (sitecustomize); then M4 speed (per-layer traces).
-- Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
+- MiniMax-M2.7 (current work): `docs/M27_ROADMAP.md` covers the bottleneck breakdown, long-context attention,
+  multi-user serving (measured costs, blockers, staged plan) and the drafter findings.
+- 397B (paused since 2026-11-06): finish M2 (full 397B coherent), then re-run with HYB_PLAN from its recorded routing;
+  M5 vLLM eager serving, then M4 speed; later an autoport in `~/FORK-tt-metal`.
 
 ## Log
 - 2026-11-05: quality vs real 397B measured (skip 0.15 costs ~6 pts top-1); HYB_LOWBIT 2-bit misses added.
