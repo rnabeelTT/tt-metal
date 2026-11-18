@@ -320,7 +320,14 @@ class ExpertGateUpRows:
         )
         self.ring = int(os.environ.get("QWEN35_MOE_SPLIT_RING", "8"))
         if readers is None:
-            readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else 4
+            # QWEN35_MOE_GU_READERS: a per-model override of the 4 cores per column group (Inkling-Small, H 4096, 512
+            # columns per die: 2 readers, with QWEN35_MOE_DN_OFFROW=1 / DN_CHUNK=2 the whole MoE 270 -> 130 us per layer;
+            # bench_moe_rows_inkling.py; outputs bit-identical)
+            readers = (
+                int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4"))
+                if self.split
+                else int(os.environ.get("QWEN35_MOE_GU_READERS", "4"))
+            )
         self.readers = readers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
