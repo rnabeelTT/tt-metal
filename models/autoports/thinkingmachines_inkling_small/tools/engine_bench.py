@@ -127,38 +127,9 @@ def main():
             if len(ks) > 1:
                 break  # traces of a second engine would need the first one's released: one k per process
     finally:
-        _quiesce(mesh)
-        ttnn.close_mesh_device(mesh)
-        ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+        from models.autoports.thinkingmachines_inkling_small.tt import clean_exit
 
-
-def _drop_sockets(hyb):
-    import gc
-
-    if hyb is not None and getattr(hyb, "socks", None) is not None:
-        hyb.socks = None
-        gc.collect()
-
-
-def _quiesce(mesh):
-    """Before closing the mesh: the async fetch's queued CQ1 copies flushed and both queues drained, the pinned regions
-    released (their destructors talk to the mesh). Each step logs, so a hang at exit names the step it stopped in."""
-    hyb = getattr(sys.modules.get("hybrid.patch"), "HYB", None)
-    f = getattr(hyb, "fetch", None) if hyb is not None else None
-    for name, fn in (
-        ("pinx flush", lambda: f.px.flush() if f is not None and f.px is not None else None),
-        ("synchronize", lambda: ttnn.synchronize_device(mesh)),
-        ("fetch release", lambda: f.release() if f is not None else None),
-        ("sockets release", lambda: _drop_sockets(hyb)),
-    ):
-        t0 = time.time()
-        print(f"[exit] {name} ...", flush=True)
-        try:
-            fn()
-        except Exception as e:  # keep closing
-            print(f"[exit] {name} failed: {e}", flush=True)
-        print(f"[exit] {name} done ({time.time() - t0:.1f} s)", flush=True)
-    print("[exit] close_mesh_device ...", flush=True)
+        clean_exit.close(mesh)
 
 
 if __name__ == "__main__":

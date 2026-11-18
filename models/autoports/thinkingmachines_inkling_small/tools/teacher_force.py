@@ -138,8 +138,9 @@ def main():
         if out_path:
             json.dump(results, open(out_path, "w"), indent=1)
     finally:
-        ttnn.close_mesh_device(mesh)
-        ttnn.set_fabric_config(ttnn.FabricConfig.DISABLED)
+        from models.autoports.thinkingmachines_inkling_small.tt import clean_exit
+
+        clean_exit.close(mesh)  # (results are written above; a teardown stall ends the process instead of hanging)
 
 
 if __name__ == "__main__":
