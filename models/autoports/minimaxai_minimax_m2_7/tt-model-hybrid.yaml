@@ -97,10 +97,16 @@ serve:
     # hybrid) are copied from the checkpoint on the first boot into the weight cache: int4 for the CPU, bfp4 for PCIe
     # fetches (hybrid/firstboot.py; byte-identical to the earlier published copies). Only official weights download.
     HYB_LIB: /weight-cache/int4_s152
-    HYB_DEV_EXPERTS: /weight-cache/dev_s152
+    HYB_DEV_EXPERTS: /weight-cache/dev_s152_q
     HYB_LIB_KEYS: minimax_m2
     HYB_BUILD_STATIC: "152"
     HYB_BUILD_LAYERS: "0,1,3,19,21,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,40,41,42,43,44,45,46,47,48,50,51,52,53,54,55,56,57,58,59,60,61"
+    # error-aware bfp4 rounding of the routed experts (bfp4_round.py): GPTQ per layer recipe (plans/bfp4_recipe.json)
+    # from a calibration capture the first boot runs on the CPU reference (bfp4_calib.py, 24 x 1024 tokens of tt-metal
+    # sources). vs plain rounding, KL to the BF16 model 0.080 -> 0.060 (CPU reference, 12 held-out sequences); the
+    # first boot spends ~1.5 h more on the CPU; the device copies above and the images below depend on it.
+    HYB_BFP4_ROUND: /opt/tt-metal/models/experimental/hybrid_moe/plans/bfp4_recipe.json
+    HYB_BFP4_CAL: /weight-cache/bfp4_cal
     # expert placement: per layer, the routed mass of reference runs (ranks the static experts) and the build order
     # (plans/m27_plan.npz, 85 KB of statistics, no weights)
     HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/m27_plan.npz
