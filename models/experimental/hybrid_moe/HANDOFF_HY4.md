@@ -9,6 +9,41 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## Status for takeover (2026-11-18, end of day 1)
+
+Branch `raahem/hy4-flash-hybrid` (rnabeelTT/tt-metal), worktree `~/hy4-flash`, host build (`build_metal_hy4.sh`, CPM
+deps from tarballs in ~/m27-work/cpm_src), env `~/m27-work/hy4/run.sh <cmd>` (python_env + the PR-50903 transformers
+overlay in ~/m27-work/hy4/pyoverlay; takes the device lock ~/.cache/hybrid-moe/ttdev.lock). Ornith-397B on :20000 is
+stopped (it held the board). Weights: tencent/Hy4-flash rev d88c9df in the HF cache; tensor cache
+~/.cache/hybrid-moe/hy4_tt (bfp4 experts), Engram FP8 store ~/.cache/hybrid-moe/hy4_engram.
+
+Working (measured on the box, single user, greedy):
+- Full 42-layer model on the 4 dies, every expert resident (bfp4); DRAM 24.3 GiB used / 7.6 free per die at 32K.
+- Quality vs the CPU BF16 reference (teacher forced, 12 texts): top-1 0.845, confident 0.917, KL 0.266 (Inkling
+  0.873 / 0.951 / 0.200; M2.7 0.848 / 0.933 / 0.196); long3k (indexer active) 0.784 / 0.884 / KL 0.57.
+- Decode: traced (tt/decode.py Hy4Decoder), exact vs the eager path; ~84 ms device + ~6 ms host per token, ~10-11
+  tok/s. Profile: op-latency bound (~200 small ops per layer), not bandwidth (floor ~8 ms/token).
+- TTFT (prefill branch, merged): 200 tok 0.38 s, 1K 0.94 s, 2K 1.68 s (was ~1 s / ~6 s / 82 s at 3K before).
+  See "## Prefill" below.
+
+In progress / broken:
+- DFly2 drafter on device (tt/dfly.py, Hy4SpecDecoder, tools/spec_bench.py): output always equals plain greedy.
+  With eager drafts acceptance is 2.5-3.2 tok/verify pass (12.5 tok/s on one prompt); once draft passes replay as
+  traces acceptance drops to 1.00 even though a replayed draft equals the eager draft for the same inputs
+  (HY4_DFLY_CHECK=1). Last change (persistent trace outputs, commit 62d4122) made it 1.00 everywhere: suspect the
+  draft reads stale target state (model.last_hn / indexer.sel / scratch rows) relative to the verify trace ordering.
+  Next step: HY4_SPEC_DEBUG=1 spec_bench prints drafts vs target picks per pass.
+- 6-row verify passes: rows 4-5 differ slightly from 1-row passes (PCC 0.99999 per layer, compounds to ~0.99).
+- Fused MoE decode kernels (qwen36 moe_decode) support Hy4 shapes but cap top-k at 15 (Hy4 = 16): off; SWIGLU_LIMIT
+  clamp define added to the kernels (gated by MOE_SWIGLU_LIMIT).
+- Engram device part in L1 drifts (PCC 0.993): kept in DRAM.
+- The prefill merge (d39004b) was not re-tested on device after merging.
+- Not done: vLLM serving test (adapter tt/generator_vllm.py + serving/ parsers untested end to end), package not
+  published (a local image was built, nothing pushed), B > 1, vision, 1M context (KV budget: bf16 latent ~15 KB/token/die).
+
+Biggest perf levers left: (1) fix traced DFly2 (2.5-3x tokens/pass); (2) fuse the HC math / shard the residual like
+qwen38_flash_next (its gr_* kernels); (3) DRAM-sharded decode matmuls; (4) a fused MoE decode for top-16.
+
 ## Decisions (2026-11-18, approved)
 
 - Day 0: text only, one user, no drafter (SPEC=0); DFly2 is the fast follow-up. Every device op is written for B rows
