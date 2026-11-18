@@ -719,9 +719,16 @@ def install():
         HYB.wcache = ExpertImageCache(os.environ["HYB_WCACHE"], resident_fn=lambda L: HYB.resident[L], tag=PORT)
         _port("moe").EXPERT_WEIGHT_HOOK = HYB.wcache
     if os.environ.get("HYB_BFP4_ROUND"):  # error-aware bfp4 rounding of the routed experts (bfp4_round.py)
+        import types
+
         import bfp4_round
 
-        _port("moe").EXPERT_ROUND_HOOK = bfp4_round
+        # the port's state dict holds a layer's resident experts in slot order (HYB.plan; -1 = an empty slot), so
+        # the per-expert methods get those ids rather than reading row j as expert j
+        _port("moe").EXPERT_ROUND_HOOK = types.SimpleNamespace(
+            tag=bfp4_round.tag,
+            round_experts=lambda L, kind, W, **kw: bfp4_round.round_experts(L, kind, W, experts=HYB.plan(L), **kw),
+        )
 
     orig_init = od.Qwen35MoEOptimized.__init__
 

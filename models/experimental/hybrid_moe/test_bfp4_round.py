@@ -157,3 +157,10 @@ def test_gptqe_per_expert(tmp_path, monkeypatch):
     assert torch.allclose(sub[0], qd[3])
     with pytest.raises(ValueError):
         B.round_experts(4, "dn", dn)  # down without the gate|up it reads
+    # a hybrid layer's rows in slot order, with an empty (all-zero) slot: each row rounds as its own expert
+    slots = [3, -1, 0]
+    W, G = torch.stack([dn[3], torch.zeros_like(dn[0]), dn[0]]), torch.stack([gu[3], torch.zeros_like(gu[0]), gu[0]])
+    got = B.round_experts(4, "dn", W, experts=slots, gate_up=G)
+    assert torch.allclose(got[0], qd[3]) and torch.allclose(got[2], qd[0]) and not got[1].any()
+    with pytest.raises(ValueError):
+        B.round_experts(4, "dn", W, experts=[3, 0], gate_up=G)  # ids must match the rows

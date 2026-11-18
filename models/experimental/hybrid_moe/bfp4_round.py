@@ -172,8 +172,9 @@ def gptq(W, H, damp, block=256, sub=32):
 
 def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None):
     """W [E, out, in] -> the layer's rounding of it as grid values [E, out, in] in W's dtype (bf16 holds every bfp4 grid
-    value exactly), or None for the default. experts: the global expert ids of W's rows (default 0..E-1); gate_up: the
-    same experts' unrounded gate|up [E, 2N, H], which gptqe on down needs."""
+    value exactly), or None for the default. experts: the global expert ids of W's rows (default 0..E-1; a negative id is
+    an empty slot: no calibration tokens, so rtne); gate_up: the same experts' unrounded gate|up [E, 2N, H], which
+    gptqe on down needs."""
     cfg = cfg if cfg is not None else _cfg()
     m = method(layer, kind, cfg)
     if m is None or m == "default":
@@ -187,6 +188,8 @@ def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None
         if kind == "dn" and gate_up is None:
             raise ValueError(f"HYB_BFP4_ROUND: gptqe on layer {layer} down needs the experts' gate|up (gate_up=)")
         ids = list(range(E) if experts is None else experts)
+        if len(ids) != E:
+            raise ValueError(f"HYB_BFP4_ROUND: layer {layer} {kind}: {len(ids)} expert ids for {E} weight rows")
         out = torch.empty_like(W)
         Hs, js = [], []
         for j, e in enumerate(ids):
