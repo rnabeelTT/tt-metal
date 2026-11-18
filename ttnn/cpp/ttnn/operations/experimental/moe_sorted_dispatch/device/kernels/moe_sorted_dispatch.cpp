@@ -88,75 +88,104 @@ void kernel_main() {
     }
     noc.async_read_barrier();
 
-    volatile tt_l1_ptr uint16_t* ids16 = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(ids_l1);
-    volatile tt_l1_ptr uint32_t* ids32 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ids_l1);
-    volatile tt_l1_ptr uint16_t* scores = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(sc_l1);
-    // element offset of (token t, slot j) inside the tiled buffers
-    auto tile_elem = [](uint32_t t, uint32_t j) -> uint32_t {
+    // The inputs were written to L1 by the NOC: drop stale cache lines, then read them through plain pointers (the
+    // scratch arrays are this core's alone; the outputs stay volatile, the NOC reads them back).
+    invalidate_l1_cache();
+    const uint16_t* ids16 = reinterpret_cast<const uint16_t*>(ids_l1);
+    const uint32_t* ids32 = reinterpret_cast<const uint32_t*>(ids_l1);
+    const uint16_t* scores = reinterpret_cast<const uint16_t*>(sc_l1);
+    // (token t, slot j) inside the tiled buffers: tile t / 32, face (row / 16) * 2 + (j / 16), element (row % 16) * 16
+    // + j % 16; a token's slots j < 16 are contiguous (k <= 16 for these models: one row of one face)
+    auto row_base = [](uint32_t t) -> uint32_t {
         const uint32_t rr = t & 31;
-        const uint32_t face = ((rr >> 4) << 1) | (j >> 4);
-        return (t >> 5) * 1024 + face * 256 + (rr & 15) * 16 + (j & 15);
+        return (t >> 5) * 1024 + (rr >> 4) * 512 + (rr & 15) * 16;
     };
-    auto id_at = [&](uint32_t t, uint32_t j) -> uint32_t {
-        const uint32_t o = tile_elem(t, j);
+    auto slot_off = [](uint32_t j) -> uint32_t { return j < 16 ? j : 256 + (j - 16); };
+    auto id_at = [&](uint32_t o) -> uint32_t {
         return ids_elem_bytes == 2 ? static_cast<uint32_t>(ids16[o]) : ids32[o];
     };
-    volatile tt_l1_ptr uint32_t* src_tok = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(src_l1);
-    volatile tt_l1_ptr uint16_t* weights = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(w_l1);
-    volatile tt_l1_ptr uint16_t* group_ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(gid_l1);
-    volatile tt_l1_ptr uint32_t* undispatch = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(und_l1);
-    volatile tt_l1_ptr uint32_t* counts = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scratch_l1);
-    volatile tt_l1_ptr uint32_t* offsets = counts + E;
-    volatile tt_l1_ptr uint32_t* ranks = offsets + E;
+    // plain stores (a fence before the NOC reads the outputs back, below)
+    uint32_t* src_tok = reinterpret_cast<uint32_t*>(src_l1);
+    uint16_t* weights = reinterpret_cast<uint16_t*>(w_l1);
+    uint16_t* group_ids = reinterpret_cast<uint16_t*>(gid_l1);
+    uint32_t* undispatch = reinterpret_cast<uint32_t*>(und_l1);
+    uint32_t* counts = reinterpret_cast<uint32_t*>(scratch_l1);
+    uint32_t* offsets = counts + E;
+    uint32_t* pos = offsets + E;  // next free row of each expert
 
     for (uint32_t e = 0; e < E; ++e) {
         counts[e] = 0;
-        ranks[e] = 0;
     }
+    constexpr bool word_ids = ids_elem_bytes == 2 && K <= 16 && K % 2 == 0;
     for (uint32_t t = 0; t < T; ++t) {
-        for (uint32_t j = 0; j < K; ++j) {
-            const uint32_t e = id_at(t, j);
-            if (e < E) {
-                counts[e] = counts[e] + 1;
+        const uint32_t b = row_base(t);
+        if constexpr (word_ids) {
+            const uint32_t* w = reinterpret_cast<const uint32_t*>(ids16 + b);  // b is even: 4-byte aligned
+#pragma GCC unroll 8
+            for (uint32_t j = 0; j < K / 2; ++j) {
+                const uint32_t v = w[j];
+                const uint32_t e0 = v & 0xFFFF, e1 = v >> 16;
+                if (e0 < E) {
+                    counts[e0] += 1;
+                }
+                if (e1 < E) {
+                    counts[e1] += 1;
+                }
+            }
+        } else {
+            for (uint32_t j = 0; j < K; ++j) {
+                const uint32_t e = id_at(b + slot_off(j));
+                if (e < E) {
+                    counts[e] += 1;
+                }
             }
         }
     }
-    // padded per-expert offsets and the expert of every group (padding groups: 0)
-    for (uint32_t g = 0; g < G; ++g) {
-        group_ids[g] = static_cast<uint16_t>(pad_group_id);
-    }
+    // padded per-expert offsets, the expert of every group, and zeros in the padding rows only (the real rows are all
+    // written by the scatter below): the same row contents as zeroing every row first
     uint32_t off = 0;
     for (uint32_t e = 0; e < E; ++e) {
         offsets[e] = off;
+        pos[e] = off;
         const uint32_t groups_e = (counts[e] + GS - 1) / GS;
         const uint32_t g0 = off / GS;
         for (uint32_t g = 0; g < groups_e; ++g) {
             group_ids[g0 + g] = static_cast<uint16_t>(e);
         }
+        for (uint32_t d = off + counts[e]; d < off + groups_e * GS; ++d) {
+            src_tok[d] = 0;
+            weights[d] = 0;
+        }
         off += groups_e * GS;
     }
-    // padding rows: token 0, weight 0
-    for (uint32_t d = 0; d < RD; ++d) {
+    for (uint32_t g = off / GS; g < G; ++g) {
+        group_ids[g] = static_cast<uint16_t>(pad_group_id);
+    }
+    for (uint32_t d = off; d < RD; ++d) {
         src_tok[d] = 0;
         weights[d] = 0;
     }
-    // scatter every real pair to its row
+    // scatter every real pair to its row, token-major (t, then j): the same row order as before
     uint32_t i = 0;
     for (uint32_t t = 0; t < T; ++t) {
+        const uint32_t b = row_base(t);
         for (uint32_t j = 0; j < K; ++j, ++i) {
-            const uint32_t e = id_at(t, j);
+            const uint32_t o = b + slot_off(j);
+            const uint32_t e = id_at(o);
             uint32_t d;
             if (e < E) {
-                d = offsets[e] + ranks[e];
-                ranks[e] = ranks[e] + 1;
+                d = pos[e];
+                pos[e] = d + 1;
                 src_tok[d] = t;
-                weights[d] = scores[tile_elem(t, j)];
+                weights[d] = scores[o];
             } else {
                 d = RD - GS;  // sentinel pairs land in the trailing padding group (never read back)
             }
             undispatch[i] = d;
         }
     }
+
+    __asm__ volatile("fence" ::: "memory");  // every L1 store above lands before the NOC reads the outputs
 
     // ---- outputs (one stick each)
     noc.async_write(CoreLocalMem<uint32_t>(src_l1), s_src, src_page, {}, {.page_id = 0});

@@ -5,7 +5,8 @@ prompts of several lengths, the hybrid counters of each prefill, and the next-to
 prefill implementations on the same build).
 
 env: BENCH_LENS (prompt token counts, default "512,2048,8192"), BENCH_REPEAT (runs per length, default 2),
-BENCH_LAYER_TIMES=1 (synchronize around every decoder layer and report full vs hybrid layer time; slows the run),
+BENCH_LAYER_TIMES=1 (synchronize around every decoder layer and report full vs hybrid layer time; slows the run; 2: also
+the attention and the feed-forward of each layer),
 BENCH_REF (a previous run's out dir, mounted under /poc: compare the logits), POC_MAX_SEQ (default 131072). usage (in the image): python bench_prefill.py <out dir>
 """
 
@@ -119,6 +120,25 @@ def wrap_layer_times(gen, times):
             return y
 
         layer.forward = fwd
+        if os.environ.get("BENCH_LAYER_TIMES") == "2":  # also the attention and the feed-forward of each layer
+            for name, obj, meth in (
+                ("attn", layer.attention, "forward_prefill_paged"),
+                ("attn", layer.attention, "forward_prefill"),
+                ("moe", layer.feed_forward, "forward"),
+            ):
+                if not hasattr(obj, meth):
+                    continue
+                inner = getattr(obj, meth)
+
+                def part(*a, _f=inner, _k=(li, name), **kw):
+                    ttnn.synchronize_device(gen.mesh_device)
+                    t0 = time.perf_counter()
+                    y = _f(*a, **kw)
+                    ttnn.synchronize_device(gen.mesh_device)
+                    times[_k] = times.get(_k, 0.0) + time.perf_counter() - t0
+                    return y
+
+                setattr(obj, meth, part)
 
 
 def main():
@@ -143,7 +163,7 @@ def main():
         hyb = [li for li, n in enumerate(nums) if n not in HYB.full_layers]
         print(f"BENCH layers: {len(full)} full {full}, {len(hyb)} hybrid", flush=True)
         times = {}
-        layer_times = os.environ.get("BENCH_LAYER_TIMES") == "1"
+        layer_times = os.environ.get("BENCH_LAYER_TIMES") in ("1", "2")
         if layer_times:
             wrap_layer_times(gen, times)
         lens = [int(v) for v in os.environ.get("BENCH_LENS", "512,2048,8192").split(",")]
@@ -183,6 +203,13 @@ def main():
                     r["hybrid_layers_s"] = round(sum(times.get(li, 0.0) for li in hyb), 3)
                     r["per_full_layer_ms"] = round(1e3 * r["full_layers_s"] / max(1, len(full)), 1)
                     r["per_hybrid_layer_ms"] = round(1e3 * r["hybrid_layers_s"] / max(1, len(hyb)), 1)
+                    pf_times = _port("optimized_decoder").PF_TIMES
+                    if pf_times:  # QWEN35_MOE_PF_TIMES=1: the sorted MoE path's steps
+                        r["moe_steps"] = {k: round(v, 3) for k, v in pf_times.items()}
+                        pf_times.clear()
+                    for kind, lis in (("full", full), ("hybrid", hyb)):
+                        for part in ("attn", "moe"):
+                            r[f"{kind}_{part}_s"] = round(sum(times.get((li, part), 0.0) for li in lis), 3)
                 ref_path = os.path.join(os.environ.get("BENCH_REF", ""), f"logits_{n}_0.pt")
                 if os.environ.get("BENCH_REF") and os.path.exists(ref_path):
                     r.update(compare(lg, torch.load(ref_path), "ref"))
