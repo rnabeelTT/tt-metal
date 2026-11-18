@@ -65,6 +65,10 @@ MM_LIMIT=${MM_LIMIT:-'{"image": 8, "audio": 4}'}
 # the TT plugin with the generic multimodal items (branch inkling-mm of the plugin fork) over the image's copy
 PLUGIN_SRC=${PLUGIN_SRC:-$HOME/vllm-tt-plugin-inkling/src/vllm_tt_plugin}
 PLUGIN_MOUNT=(); [ -d "$PLUGIN_SRC" ] && PLUGIN_MOUNT=(-v "$PLUGIN_SRC:/opt/tt-venv/lib/python3.12/site-packages/vllm_tt_plugin:ro")
+# M2.7's v1.9 expert-sorting kernel (device code, JIT-compiled; on this branch, not yet in the dev image), from a copy of
+# the branch's ttnn source (the checkout is sparse): KFIX_DIR
+KFIX=${KFIX_DIR:-$HOME/inkling-work/kfix}/moe_sorted_dispatch.cpp
+[ -f "$KFIX" ] && PLUGIN_MOUNT+=(-v "$KFIX:/opt/tt-metal/ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/device/kernels/moe_sorted_dispatch.cpp:ro")
 PORT_DIR=$REPO/models/autoports/thinkingmachines_inkling_small
 (cd "$P" && python3 -m hybrid.hostk >/dev/null)
 mkdir -p "$CACHE/tt" "$CACHE/logs" "$HOME/.cache/hybrid-moe"
@@ -90,7 +94,7 @@ docker run -d --name inkling-serve \
   -e HYB_SLOTS=$S -e HYB_LIB=$LIB \
   -e HYB_STREAM_SLOTS=0 -e HYB_SKIP=0 -e HYB_LOWBIT=0 -e HYB_HOSTK_THREADS=${HK_THREADS:-6} -e HYB_DECODE_ROWS=8 \
   -e HYB_WCACHE=${WCACHE:-/cache/wcache} $PENV \
-  -e INKLING_SPEC_K=$K -e INKLING_TRACE=${TRACE:-1} ${EXTRA} \
+  -e INKLING_SPEC_K=$K -e INKLING_TRACE=${TRACE:-1} -e QWEN35_GU_COL_SPLIT=${GU_COL_SPLIT:-0} ${EXTRA} \
   -e PYTHONPATH=/opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve thinkingmachines/Inkling-Small --max-model-len $CTX \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name inkling-small-hybrid \
