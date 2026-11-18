@@ -161,6 +161,7 @@ class InklingSpecServing:
             c
             for layer in model.layers
             for c in (layer.attention.k_sconv, layer.attention.v_sconv, layer.attn_sconv, layer.mlp_sconv)
+            + ((layer.attn_sconv_r, layer.mlp_sconv_r) if getattr(layer, "rep", None) is not None else ())
         ]
         # Prefix cache (INKLING_PREFIX_CACHE, default 1; vLLM's own prefix caching stays off: the engine keeps every
         # cache itself). The global layers' paged KV is indexed by position, so a new prompt that shares the previous

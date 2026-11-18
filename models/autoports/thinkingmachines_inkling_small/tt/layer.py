@@ -81,7 +81,7 @@ class InklingDenseMLP:
             packer_l1_acc=True,
         )
 
-    def forward(self, x, mode="decode"):
+    def forward(self, x, mode="decode", partial=False):
         if x.is_sharded():
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         mc = ttnn.L1_MEMORY_CONFIG if int(x.shape[-2]) <= 32 else ttnn.DRAM_MEMORY_CONFIG
@@ -92,7 +92,7 @@ class InklingDenseMLP:
         ttnn.deallocate(u)
         part = rows_linear(h, self.w2, self.mesh, self.ckc, ttnn.DRAM_MEMORY_CONFIG, tag="dense")
         ttnn.deallocate(h)
-        if self.N == 1:
+        if self.N == 1 or partial == "raw":  # raw: the per-device partial for the replicated boundary's all-reduce
             return part
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
@@ -105,6 +105,93 @@ class InklingDenseMLP:
             topology=self.args.ccl_topology(),
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
+
+
+# INKLING_REPLICATED (default 0): the verify / decode rows keep the residual replicated on every die (qwen36
+# decode_boundary.py's residual layout: [1, 1, R, H] width-sharded over 16 cores); a layer's two boundaries are one bf16
+# all-reduce each (+ the full-width short conv + the add) instead of reduce-scatter + all-gather, and its norms run
+# locally. Prefill keeps the fractured contract; the full-width conv states are gathered from the fractured ones after
+# every prefill (sync_replicated_states).
+REPLICATED = os.environ.get("INKLING_REPLICATED", "0") == "1"
+
+
+class RepBoundary:
+    """The model-wide bf16 all-reduce boundary (one scratch buffer + global semaphore per site, "mixer" / "mlp": the
+    two sites strictly alternate, as qwen36 DecodeBoundary). bf16 partials in: the BFP8 partial of DecodeBoundary is
+    ~2x faster (18.6 vs 29.8 us at 3 rows) but its sum is ~4x further from the exact one (tools/ccl_bench.py)."""
+
+    def __init__(self, mesh, hidden, topology):
+        from models.demos.blackhole.qwen36.tt.decode_boundary import norm_config, residual_memory_config
+
+        # INKLING_REP_CORES (default 8,8): the residual / norm / all-reduce shard grid. The scratch buffers are
+        # persistent L1 and an L1 address is reserved on every core: on qwen36's 16 cores the two bf16 sites take
+        # 2 x 64 KB per core, which the 1536-row prefill's circular buffers need (they clashed by ~63 KB); 64 cores: 2 x 16
+        CORES = tuple(int(v) for v in os.environ.get("INKLING_REP_CORES", "8,8").split(","))
+        self.mesh, self.hidden, self.topology = mesh, hidden, topology
+        self.mc = residual_memory_config(hidden, CORES)
+        self.norm_config = norm_config(hidden, CORES)
+        nd = mesh.get_num_devices()
+        n = CORES[0] * CORES[1]
+        scratch_mc = ttnn.create_sharded_memory_config(
+            shape=(ttnn.TILE_SIZE, hidden * nd // n),
+            core_grid=ttnn.CoreGrid(x=CORES[0], y=CORES[1]),
+            strategy=ttnn.ShardStrategy.WIDTH,
+            orientation=ttnn.ShardOrientation.ROW_MAJOR,
+            use_height_and_width_as_shard_shape=True,
+        )
+        grid = mesh.compute_with_storage_grid_size()
+        sem_cores = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(grid.x - 1, grid.y - 1))})
+        self.sites = {
+            site: (
+                ttnn.empty([1, 1, ttnn.TILE_SIZE, hidden * nd], ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, scratch_mc),
+                ttnn.create_global_semaphore(mesh, sem_cores, 0),
+            )
+            for site in ("mixer", "mlp")
+        }
+
+    def all_reduce(self, partial, site):
+        """Sum over the dies of partial [1, 1, R, H] (bf16) -> replicated, in the residual layout; frees partial."""
+        p = ttnn.to_memory_config(partial, self.mc, dtype=ttnn.bfloat16)
+        if p.buffer_address() != partial.buffer_address():
+            ttnn.deallocate(partial)
+        scratch, sem = self.sites[site]
+        red = ttnn.experimental.all_reduce_async(
+            p,
+            scratch,
+            cluster_axis=1,
+            mesh_device=self.mesh,
+            multi_device_global_semaphore=sem,
+            memory_config=self.mc,
+            dtype=ttnn.bfloat16,
+            topology=self.topology,
+            num_links=1,
+        )
+        ttnn.deallocate(p)
+        return red
+
+    def gather(self, x_frac, tt_ccl):
+        """The fractured [1, 1, R, H / N] rows (the embedding) -> the replicated residual."""
+        return ttnn.experimental.all_gather_async(
+            x_frac,
+            persistent_output_buffer=None,
+            dim=3,
+            multi_device_global_semaphore=tt_ccl.get_and_cycle_ag_semaphore_handles(),
+            num_links=1,
+            topology=self.topology,
+            memory_config=self.mc,
+            barrier_semaphore=tt_ccl.get_and_cycle_barrier_semaphore_handle(),
+            chunks_per_sync=10,
+            num_workers_per_link=2,
+            num_buffers_per_channel=2,
+        )
+
+
+def rep_boundary(args, mesh):
+    b = args.__dict__.get("_inkling_rep_boundary")
+    if b is None:
+        b = RepBoundary(mesh, args.dim, args.ccl_topology())
+        args._inkling_rep_boundary = b
+    return b
 
 
 class InklingDecoderLayer(_M27Layer):
@@ -151,6 +238,11 @@ class InklingDecoderLayer(_M27Layer):
         self.mlp_sconv = ShortConv(
             mesh_device, state_dict[f"layers.{layer_num}.mlp_sconv.weight"].reshape(H, -1), shard, H // N
         )
+        # the full-width conv weights, for enable_replicated() (the target model's layers; the MTP block stays fractured)
+        self._sconv_w = {
+            k: state_dict[f"layers.{layer_num}.{k}.weight"].reshape(H, -1).clone() for k in ("attn_sconv", "mlp_sconv")
+        }
+        self.rep = None
         self.feed_forward = self._build_feed_forward(
             mesh_device, args, state_dict, layer_num, tensor_cache_path, tt_ccl
         )
@@ -164,10 +256,49 @@ class InklingDecoderLayer(_M27Layer):
         mlp_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
         return Qwen35MoEOptimized(mesh_device, args, mlp_state, mlp_cache, tt_ccl=tt_ccl, layer_num=layer_num)
 
+    def enable_replicated(self):
+        """Replicated-residual rows (INKLING_REPLICATED): the boundary and the two full-width convs (built before any
+        trace capture)."""
+        if self.num_devices == 1 or self.rep is not None:
+            return
+        H = self.args.dim
+        rep = ttnn.ReplicateTensorToMesh(self.device)
+        self.rep = rep_boundary(self.args, self.device)
+        self.attn_sconv_r = ShortConv(self.device, self._sconv_w["attn_sconv"], rep, H)
+        self.mlp_sconv_r = ShortConv(self.device, self._sconv_w["mlp_sconv"], rep, H)
+
+    def sync_replicated_states(self):
+        """The full-width conv states := the fractured ones (gathered over the dies), after a prefill wrote them."""
+        if self.rep is None:
+            return
+        for frac, full in ((self.attn_sconv, self.attn_sconv_r), (self.mlp_sconv, self.mlp_sconv_r)):
+            t = ttnn.to_layout(frac.st, ttnn.TILE_LAYOUT)
+            g = ttnn.experimental.all_gather_async(
+                t,
+                persistent_output_buffer=None,
+                dim=3,
+                multi_device_global_semaphore=self.tt_ccl.get_and_cycle_ag_semaphore_handles(),
+                num_links=1,
+                topology=self.args.ccl_topology(),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                barrier_semaphore=self.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
+                chunks_per_sync=10,
+                num_workers_per_link=2,
+                num_buffers_per_channel=2,
+            )
+            ttnn.deallocate(t)
+            r = ttnn.to_layout(g, ttnn.ROW_MAJOR_LAYOUT)
+            ttnn.deallocate(g)
+            ttnn.copy(r, full.st)
+            ttnn.deallocate(r)
+
     def reset(self):
         self.attention.reset()
         self.attn_sconv.reset()
         self.mlp_sconv.reset()
+        if self.rep is not None:
+            self.attn_sconv_r.reset()
+            self.mlp_sconv_r.reset()
 
     def forward(
         self,
@@ -212,6 +343,8 @@ class InklingDecoderLayer(_M27Layer):
     def forward_rows(self, x, positions, page_table, tau=None, commit_all=True, kv_idx=None):
         """R <= 8 rows at consecutive positions (spec verify / prefill row groups): x [1, 1, R, H/N] fractured,
         positions [R] int32. commit_all=False leaves the 4 conv states for commit_rows(n) (verify)."""
+        if self.rep is not None:
+            return self._forward_rows_rep(x, positions, page_table, tau, commit_all, kv_idx)
         R = int(x.shape[2])
         norm_cfg = self.args.get_norm_config("attn", Mode.DECODE) if self.num_devices > 1 else None
         attn_in = self.attention_norm(x, mode=Mode.DECODE, norm_config=norm_cfg)
@@ -233,9 +366,45 @@ class InklingDecoderLayer(_M27Layer):
         ttnn.deallocate(f2)
         return out
 
+    def _forward_rows_rep(self, x, positions, page_table, tau, commit_all, kv_idx):
+        """forward_rows on the replicated residual: x [1, 1, R, H] in the boundary's residual layout (or the fractured
+        [1, 1, R, H / N] embedding rows: gathered first) -> the replicated residual."""
+        bnd = self.rep
+        if int(x.shape[-1]) != self.args.dim:
+            x = bnd.gather(x, self.tt_ccl)
+        nc = bnd.norm_config
+        attn_in = self.attention_norm.norm(x, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        a_in = ttnn.sharded_to_interleaved(attn_in, ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(attn_in)
+        part = self.attention.forward_rows(
+            a_in, positions, page_table, tau=tau, commit_all=commit_all, reduce=False, kv_idx=kv_idx
+        )
+        ttnn.deallocate(a_in)
+        a = bnd.all_reduce(part, "mixer")
+        a2 = self.attn_sconv_r.rows(a, commit_all=commit_all)
+        ttnn.deallocate(a)
+        h = ttnn.add(x, a2, memory_config=bnd.mc)
+        ttnn.deallocate(a2)
+        ff_in = self.ffn_norm.norm(h, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+        f_in = ttnn.sharded_to_interleaved(ff_in, ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(ff_in)
+        fpart = self.feed_forward.forward(f_in, mode="decode", partial="raw")
+        ttnn.deallocate(f_in)
+        f = bnd.all_reduce(fpart, "mlp")
+        f2 = self.mlp_sconv_r.rows(f, commit_all=commit_all)
+        ttnn.deallocate(f)
+        out = ttnn.add(h, f2, memory_config=bnd.mc)
+        ttnn.deallocate(h)
+        ttnn.deallocate(f2)
+        return out
+
     def commit_rows(self, n: int):
         """Spec verify: every conv state advances past the first n rows of the last forward_rows."""
         self.attention.commit_rows(n)
+        if self.rep is not None:
+            self.attn_sconv_r.commit_rows(n)
+            self.mlp_sconv_r.commit_rows(n)
+            return
         self.attn_sconv.commit_rows(n)
         self.mlp_sconv.commit_rows(n)
 

@@ -1862,6 +1862,9 @@ def _forward_fused(self, x4, orig, partial, logits=None):
     ttnn.deallocate(host)
     if mk != m:
         ttnn.deallocate(part)
+    if partial == "raw":  # the per-device partial sum as computed (bf16 DRAM): the caller reduces it (Inkling's bf16
+        # all-reduce boundary, tt/layer.py INKLING_REPLICATED)
+        return ttnn.reshape(out, orig) if list(out.shape) != orig else out
     if partial:
         from models.demos.blackhole.qwen36.tt.decode_boundary import decode_boundary
 

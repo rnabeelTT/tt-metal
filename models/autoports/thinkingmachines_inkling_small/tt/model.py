@@ -36,6 +36,11 @@ class Qwen35MoeModel(_M27Model):
             args.partial_rotary_factor = ROPE_DUMMY_DIM / args.head_dim
         super().__init__(mesh_device, args, state_dict, tensor_cache_path)
         self._pad_lm_head(state_dict)
+        from models.autoports.thinkingmachines_inkling_small.tt import layer as _layer
+
+        if _layer.REPLICATED and self.num_devices > 1:  # replicated-residual verify rows (tt/layer.py)
+            for layer in self.layers:
+                layer.enable_replicated()
 
     def _pad_lm_head(self, state_dict):
         """The vocab-sharded LM head with each die's shard a whole number of tiles: 201024 / 4 = 50256 columns per die
@@ -107,11 +112,28 @@ class Qwen35MoeModel(_M27Model):
 
         prefill_uploads_clear()  # (left over by a prefill that raised, or by direct forward_prefill calls)
         try:
-            return self._prefill_tokens(
+            out = self._prefill_tokens(
                 ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer
             )
         finally:
             prefill_uploads_clear()
+        for layer in self.layers:  # the replicated rows' full-width conv states from the prefill's (no-op otherwise)
+            layer.sync_replicated_states()
+        return out
+
+    def _final_norm_decode(self, x):
+        """The final norm of the verify rows: on the replicated residual (INKLING_REPLICATED) the sharded norm program
+        without its all-gather (the TP path's lm_head norm config, output in DRAM for the LM head)."""
+        import ttnn
+
+        if self.num_devices > 1 and int(x.shape[-1]) == self.args.dim:
+            nc = dict(self.args.get_norm_config("lm_head", Mode.DECODE))
+            nc["output_mem_config"] = ttnn.DRAM_MEMORY_CONFIG
+            x_in = ttnn.to_memory_config(x, nc["sharded_output_config"])
+            out = self.norm.norm(x_in, mode=Mode.DECODE, in_sharded=True, out_sharded=True, norm_config=nc)
+            ttnn.deallocate(x_in)
+            return out
+        return super()._final_norm_decode(x)
 
     def _prefill_tokens(self, ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer):
         import os
