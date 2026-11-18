@@ -41,6 +41,7 @@ HYB_KEYS = (
     "t_pf",
     "t_lg2rows",
     "dec_picks",
+    "dec_union",
     "dec_hits",
     "host_experts",
     "fetched",

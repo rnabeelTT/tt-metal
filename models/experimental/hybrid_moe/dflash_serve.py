@@ -62,6 +62,11 @@ WARMUP_PROMPT = "Write a haiku about the sea."
 # DFLASH_SAMPLED_DRAFTS=0: sampled requests keep the drafter's argmax drafts (point-mass proposals)
 _SAMPLED_DRAFTS = os.environ.get("DFLASH_SAMPLED_DRAFTS", "1") == "1"
 _SAMPLE_DEBUG = int(os.environ.get("DFLASH_SAMPLE_DEBUG", "0") or 0)  # log the first N sampled passes
+# DFLASH_BENCH_FOREIGN=<json of token-id lists> (measurement only, the multi-user cost study): every verify row after the
+# first carries a token drawn at random from these texts instead of a draft, so the rows route like independent users'
+# tokens (acceptance ~0; the verify pass's cost is what is measured). DFLASH_BENCH_KEEP=n keeps the first n drafts;
+# DFLASH_BENCH_CONTIG=1 takes the foreign rows as one text's consecutive tokens (a second user's verify block)
+_FOREIGN = os.environ.get("DFLASH_BENCH_FOREIGN", "")
 _SUFFIX = os.environ.get("DFLASH_SUFFIX", "1") == "1"  # prompt-lookup drafts (suffix_draft.py) besides the drafter's
 LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
@@ -814,6 +819,20 @@ class DFlashServing:
                     drafts = sfx
                     if qs is not None:  # the suffix rows are point-mass proposals
                         qs = [(torch.tensor([d]), torch.ones(1)) for d in cont] + qs[len(cont) :]
+        if _FOREIGN:
+            if not hasattr(self, "_foreign"):
+                import random
+
+                self._foreign = [x for seq in json.load(open(_FOREIGN)) for x in seq]
+                self._frng = random.Random(0)
+            keep = int(os.environ.get("DFLASH_BENCH_KEEP", "0"))  # rows 1..keep keep their drafts (this user's)
+            n = K - keep
+            if os.environ.get("DFLASH_BENCH_CONTIG") == "1":  # one other user's n consecutive tokens
+                i = self._frng.randrange(len(self._foreign) - n)
+                fx = self._foreign[i : i + n]
+            else:  # n independent users' tokens
+                fx = [self._foreign[self._frng.randrange(len(self._foreign))] for _ in range(n)]
+            drafts = list(drafts[:keep]) + fx
         a1 = time.perf_counter()
         ver.stage([t] + drafts, list(range(p, p + R)), self._row)
         s2 = time.perf_counter()

@@ -238,6 +238,20 @@ Pieces (all traced, per-prompt re-capture):
   fixed: per core ~10 us per 128-token chunk of compute (QK, softmax, PV; the reader runs ~3.5 GB/s per core) and a
   ~30 us six-round tree reduction over 55 cores. Not pursued (user, 2026-11-16): a cheaper tree ~3-4% at 44K;
   approx exp / lower fidelity needs the quality gate.
+- MULTI-USER COST STUDY, stage 1 (2026-11-18, ~/m27-pkg/batch, runner with the v1.11 serving env, 32K layout, auto
+  fetch, 4 short prompts x 128, first prompt dropped): DFLASH_BENCH_FOREIGN puts tokens drawn from other texts in the
+  verify rows (DFLASH_BENCH_KEEP / _CONTIG), dec_union counts distinct experts per hybrid layer. Verify ms / distinct
+  experts per hybrid layer / CPU experts per pass:
+  - rows ops + fused boundary (serving): 4 rows own drafts 24.5 / 21.5 / 16.7; 4 rows, 3 foreign 25.1 / 23.4 / 19.9.
+  - unfused boundary (DFLASH_FB=0): 4 rows 27.7 / 21.2 / 17.1.
+  - stock attention (QWEN35_ROWS_ATTN_OPS=0, unfused): 4 rows 32.2 / 21.5 / 16.9 (foreign 33.4 / 23.5 / 22.0);
+    8 rows own drafts 43.1 / 32.1 / 29.8 (2.74 tokens per pass vs 2.33: 7 drafts); 8 rows, 7 foreign 43.3 / 37.3 /
+    36.8; 8 rows = own 4 + another text's 4 consecutive 46.2 / 36.6 / 46.6 (t_wait 7.1 vs 2.6 ms).
+  Blockers found: 8 rows fail in the fused boundary (fabric_boundary ops CB config) and in rows_sdpa_decode (rows x
+  q heads per kv head must fit one tile: 8 x 6 = 48 > 32; M2.7's limit is 5 rows): multi-user verify needs per-user
+  attention calls (each user's rows against its own KV) and an 8-row boundary. Foreign tokens in ONE context raise
+  the union far less than independent users would (23 vs ~30 at 4 rows, 37 vs ~56 at 8; routing data ref_held): the
+  routing follows the context, so the MoE / CPU costs above are a floor for real multi-user rows.
 - DRAFTER ACCEPTANCE GAP (2026-11-18, scratch ~/m27-pkg/drafter): NVIDIA's card reports AL 3.05 (MT-Bench, draft
   length 3; 3.08 at 7) for nvidia/MiniMax-M2.7-DFlash. Served v1.11 on the 80 MT-Bench first turns (greedy, 1024
   tokens, DFLASH_STATS): 2.47 overall (writing 2.49, roleplay 2.48, reasoning 2.52, math 3.02, coding 2.70,

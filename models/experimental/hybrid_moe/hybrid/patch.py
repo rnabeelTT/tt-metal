@@ -242,6 +242,7 @@ class HybridState:
             "t_up_conv": 0.0,
             "t_lib_load": 0.0,
             "dec_picks": 0,
+            "dec_union": 0,
             "dec_hits": 0,
             "pf_act": 0,
             "pf_pred": 0,
@@ -1310,6 +1311,7 @@ def _route_host(self, lg, m, ids=None):
     st["hits"] += nh
     st["dec_picks"] += m * k
     st["dec_hits"] += nh
+    st["dec_union"] += len(np.unique(ids[:m]))  # distinct experts of the step's rows (summed over hybrid layers)
     st["steps"] += 1
     if HYB.record is not None:
         HYB.record.append((L, torch.from_numpy(ids[0].astype(np.int64)), torch.from_numpy(sc[0].astype(np.float32))))
@@ -2372,6 +2374,7 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False):
     HYB.st["hits"] += int(valid * k - v_miss.sum())
     if mode != "prefill":
         HYB.st["dec_picks"] += int(valid * k)
+        HYB.st["dec_union"] += int(torch.unique(idh[:valid]).numel())
         HYB.st["dec_hits"] += int(valid * k - v_miss.sum())
     HYB.st["dyn_hits"] += int(in_d[:valid].sum())
     if mode == "prefill":
