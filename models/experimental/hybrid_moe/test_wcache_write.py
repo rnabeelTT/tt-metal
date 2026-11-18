@@ -59,3 +59,39 @@ def test_stalled_write_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "open", lambda p, *a, **k: ShortFile(p, 1000, 4096), raising=False)
     with pytest.raises(OSError):
         W._write_all(str(tmp_path / "x"), memoryview(bytes(10000)))
+
+
+def test_hybrid_image_cut_from_full_image(tmp_path):
+    """A demoted layer's missing hybrid image is cut from the full image on the host: per device shard, slot s holds
+    expert ids[s]'s bytes (zero bytes for an empty slot), as wcache.gather builds it on the device."""
+    W = _wcache()
+    tp, E_full, c = 4, 8, 96  # 4 shards of 8 experts, 96 bytes per expert per shard
+    ids = [5, 0, -1, 7, -1]
+    plan = {3: list(range(E_full))}
+    wc = W.ExpertImageCache(str(tmp_path), resident_fn=lambda L: plan[L], tag="t")
+    wc.px = types.SimpleNamespace(tp=tp)
+    full = dict(
+        E=E_full,
+        H=64,
+        Nlp=32,
+        tp=tp,
+        gate_up_dtype="DataType.BFLOAT4_B",
+        down_dtype="DataType.BFLOAT4_B",
+        sfx=".qx",
+        gate_up_tile="None",
+    )
+    imgs = {}
+    for path, k in zip(wc._paths(3, wc._key(3, full)), (1, 2)):
+        imgs[path] = bytes((k * 100 + d * 10 + e + i) % 251 for d in range(tp) for e in range(E_full) for i in range(c))
+        (tmp_path / os.path.basename(path)).write_bytes(imgs[path])
+    plan[3] = ids
+    hyb = dict(full, E=len(ids))
+    assert not wc._slice_full_image(None, 3, hyb, dict(full, sfx=".other"))  # another rounding: not a source
+    assert wc._slice_full_image(None, 3, hyb, full)
+    for src, dst in zip(wc._paths(3, wc._key(3, full, ids=list(range(E_full)))), wc._paths(3, wc._key(3, hyb))):
+        data, got = imgs[src], open(dst, "rb").read()
+        n = E_full * c
+        want = b"".join(
+            bytes(c) if e < 0 else data[d * n + e * c : d * n + (e + 1) * c] for d in range(tp) for e in ids
+        )
+        assert got == want
