@@ -9,6 +9,7 @@ speculative output equals the plain greedy output token for token.
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 import torch
@@ -101,6 +102,8 @@ def main():
                 while acc < len(drafts) and picks[acc] == drafts[acc]:
                     acc += 1
                 emit = drafts[:acc] + [picks[acc]]
+                if os.environ.get("HY4_SPEC_DEBUG") == "1" and passes < 6:
+                    logger.info(f"anchor {anchor} n {n}: drafts {drafts} picks {picks} acc {acc}")
                 passes += 1
                 for t in emit:
                     out.append(t)

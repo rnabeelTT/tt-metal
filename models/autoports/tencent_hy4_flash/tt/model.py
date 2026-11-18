@@ -164,6 +164,15 @@ class Hy4Model:
         hn = self.norm(h, mem)
         ttnn.deallocate(h)
         lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        bufs = getattr(self, "step_bufs", None)
+        if bufs is not None:
+            # persistent outputs, allocated before any trace capture: a trace's outputs allocated during its capture
+            # can sit in another trace's freed intermediates and be overwritten by that trace's replays
+            ttnn.copy(lg, bufs["lg"])
+            ttnn.copy(hn, bufs["hn"])
+            ttnn.deallocate(lg)
+            ttnn.deallocate(hn)
+            lg, hn = bufs["lg"], bufs["hn"]
         self.last_hn = hn  # the final normalized hidden of the rows (kept: the DFly2 drafter's target hidden)
         return lg
 

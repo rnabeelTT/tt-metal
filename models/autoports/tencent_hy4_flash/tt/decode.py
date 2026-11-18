@@ -78,6 +78,7 @@ class Hy4Decoder:
         self.gcap = a0.indexer.gcap if a0.indexer is not None else 0
         self.buckets = [b // cfg.idx_ratio for b in BUCKETS_TOKENS if b // cfg.idx_ratio + 32 <= self.gcap]
         self.si = self._alloc()
+        self._alloc_outputs()
         self.ob = self.ogb = None  # the staging windows' bases
         self.pos = None
         self.tokens = []  # every token fed so far, by position (Engram history after a rewind)
@@ -116,6 +117,22 @@ class Hy4Decoder:
         si.gsin = self._dev(z(1, 1, 32, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.vis = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
         return si
+
+    def _alloc_outputs(self):
+        """Persistent pass outputs (Hy4Model.step copies into them): logits, final hidden, the indexer selections."""
+        m = self.model
+        if getattr(m, "step_bufs", None) is not None:
+            return
+        N, H = m.N, self.cfg.hidden
+        z = torch.zeros
+        lg = ttnn.from_torch(z(1, 1, ROWS, m.Vp), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                             mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))
+        hn = self._dev(z(1, 1, ROWS, H), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+        m.step_bufs = {"lg": lg, "hn": hn}
+        for l in m.layers:
+            if l.attn.indexer is not None:
+                l.attn.indexer.sel_buf = self._dev(z(1, 1, ROWS, self.n_sel, dtype=torch.int32), ttnn.uint32,
+                                                   ttnn.ROW_MAJOR_LAYOUT)
 
     # ------------------------------------------------------------------ prefill -> decode
     def start(self, pos: int):
@@ -248,14 +265,12 @@ class Hy4Decoder:
         key = (R, sparse, bucket)
         if not self.trace:
             lg = self.model.step(self.si, R, mem=self.mem)
-            out = self.model.read_logits(lg, R)
-            ttnn.deallocate(lg)
+            out = self.model.read_logits(lg, R)  # (lg: the persistent logits buffer)
         else:
             if key not in self.traces:
                 # compile eagerly first (this pass's result is the real one), then capture for the next passes
                 lg = self.model.step(self.si, R, mem=self.mem)
-                out = self.model.read_logits(lg, R)
-                ttnn.deallocate(lg)
+                out = self.model.read_logits(lg, R)  # (lg: the persistent logits buffer)
                 self._capture(key, ids, p0)
             else:
                 ttnn.execute_trace(self.mesh, self.traces[key], cq_id=0, blocking=False)
@@ -307,6 +322,7 @@ class Hy4SpecDecoder(Hy4Decoder):
         self.dfly = Hy4DFly(model)
         self.scratch = self.dfly.layers[0]["attn"].scratch_row
         self.ds = self._alloc_draft()
+        self.dfly.out_buf = self._dev(torch.zeros(1, self.W - 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         self.dtraces, self.dout = {}, {}
         self.saved = {}  # target pass key -> (last_hn, {layer: sel}) of that pass's trace
         self.last_key = None
@@ -381,11 +397,11 @@ class Hy4SpecDecoder(Hy4Decoder):
         if not self.trace:
             d = self.dfly.step(self.ds, n, mem=self.mem)
             out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
-            ttnn.deallocate(d)
+            pass  # d: the drafter's persistent output buffer
         elif dkey not in self.dtraces:
             d = self.dfly.step(self.ds, n, mem=self.mem)
             out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
-            ttnn.deallocate(d)
+            pass  # d: the drafter's persistent output buffer
             tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
             self.dout[dkey] = self.dfly.step(self.ds, n, mem=self.mem)
             ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
@@ -397,7 +413,7 @@ class Hy4SpecDecoder(Hy4Decoder):
             if os.environ.get("HY4_DFLY_CHECK") == "1":
                 d = self.dfly.step(self.ds, n, mem=self.mem)
                 e = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
-                ttnn.deallocate(d)
+                pass  # d: the drafter's persistent output buffer
                 logger.info(f"draft {dkey}: trace {out.tolist()} eager {e.tolist()}")
         return [int(v) & 0xFFFFFFFF for v in out.tolist()]
 

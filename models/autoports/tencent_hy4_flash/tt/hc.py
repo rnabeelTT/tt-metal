@@ -17,10 +17,19 @@ input, one broadcast multiply-add for the update. The head (HyperHead) is the `p
 
 from __future__ import annotations
 
+import os
+
 import torch
 import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import TILE, ckc, upload
+
+
+def _ssum(x, mem):
+    """Sum over the stream dim (1) in one program (ttnn.sum(dim=1) is transpose + reduce + transpose)."""
+    if os.environ.get("HY4_HC_FASTREDUCE", "1") == "1":
+        return ttnn.experimental.fast_reduce_nc(x, dims=[1], memory_config=mem)
+    return ttnn.sum(x, dim=1, keepdim=True, memory_config=mem)
 
 
 class HyperConnection:
@@ -57,9 +66,9 @@ class HyperConnection:
     def _weights(self, xf, mem):
         """xf fp32 [1, hc, T, H] -> w [1, 1, T, 32] fp32: cols 0..hc-1 = pre, hc..2hc-1 = post (pad meaningless)."""
         mix = ttnn.matmul(xf, self.fnT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
-        mix = ttnn.sum(mix, dim=1, keepdim=True, memory_config=mem)  # [1, 1, T, 32]
-        ss = ttnn.sum(ttnn.sum(ttnn.multiply(xf, xf, memory_config=mem), dim=-1, keepdim=True, memory_config=mem),
-                      dim=1, keepdim=True, memory_config=mem)  # [1, 1, T, 1]
+        mix = _ssum(mix, mem)  # [1, 1, T, 32]
+        ss = _ssum(ttnn.sum(ttnn.multiply(xf, xf, memory_config=mem), dim=-1, keepdim=True, memory_config=mem),
+                   mem)  # [1, 1, T, 1]
         r = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss, self.inv_n, memory_config=mem), self.eps, memory_config=mem),
                        memory_config=mem)
         mix = ttnn.multiply(mix, r, memory_config=mem)
@@ -79,7 +88,7 @@ class HyperConnection:
         xf = ttnn.typecast(X, ttnn.float32, memory_config=mem)
         w = self._weights(xf, mem)
         pre = self._per_stream(w, 0, mem)
-        s = ttnn.sum(ttnn.multiply(xf, pre, memory_config=mem), dim=1, keepdim=True, memory_config=mem)
+        s = _ssum(ttnn.multiply(xf, pre, memory_config=mem), mem)
         ttnn.deallocate(xf)
         out = ttnn.typecast(s, ttnn.bfloat16, memory_config=mem)
         post = self._per_stream(w, self.hc, mem) if self.M == 2 * self.hc else None

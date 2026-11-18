@@ -220,4 +220,8 @@ class Hy4DFly:
         out = ttnn.concat(drafts, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1, 5]
         for t_ in drafts:
             ttnn.deallocate(t_)
+        if getattr(self, "out_buf", None) is not None:  # persistent (see Hy4Model.step)
+            ttnn.copy(out, self.out_buf)
+            ttnn.deallocate(out)
+            out = self.out_buf
         return out

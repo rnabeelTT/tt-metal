@@ -306,5 +306,10 @@ class Hy4Indexer:
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(u)
         idx = ttnn.concat([urm, si.idx_tail], dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        sel_buf = getattr(self, "sel_buf", None)
+        if sel_buf is not None:  # persistent (see Hy4Model.step)
+            ttnn.copy(urm, sel_buf)
+            ttnn.deallocate(urm)
+            urm = sel_buf
         self.sel = urm  # the rows' selected token rows [1, 1, 32, 2044] (kept: the DFly2 drafter's index share)
         return idx
