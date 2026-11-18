@@ -92,7 +92,7 @@ class Hy4Layer:
         f_in, post = self.ffn_hc.pre(X2, m("hc"))
         f_n = self.post_norm(f_in, m("norm"))
         ttnn.deallocate(f_in)
-        f = self.mlp.forward(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"))
+        f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"))
         ttnn.deallocate(f_n)
         X3 = self.ffn_hc.post(X2, f, post, m("hc"))
         for t_ in (X2, f, post):
@@ -164,7 +164,7 @@ class Hy4Model:
         hn = self.norm(h, mem)
         ttnn.deallocate(h)
         lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
-        ttnn.deallocate(hn)
+        self.last_hn = hn  # the final normalized hidden of the rows (kept: the DFly2 drafter's target hidden)
         return lg
 
     def read_logits(self, lg, R) -> torch.Tensor:

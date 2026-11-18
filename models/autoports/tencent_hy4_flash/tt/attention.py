@@ -51,7 +51,7 @@ def _dt(name, default):
 
 
 class Hy4Attention:
-    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int):
+    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None):
         """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity (sparse layers); chunk: the
         largest rows per forward (prefill chunk), which sizes the SWA ring."""
         self.mesh, self.cfg, self.li = mesh, cfg, layer_idx
@@ -102,6 +102,11 @@ class Hy4Attention:
         self.q_sink = upload(mesh, qs[:, :Hd].reshape(N, Hd, 1, SINK_COLS), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                              mapper=("shard", 0))
         self.stage = None  # the decode staging window (init_stage)
+        self.indexer = None
+        if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
+            self.cache, self.rows = share.cache, share.rows
+            self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
+            return
         # caches (row-major bf16, replicated): sparse layers hold every position + a sink block at the end; SWA layers
         # a ring of `ring` rows + the sink block
         if self.kind == "sparse":
@@ -109,7 +114,8 @@ class Hy4Attention:
         else:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
         self.sink_row = self.rows
-        cache = torch.zeros(1, 1, self.rows + 32, self.width, dtype=torch.bfloat16)
+        self.scratch_row = self.rows + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
+        cache = torch.zeros(1, 1, self.rows + 64, self.width, dtype=torch.bfloat16)
         cache[0, 0, self.sink_row, cfg.latent_width] = SINK_KEY
         cache[0, 0, self.sink_row, cfg.latent_width + 1] = SINK_KEY
         self.cache = upload(mesh, cache, ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)

@@ -80,6 +80,7 @@ class Hy4Decoder:
         self.si = self._alloc()
         self.ob = self.ogb = None  # the staging windows' bases
         self.pos = None
+        self.tokens = []  # every token fed so far, by position (Engram history after a rewind)
         self.traces = {}
         self.out = {}
         # HY4_DECODE_L1=1: the step's intermediates in L1 (interleaved) instead of DRAM
@@ -126,6 +127,10 @@ class Hy4Decoder:
             if layer.attn.indexer is not None:
                 layer.attn.indexer.init_stage(nb, gb)
         self.ob, self.ogb, self.pos = nb, gb, pos
+
+    def set_history(self, tokens):
+        """The sequence's tokens so far (the prompt): the Engram n-gram history of a rewound pass."""
+        self.tokens = [int(t) for t in tokens]
 
     # ------------------------------------------------------------------ host side of a step
     def _host_inputs(self, ids: list[int], p0: int):
@@ -195,7 +200,14 @@ class Hy4Decoder:
             bucket = next((b for b in self.buckets if b >= need), None)
             if bucket is None:
                 raise RuntimeError(f"context {p0 + R} past the largest indexer bucket")
+        del self.tokens[p0:]  # a pass may start before the end of the last one (rejected verify rows)
+        self.tokens += [int(t) for t in ids]
+        eng = self.model.engram
         for li in self.model.engram_li():
+            if eng is not None and hasattr(eng, "pos") and eng.pos.get(li) != p0:
+                keep = getattr(eng, "keep", 2)
+                eng.hist[li] = np.array(self.tokens[max(0, p0 - keep) : p0], dtype=np.int64)
+                eng.pos[li] = p0
             rows = self.model.engram.rows(li, torch.tensor(ids), p0)
             e = torch.zeros(1, 1, ROWS, rows.shape[-1], dtype=torch.bfloat16)
             e[0, 0, :R] = rows
@@ -220,11 +232,13 @@ class Hy4Decoder:
                 c(h[f"eng_{li}"], t)
 
     # ------------------------------------------------------------------ a pass
-    def run(self, ids: list[int], logits_rows: str = "last") -> torch.Tensor:
-        """Rows `ids` at positions pos .. pos + R - 1 -> logits fp32 [V] (last row) or [R, V]."""
+    def run(self, ids: list[int], logits_rows: str = "last", p0: int | None = None) -> torch.Tensor:
+        """Rows `ids` at positions p0 .. p0 + R - 1 (default: right after the last pass) -> logits fp32 [V] (last row)
+        or [R, V]. A verify pass that accepted n of its rows continues with p0 = its start + n."""
         import time as _t
 
-        R, p0 = len(ids), self.pos
+        R = len(ids)
+        p0 = self.pos if p0 is None else int(p0)
         t0 = _t.perf_counter()
         h, sparse, bucket = self._host_inputs(ids, p0)
         t1 = _t.perf_counter()
@@ -269,3 +283,126 @@ class Hy4Decoder:
         for tid in self.traces.values():
             ttnn.release_trace(self.mesh, tid)
         self.traces, self.out = {}, {}
+
+
+@dataclass
+class DraftInputs:
+    tok: object = None
+    bonus: object = None
+    cos: object = None
+    sin: object = None
+    idx_dense: object = None
+    idx_tail: object = None
+    sparse: bool = False
+
+
+class Hy4SpecDecoder(Hy4Decoder):
+    """Hy4Decoder + the DFly2 drafter (tt/dfly.py): draft passes traced per (target pass key, accepted row)."""
+
+    def __init__(self, model, trace: bool = True):
+        super().__init__(model, trace)
+        from models.autoports.tencent_hy4_flash.tt.dfly import W, Hy4DFly
+
+        self.W = W
+        self.dfly = Hy4DFly(model)
+        self.scratch = self.dfly.layers[0]["attn"].scratch_row
+        self.ds = self._alloc_draft()
+        self.dtraces, self.dout = {}, {}
+        self.saved = {}  # target pass key -> (last_hn, {layer: sel}) of that pass's trace
+        self.last_key = None
+
+    def _alloc_draft(self):
+        z = torch.zeros
+        ds = DraftInputs()
+        ds.tok = self._dev(z(1, ROWS, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        ds.bonus = self._dev(z(1, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        ds.cos = self._dev(z(1, 1, ROWS, self.cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.sin = self._dev(z(1, 1, ROWS, self.cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.idx_dense = self._dev(z(1, 1, ROWS, self.K_dense, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        ds.idx_tail = self._dev(z(1, 1, ROWS, self.K_dense - self.n_sel, dtype=torch.int32), ttnn.uint32,
+                                ttnn.ROW_MAJOR_LAYOUT)
+        return ds
+
+    def _remember(self, key):
+        """After a target pass (eager or the capture of its trace): the tensors the drafter reads."""
+        sel = {l.li: l.attn.indexer.sel for l in self.model.layers
+               if l.attn.indexer is not None and getattr(l.attn.indexer, "sel", None) is not None}
+        self.saved[key] = (self.model.last_hn, sel)
+
+    def run(self, ids, logits_rows="last", p0=None):
+        out = super().run(ids, logits_rows, p0)
+        R = len(ids)
+        key = (R, self.si.sparse, self.si.bucket)
+        if not self.trace or key not in self.saved:
+            self._remember(key)
+        self.last_key = key
+        return out
+
+    def draft(self, bonus: int, anchor: int, n: int) -> list[int]:
+        """The 5 greedy drafts after the last target pass (its last accepted row n; `bonus` at position anchor)."""
+        cfg, r = self.cfg, self.cfg.idx_ratio
+        tkey = self.last_key
+        sparse = tkey[1]
+        h = {}
+        tok = torch.zeros(1, ROWS, dtype=torch.int32)
+        tok[0, 0] = bonus
+        tok[0, 1 : self.W] = self.dfly.mask_id
+        h["tok"] = _rm(tok, ttnn.uint32)
+        h["bonus"] = _rm(torch.tensor([[bonus]], dtype=torch.int32), ttnn.uint32)
+        pos = torch.full((ROWS,), anchor + self.W - 1, dtype=torch.long)
+        pos[: self.W] = torch.arange(anchor, anchor + self.W)
+        c, s = cos_sin(pos, cfg.rope_theta["sparse"], cfg.qk_rope)
+        h["cos"] = _tile(c.float().reshape(1, 1, ROWS, -1), ttnn.float32)
+        h["sin"] = _tile(s.float().reshape(1, 1, ROWS, -1), ttnn.float32)
+        dense = np.full((ROWS, self.K_dense), SENTINEL, dtype=np.uint32)
+        tail = np.full((ROWS, self.K_dense - self.n_sel), SENTINEL, dtype=np.uint32)
+        dense[:, 0] = tail[:, 0] = self.sink_sparse
+        own = np.arange(((anchor - 1) // r) * r, anchor)
+        for j in range(ROWS):
+            jj = min(j, self.W - 1)
+            blk = self.scratch + np.arange(jj + 1)
+            if not sparse:
+                keys = np.concatenate([np.arange(anchor), blk])
+                dense[j, 1 : 1 + keys.size] = keys
+            t = np.concatenate([own, blk])
+            tail[j, 1 : 1 + t.size] = t
+        u = lambda a: _rm(torch.from_numpy(a.view(np.int32)).reshape(1, 1, ROWS, -1), ttnn.uint32)  # noqa: E731
+        h["idx_dense"], h["idx_tail"] = u(dense), u(tail)
+        c_ = ttnn.copy_host_to_device_tensor
+        for k in ("tok", "bonus", "cos", "sin", "idx_dense", "idx_tail"):
+            c_(h[k], getattr(self.ds, k))
+        self.ds.sparse = sparse
+        dkey = (tkey, n)
+        hn, sel = self.saved[tkey]
+        self.model.last_hn = hn
+        for l in self.model.layers:
+            if l.li in sel:
+                l.attn.indexer.sel = sel[l.li]
+        if not self.trace:
+            d = self.dfly.step(self.ds, n, mem=self.mem)
+            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+            ttnn.deallocate(d)
+        elif dkey not in self.dtraces:
+            d = self.dfly.step(self.ds, n, mem=self.mem)
+            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+            ttnn.deallocate(d)
+            tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+            self.dout[dkey] = self.dfly.step(self.ds, n, mem=self.mem)
+            ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+            self.dtraces[dkey] = tid
+            logger.info(f"captured draft trace {dkey}")
+        else:
+            ttnn.execute_trace(self.mesh, self.dtraces[dkey], cq_id=0, blocking=False)
+            out = ttnn.to_torch(ttnn.get_device_tensors(self.dout[dkey])[0]).reshape(-1)[: self.W - 1]
+            if os.environ.get("HY4_DFLY_CHECK") == "1":
+                d = self.dfly.step(self.ds, n, mem=self.mem)
+                e = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+                ttnn.deallocate(d)
+                logger.info(f"draft {dkey}: trace {out.tolist()} eager {e.tolist()}")
+        return [int(v) & 0xFFFFFFFF for v in out.tolist()]
+
+    def release(self):
+        super().release()
+        for tid in self.dtraces.values():
+            ttnn.release_trace(self.mesh, tid)
+        self.dtraces, self.dout = {}, {}

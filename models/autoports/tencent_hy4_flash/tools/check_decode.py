@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--no-engram", action="store_true")
     ap.add_argument("--trace", action="store_true")
     ap.add_argument("--texts", default="", help="tf_texts.json: take the tokens from its first text instead")
+    ap.add_argument("--rows", type=int, default=1, help="rows per decoder pass (verify width); checks all rows")
     args = ap.parse_args()
     from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
     from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder
@@ -71,13 +72,17 @@ def main():
         prefill()
         dec = Hy4Decoder(model, trace=args.trace)
         dec.start(P)
+        dec.set_history(ids[:P].tolist())
         got, t_got = [], []
-        for i in range(S):
+        R = args.rows
+        for i in range(0, S, R):
             t0 = time.time()
-            got.append(dec.run([int(ids[P + i])]))
-            t_got.append(time.time() - t0)
+            n = min(R, S - i)
+            out = dec.run([int(t) for t in ids[P + i : P + i + n]], logits_rows="all")
+            got += [out[j] for j in range(n)]
+            t_got += [(time.time() - t0)] * n
             tm = getattr(dec, "timing", None)
-            logger.info(f"decoder step {i}: {t_got[-1] * 1e3:.0f} ms" + (
+            logger.info(f"decoder pass {i // R} ({n} rows): {t_got[-1] * 1e3:.0f} ms" + (
                 f" (host inputs {tm[0] * 1e3:.1f}, copies {tm[1] * 1e3:.1f}, device {tm[2] * 1e3:.1f}, read "
                 f"{tm[3] * 1e3:.1f})" if tm else ""))
         for i in range(S):

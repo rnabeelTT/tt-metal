@@ -22,7 +22,12 @@ import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import AllReduce, RMSNorm, TILE, ckc, num_devices, upload
 
-GATHER_MAX = int(os.environ.get("HY4_MOE_GATHER_MAX", "8"))
+class _Args:
+    """The model-wide cache holder FusedMoEDecode keys its kernels / buffers on."""
+
+
+_FUSED_ARGS = _Args()
+GATHER_MAX = int(os.environ.get("HY4_MOE_GATHER_MAX", "1"))  # more rows: the chunk-masked path (fixed op count)
 PREFILL_CHUNK = int(os.environ.get("HY4_MOE_CHUNK", "32"))
 
 
@@ -127,6 +132,24 @@ class Hy4MoE:
         self.cfg_dn_g = _smm_cfg(1, L, Il, target_cores=64, in0_block_w_cap=32)
         self.cfg_gu_m = _smm_cfg(PREFILL_CHUNK, 2 * Il, L, target_cores=32, in0_block_w_cap=64)
         self.cfg_dn_m = _smm_cfg(PREFILL_CHUNK, L, Il, target_cores=32, in0_block_w_cap=32)
+        # decode: the M2.7 / Qwen fused MoE kernels (route + gate|up + down in 3 programs), with Hy4's SwiGLU clamps
+        # (MOE_SWIGLU_LIMIT, moe_decode/kernels SWIGLU_LIMIT), the router run by this port on the full-width hidden
+        self.fused = None
+        if os.environ.get("HY4_MOE_FUSED", "0") == "1" and tp > 1:  # top-16 > the kernels' 15 slots: off
+            os.environ["MOE_SWIGLU_LIMIT"] = str(self.limit)
+            from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
+
+            if moe_fused.supported(E, L, Il, gu_dt, banks=len(moe_fused.bank_workers(mesh))):
+                self.fused = moe_fused.FusedMoEDecode(
+                    mesh, _FUSED_ARGS, hidden=L, inter_local=Il, num_experts=E, k=self.k, tp=tp, dtype=gu_dt,
+                    down_dtype=dn_dt, router_weight=None, shared_gate_weight=None, shared_gate_proj=None,
+                    shared_up_proj=None, shared_down_proj=None, cache_name=lambda n: None, router_ckc=self.ckc_r,
+                    router="sigb", selection_bias=sd["gate.e_score_correction_bias"],
+                    router_logits=lambda x1: self._logits_fp32(self._x_full),
+                )
+                for m in range(2, 33):
+                    if m <= int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8")):
+                        self.fused.rows_ops(m)  # buffers uploaded before any trace capture
 
     def _up(self, t, dtype, dim, cache_name, have_cache, shape):
         kw = {"mesh_mapper": ttnn.ShardTensorToMesh(self.mesh, dim=dim)} if self.N > 1 else {}
@@ -270,6 +293,58 @@ class Hy4MoE:
         out = ttnn.matmul(h, self.sw2, compute_kernel_config=self.ckc_s, memory_config=mem)
         ttnn.deallocate(h)
         return out
+
+    def _logits_fp32(self, x):
+        xf = ttnn.typecast(x, ttnn.float32, memory_config=ttnn.L1_MEMORY_CONFIG)
+        lg = ttnn.matmul(xf, self.wr, dtype=ttnn.float32, compute_kernel_config=self.ckc_r,
+                         memory_config=ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(xf)
+        return lg
+
+    def forward_decode(self, x, T: int, mem=None):
+        """Decode / verify rows (T <= 32 real rows of x [1, 1, 32, 3072]): the fused kernels when available."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
+        if self.fused is None or T > rows_max:
+            # trace-safe rows path: per-row gather (the chunk-masked prefill path writes from the host: ttnn.zeros)
+            scores, ids = self.route(x, mem)
+            xl = ttnn.matmul(x, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)
+            routed = self._gather(xl, scores, ids, T, mem)
+            Tp = int(x.shape[-2])
+            if Tp != T:
+                routed = ttnn.pad(routed, [(0, 0), (0, 0), (0, Tp - T), (0, 0)], value=0.0)
+            for t_ in (xl, scores, ids):
+                ttnn.deallocate(t_)
+            up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)  # [T, 3072]
+            ttnn.deallocate(routed)
+            sh = self._shared(x, mem)
+            part = ttnn.add(sh, up, memory_config=mem)  # rows >= T are padding
+            ttnn.deallocate(up)
+            ttnn.deallocate(sh)
+            full = self.ar(part, mem)
+            ttnn.deallocate(part)
+            return self.norm(full, mem)
+        Tp = int(x.shape[-2])
+        xr = x if T == Tp else ttnn.slice(x, (0, 0, 0, 0), (1, 1, T, int(x.shape[-1])), memory_config=mem)
+        self._x_full = xr
+        xl = ttnn.matmul(xr, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)  # [1,1,T,1536]
+        if T == 1:
+            routed = self.fused(xl, self.up_gate, self.down)  # model-wide [1,1,1,1536] partial sum
+        else:
+            routed = self.fused.rows(xl, self.up_gate, self.down)
+        ttnn.deallocate(xl)
+        up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)  # partial [T,3072]
+        up = ttnn.multiply(up, self.scale, memory_config=mem)  # the routed scaling (the fused router normalizes to 1)
+        sh = self._shared(x, mem)
+        part = ttnn.add(sh, up, memory_config=mem)  # [Tp, H] + [T, H]: rows >= T are padding
+        ttnn.deallocate(up)
+        ttnn.deallocate(sh)
+        if xr is not x:
+            ttnn.deallocate(xr)
+        self._x_full = None
+        full = self.ar(part, mem)
+        ttnn.deallocate(part)
+        return self.norm(full, mem)
 
     def forward(self, x, T: int, mem=None):
         """x [1, 1, Tp, 3072] bf16 replicated (normed); rows >= T are padding. -> [1, 1, Tp, 3072] replicated."""

@@ -20,6 +20,8 @@ Matmuls: custom_mm (1x32 activation tiles, LoFi, FP32 accumulation), worker core
 
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 import torch
@@ -81,7 +83,13 @@ def ep_offsets(mesh_device, experts_per_die):
 
 
 def _ep_defines(ep_experts, gate_first=False):
-    return ([("EP_EXPERTS", str(ep_experts))] if ep_experts else []) + ([("GATE_FIRST", "1")] if gate_first else [])
+    # MOE_SWIGLU_LIMIT (process-wide, e.g. Hy4-flash's 10): clamp gate <= L and |up| <= L before the SwiGLU
+    lim = os.environ.get("MOE_SWIGLU_LIMIT")
+    return (
+        ([("EP_EXPERTS", str(ep_experts))] if ep_experts else [])
+        + ([("GATE_FIRST", "1")] if gate_first else [])
+        + ([("SWIGLU_LIMIT", f"{float(lim)}f")] if lim else [])
+    )
 
 
 def logits_row_bytes(num_experts, router):

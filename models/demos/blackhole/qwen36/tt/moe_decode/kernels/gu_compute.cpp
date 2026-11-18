@@ -68,6 +68,40 @@ inline void round_sig7() {
 }  // namespace ckernel::sfpu
 #endif
 
+
+#ifdef SWIGLU_LIMIT
+#ifdef TRISC_MATH
+namespace ckernel::sfpu {
+// SwiGLU input clamps (Hy4-flash: gate <= L, |up| <= L), on the result rows.
+template <int ITERATIONS, bool BOTH>
+inline void clamp_lim() {
+    for (int d = 0; d < ITERATIONS; d++) {
+        sfpi::vFloat x = sfpi::dst_reg[0];
+        v_if(x > SWIGLU_LIMIT) { x = SWIGLU_LIMIT; }
+        v_endif;
+        if constexpr (BOTH) {
+            v_if(x < -SWIGLU_LIMIT) { x = -SWIGLU_LIMIT; }
+            v_endif;
+        }
+        sfpi::dst_reg[0] = x;
+        sfpi::dst_reg++;
+    }
+}
+}  // namespace ckernel::sfpu
+#endif
+ALWI void clamp_gate_rows(uint32_t idst) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, clamp_lim, (kRowIters, false), idst, VectorMode::R));
+}
+ALWI void clamp_up_rows(uint32_t idst) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, clamp_lim, (kRowIters, true), idst, VectorMode::R));
+}
+#define SWIGLU_CLAMP_GATE(i) clamp_gate_rows(i)
+#define SWIGLU_CLAMP_UP(i) clamp_up_rows(i)
+#else
+#define SWIGLU_CLAMP_GATE(i)
+#define SWIGLU_CLAMP_UP(i)
+#endif
+
 ALWI void round_rows(uint32_t idst) {
     MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, round_sig7, (kRowIters), idst, VectorMode::R));
 }
@@ -110,8 +144,12 @@ void kernel_main() {
         gu_layout::static_for<np>([&](auto p) {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
 #ifdef GATE_FIRST
+            SWIGLU_CLAMP_GATE(u);
+            SWIGLU_CLAMP_UP(gu_layout::gate_dst<m, banks>(u));
             silu_rows(u);  // [gate | up] packing: the first-half column is the gate
 #else
+            SWIGLU_CLAMP_GATE(gu_layout::gate_dst<m, banks>(u));
+            SWIGLU_CLAMP_UP(u);
             silu_rows(gu_layout::gate_dst<m, banks>(u));
 #endif
         });
