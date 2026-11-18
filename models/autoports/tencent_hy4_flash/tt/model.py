@@ -72,6 +72,47 @@ class Hy4Layer:
             ttnn.deallocate(t_)
         return X3
 
+    def forward_split(self, X, p0, T, cos_sin, engram_emb=None, mem=None, engram_keep=None):
+        """Row-split prefill (tt-metal PR 61548 row 22): X [1, hc, Tp/N, H] holds THIS die's quarter of the rows; the
+        hyper-connections, norms and Engram run on it; the sublayer inputs are all-gathered over rows, the sublayer
+        partials reduce-scattered over rows (the same bytes as the all-reduce they replace)."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        ag = lambda t: ttnn.all_gather(t, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=mem)  # noqa
+        rs = lambda t: ttnn.reduce_scatter(t, 2, cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=mem)  # noqa
+        if self.engram is not None and engram_emb is not None:
+            X2 = self.engram.forward(X, engram_emb, mem, engram_keep)
+            ttnn.deallocate(X)
+            X = X2
+        a_in, post = self.attn_hc.pre(X, mem)
+        a_n = self.in_norm(a_in, mem)
+        ttnn.deallocate(a_in)
+        a_full = ag(a_n)
+        ttnn.deallocate(a_n)
+        part = self.attn.forward_part(a_full, p0, T, cos_sin, mem)
+        ttnn.deallocate(a_full)
+        a_loc = rs(part)
+        ttnn.deallocate(part)
+        a = self.attn.post_norm(a_loc, mem)
+        ttnn.deallocate(a_loc)
+        X2 = self.attn_hc.post(X, a, post, mem)
+        for t_ in (X, a, post):
+            ttnn.deallocate(t_)
+        f_in, post = self.ffn_hc.pre(X2, mem)
+        f_n = self.post_norm(f_in, mem)
+        ttnn.deallocate(f_in)
+        f_full = ag(f_n)
+        ttnn.deallocate(f_n)
+        part = self.mlp.forward_part(f_full, T, mem)
+        ttnn.deallocate(f_full)
+        f_loc = rs(part)
+        ttnn.deallocate(part)
+        f = self.mlp.norm(f_loc, mem)
+        ttnn.deallocate(f_loc)
+        X3 = self.ffn_hc.post(X2, f, post, mem)
+        for t_ in (X2, f, post):
+            ttnn.deallocate(t_)
+        return X3
+
     def step(self, X, si, R, mem=None):
         """Trace-safe rows pass (tt/decode.py): every position-dependent input in si. HY4_L1_PARTS (default all):
         which parts keep their intermediates in `mem` (the rest DRAM)."""
@@ -177,7 +218,7 @@ class Hy4Model:
         if self.engram is not None:
             self.engram.reset()
 
-    def _engram_rows(self, ids: torch.Tensor, p0: int, Tp: int) -> dict:
+    def _engram_rows(self, ids: torch.Tensor, p0: int, Tp: int, split: bool = False) -> dict:
         """{layer: [1,1,Tp,1536] device rows} for this pass (zeros past the real rows)."""
         out = {}
         if self.engram is None:
@@ -188,36 +229,63 @@ class Hy4Model:
             rows = self.engram.rows(layer.li, ids, p0)  # [T, 1536] bf16 (host store, continues the sequence)
             full = torch.zeros(Tp, rows.shape[-1], dtype=torch.bfloat16)
             full[: rows.shape[0]] = rows
-            out[layer.li] = upload(self.mesh, full.reshape(1, 1, Tp, -1), ttnn.bfloat16)
+            out[layer.li] = upload(self.mesh, full.reshape(1, 1, Tp, -1), ttnn.bfloat16,
+                                   mapper=("shard", 2) if split else "rep")
         keep = self.engram.mask(ids).reshape(-1)
         if out and not bool(keep.all()):
             k = torch.zeros(Tp, 1, dtype=torch.bfloat16)
             k[: keep.numel(), 0] = keep.to(torch.bfloat16)
-            out["keep"] = upload(self.mesh, k.reshape(1, 1, Tp, 1), ttnn.bfloat16)
+            out["keep"] = upload(self.mesh, k.reshape(1, 1, Tp, 1), ttnn.bfloat16, mapper=("shard", 2) if split else "rep")
         return out
 
+    def prefill(self, ids: torch.Tensor, chunk: int | None = None) -> torch.Tensor:
+        """A whole prompt (continuing the sequence) -> the last row's logits. Chunks: up to the 2048-token dense regime
+        boundary first (so every later chunk selects with device-built index lists), then HY4_PREFILL_CHUNK tokens
+        (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary."""
+        ids = ids.reshape(-1)
+        big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
+        dense_end = self.cfg.idx_candidate_topk
+        lg, i = None, 0
+        while i < ids.numel():
+            p = self.pos
+            n = dense_end - p if p < dense_end else big
+            n = max(128, (n // 128) * 128) if i + n < ids.numel() else n
+            lg = self.forward(ids[i : i + n])
+            i += n
+        return lg
+
     def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None) -> torch.Tensor:
-        """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows)."""
+        """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows).
+        From HY4_ROW_SPLIT_MIN tokens (default 128) the rows are split over the dies between layers (forward_split)."""
         cfg, mesh = self.cfg, self.mesh
         T = int(ids.numel())
         p0 = self.pos
         assert p0 + T <= self.max_ctx, f"context {p0 + T} > max_ctx {self.max_ctx}"
-        Tp = -(-T // 32) * 32
+        split = self.N > 1 and T >= int(os.environ.get("HY4_ROW_SPLIT_MIN", "128"))
+        align = 32 * self.N if split else 32
+        Tp = -(-T // align) * align
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         tok[0, :T] = ids.reshape(-1).to(torch.int32)
-        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1) if split else "rep")
         x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(tok_t)
-        x = ttnn.reshape(x, (1, 1, Tp, cfg.hidden))
+        x = ttnn.reshape(x, (1, 1, Tp // self.N if split else Tp, cfg.hidden))
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))  # the 4 streams start equal
         ttnn.deallocate(x)
         pos = torch.arange(p0, p0 + Tp)
         cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
-        eng = self._engram_rows(ids.reshape(-1), p0, Tp)
+        eng = self._engram_rows(ids.reshape(-1), p0, Tp, split=split)
         for layer in self.layers:
-            X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
+            if split:
+                X = layer.forward_split(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
+            else:
+                X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
         for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
             ttnn.deallocate(t_)
+        if split:  # the head on every row: gather the rows back (bf16 [1, hc, Tp, H] is small next to a layer's work)
+            Xg = ttnn.all_gather(X, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear)
+            ttnn.deallocate(X)
+            X = Xg
         self.pos = p0 + T
         h, _ = self.head_hc.pre(X, mem)
         ttnn.deallocate(X)

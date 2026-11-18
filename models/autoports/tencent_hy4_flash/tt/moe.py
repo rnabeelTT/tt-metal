@@ -57,6 +57,18 @@ class Hy4DenseMLP:
         self.ar = AllReduce(mesh)
         self.ckc = ckc(mesh)
 
+    def forward_part(self, x, T=None, mem=None):
+        """forward() without the all-reduce and norm: the per-die down-projection partial."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
+        u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
+        h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+        ttnn.deallocate(g)
+        ttnn.deallocate(u)
+        part = ttnn.matmul(h, self.w2, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(h)
+        return part
+
     def forward(self, x, mem=None):
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
@@ -346,6 +358,41 @@ class Hy4MoE:
         ttnn.deallocate(part)
         return self.norm(full, mem)
 
+    def forward_part(self, x, T: int, mem=None):
+        """Prefill: forward() without the all-reduce and norm (the per-die partial [1, 1, Tp, 3072])."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        Tp = int(x.shape[-2])
+        scores, ids = self.route(x, mem)
+        xl = ttnn.matmul(x, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)
+        if getattr(self, "_sorted", None) is None:
+            from models.autoports.tencent_hy4_flash.tt.prefill_moe import SortedExperts
+
+            self._sorted = SortedExperts(self)
+        sub = int(os.environ.get("HY4_MOE_SUB", "2048"))  # the sorted dispatch admits ~3K rows at top-16 of 512
+        if Tp <= sub:
+            routed = self._sorted(xl, scores, ids, Tp, mem)
+        else:
+            parts = []
+            for r0 in range(0, Tp, sub):
+                r1 = min(Tp, r0 + sub)
+                sl = lambda t, w: ttnn.slice(t, (0, 0, r0, 0), (1, 1, r1, w), memory_config=mem)  # noqa: E731
+                xs, ss, is_ = sl(xl, self.L), sl(scores, self.k), sl(ids, self.k)
+                parts.append(self._sorted(xs, ss, is_, r1 - r0, mem))
+                for t_ in (xs, ss, is_):
+                    ttnn.deallocate(t_)
+            routed = ttnn.concat(parts, dim=2, memory_config=mem)
+            for t_ in parts:
+                ttnn.deallocate(t_)
+        for t_ in (xl, scores, ids):
+            ttnn.deallocate(t_)
+        up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)
+        ttnn.deallocate(routed)
+        sh = self._shared(x, mem)
+        part = ttnn.add(up, sh, memory_config=mem)
+        ttnn.deallocate(up)
+        ttnn.deallocate(sh)
+        return part
+
     def forward(self, x, T: int, mem=None):
         """x [1, 1, Tp, 3072] bf16 replicated (normed); rows >= T are padding. -> [1, 1, Tp, 3072] replicated."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
@@ -356,6 +403,13 @@ class Hy4MoE:
             routed = self._gather(xl, scores, ids, T, mem)
             if Tp != T:
                 routed = ttnn.pad(routed, [(0, 0), (0, 0), (0, Tp - T), (0, 0)], value=0.0)
+        elif os.environ.get("HY4_MOE_SORTED", "1") == "1":
+            # prefill: expert-sorted dispatch + one grouped sparse matmul per projection (tt/prefill_moe.py)
+            if getattr(self, "_sorted", None) is None:
+                from models.autoports.tencent_hy4_flash.tt.prefill_moe import SortedExperts
+
+                self._sorted = SortedExperts(self)
+            routed = self._sorted(xl, scores, ids, Tp, mem)
         else:
             routed = self._masked(xl, scores, ids, Tp, mem)
         ttnn.deallocate(xl)

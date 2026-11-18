@@ -130,12 +130,29 @@ class Hy4Attention:
     def _cache_row(self, pos: np.ndarray) -> np.ndarray:
         return pos if self.kind == "sparse" else pos % self.rows
 
-    def index_lists(self, p0: int, T: int, selected: np.ndarray | None) -> torch.Tensor:
+    def index_lists(self, p0: int, T: int, selected: np.ndarray | None, Tp: int | None = None) -> torch.Tensor:
         """[1, 1, Tp, K] uint32 per query row p = p0 + s: [sink | keys... | sentinels]. keys: every position <= p
         (dense: sparse layers with p < 2048), the window (p - 511 .. p) for SWA, or the indexer's 511 groups x 4 +
         the query's own group up to p (selected[s] = the row's group ids, sorted by score)."""
         cfg = self.cfg
-        Tp = -(-T // 32) * 32
+        Tp = Tp or -(-T // 32) * 32
+        key = None
+        if selected is None or self.kind == "swa":  # position-only lists: shared by every layer of the kind
+            key = (self.kind, p0, T, Tp, self.rows, self.sink_row)
+            hit = Hy4Attention._IDX_CACHE.get(key)
+            if hit is not None:
+                return hit
+        out = self._index_lists(p0, T, selected, Tp)
+        if key is not None:
+            if len(Hy4Attention._IDX_CACHE) > 8:
+                Hy4Attention._IDX_CACHE.clear()
+            Hy4Attention._IDX_CACHE[key] = out
+        return out
+
+    _IDX_CACHE = {}
+
+    def _index_lists(self, p0, T, selected, Tp):
+        cfg = self.cfg
         if self.kind == "swa":
             K = -(-(cfg.window + 1) // K_CHUNK) * K_CHUNK
         else:
@@ -232,6 +249,95 @@ class Hy4Attention:
         return self.post_norm(full, mem)
 
     # ------------------------------------------------------------------ eager (prefill)
+    def forward_part(self, x, p0: int, T: int, cos_sin, mem=None):
+        """forward() without its all-reduce and post norm: the per-die o_proj partial [1, 1, Tp, 3072] (the row-split
+        prefill reduce-scatters it over rows and norms each die's rows)."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        cos, sin = cos_sin[self.kind]
+        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
+        row = self._kv_row(x, cos, sin, mem)
+        row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        ttnn.deallocate(row)
+        self._write_rows(row_rm, p0, T)
+        ttnn.deallocate(row_rm)
+        Tp = int(x.shape[-2])
+        selected = None
+        if self.indexer is not None:
+            tail = self._idx_tail(p0, T, Tp) if p0 >= self.cfg.idx_candidate_topk else None
+            selected = self.indexer.forward(x, q_resid, p0, T, mem, tail=tail)
+        ttnn.deallocate(q_resid)
+        if isinstance(selected, tuple):  # the device-built lists of a selecting chunk
+            idx, shared = selected[1], False
+        else:
+            idx, shared = self._idx_device(p0, T, selected, Tp)
+        qs = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)
+        qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)
+        for t_ in (qs, q_lat, q_rope):
+            ttnn.deallocate(t_)
+        if self.Hp != self.Hd:
+            q2 = ttnn.concat([qcat, self._zeros((1, self.Hp - self.Hd, Tp, self.width))], dim=1, memory_config=mem)
+            ttnn.deallocate(qcat)
+            qcat = q2
+        q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(qcat)
+        o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc)
+        ttnn.deallocate(q_rm)
+        if not shared:
+            ttnn.deallocate(idx)
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
+        ttnn.deallocate(o)
+        o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(o2)
+        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(o)
+        ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
+        g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
+        gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        ttnn.deallocate(ov)
+        ttnn.deallocate(g)
+        part = ttnn.matmul(gated, self.wo, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(gated)
+        return part
+
+    _IDX_DEV = {}
+
+    def _idx_tail(self, p0, T, Tp):
+        """[1, 1, Tp, K - 2044] uint32: per row [sink, own group's positions up to p, sentinels] (device, shared by the
+        sparse layers of the chunk)."""
+        cfg = self.cfg
+        key = (id(self.mesh), "tail", p0, T, Tp, self.sink_row)
+        t = Hy4Attention._IDX_DEV.get(key)
+        if t is None:
+            for k in [k for k in Hy4Attention._IDX_DEV if k[1] == "tail"]:
+                ttnn.deallocate(Hy4Attention._IDX_DEV.pop(k))
+            K = -(-(cfg.idx_candidate_topk + 1) // K_CHUNK) * K_CHUNK
+            n_sel = (cfg.idx_group_topk - 1) * cfg.idx_ratio
+            tail = np.full((Tp, K - n_sel), SENTINEL, dtype=np.uint32)
+            tail[:, 0] = self.sink_row
+            for s_ in range(Tp):
+                p = p0 + min(s_, T - 1)
+                own = np.arange((p // cfg.idx_ratio) * cfg.idx_ratio, p + 1)
+                tail[s_, 1 : 1 + own.size] = own
+            t = Hy4Attention._IDX_DEV[key] = upload(self.mesh, torch.from_numpy(tail.view(np.int32)).reshape(1, 1, Tp, -1),
+                                                    ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        return t
+
+    def _idx_device(self, p0, T, selected, Tp):
+        """The chunk's index lists on the device. Position-only lists (SWA, dense) are uploaded once per chunk and shared
+        by every layer of the kind (-> (tensor, True)); selection lists are per layer (-> (tensor, False))."""
+        if selected is not None and self.kind != "swa":
+            return upload(self.mesh, self.index_lists(p0, T, selected, Tp), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT), False
+        key = (id(self.mesh), self.kind, p0, T, Tp, self.rows, self.sink_row)
+        t = Hy4Attention._IDX_DEV.get(key)
+        if t is None:
+            stale = [k for k in Hy4Attention._IDX_DEV if k[1] == self.kind]
+            for k in stale:  # one chunk at a time per kind
+                ttnn.deallocate(Hy4Attention._IDX_DEV.pop(k))
+            t = Hy4Attention._IDX_DEV[key] = upload(self.mesh, self.index_lists(p0, T, None, Tp), ttnn.uint32,
+                                                    ttnn.ROW_MAJOR_LAYOUT)
+        return t, True
+
     def forward(self, x, p0: int, T: int, cos_sin, mem=None):
         """x: [1, 1, Tp, 3072] bf16 replicated (normed attention input), rows p0 .. p0 + T - 1 real (Tp = T padded to
         32). cos_sin: {kind: (cos, sin)} fp32 [1, 1, Tp, 64] device tables of these positions (shared by the layers).
