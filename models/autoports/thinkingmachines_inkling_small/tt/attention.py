@@ -31,6 +31,7 @@ import ttnn
 
 from models.autoports.thinkingmachines_inkling_small.tt import relbias
 from models.autoports.thinkingmachines_inkling_small.tt.attn.inkling_sdpa import inkling_sdpa_decode
+from models.autoports.thinkingmachines_inkling_small.tt.rows_mm import rows_linear
 from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
 
 L1 = ttnn.L1_MEMORY_CONFIG
@@ -233,7 +234,7 @@ class InklingAttention:
         tau [1, 1, 1, 1] (global layers past 128K, else None). -> [1, 1, 1, H/N] fractured (reduce) or the [1, 1, 1, H]
         partial sum."""
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
-        p = ttnn.linear(x, self.w_qkvr, compute_kernel_config=self.ckc, memory_config=L1)  # [1, 1, 1, fd]
+        p = rows_linear(x, self.w_qkvr, self.mesh, self.ckc, L1, tag="qkv")  # [1, 1, 1, fd]
         qd, kd, rd = self.qd, self.kd, self.rd
         q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, 1, qd), memory_config=L1)
         k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, 1, qd + kd), memory_config=L1)
@@ -275,7 +276,7 @@ class InklingAttention:
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, 1, NH * HD))
-        part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)  # [1, 1, 1, H] partial
+        part = rows_linear(o, self.w_o, self.mesh, self.ckc, DRAM, tag="o")  # [1, 1, 1, H] partial
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
             return part
@@ -296,7 +297,7 @@ class InklingAttention:
         NH, NKV, HD, DR = self.NH, self.NKV, self.HD, self.DREL
         R = int(x.shape[2])
         assert R * (NH // NKV) <= 32, f"{R} rows x {NH // NKV} q heads per kv head must fit one tile"
-        p = ttnn.linear(x, self.w_qkvr, compute_kernel_config=self.ckc, memory_config=L1)  # [1, 1, R, fd]
+        p = rows_linear(x, self.w_qkvr, self.mesh, self.ckc, L1, tag="qkv")  # [1, 1, R, fd]
         qd, kd, rd = self.qd, self.kd, self.rd
         q = ttnn.slice(p, (0, 0, 0, 0), (1, 1, R, qd), memory_config=L1)
         k = ttnn.slice(p, (0, 0, 0, qd), (1, 1, R, qd + kd), memory_config=L1)
@@ -349,7 +350,7 @@ class InklingAttention:
         ttnn.deallocate(q_in)
         ttnn.deallocate(rq)
         o = ttnn.reshape(o, (1, 1, R, NH * HD))
-        part = ttnn.linear(o, self.w_o, compute_kernel_config=self.ckc, memory_config=DRAM)
+        part = rows_linear(o, self.w_o, self.mesh, self.ckc, DRAM, tag="o")
         ttnn.deallocate(o)
         if not reduce or self.N == 1:
             return part

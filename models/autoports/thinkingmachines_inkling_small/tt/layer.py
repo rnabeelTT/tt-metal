@@ -20,6 +20,7 @@ import torch
 import ttnn
 
 from models.autoports.minimaxai_minimax_m2_7.tt.layer import Qwen35MoeDecoderLayer as _M27Layer
+from models.autoports.thinkingmachines_inkling_small.tt.rows_mm import rows_linear
 from models.autoports.thinkingmachines_inkling_small.tt.attention import InklingAttention
 from models.autoports.thinkingmachines_inkling_small.tt.sconv import ShortConv
 from models.demos.blackhole.qwen36.utils.substate import substate
@@ -84,12 +85,12 @@ class InklingDenseMLP:
         if x.is_sharded():
             x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         mc = ttnn.L1_MEMORY_CONFIG if int(x.shape[-2]) <= 32 else ttnn.DRAM_MEMORY_CONFIG
-        g = ttnn.linear(x, self.w1, compute_kernel_config=self.ckc, memory_config=mc)
-        u = ttnn.linear(x, self.w3, compute_kernel_config=self.ckc, memory_config=mc)
+        g = rows_linear(x, self.w1, self.mesh, self.ckc, mc, tag="dense")
+        u = rows_linear(x, self.w3, self.mesh, self.ckc, mc, tag="dense")
         h = ttnn.multiply(g, u, input_tensor_a_activations=[ttnn.UnaryOpType.SILU], memory_config=mc)
         ttnn.deallocate(g)
         ttnn.deallocate(u)
-        part = ttnn.linear(h, self.w2, compute_kernel_config=self.ckc, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        part = rows_linear(h, self.w2, self.mesh, self.ckc, ttnn.DRAM_MEMORY_CONFIG, tag="dense")
         ttnn.deallocate(h)
         if self.N == 1:
             return part
