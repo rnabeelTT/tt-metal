@@ -65,6 +65,38 @@ def test_gptq_on_grid_and_lower_output_error():
     assert out(Q) < 0.9 * out(B.rtne(W))
 
 
+def naive_gptq(W, H, damp):
+    """textbook GPTQ (one column at a time, error pushed straight into every later column)"""
+    W = W.float().clone()
+    n = H.shape[0]
+    H = H.double() + damp * torch.mean(torch.diag(H.double())) * torch.eye(n, dtype=torch.float64)
+    U = torch.linalg.cholesky(torch.cholesky_inverse(torch.linalg.cholesky(H)), upper=True).float()
+    Q = torch.empty_like(W)
+    for i in range(n):
+        Q[:, i] = B.q_groups(W[:, i].view(-1, 16)).view(-1)
+        err = (W[:, i] - Q[:, i]) / U[i, i]
+        W[:, i:] -= err[:, None] * U[i, i:][None]
+    return Q
+
+
+def test_gptq_blocked_batched_matches_textbook():
+    """the blocked, in-place, expert-batched GPTQ is the textbook algorithm (up to float summation order)"""
+    torch.manual_seed(3)
+    I, O, T, E = 80, 32, 2048, 3  # 80 columns: several blocks and sub-blocks with block=32, sub=8
+    Hs, Ws = [], []
+    for _ in range(E):
+        X = torch.randn(T, I) @ (torch.randn(I, I) * 0.3 + torch.eye(I))
+        Hs.append(X.t() @ X)
+        Ws.append(torch.randn(O, I) * 0.02)
+    Hs, Ws = torch.stack(Hs), torch.stack(Ws)
+    got = B.gptq(Ws, Hs, 0.1, block=32, sub=8)
+    for e in range(E):
+        ref = naive_gptq(Ws[e], Hs[e], 0.1)
+        assert (got[e] != ref).float().mean() < 1e-3
+    shared = B.gptq(Ws, Hs[:1], 0.1, block=32, sub=8)  # one H for every batch entry
+    assert (shared[1] != naive_gptq(Ws[1], Hs[0], 0.1)).float().mean() < 1e-3
+
+
 def test_gptq_rejects_empty_hessian():
     with pytest.raises(ValueError):
         B.gptq(torch.randn(16, 8), torch.zeros(8, 8), damp=0.1)

@@ -73,22 +73,26 @@ def main():
 
     for L in layers:
         t0 = time.time()
-        ids = sorted(order[L, int(S) :].tolist())
-        done = 0
-        for e in ids:
+        ids = [
+            e
+            for e in sorted(order[L, int(S) :].tolist())
+            if not os.path.exists(os.path.join(out, f"{L}_{e}_dn.tensorbin"))
+        ]
+        if ids:
+            pre = f"model.layers.{L}.block_sparse_moe.experts."
+            gu = torch.stack(
+                [torch.cat([get(f"{pre}{e}.w1.weight"), get(f"{pre}{e}.w3.weight")]) for e in ids]
+            )  # [n, 2N, H]
+            dn = torch.stack([get(f"{pre}{e}.w2.weight") for e in ids])  # [n, H, N]
+            # HYB_BFP4_ROUND: grid values, or None (the layer's experts round together: the GPTQ methods batch them)
+            qg = round_experts(L, "gu", gu, experts=ids)
+            qd = round_experts(L, "dn", dn, experts=ids, gate_up=gu)
+            gu, dn = (gu if qg is None else qg), (dn if qd is None else qd)
+        N = gu.shape[1] // 2 if ids else 0
+        for j, e in enumerate(ids):
             p = os.path.join(out, f"{L}_{e}")
-            if os.path.exists(p + "_dn.tensorbin"):
-                continue
-            pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
-            gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
-            N, H = gate.shape
-            gu0 = torch.cat([gate, up])[None]
-            q = round_experts(L, "gu", gu0, experts=[e])  # HYB_BFP4_ROUND: grid values, or None
-            if q is not None:
-                gate, up = q[0, :N], q[0, N:]
-            q = round_experts(L, "dn", down[None], experts=[e], gate_up=gu0)
-            if q is not None:
-                down = q[0]
+            gate, up, down = gu[j, :N], gu[j, N:], dn[j]  # [N,H] [N,H] [H,N]
+            H = gate.shape[1]
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]
             packed = torch.cat(
@@ -97,9 +101,8 @@ def main():
             )  # [H, TP * 2 Nl]
             dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1)
             dump(p + "_dn.tensorbin", round_sig(down.T.contiguous()).reshape(1, 1, N, H), -2)
-            done += 1
         handles.clear()
-        print(f"layer {L}: {done} of {len(ids)} experts in {time.time() - t0:.0f}s", flush=True)
+        print(f"layer {L}: {len(ids)} experts in {time.time() - t0:.0f}s", flush=True)
 
 
 if __name__ == "__main__":

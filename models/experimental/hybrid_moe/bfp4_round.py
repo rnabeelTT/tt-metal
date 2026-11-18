@@ -106,19 +106,15 @@ def _cal(layer, cfg):
 def q_groups(v, search=True):
     """v [..., 16] -> the nearest bfp4 grid values (search: also the exponent one lower, per group, least squared
     error)."""
-    e = torch.floor(torch.log2(v.abs().amax(-1, keepdim=True).clamp_min(1e-30)))
-    best = best_err = None
-    for de in (0, -1) if search else (0,):
-        step = torch.pow(2.0, e + de - 2)
-        q = torch.clamp(torch.round(v / step), -7, 7) * step
-        err = ((q - v) ** 2).sum(-1, keepdim=True)
-        if best is None:
-            best, best_err = q, err
-        else:
-            better = err < best_err
-            best = torch.where(better, q, best)
-            best_err = torch.where(better, err, best_err)
-    return best
+    _, ex = torch.frexp(v.abs().amax(-1, keepdim=True))  # amax = m * 2^ex, m in [0.5, 1): floor(log2 amax) = ex - 1
+    step = torch.ldexp(torch.ones_like(v[..., :1]), ex - 3)  # 2^(e - 2); an all-zero group rounds to 0 either way
+    q = torch.clamp(torch.round(v / step), -7, 7) * step
+    if not search:
+        return q
+    step = step * 0.5
+    q1 = torch.clamp(torch.round(v / step), -7, 7) * step
+    better = ((q1 - v) ** 2).sum(-1, keepdim=True) < ((q - v) ** 2).sum(-1, keepdim=True)
+    return torch.where(better, q1, q)
 
 
 def rtne(W):
@@ -128,36 +124,50 @@ def rtne(W):
     return q_groups(Wt).reshape(*W.shape[:-2], I, O).transpose(-1, -2).contiguous()
 
 
-def gptq(W, H, damp, block=128):
-    """W [rows, in] (rows: any number of `out` groups of 16, e.g. many experts stacked) with one shared H [in, in].
-    Works on W transposed, so the column being rounded and the ones its error updates are contiguous rows (2x faster
-    than the row-major loop, same values)."""
-    Wt = W.float().t().contiguous()  # [in, rows]
+def gptq(W, H, damp, block=256, sub=32):
+    """GPTQ of W [E, rows, in] (rows: any number of `out` groups of 16) with H [E or 1, in, in] (one per batch entry,
+    or one shared): the experts of a chunk run each column step together. Works on W transposed, so the column
+    being rounded and the ones its error updates are contiguous; inside a block of `block` columns the error reaches
+    the next `sub` columns directly and the rest of the block, then the columns after it, by in-place GEMMs."""
+    if W.dim() == 2:
+        return gptq(W[None], H[None], damp, block, sub)[0]
+    Wt = W.float().transpose(1, 2).contiguous()  # [E, n, R]
+    E, n, R = Wt.shape
     H = H.double().clone()
-    n = H.shape[0]
-    dead = torch.diag(H) == 0
-    if dead.all():
-        raise ValueError(f"gptq: the Hessian is all zero ({n} columns): no calibration tokens reached this weight")
-    H[dead, dead] = 1
-    Wt[dead] = 0
-    H += damp * torch.mean(torch.diag(H)) * torch.eye(n, dtype=H.dtype)
-    Hinv = torch.linalg.cholesky(torch.cholesky_inverse(torch.linalg.cholesky(H)), upper=True).float()
+    d = torch.diagonal(H, dim1=1, dim2=2)
+    dead = d == 0
+    if dead.all(-1).any():
+        raise ValueError(f"gptq: a Hessian is all zero ({n} columns): no calibration tokens reached this weight")
+    d[dead] = 1
+    if H.shape[0] == E:
+        Wt[dead] = 0
+    else:
+        Wt[:, dead[0]] = 0
+    d += damp * d.mean(-1, keepdim=True)
+    U = torch.linalg.cholesky(torch.cholesky_inverse(torch.linalg.cholesky(H)), upper=True).float()
+    diag = torch.diagonal(U, dim1=1, dim2=2).expand(E, n)
+    Ut = U.transpose(1, 2).contiguous().expand(E, n, n)  # lower: Ut[k, i] = U[i, k]
     Qt = torch.empty_like(Wt)
-    R = Wt.shape[1]
+    Err = torch.empty(E, block, R)
     for i1 in range(0, n, block):
         i2 = min(i1 + block, n)
-        W1 = Wt[i1:i2].clone()
-        Err1 = torch.empty_like(W1)
-        Hi = Hinv[i1:i2, i1:i2]
-        for i in range(i2 - i1):
-            w = W1[i]
-            q = q_groups(w.view(R // 16, 16)).view(R)
-            Qt[i1 + i] = q
-            err = (w - q) / Hi[i, i]
-            W1[i:] -= Hi[i, i:, None] * err[None]
-            Err1[i] = err
-        Wt[i2:] -= Hinv[i1:i2, i2:].t() @ Err1
-    return Qt.t()
+        W1 = Wt[:, i1:i2]
+        for j1 in range(0, i2 - i1, sub):
+            j2 = min(j1 + sub, i2 - i1)
+            for i in range(j1, j2):
+                w = W1[:, i]
+                q = q_groups(w.view(E, R // 16, 16)).view(E, R)
+                Qt[:, i1 + i] = q
+                err = Err[:, i]
+                torch.sub(w, q, out=err)
+                err /= diag[:, i1 + i, None]
+                if i + 1 < j2:
+                    W1[:, i + 1 : j2] -= Ut[:, i1 + i + 1 : i1 + j2, i1 + i, None] * err[:, None]
+            if j2 < i2 - i1:
+                W1[:, j2:].baddbmm_(Ut[:, i1 + j2 : i2, i1 + j1 : i1 + j2], Err[:, j1:j2], alpha=-1)
+        if i2 < n:
+            Wt[:, i2:].baddbmm_(Ut[:, i2:, i1:i2], Err[:, : i2 - i1], alpha=-1)
+    return Qt.transpose(1, 2)
 
 
 def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None):
@@ -176,19 +186,26 @@ def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None
         h, idx = _cal(layer, cfg)
         if kind == "dn" and gate_up is None:
             raise ValueError(f"HYB_BFP4_ROUND: gptqe on layer {layer} down needs the experts' gate|up (gate_up=)")
-        ids = range(E) if experts is None else experts
-        out = []
+        ids = list(range(E) if experts is None else experts)
+        out = torch.empty_like(W)
+        Hs, js = [], []
         for j, e in enumerate(ids):
             x = h[(idx == int(e)).any(-1)]
             if x.shape[0] < MIN_TOK:
-                out.append(rtne(W[j : j + 1]).to(W.dtype))
+                out[j] = rtne(W[j : j + 1])[0].to(W.dtype)
                 continue
             if kind == "dn":
                 g = gate_up[j].float()
                 N = g.shape[0] // 2
                 x = torch.nn.functional.silu(x @ g[:N].t()) * (x @ g[N:].t())
-            out.append(gptq(W[j].float(), x.t() @ x, damp)[None].to(W.dtype))
-        return torch.cat(out)
+            Hs.append(x.t() @ x)
+            js.append(j)
+            if len(js) == chunk:
+                out[js] = gptq(W[js], torch.stack(Hs), damp).to(W.dtype)
+                Hs, js = [], []
+        if js:
+            out[js] = gptq(W[js], torch.stack(Hs), damp).to(W.dtype)
+        return out
     if m.startswith("gptq"):
         if kind != "gu":
             raise ValueError(f"HYB_BFP4_ROUND: {m!r} (layer-wide Hessian) is for gate|up only; use gptqe on down")
@@ -197,7 +214,7 @@ def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None
         H = h.t() @ h
         out = []
         for e0 in range(0, E, chunk):
-            Wc = W[e0 : e0 + chunk].float().reshape(-1, I)  # shared H: experts stack along the rows
-            out.append(gptq(Wc, H, damp).reshape(-1, O, I).to(W.dtype))
+            Wc = W[e0 : e0 + chunk].reshape(1, -1, I)  # shared H: experts stack along the rows
+            out.append(gptq(Wc, H[None], damp)[0].reshape(-1, O, I).to(W.dtype))
         return torch.cat(out)
     raise ValueError(f"HYB_BFP4_ROUND: unknown method {m!r} for layer {layer} {kind}")
