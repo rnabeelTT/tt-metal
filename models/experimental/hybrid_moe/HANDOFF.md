@@ -238,6 +238,28 @@ Pieces (all traced, per-prompt re-capture):
   fixed: per core ~10 us per 128-token chunk of compute (QK, softmax, PV; the reader runs ~3.5 GB/s per core) and a
   ~30 us six-round tree reduction over 55 cores. Not pursued (user, 2026-11-16): a cheaper tree ~3-4% at 44K;
   approx exp / lower fidelity needs the quality gate.
+- v1.11 PUBLISHED (2026-11-18, image 1f029208ef76 from 91a8759ba10, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.10's kept as serve_default_running_v110.cmd): v1.10 + error-aware bfp4 rounding of the
+  device experts (bfp4_round.py, HYB_BFP4_ROUND=plans/bfp4_recipe.json: gate|up GPTQ with the layer Hessian, damping
+  0.1, layers 1/3/5-8/60/61 the experts' own; down GPTQ with each expert's routed Hessian, damping 0.3; rtne under 64
+  calibration tokens). Recipe picked per layer on study4's selection split; CPU model-level vs BF16 on held-out text
+  (4 code + 8 chat x 1024): KL 0.0797 -> 0.0603, top-1 0.8917 -> 0.9044, NLL 1.884 -> 1.867 (BF16 1.869). Served
+  forced 4 prompts (ref_fb2, 735 positions): top-1 0.8898 -> 0.9034, KL mean 0.0351 -> 0.0329, median 0.0192 ->
+  0.0160. Card (~/m27-pkg/q1/card_fix.out, cards_fix.out): short 83.3 / sampled 64.8 tok/s; 44.7K first 46.2 (TTFT
+  20.7 s), resent 49.5; 85K first 37.5 (TTFT 58.0 s), resent 41.4; sampled 44.7K 38.2 (N = 1; 40.5 in the run
+  before). First boot: + calibration capture (bfp4_calib.py, 24 x 1024 tokens of plans/bfp4_cal_tokens.npy through
+  the CPU reference, ~15 min, HYB_BFP4_CAL=/weight-cache/bfp4_cal, 8.8 GB) and GPTQ in every conversion (dev copies
+  dev_s152_q, 62 layer images): ~1.5 h more than v1.10. Bugs found shipping it:
+  - the hybrid state dict holds a layer's resident experts in slot order (HYB.plan, -1 = empty / sink), so gptqe
+    read row j as expert j and the all-zero sink stopped the boot (52980da52c6: patch.py passes experts=HYB.plan(L));
+  - a full disk made the image write return short and the truncated image was renamed into place (99bf6b04550:
+    _write_all / _write_image);
+  - an elastic demotion whose on-device gather does not fit loads the layer's hybrid image, and a missing one was
+    converted (GPTQ, ~65 s per layer) while the request waited: 85K TTFT 123 s (91a8759ba10: the missing hybrid image
+    is cut from the full image on the host, the gather's bytes; gate|up identical to a conversion, down differs in
+    a few bytes of a few experts: GPTQ's batched float order).
+  Orphaned on this box by v1.11: the v1.10 wcache entries (non-.q keys) and int4 / dev builds are kept for rollback
+  except dev_s152 (deleted for disk room; a v1.10 rollback rebuilds it on boot).
 - v1.10 BUILT, SERVING HERE, NOT PUSHED TO HF (2026-11-17, image 84de706535cf from e39472160b3; launch cmd ~/m27-pkg/
   serve_default_running.cmd, v1.9's kept as serve_default_running_v19.cmd): v1.9 + the suffix drafts. The first build
   (f0c990a4a674, from 65f8c420c5f) failed at engine start: the manifest did not list suffix_draft.py. Served card
