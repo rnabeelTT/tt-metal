@@ -285,8 +285,9 @@ Pieces (all traced, per-prompt re-capture):
     converted (GPTQ, ~65 s per layer) while the request waited: 85K TTFT 123 s (91a8759ba10: the missing hybrid image
     is cut from the full image on the host, the gather's bytes; gate|up identical to a conversion, down differs in
     a few bytes of a few experts: GPTQ's batched float order).
-  Orphaned on this box by v1.11: the v1.10 wcache entries (non-.q keys) and int4 / dev builds are kept for rollback
-  except dev_s152 (deleted for disk room; a v1.10 rollback rebuilds it on boot).
+  Disk cleanup (2026-11-18, disk full): deleted the v1.10 and older wcache entries (only v1.11's 166 images remain),
+  dev_s152, the v1.10 / v1.9 images and the dev runner's ~/.cache/hybrid-moe/minimax_m27_* + wcache_m27 (296 GB;
+  run_m27_dflash.sh's /hyblib libraries must be rebuilt to use it). A v1.10 rollback is a full first boot.
 - v1.10 BUILT, SERVING HERE, NOT PUSHED TO HF (2026-11-17, image 84de706535cf from e39472160b3; launch cmd ~/m27-pkg/
   serve_default_running.cmd, v1.9's kept as serve_default_running_v19.cmd): v1.9 + the suffix drafts. The first build
   (f0c990a4a674, from 65f8c420c5f) failed at engine start: the manifest did not list suffix_draft.py. Served card
