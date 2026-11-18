@@ -82,10 +82,11 @@ def main():
             pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
             gate, up, down = get(pre + "w1.weight"), get(pre + "w3.weight"), get(pre + "w2.weight")  # [N,H] [N,H] [H,N]
             N, H = gate.shape
-            q = round_experts(L, "gu", torch.cat([gate, up])[None])  # HYB_BFP4_ROUND: grid values, or None
+            gu0 = torch.cat([gate, up])[None]
+            q = round_experts(L, "gu", gu0, experts=[e])  # HYB_BFP4_ROUND: grid values, or None
             if q is not None:
                 gate, up = q[0, :N], q[0, N:]
-            q = round_experts(L, "dn", down[None])
+            q = round_experts(L, "dn", down[None], experts=[e], gate_up=gu0)
             if q is not None:
                 down = q[0]
             Nl = N // TP

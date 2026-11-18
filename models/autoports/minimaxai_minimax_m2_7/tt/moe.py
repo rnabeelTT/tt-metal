@@ -316,10 +316,11 @@ class Qwen35MoE:
             if (
                 qhook is not None
             ):  # grid values: round_sig (rnd) leaves them unchanged and the packer keeps them exactly
+                gate_up0 = gate_up  # down's per-expert rounding reads the experts' unrounded gate|up
                 if self.prec.routed_gate_up == ttnn.bfloat4_b:
                     gate_up = _or(qhook.round_experts(layer_num, "gu", gate_up), gate_up)
                 if self.prec.routed_down == ttnn.bfloat4_b:
-                    down = _or(qhook.round_experts(layer_num, "dn", down), down)
+                    down = _or(qhook.round_experts(layer_num, "dn", down, gate_up=gate_up0), down)
             gate_t = gate_up[:, :N, :].transpose(1, 2)  # [E, H, N]
             up_t = gate_up[:, N:, :].transpose(1, 2)  # [E, H, N]
 

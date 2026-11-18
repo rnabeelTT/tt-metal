@@ -8,13 +8,18 @@ weight to 5 significant bits (moe_decode.fused.round_sig) and lets ttnn's packer
 and round to nearest. Values already on that grid pack exactly (checked on a p300 board, ~/m27-pkg/bfp4q/t_pack.py), so
 any rounding that returns grid values changes only which grid point each weight takes:
 
-    rtne     per group, e = the largest value's exponent or one less (that value then clips to 7 steps), whichever has
-             the smaller squared error; round to nearest within it.
-    gptq<d>  GPTQ over the input columns with a calibration Hessian H = sum x x^T (damping d * mean diag H); each column
-             is rounded as above and its error is pushed into the columns not yet rounded. Needs <dir>/H_<L>_<kind>.pt.
+    rtne      per group, e = the largest value's exponent or one less (that value then clips to 7 steps), whichever
+              has the smaller squared error; round to nearest within it.
+    gptq<d>   GPTQ over the input columns with the layer's calibration Hessian H = sum x x^T over every calibration
+              token (damping d * mean diag H); each column is rounded as above and its error is pushed into the
+              columns not yet rounded. gate|up only (its input is the layer's MoE input, shared by all experts).
+    gptqe<d>  GPTQ with the expert's own Hessian: the calibration tokens routed to it (gate|up: their MoE inputs; down:
+              silu(x g^T) * (x u^T) through the expert's unrounded gate|up). rtne for an expert with fewer than
+              MIN_TOK routed tokens.
 
-HYB_BFP4_ROUND: unset / "" -> the default conversion; "rtne" -> rtne everywhere; a .json path -> {"default": method,
-"layers": {"<L>": {"gu": method, "dn": method}}} with HYB_BFP4_H=<dir> holding the Hessians gptq methods need.
+HYB_BFP4_ROUND: unset / "" -> the default conversion; "rtne" -> rtne everywhere; a .json path -> {"default": method or
+{"gu": method, "dn": method}, "layers": {"<L>": {"gu": method, "dn": method}}}. gptq methods read the calibration
+capture HYB_BFP4_CAL=<dir>/cal_<L>.pt: {"h": [T, H] the layer's MoE inputs, "idx": [T, k] the routed expert ids}.
 Weights are [E, out, in] (gate|up: [E, 2N, H]; down: [E, H, N]): groups run along `out`, as in the device layout.
 """
 
@@ -36,7 +41,7 @@ def _cfg():
             c = json.load(f)
     else:
         c = {"default": spec, "layers": {}}
-    c["hdir"] = os.environ.get("HYB_BFP4_H", "")
+    c["cal"] = os.environ.get("HYB_BFP4_CAL", "")
     return c
 
 
@@ -45,7 +50,8 @@ def method(layer, kind, cfg=None):
     cfg = cfg if cfg is not None else _cfg()
     if cfg is None:
         return None
-    return cfg["layers"].get(str(layer), {}).get(kind, cfg["default"])
+    d = cfg["default"]
+    return cfg["layers"].get(str(layer), {}).get(kind, d[kind] if isinstance(d, dict) else d)
 
 
 def tag(layer, cfg=None):
@@ -57,12 +63,33 @@ def tag(layer, cfg=None):
     if all(m is None or m == "default" for m in ms):
         return ""
     h = hashlib.sha1(repr(ms).encode())
-    for kind, m in zip(("gu", "dn"), ms):
-        if m and m.startswith("gptq"):
-            p = os.path.join(cfg["hdir"], f"H_{layer}_{kind}.pt")
-            st = os.stat(p)
-            h.update(f"{p}:{st.st_size}:{int(st.st_mtime)}".encode())
+    if any(m and m.startswith("gptq") for m in ms):
+        p = _cal_path(layer, cfg)
+        st = os.stat(p)
+        h.update(f"{p}:{st.st_size}:{int(st.st_mtime)}".encode())
     return ".q" + h.hexdigest()[:10]
+
+
+MIN_TOK = 64
+_CAL = {}
+
+
+def _cal_path(layer, cfg):
+    if not cfg["cal"]:
+        raise ValueError(
+            f"HYB_BFP4_ROUND: layer {layer} uses a gptq method, but HYB_BFP4_CAL (the capture dir) is unset"
+        )
+    return os.path.join(cfg["cal"], f"cal_{layer}.pt")
+
+
+def _cal(layer, cfg):
+    """(h [T, H] float, idx [T, k] long) of the layer's calibration capture (the last layer's stays loaded)."""
+    p = _cal_path(layer, cfg)
+    if _CAL.get("path") != p:
+        c = torch.load(p)
+        _CAL.clear()
+        _CAL.update(path=p, h=c["h"].float(), idx=c["idx"].long())
+    return _CAL["h"], _CAL["idx"]
 
 
 def q_groups(v, search=True):
@@ -122,19 +149,41 @@ def gptq(W, H, damp, block=128):
     return Qt.t()
 
 
-def round_experts(layer, kind, W, cfg=None, chunk=32):
+def round_experts(layer, kind, W, cfg=None, chunk=32, experts=None, gate_up=None):
     """W [E, out, in] -> the layer's rounding of it as grid values [E, out, in] in W's dtype (bf16 holds every bfp4 grid
-    value exactly), or None for the default."""
+    value exactly), or None for the default. experts: the global expert ids of W's rows (default 0..E-1); gate_up: the
+    same experts' unrounded gate|up [E, 2N, H], which gptqe on down needs."""
     cfg = cfg if cfg is not None else _cfg()
     m = method(layer, kind, cfg)
     if m is None or m == "default":
         return None
+    E, O, I = W.shape
     if m == "rtne":
-        return torch.cat([rtne(W[e0 : e0 + chunk]).to(W.dtype) for e0 in range(0, W.shape[0], chunk)])
+        return torch.cat([rtne(W[e0 : e0 + chunk]).to(W.dtype) for e0 in range(0, E, chunk)])
+    if m.startswith("gptqe"):
+        damp = float(m[5:])
+        h, idx = _cal(layer, cfg)
+        if kind == "dn" and gate_up is None:
+            raise ValueError(f"HYB_BFP4_ROUND: gptqe on layer {layer} down needs the experts' gate|up (gate_up=)")
+        ids = range(E) if experts is None else experts
+        out = []
+        for j, e in enumerate(ids):
+            x = h[(idx == int(e)).any(-1)]
+            if x.shape[0] < MIN_TOK:
+                out.append(rtne(W[j : j + 1]).to(W.dtype))
+                continue
+            if kind == "dn":
+                g = gate_up[j].float()
+                N = g.shape[0] // 2
+                x = torch.nn.functional.silu(x @ g[:N].t()) * (x @ g[N:].t())
+            out.append(gptq(W[j].float(), x.t() @ x, damp)[None].to(W.dtype))
+        return torch.cat(out)
     if m.startswith("gptq"):
+        if kind != "gu":
+            raise ValueError(f"HYB_BFP4_ROUND: {m!r} (layer-wide Hessian) is for gate|up only; use gptqe on down")
         damp = float(m[4:])
-        H = torch.load(os.path.join(cfg["hdir"], f"H_{layer}_{kind}.pt"))
-        E, O, I = W.shape
+        h, _ = _cal(layer, cfg)
+        H = h.t() @ h
         out = []
         for e0 in range(0, E, chunk):
             Wc = W[e0 : e0 + chunk].float().reshape(-1, I)  # shared H: experts stack along the rows

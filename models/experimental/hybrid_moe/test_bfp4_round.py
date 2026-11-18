@@ -77,13 +77,51 @@ def test_config_methods_and_tag(tmp_path, monkeypatch):
     monkeypatch.setenv("HYB_BFP4_ROUND", "rtne")
     assert torch.equal(B.round_experts(0, "gu", W), B.rtne(W))
     assert B.tag(0).startswith(".q")
-    torch.save(torch.eye(16) * 4.0, tmp_path / "H_3_gu.pt")
+    torch.save(
+        {"h": torch.randn(256, 16).bfloat16(), "idx": torch.zeros(256, 2, dtype=torch.uint8)}, tmp_path / "cal_3.pt"
+    )
     cfg = {"default": "rtne", "layers": {"3": {"gu": "gptq0.1"}, "5": {"gu": "default", "dn": "default"}}}
     (tmp_path / "r.json").write_text(json.dumps(cfg))
     monkeypatch.setenv("HYB_BFP4_ROUND", str(tmp_path / "r.json"))
-    monkeypatch.setenv("HYB_BFP4_H", str(tmp_path))
+    monkeypatch.setenv("HYB_BFP4_CAL", str(tmp_path))
     assert B.method(3, "gu") == "gptq0.1" and B.method(3, "dn") == "rtne"
     assert B.round_experts(5, "gu", W) is None and B.tag(5) == ""
     assert B.tag(3) != B.tag(0) and on_grid(B.round_experts(3, "gu", W))
     Wb = W.bfloat16()
     assert B.round_experts(3, "gu", Wb).dtype == torch.bfloat16
+    (tmp_path / "d.json").write_text(json.dumps({"default": {"gu": "rtne", "dn": "gptq0.1"}, "layers": {}}))
+    monkeypatch.setenv("HYB_BFP4_ROUND", str(tmp_path / "d.json"))
+    assert B.method(7, "gu") == "rtne" and B.method(7, "dn") == "gptq0.1"
+    with pytest.raises(ValueError):  # the layer-wide Hessian is gate|up's input only
+        B.round_experts(3, "dn", W)
+
+
+def test_gptqe_per_expert(tmp_path, monkeypatch):
+    """gptqe: each expert's GPTQ uses only the tokens routed to it (down: through its unrounded gate|up); an expert with
+    too few tokens falls back to rtne; a subset of experts (build_dev_experts) rounds exactly like the whole layer."""
+    torch.manual_seed(2)
+    H, N, T = 32, 16, 600
+    h = (torch.randn(T, H) @ (torch.randn(H, H) * 0.3 + torch.eye(H))).bfloat16()
+    idx = torch.zeros(T, 2, dtype=torch.uint8)
+    idx[:, 0], idx[:, 1] = 0, 3  # experts 0 and 3 see every token, 1 sees 10 (< MIN_TOK), 2 none
+    idx[:10, 1] = 1
+    torch.save({"h": h, "idx": idx}, tmp_path / "cal_4.pt")
+    (tmp_path / "e.json").write_text(json.dumps({"default": {"gu": "gptqe0.1", "dn": "gptqe0.3"}, "layers": {}}))
+    monkeypatch.setenv("HYB_BFP4_ROUND", str(tmp_path / "e.json"))
+    monkeypatch.setenv("HYB_BFP4_CAL", str(tmp_path))
+    gu = torch.randn(4, 2 * N, H) * 0.05
+    dn = torch.randn(4, H, N) * 0.05
+    qg = B.round_experts(4, "gu", gu)
+    qd = B.round_experts(4, "dn", dn, gate_up=gu)
+    assert on_grid(qg) and on_grid(qd)
+    for e in (1, 2):
+        assert torch.equal(qg[e], B.rtne(gu[e : e + 1])[0]) and torch.equal(qd[e], B.rtne(dn[e : e + 1])[0])
+    x = h.float()
+    a = torch.nn.functional.silu(x @ gu[0, :N].t()) * (x @ gu[0, N:].t())
+    err = lambda M, W, inp: ((inp @ (M - W).t()) ** 2).sum()  # noqa: E731
+    assert err(qg[0], gu[0], x) < err(B.rtne(gu[:1])[0], gu[0], x)
+    assert err(qd[0], dn[0], a) < err(B.rtne(dn[:1])[0], dn[0], a)
+    sub = B.round_experts(4, "dn", dn[[3]], experts=[3], gate_up=gu[[3]])
+    assert torch.allclose(sub[0], qd[3])
+    with pytest.raises(ValueError):
+        B.round_experts(4, "dn", dn)  # down without the gate|up it reads
