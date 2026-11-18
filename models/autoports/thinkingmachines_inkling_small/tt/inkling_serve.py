@@ -35,6 +35,7 @@ import torch
 import ttnn
 from loguru import logger
 
+from models.autoports.thinkingmachines_inkling_small.tt import mm as mm_rows
 from models.autoports.thinkingmachines_inkling_small.tt.inkling_mtp import InklingMtp
 from models.autoports.thinkingmachines_inkling_small.tt.lazy_guard import LazyCacheGuard
 from models.autoports.thinkingmachines_inkling_small.tt.sampling import InklingSampler
@@ -478,7 +479,7 @@ class InklingSpecServing:
         return drafts, (None if smp.greedy else qs)
 
     # ------------------------------------------------------------------ warm-up / capture
-    def _mtp_prompt_hook(self, ids, start=0, snap=None):
+    def _mtp_prompt_hook(self, ids, start=0, snap=None, mm=None):
         """on_chunk for prefill_tokens: drafter depth 0 over the chunk's rows t (the target's normed hidden of t, the
         token at t + 1), committed past the real rows; ids = every prompt token (the one after the prefilled part too),
         start = the prefill's first position (the chunk offsets are relative to it); snap = the prefix-snapshot position.
@@ -498,7 +499,10 @@ class InklingSpecServing:
                 tail = torch.as_tensor(ids[c0 + 1 : c0 + 1 + n]).to(torch.int32)
                 nxt[: tail.numel()] = tail
                 e = model.embd(self._dev(self._ids_host(nxt.tolist())))
-                e = mtp._gather(ttnn.reshape(e, (1, 1, Tp, e.shape[-1])))
+                e = ttnn.reshape(e, (1, 1, Tp, e.shape[-1]))
+                if mm is not None:  # the drafter's input embedding of an image / audio position is its tower row
+                    e = mm_rows.merge(e, mm, c0 + 1, n, Tp, self.mesh, int(model.args.dim))
+                e = mtp._gather(e)
                 x_in = ttnn.concat([mtp._norm(h, dp.hn), mtp._norm(e, dp.en)], dim=-1)
                 for t in (h, e):
                     ttnn.deallocate(t)
@@ -512,7 +516,7 @@ class InklingSpecServing:
 
         return hook
 
-    def _prefill(self, ids, start=0, snap=None):
+    def _prefill(self, ids, start=0, snap=None, mm=None):
         """The target's prefill of ids[start:-1] (+ the drafter's prompt pass); the states must hold ids[:start].
         snap: a position (a chunk boundary past start) at which every layer's conv states are copied (prefix cache)."""
         hyb = _hyb()
@@ -522,7 +526,7 @@ class InklingSpecServing:
             )  # the streaming threshold / prefetch banking by prompt length
             if hyb.hostk:
                 hyb.hostk_threads = 0  # prefill: the host kernel's whole pool (compute-bound)
-        hook = self._mtp_prompt_hook(ids, start, snap) if self.mtp_prompt else None
+        hook = self._mtp_prompt_hook(ids, start, snap, mm) if self.mtp_prompt else None
         on_layer = None
         if snap is not None:
             on_layer = lambda li, end, part: self._px_save(li, part) if end == snap else None  # noqa: E731
@@ -534,6 +538,7 @@ class InklingSpecServing:
                 buckets=self.buckets,
                 on_chunk=hook,
                 on_layer=on_layer,
+                mm=mm,
             )
         finally:
             if self.captured and self.guard.purge():
@@ -557,13 +562,22 @@ class InklingSpecServing:
         for h, t in zip(px["rings"], self._px_rings):
             ttnn.copy_host_to_device_tensor(h, t)
 
-    def _px_match(self, prompt_ids):
-        """The prefix-cache entry whose first b tokens begin this prompt (b < len(prompt)), else None."""
+    @staticmethod
+    def _mm_key(mm):
+        """The prompt's media items as (first placeholder position, identifier): a prefix with images / audio matches
+        only the same items at the same places (their placeholder token ids are the same for any content)."""
+        return [] if mm is None else list(mm["keys"])
+
+    def _px_match(self, prompt_ids, mmkey=()):
+        """The prefix-cache entry whose first b tokens (and media items before b) begin this prompt (b < len(prompt)),
+        else None."""
         px = self._px
         if px is None or px["b"] > len(prompt_ids) - 1:
             return None
         b = px["b"]
         a = np.asarray(px["ids"][:b], dtype=np.int64)
+        if px.get("mm", []) != [k for k in mmkey if k[0] < b]:
+            return None
         return px if np.array_equal(a, np.asarray(prompt_ids[:b], dtype=np.int64)) else None
 
     def _reset(self):
@@ -779,16 +793,17 @@ class InklingSpecServing:
 
             faulthandler.cancel_dump_traceback_later()
 
-    def prefill(self, prompt_ids, sampling=None) -> int:
+    def prefill(self, prompt_ids, sampling=None, mm=None) -> int:
         """A new sequence: prefill the prompt (all but its last token; that one is the first verify row) and return
-        the first generated token. sampling = (temperature, top_k, top_p, seed) or None (greedy)."""
+        the first generated token. sampling = (temperature, top_k, top_p, seed) or None (greedy). mm: the prompt's
+        image / audio rows (tt/mm.py build(); their placeholder positions take them instead of token embeddings)."""
         self._arm()
         try:
-            return self._prefill_request(prompt_ids, sampling)
+            return self._prefill_request(prompt_ids, sampling, mm)
         finally:
             self._disarm()
 
-    def _prefill_request(self, prompt_ids, sampling):
+    def _prefill_request(self, prompt_ids, sampling, mm=None):
         t0 = time.time()
         P = len(prompt_ids)
         if P < 1:
@@ -800,7 +815,10 @@ class InklingSpecServing:
         self.adopt_next = False
         self._pending = []
         self._reset()
-        px, self._px = self._px_match(prompt_ids) if P > 1 else None, None  # (invalid until this prefill completes)
+        if mm is not None and int(mm["pos"].max()) >= P - 1:
+            raise ValueError("an image / audio placeholder as the prompt's last token (the first verify row)")
+        mmkey = self._mm_key(mm)
+        px, self._px = self._px_match(prompt_ids, mmkey) if P > 1 else None, None  # (invalid until this prefill ends)
         b0 = px["b"] if px is not None else 0
         snap = ((P - 2) // self.chunk) * self.chunk if self.px_on and P > 1 else 0
         snap = snap if snap >= self.px_min else 0
@@ -809,7 +827,7 @@ class InklingSpecServing:
             self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
             self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
         if P - 1 > b0:
-            self._prefill(list(prompt_ids), start=b0, snap=(snap if snap > b0 else None))
+            self._prefill(list(prompt_ids), start=b0, snap=(snap if snap > b0 else None), mm=mm)
             if self._new_programs() and self.recaptures < int(os.environ.get("INKLING_MAX_RECAPTURES", "4")):
                 # programs compiled after the captures (see _new_programs): fresh traces whose intermediates avoid the
                 # new binaries, then the prompt again (the captures' eager passes reset the sequence state)
@@ -823,10 +841,11 @@ class InklingSpecServing:
                 self.capture()
                 self._reset()
                 b0 = 0
-                self._prefill(list(prompt_ids), snap=(snap or None))
+                self._prefill(list(prompt_ids), snap=(snap or None), mm=mm)
         if snap and snap > b0:
             self._px = {
                 "ids": list(prompt_ids[:snap]),
+                "mm": [k for k in mmkey if k[0] < snap],
                 "b": snap,
                 "rings": [ttnn.from_device(t) for t in self._px_rings],
             }

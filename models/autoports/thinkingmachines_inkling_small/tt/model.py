@@ -89,6 +89,7 @@ class Qwen35MoeModel(_M27Model):
         on_chunk=None,
         group=None,
         on_layer=None,
+        mm=None,
     ):
         """Eager chunked prefill of token ids [T] (torch) from position `start` (a multiple of the chunk; the conv
         states must hold the sequence up to start). Chunks of `chunk` rows (default the layers' prefill_chunk). A
@@ -113,7 +114,7 @@ class Qwen35MoeModel(_M27Model):
         prefill_uploads_clear()  # (left over by a prefill that raised, or by direct forward_prefill calls)
         try:
             out = self._prefill_tokens(
-                ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer
+                ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer, mm
             )
         finally:
             prefill_uploads_clear()
@@ -135,7 +136,9 @@ class Qwen35MoeModel(_M27Model):
             return out
         return super()._final_norm_decode(x)
 
-    def _prefill_tokens(self, ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer):
+    def _prefill_tokens(
+        self, ids, page_table_host, start, chunk, logits_rows, buckets, on_chunk, group, on_layer, mm=None
+    ):
         import os
         import sys
 
@@ -174,7 +177,12 @@ class Qwen35MoeModel(_M27Model):
                     mesh_mapper=rep,
                 )
                 x = self.embd(tok_tt)
-                xs.append(ttnn.reshape(x, (1, 1, Tp, x.shape[-1])))
+                x = ttnn.reshape(x, (1, 1, Tp, x.shape[-1]))
+                if mm is not None:  # image / audio rows in place of their placeholder tokens' embeddings (tt/mm.py)
+                    from models.autoports.thinkingmachines_inkling_small.tt import mm as _mm
+
+                    x = _mm.merge(x, mm, start + c0, n, Tp, self.mesh_device, int(self.args.dim))
+                xs.append(x)
                 ttnn.deallocate(tok_tt)
             memlog = os.environ.get("INKLING_PREFILL_MEMLOG") == "1" and g0 == 0
             for li, layer in enumerate(self.layers):

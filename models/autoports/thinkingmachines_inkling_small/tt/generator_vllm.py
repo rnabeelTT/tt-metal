@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 
 import torch
 from loguru import logger
@@ -86,7 +87,7 @@ def _xgrammar_stop_ids(stop_ids):
 def _register_processor(cls):
     """vLLM resolves InklingForConditionalGeneration as a multimodal architecture and builds the processor registered
     on the model class: the qwen36 base's (Qwen3.5) rejects Inkling's config. Use vLLM's own Inkling processor (text
-    requests pass through it unchanged; image / audio inputs are refused in prefill_forward until the towers run)."""
+    requests pass through it unchanged; image / audio items reach prefill_forward as mm_items, tt/mm.py)."""
     try:
         from vllm.models.inkling.common.mm_preprocess import (
             InklingDummyInputsBuilder,
@@ -104,9 +105,12 @@ def _register_processor(cls):
 
 @_register_processor
 class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
-    """vLLM bridge for Inkling-Small (HF arch InklingForConditionalGeneration; text only for now)."""
+    """vLLM bridge for Inkling-Small (HF arch InklingForConditionalGeneration): text, image and audio inputs."""
 
-    supports_multimodal = False
+    supports_multimodal = True
+    # the TT plugin passes every multimodal item (any modality, with its placeholder range and identifier) as the
+    # mm_items prefill kwarg (vllm-tt-plugin branch inkling-mm)
+    tt_generic_mm_items = True
     model_capabilities = {
         "supports_prefix_caching": False,
         "supports_async_decode": True,
@@ -116,6 +120,16 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         **({"max_output_tokens_per_step": SPEC_K + 1} if SPEC_K > 0 else {}),
     }
     decode_input_update_contract = 1
+
+    @classmethod
+    def get_placeholder_str(cls, modality: str, i: int) -> str | None:
+        """Inkling's media placeholders (vLLM's models/inkling: the processor expands each into marker + rows); the
+        qwen36 base's are Qwen's and refuse audio (chat requests with input_audio failed with 400)."""
+        if modality.startswith("image"):
+            return "<|content_image|>"
+        if modality.startswith("audio"):
+            return "<|content_audio_input|>"
+        raise ValueError("Inkling takes image and audio inputs")
 
     @classmethod
     def initialize_vllm_model(
@@ -214,17 +228,31 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
                 return any(present(x) for x in v)
             return not (hasattr(v, "numel") and v.numel() == 0)
 
-        if any(
-            present(kwargs.get(k)) for k in ("pixel_values", "pixel_values_videos", "input_features", "audio_features")
-        ):
-            raise NotImplementedError("Inkling serving is text only for now")
+        if present(kwargs.get("pixel_values_videos")):
+            raise NotImplementedError("Inkling serving takes text, image and audio inputs (no video)")
+        mm_items = kwargs.get("mm_items")
+        if mm_items is None and any(present(kwargs.get(k)) for k in ("pixel_values", "input_features", "audio_features")):
+            raise NotImplementedError("image / audio inputs need the TT plugin's mm_items (vllm-tt-plugin inkling-mm)")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         sp = kwargs.get("sampling_params")
         out = []
         for u in range(N):
             ids = tokens[u, : plens[u]].tolist()
             sampling = self._mtp_sampling(sp, u)
-            out.append(self._engine.prefill(ids, sampling))
+            items = mm_items[u] if mm_items is not None and u < len(mm_items) else None
+            mm = None
+            if items:
+                from models.autoports.thinkingmachines_inkling_small.tt import mm as mm_rows
+
+                if getattr(self, "_towers", None) is None:
+                    self._towers = mm_rows.InklingTowers(mm_rows.default_checkpoint())
+                t_mm = time.time()
+                mm = mm_rows.build(items, ids, self._towers)
+                logger.info(
+                    f"Inkling multimodal prompt: {len(items)} item(s), {int(mm['pos'].numel())} embedding rows "
+                    f"({time.time() - t_mm:.2f} s on the host)"
+                )
+            out.append(self._engine.prefill(ids, sampling, mm))
         self._live_slots = set(range(N))
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)

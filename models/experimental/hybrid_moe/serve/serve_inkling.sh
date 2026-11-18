@@ -60,7 +60,11 @@ HF_HOST=${HF_HOST:-${HF_HOME:-/opt/tenstorrent/models}}
 CACHE=${INKLING_CACHE:-$HOME/.cache/inkling}
 TR_MIB=${TRACE_MIB:-400}
 TT_CFG='{"tt": {"trace_mode": "all", "sample_on_device_mode": "all", "trace_region_size": '$((TR_MIB * 1048576))', "l1_small_size": 24576, "fabric_config": "FABRIC_1D"}}'
-MM_LIMIT='{"image": 0, "audio": 0}'  # text only (the towers are not served yet)
+# image / audio inputs (the towers run on the host, tt/mm.py); MM_LIMIT='{"image": 0, "audio": 0}': text only
+MM_LIMIT=${MM_LIMIT:-'{"image": 8, "audio": 4}'}
+# the TT plugin with the generic multimodal items (branch inkling-mm of the plugin fork) over the image's copy
+PLUGIN_SRC=${PLUGIN_SRC:-$HOME/vllm-tt-plugin-inkling/src/vllm_tt_plugin}
+PLUGIN_MOUNT=(); [ -d "$PLUGIN_SRC" ] && PLUGIN_MOUNT=(-v "$PLUGIN_SRC:/opt/tt-venv/lib/python3.12/site-packages/vllm_tt_plugin:ro")
 PORT_DIR=$REPO/models/autoports/thinkingmachines_inkling_small
 (cd "$P" && python3 -m hybrid.hostk >/dev/null)
 mkdir -p "$CACHE/tt" "$CACHE/logs" "$HOME/.cache/hybrid-moe"
@@ -75,7 +79,7 @@ docker run -d --name inkling-serve \
   -v "$REPO/models/demos/blackhole/qwen36:/opt/tt-metal/models/demos/blackhole/qwen36" \
   -v "$P:/opt/tt-metal/models/experimental/hybrid_moe" \
   -v "$REPO/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:/opt/tt-metal/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:ro" \
-  -v "$PORT_DIR/vllm_bundle:/extra_models:ro" \
+  -v "$PORT_DIR/vllm_bundle:/extra_models:ro" "${PLUGIN_MOUNT[@]}" \
   --user "$(id -u):$(id -g)" -p ${PORT:-8000}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=thinkingmachines/Inkling-Small -e MESH_DEVICE=P300x2 -e HF_HUB_OFFLINE=1 \
   -e HOME=/tmp -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e EXTRA_MODELS_DIR=/extra_models \
