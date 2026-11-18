@@ -25,6 +25,18 @@ VERSION = 1
 _DT = {"DataType.BFLOAT4_B": ttnn.bfloat4_b, "DataType.BFLOAT8_B": ttnn.bfloat8_b}
 
 
+def _write_all(path, mv):
+    """Write every byte of mv to path. One unbuffered write() may write less (a full disk can return a short count
+    rather than raise), and a short image renamed into place breaks every later start."""
+    with open(path, "wb", buffering=0) as f:
+        done = 0
+        while done < len(mv):
+            w = f.write(mv[done:])
+            if not w:
+                raise OSError(f"wcache: write to {path} stopped at {done} of {len(mv)} bytes")
+            done += w
+
+
 class ExpertImageCache:
     def __init__(self, root, resident_fn, tag=""):
         self.root, self.resident_fn, self.tag = root, resident_fn, tag
@@ -219,8 +231,12 @@ class ExpertImageCache:
             rid, buf = self._region(tp * n)
             px.read(dst, rid, [d * n for d in range(tp)])
             tmp = path + ".tmp"
-            with open(tmp, "wb", buffering=0) as f:
-                f.write(memoryview(buf)[: tp * n])
+            try:
+                _write_all(tmp, memoryview(buf)[: tp * n])
+            except BaseException:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+                raise
             os.replace(tmp, path)
         self.t_store += time.perf_counter() - t0
 
