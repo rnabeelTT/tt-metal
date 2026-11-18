@@ -60,8 +60,14 @@ runtime:
   plugin: {path: /home/raahem/vllm-tt-plugin-inkling}   # inkling-mm (6897caf, on 23b0736): mm_items for generic image / audio inputs
   extra_models_dir: models/autoports/thinkingmachines_inkling_small/vllm_bundle
   overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2",
-              # vLLM's Inkling audio / image processors (numpy held at 1.26.4: numba needs <= 2.4)
-              "av==19.0.2", "soundfile==0.14.0", "soxr==1.1.0", "scipy==1.17.1", "numpy==1.26.4"]
+              "numpy==1.26.4"]   # numba (vLLM) needs numpy <= 2.4
+  # vLLM's audio decoding and Inkling's audio / image processors are optional vLLM extras: installed from these
+  # wheels (overrides only pin packages something else pulls in)
+  wheels:
+    - /home/raahem/inkling-work/wheels/av-19.0.2-cp312-abi3-manylinux_2_28_x86_64.whl
+    - /home/raahem/inkling-work/wheels/soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl
+    - /home/raahem/inkling-work/wheels/soxr-1.1.0-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+    - /home/raahem/inkling-work/wheels/scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 
 serve:
   port: 8000
