@@ -69,12 +69,53 @@ class SortedExperts:
         self.cfg_gu = _grouped_cfg(mesh, L, (2 * Il) // 32, self.TILE_BYTES.get(moe.up_gate.dtype, 2048))
         self.cfg_dn = _grouped_cfg(mesh, Il, L // 32, self.TILE_BYTES.get(moe.down.dtype, 2048))
 
+    _MASKS = {}
+
+    def _build(self, ids, scores, T):
+        """SortedDispatch.build (kernel mode) without its group one-hot: the grouped sparse matmul selects groups by
+        `indices` (padding groups carry the sentinel id) and only validates the [1, G, 1, E] sparsity operand's shape,
+        so a cached zero tensor stands in for the fp32 one-hot (a [G, 32, E] fp32 eq + typecast + untilize: ~2.6 ms per
+        layer at 2K rows). HY4_PF_MASK_DUMMY=0 restores the built mask."""
+        d = self.dispatch
+        if os.environ.get("HY4_PF_MASK_DUMMY", "1") != "1":
+            return d.build(ids, scores, T)
+        from models.autoports.minimaxai_minimax_m2_7.tt import moe_dispatch as md
+
+        k, E, gs = d.k, d.E, d.group
+        R = T * k
+        Rd = md.dispatch_rows(T, k, E, gs)
+        G = Rd // gs
+        assert Rd <= md.MAX_DISPATCH_ROWS, f"sorted dispatch admits at most {md.MAX_DISPATCH_ROWS} rows (T={T}: {Rd})"
+        ids_t, sc_t = d._tiled(ids), d._tiled(scores)
+        op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
+        src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=DRAM, pad_group_id=d.pad_group_id)
+        for t in (ids_t, sc_t):
+            if t is not ids and t is not scores:
+                ttnn.deallocate(t)
+        weights = ttnn.reshape(ttnn.to_layout(ttnn.reshape(w_disp, (1, 1, 1, Rd)), ttnn.TILE_LAYOUT), (1, 1, Rd, 1))
+        ttnn.deallocate(w_disp)
+        key = (id(d.device), G, E)
+        mask = SortedExperts._MASKS.get(key)
+        if mask is None:
+            if len(SortedExperts._MASKS) >= 8:
+                ttnn.deallocate(SortedExperts._MASKS.pop(next(iter(SortedExperts._MASKS))))
+            mask = SortedExperts._MASKS[key] = ttnn.zeros((1, G, 1, E), dtype=ttnn.bfloat16,
+                                                           layout=ttnn.ROW_MAJOR_LAYOUT, device=d.device)
+        out = {"src_tok": ttnn.reshape(src_tok, (1, Rd)), "weights": weights, "group_mask": mask, "mask_cached": True,
+               "group_ids": ttnn.reshape(group_ids, (1, G)), "Rd": Rd, "G": G}
+        if md.UNDISPATCH_KERNEL:
+            out["undispatch_rm"], out["undispatch"] = und, None
+        else:
+            out["undispatch"] = ttnn.reshape(ttnn.to_layout(ttnn.reshape(und, (1, 1, 1, R)), ttnn.TILE_LAYOUT), (1, 1, T, k))
+            ttnn.deallocate(und)
+        return out
+
     def __call__(self, xl, scores, ids, T, mem=DRAM):
         """xl [1,1,T,L] bf16 tiled (the latent), scores [1,1,T,k] bf16 (normalised x 3.998), ids [1,1,T,k] uint16
         -> per-die partial routed output [1,1,T,L] (the sum over this die's slice of every expert's intermediate)."""
         moe = self.moe
         E, L, Il = moe.E, moe.L, moe.Il
-        m = self.dispatch.build(ids, scores, T)
+        m = self._build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
         x_disp = gather_rows(xl, m["src_tok"], Rd, GS, group_ids=m["group_ids"], num_experts=E)  # [1,G,32,L]
         ttnn.deallocate(m["src_tok"])
@@ -97,7 +138,8 @@ class SortedExperts:
                                   program_config=self.cfg_dn, compute_kernel_config=moe.ckc_e,
                                   dtype=ttnn.bfloat16)  # [1,G,32,L]
         ttnn.deallocate(din2)
-        ttnn.deallocate(m["group_mask"])
+        if not m.get("mask_cached"):
+            ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
         y = undispatch_rows(down, None, m.get("undispatch"), T, moe.k, L, undispatch_rm=m.get("undispatch_rm"))
         ttnn.deallocate(down)

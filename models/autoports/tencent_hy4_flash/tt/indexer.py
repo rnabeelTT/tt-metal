@@ -302,7 +302,13 @@ class Hy4Indexer:
         head-weight columns and streamed query projection."""
         Tp = int(x.shape[-2])
         q = iq(q_resid, mem) if iq is not None else mm(q_resid, self.wq, self.ckc, mem)
-        q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
+        if Tp > 32 and os.environ.get("HY4_PF_NLP_HEADS", "1") == "1":
+            q2 = ttnn.experimental.nlp_create_qkv_heads(q, num_heads=self.nh, num_kv_heads=0, transpose_k_heads=False,
+                                                        memory_config=mem)[0]
+            ttnn.deallocate(q)
+            q = q2
+        else:
+            q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
         qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
         qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)
         ttnn.deallocate(q)

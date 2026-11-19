@@ -261,6 +261,13 @@ class Hy4Attention:
             # one tile row: [1, 1, 32, Hd * 256] and [1, Hd, 32, 256] share their tile pages (head h, tile c -> page
             # 8 h + c): a zero-copy view instead of reshape + permute (~21 us)
             q = ttnn.experimental.view(q, (1, self.Hd, Tp, 256))
+        elif os.environ.get("HY4_PF_NLP_HEADS", "1") == "1":
+            # [1, 1, Tp, Hd * 256] -> [1, Hd, Tp, 256] (the reshape + permute went through a 32-padded head dim: ~1 ms at
+            # 16 heads x 2K rows vs 84 us)
+            q2 = ttnn.experimental.nlp_create_qkv_heads(q, num_heads=self.Hd, num_kv_heads=0, transpose_k_heads=False,
+                                                        memory_config=mem)[0]
+            ttnn.deallocate(q)
+            q = q2
         else:
             q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.Hd, 256)), (0, 2, 1, 3), memory_config=mem)  # [1,Hd,Tp,256]
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
@@ -394,7 +401,12 @@ class Hy4Attention:
         Tp = int(x.shape[-2])
         ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)
         ttnn.deallocate(o)
-        ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
+        if os.environ.get("HY4_PF_NLP_HEADS", "1") == "1":
+            ov2 = ttnn.experimental.nlp_concat_heads(ov, memory_config=mem)  # [1, 1, Tp, Hd * 256]
+        else:
+            ov2 = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
+        ttnn.deallocate(ov)
+        ov = ov2
         g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)
         gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
         ttnn.deallocate(ov)
