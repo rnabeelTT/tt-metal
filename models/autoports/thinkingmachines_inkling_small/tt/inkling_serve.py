@@ -138,6 +138,7 @@ class InklingSpecServing:
         att = model.layers[0].attention
         self.max_seq_len = int(args.max_seq_len)
         self.chunk = int(att.prefill_chunk)
+        self.block = int(att.block)
         self.buckets = prefill_buckets(self.chunk)
         self.pt_host = torch.arange(att.max_blocks, dtype=torch.int32)
         self.pt = ttnn.from_torch(
@@ -174,6 +175,11 @@ class InklingSpecServing:
         self.px_on = os.environ.get("INKLING_PREFIX_CACHE", "1") == "1"
         self.px_min = int(os.environ.get("INKLING_PREFIX_MIN", "2048"))
         self._px = None
+        # vLLM-paged serving (enable_vllm_paging, set by the vLLM adapter): the global layers' KV through the request's
+        # vLLM block table, vLLM's prefix cache for it, and the per-sequence state at a cached prefix's end (conv states,
+        # sliding rings) in the plugin's prefix-state slots (_ps: slot -> host snapshot) instead of the engine's own entry
+        self.paged = False
+        self._ps = {}
         if self.px_on:
             blocks = list(model.layers) + ([self.mtp.depths[0].block] if self.mtp_prompt else [])
             convs = lambda bl: (bl.attention.k_sconv, bl.attention.v_sconv, bl.attn_sconv, bl.mlp_sconv)  # noqa: E731
@@ -356,6 +362,7 @@ class InklingSpecServing:
     def _verify(self, ids, p0):
         """Verify rows: traced when this width was captured, else eager. -> (logits [R, V] host, hidden x mup)."""
         R = len(ids)
+        self._check_backed(int(p0), R)
         if R not in self.tid:
             return self._rows_eager(ids, p0)
         di, dp, dk, dt = self.bufs[R]
@@ -549,9 +556,84 @@ class InklingSpecServing:
                 # the uploads)
                 hyb.hostk_threads = int(os.environ.get("INKLING_DECODE_HOSTK_THREADS", "6"))
 
+    def enable_vllm_paging(self, scratch_base, scratch_blocks, context):
+        """vLLM-paged serving: logical blocks map to the request's vLLM block ids (set_page_row); a logical block vLLM
+        has not allocated (id 0) maps to one of the engine's scratch blocks [scratch_base, + scratch_blocks) (the caches
+        hold them: INKLING_KV_EXTRA_BLOCKS). context: vLLM's max_model_len (positions past it are never read)."""
+        if not self.px_on:
+            raise RuntimeError("vLLM prefix caching needs the prefix snapshot buffers (INKLING_PREFIX_CACHE=1)")
+        self.paged = True
+        self._scratch_base, self._scratch_n, self._context = int(scratch_base), int(scratch_blocks), int(context)
+        self._row_key = None
+        self._backed = self.pt_host.numel()  # logical blocks [0, _backed) are vLLM-allocated
+
+    def set_page_row(self, row):
+        """The request's vLLM block table row (logical block -> vLLM block id, 0 = not allocated) -> pt_host / pt. A
+        change is written into the persistent device table the decode traces read."""
+        if not self.paged or row is None:
+            return
+        r = torch.as_tensor(row).reshape(-1).to(torch.int64)
+        key = r.numpy().tobytes()
+        if key == self._row_key:
+            return
+        self._row_key = key
+        n = self.pt_host.numel()
+        m = torch.zeros(n, dtype=torch.int64)
+        k = min(n, r.numel())
+        m[:k] = r[:k]
+        unalloc = m <= 0
+        self._backed = int(unalloc.nonzero()[0]) if bool(unalloc.any()) else n
+        m = torch.where(unalloc, self._scratch_base + torch.arange(n) % self._scratch_n, m).to(torch.int32)
+        if not torch.equal(m, self.pt_host):
+            self.pt_host = m
+            ttnn.copy_host_to_device_tensor(
+                ttnn.from_torch(m.reshape(1, -1), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self.rep),
+                self.pt,
+            )
+
+    def _check_backed(self, pos, n):
+        """Positions [pos, pos + n) about to be written: a write past vLLM's allocation below its context lands in a
+        scratch block, and the KV it holds is lost (vLLM's lookahead covers the engine's lead: counted, never expected)."""
+        if not self.paged:
+            return
+        last = min(pos + n, self._context) - 1
+        if last >= 0 and last // self.block >= self._backed:
+            self.stats["kv_unbacked"] = self.stats.get("kv_unbacked", 0) + 1
+            if self.stats["kv_unbacked"] == 1:
+                logger.warning(
+                    f"Inkling: KV write at positions {pos}..{last} past vLLM's allocated blocks ({self._backed}): raise "
+                    "INKLING_KV_LOOKAHEAD"
+                )
+
+    def _ps_save(self, slot, pos):
+        """The prefix-state snapshot of the prefill that just ended (its hooks copied every block's conv states at
+        `pos` into the staging buffers; each sliding ring still holds the window before pos, pos being the last chunk
+        boundary before the prompt's end) -> host, as prefix-state slot `slot`."""
+        self._ps[int(slot)] = {
+            "pos": int(pos),
+            "convs": [[ttnn.from_device(buf) for _, buf in blk] for blk in self._px_convs],
+            "rings": [ttnn.from_device(t) for t in self._px_rings],
+        }
+        self.stats["prefix_saves"] = self.stats.get("prefix_saves", 0) + 1
+
+    def _ps_restore(self, slot, pos):
+        """Prefix-state slot `slot` (a snapshot at `pos`) -> the conv states and sliding rings (after _reset())."""
+        rec = self._ps.get(int(slot))
+        if rec is None or rec["pos"] != int(pos):
+            raise RuntimeError(
+                f"Inkling: prefix-state slot {slot} holds {None if rec is None else rec['pos']}, restore asked {pos}"
+            )
+        for blk, hs in zip(self._px_convs, rec["convs"]):
+            for (c, buf), h in zip(blk, hs):
+                ttnn.copy_host_to_device_tensor(h, buf)
+                ttnn.copy(buf, c.st)
+        for h, t in zip(rec["rings"], self._px_rings):
+            ttnn.copy_host_to_device_tensor(h, t)
+
     def _px_save(self, i, part=None):
         """Block i's conv states -> its snapshot buffers (block i = target layer i; the last = drafter depth 0).
         part: "attn" (k, v, attn convs), "mlp" (the MLP conv) or None (all four)."""
+        self._px_count = getattr(self, "_px_count", 0) + 1
         convs = self._px_convs[i]
         for c, buf in convs[:3] if part == "attn" else convs[3:] if part == "mlp" else convs:
             ttnn.copy(c.st, buf)
@@ -794,7 +876,7 @@ class InklingSpecServing:
 
             faulthandler.cancel_dump_traceback_later()
 
-    def prefill(self, prompt_ids, sampling=None, mm=None) -> int:
+    def prefill(self, prompt_ids, sampling=None, mm=None, start=0, page_row=None, restore=None, saves=()) -> int:
         """A new sequence: prefill the prompt (all but its last token; that one is the first verify row) and return
         the first generated token. sampling = (temperature, top_k, top_p, seed) or None (greedy). mm: the prompt's
         image / audio rows (tt/mm.py build(); their placeholder positions take them instead of token embeddings)."""
@@ -803,11 +885,14 @@ class InklingSpecServing:
             hyb = _hyb()
             if hyb is not None and hyb.enabled:  # the expert placement as at startup: output independent of earlier requests
                 hyb.reset_placement()
-            return self._prefill_request(prompt_ids, sampling, mm)
+            return self._prefill_request(prompt_ids, sampling, mm, start, page_row, restore, saves)
         finally:
             self._disarm()
 
-    def _prefill_request(self, prompt_ids, sampling, mm=None):
+    def _prefill_request(self, prompt_ids, sampling, mm=None, start=0, page_row=None, restore=None, saves=()):
+        """vLLM-paged (enable_vllm_paging): start = vLLM's cached prefix length, restore = (slot, start) the
+        prefix-state snapshot to resume from, saves = [(pos, slot)] the snapshots to take (the plugin's prefix_state
+        directives; Inkling's policy asks one per prompt, at its last chunk boundary before the last token)."""
         t0 = time.time()
         P = len(prompt_ids)
         if P < 1:
@@ -822,14 +907,35 @@ class InklingSpecServing:
         if mm is not None and int(mm["pos"].max()) >= P - 1:
             raise ValueError("an image / audio placeholder as the prompt's last token (the first verify row)")
         mmkey = self._mm_key(mm)
-        px, self._px = self._px_match(prompt_ids, mmkey) if P > 1 else None, None  # (invalid until this prefill ends)
-        b0 = px["b"] if px is not None else 0
-        snap = ((P - 2) // self.chunk) * self.chunk if self.px_on and P > 1 else 0
-        snap = snap if snap >= self.px_min else 0
-        if b0:
-            self._px_restore(px)
-            self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
-            self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
+        if self.paged:
+            self.set_page_row(page_row)
+            px, self._px = None, None
+            saves = [(int(q), int(sl)) for q, sl in (saves or ())]
+            if len(saves) > 1:
+                raise RuntimeError(f"Inkling: {len(saves)} prefix-state saves in one prefill (the policy asks one)")
+            snap = saves[0][0] if saves else 0
+            b0 = int(start or 0)
+            if snap and (snap % self.chunk or snap <= b0 or snap > P - 1 or (snap - b0) % self.chunk):
+                raise RuntimeError(f"Inkling: prefix-state save at {snap} is not a chunk end of this prefill ({b0}, {P})")
+            if restore is not None:
+                if int(restore[1]) != b0:
+                    raise RuntimeError(f"Inkling: restore at {restore[1]} for a prefill from {b0}")
+                if b0:
+                    self._ps_restore(restore[0], b0)
+                    self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
+                    self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
+            elif b0:
+                raise RuntimeError(f"Inkling: prefill from {b0} without a prefix-state restore")
+        else:
+            px, self._px = self._px_match(prompt_ids, mmkey) if P > 1 else None, None  # (invalid until this ends)
+            b0 = px["b"] if px is not None else 0
+            snap = ((P - 2) // self.chunk) * self.chunk if self.px_on and P > 1 else 0
+            snap = snap if snap >= self.px_min else 0
+            if b0:
+                self._px_restore(px)
+                self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
+                self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
+        self._px_count = 0
         if P - 1 > b0:
             self._prefill(list(prompt_ids), start=b0, snap=(snap if snap > b0 else None), mm=mm)
             if self._new_programs() and self.recaptures < int(os.environ.get("INKLING_MAX_RECAPTURES", "4")):
@@ -845,8 +951,15 @@ class InklingSpecServing:
                 self.capture()
                 self._reset()
                 b0 = 0
+                self._px_count = 0
                 self._prefill(list(prompt_ids), snap=(snap or None), mm=mm)
-        if snap and snap > b0:
+        if self.paged:
+            if snap:
+                want = 2 * len(self.model.layers) + (1 if self.mtp_prompt else 0)
+                if self._px_count != want:
+                    raise RuntimeError(f"Inkling: prefix-state snapshot at {snap} took {self._px_count} of {want} copies")
+                self._ps_save(saves[0][1], snap)
+        elif snap and snap > b0:
             self._px = {
                 "ids": list(prompt_ids[:snap]),
                 "mm": [k for k in mmkey if k[0] < snap],
@@ -855,10 +968,9 @@ class InklingSpecServing:
             }
         elif snap and px is not None:
             self._px = px  # the same boundary: the restored snapshot still holds
-        if b0 or self._px is not None:
-            logger.info(
-                f"Inkling prefix cache: prompt of {P} tokens, reused {b0}, snapshot at {self._px['b'] if self._px else '-'}"
-            )
+        if b0 or self._px is not None or (self.paged and snap):
+            at = snap if self.paged else (self._px["b"] if self._px else None)
+            logger.info(f"Inkling prefix cache: prompt of {P} tokens, reused {b0}, snapshot at {at or '-'}")
         nxt = self._first(int(prompt_ids[-1]), P - 1, self._smp)
         if self.sfx_on:
             from hybrid.suffix_draft import Chooser, SuffixIndex
@@ -910,6 +1022,7 @@ class InklingSpecServing:
         step); the plugin's tok / pos are checked when it flags them authoritative."""
         if self._pos is None:
             raise RuntimeError("Inkling step before any prefill")
+        self.set_page_row(page_table_row)
         self._arm()
         try:
             return self._step(tok, pos, host_authoritative)
@@ -940,12 +1053,13 @@ class InklingSpecServing:
                     return out
             buf = buf + self._device_step()
 
-    def step_logits(self, tok: int, pos: int) -> torch.Tensor:
+    def step_logits(self, tok: int, pos: int, page_table_row=None) -> torch.Tensor:
         """Host-sampled decode (the plugin samples: logprobs, min_p, logit_bias, bad words, structured outputs ...):
         one verify row [tok] at pos, no drafts; -> the logits row [V] of the token after it. The plugin's token is
         authoritative (its sampler, not the engine's, picked it), so the continuation is re-anchored on it."""
         if self._pos is None:
             raise RuntimeError("Inkling step before any prefill")
+        self.set_page_row(page_table_row)
         if int(pos) != self._pos:
             raise RuntimeError(
                 f"Inkling host-sampled step at position {pos}; the engine's continuation is at {self._pos}"

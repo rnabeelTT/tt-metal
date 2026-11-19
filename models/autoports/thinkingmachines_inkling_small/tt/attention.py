@@ -220,7 +220,11 @@ class InklingAttention:
                 mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
             )
         elif own_global_cache:
-            self.k_cache, self.v_cache = self._alloc_cache(self.max_blocks)
+            # INKLING_KV_EXTRA_BLOCKS: physical blocks past the logical max_blocks (vLLM-paged serving: vLLM's block ids
+            # reach its pool size, and the engine keeps a few scratch blocks of its own; the page table stays logical)
+            self.k_cache, self.v_cache = self._alloc_cache(
+                self.max_blocks + int(os.environ.get("INKLING_KV_EXTRA_BLOCKS", "0"))
+            )
         else:
             self.k_cache = self.v_cache = None  # bound by the serving engine (bind_cache)
         self._kv_shard = ttnn.create_sharded_memory_config(

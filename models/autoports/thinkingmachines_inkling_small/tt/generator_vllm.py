@@ -26,6 +26,7 @@ import os
 import time
 
 import torch
+import ttnn
 from loguru import logger
 
 from models.autoports.minimaxai_minimax_m2_7.tt.generator_vllm import MiniMaxM2ForCausalLM
@@ -41,6 +42,33 @@ if SPEC_K > 0:
     from models.autoports.minimaxai_minimax_m2_7.tt import mtp_plugin_shim
 
     mtp_plugin_shim.apply(SPEC_K + 1)
+
+# INKLING_VLLM_PREFIX (default 1): vLLM's prefix cache, as the other ports serve it. vLLM pages the global layers' KV
+# (the engine maps its block table) and keeps the cached prefixes; the rest of the per-sequence state at a prefix's end
+# (every layer's conv states, the sliding layers' rings) lives in the plugin's prefix-state slots, one snapshot per
+# prompt at its last chunk boundary before the last prompt token (the first verify row, not prefilled):
+# INKLING_PREFIX_SLOTS snapshots (~200 MB of host RAM each), LRU over prompts.
+VLLM_PREFIX = os.environ.get("INKLING_VLLM_PREFIX", "1") == "1"
+PREFIX_SLOTS = int(os.environ.get("INKLING_PREFIX_SLOTS", "16"))
+PREFIX_MIN = int(os.environ.get("INKLING_PREFIX_MIN", "2048"))
+PREFILL_CHUNK = int(os.environ.get("INKLING_PREFILL_CHUNK", "2048"))
+# the engine's scratch blocks (a logical block vLLM has not allocated yet) and the scheduler's lookahead: the engine runs
+# up to ~2 multi-token steps ahead of vLLM's view (async scheduling, buffered verify output) plus its verify window
+KV_SCRATCH = 8
+KV_LOOKAHEAD = int(os.environ.get("INKLING_KV_LOOKAHEAD", str(4 * (SPEC_K + 1))))
+
+if VLLM_PREFIX:
+    from vllm_tt_plugin import scheduler as _tt_scheduler
+
+    _sched_init = _tt_scheduler.TTScheduler.__init__
+
+    def _inkling_sched_init(self, *args, **kwargs):
+        _sched_init(self, *args, **kwargs)
+        self.num_lookahead_tokens = max(int(self.num_lookahead_tokens), KV_LOOKAHEAD)
+
+    if not getattr(_tt_scheduler.TTScheduler.__init__, "_inkling", False):
+        _inkling_sched_init._inkling = True
+        _tt_scheduler.TTScheduler.__init__ = _inkling_sched_init
 
 
 def _xgrammar_stop_ids(stop_ids):
@@ -112,7 +140,21 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
     # mm_items prefill kwarg (vllm-tt-plugin branch inkling-mm)
     tt_generic_mm_items = True
     model_capabilities = {
-        "supports_prefix_caching": False,
+        "supports_prefix_caching": VLLM_PREFIX,
+        **(
+            {
+                "prefix_state_cache": {
+                    "slots": PREFIX_SLOTS,
+                    "segment": 0,
+                    "min_tokens": PREFIX_MIN,
+                    "prompt_end": True,
+                    "prompt_end_align": PREFILL_CHUNK,
+                    "prompt_end_before_last": True,
+                }
+            }
+            if VLLM_PREFIX
+            else {}
+        ),
         "supports_async_decode": True,
         "supports_async_decode_overlap": True,
         "supports_sample_on_device": True,
@@ -149,11 +191,20 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
                 f"HYB_DECODE_ROWS={hyb_rows} < the verify width {SPEC_K + 1}: rows past it would get no " "host experts"
             )
         # the context plus the verify window (positions past max_model_len are written, never read)
-        args, model = create_model(mesh_device, max_batch_size=1, max_seq_len=max_seq_len + 2 * (SPEC_K + 1) + 64)
+        engine_len = max_seq_len + 2 * (SPEC_K + 1) + 64
+        if VLLM_PREFIX:
+            # the global caches hold every vLLM block id (its pool: get_max_tokens_all_users, + the null block 0) and the
+            # engine's scratch blocks after them; the page table stays as long as the engine's context
+            n_vllm = cls.get_max_tokens_all_users(max_model_len=max_seq_len) // BLOCK_SIZE + 1
+            n_logical = math.ceil(engine_len / BLOCK_SIZE)
+            os.environ["INKLING_KV_EXTRA_BLOCKS"] = str(max(0, n_vllm - n_logical) + KV_SCRATCH)
+        args, model = create_model(mesh_device, max_batch_size=1, max_seq_len=engine_len)
         self = cls([model], [args], mesh_device)
         from models.autoports.thinkingmachines_inkling_small.tt.inkling_serve import InklingSpecServing
 
         self._engine = InklingSpecServing(model, args, mesh_device, SPEC_K, trace=TRACE)
+        if VLLM_PREFIX:
+            self._engine.enable_vllm_paging(max(n_vllm, n_logical), KV_SCRATCH, max_seq_len)
         _xgrammar_stop_ids(sorted(self._engine.eos))
         self._mtp = self._engine  # the inherited _mtp_decode drives it
         self._gen = None
@@ -218,8 +269,13 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         whose argmax is that token (greedy host sampling then agrees with the engine's continuation)."""
         N = int(tokens.shape[0])
         start_pos = kwargs.get("start_pos")
-        if start_pos is not None and any(int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()):
+        starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
+        if any(starts) and not VLLM_PREFIX:
             raise NotImplementedError("prefix caching / chunked prefill are off for Inkling (start_pos must be 0)")
+        pt = None
+        if VLLM_PREFIX and page_table is not None:
+            pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
+        directives = kwargs.get("prefix_state") or [None] * N
 
         def present(v):  # the plugin passes the multimodal kwargs on every prefill (None / empty lists for text)
             if v is None:
@@ -252,7 +308,18 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
                     f"Inkling multimodal prompt: {len(items)} item(s), {int(mm['pos'].numel())} embedding rows "
                     f"({time.time() - t_mm:.2f} s on the host)"
                 )
-            out.append(self._engine.prefill(ids, sampling, mm))
+            d = directives[u] or {}
+            out.append(
+                self._engine.prefill(
+                    ids,
+                    sampling,
+                    mm,
+                    start=starts[u],
+                    page_row=None if pt is None else pt[u],
+                    restore=d.get("restore"),
+                    saves=d.get("saves") or (),
+                )
+            )
         self._live_slots = set(range(N))
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
@@ -284,8 +351,12 @@ class InklingForConditionalGeneration(MiniMaxM2ForCausalLM):
         assert len(live) <= 1, "single-user Inkling step got several live rows"
         V = int(getattr(self.model_args[0], "vocab_size", 201024))
         logits = torch.full((tokens.numel(), 1, V), float("-inf"), dtype=torch.float32)
+        page_table = kwargs.get("page_table", args[2] if len(args) > 2 else None)
+        pt = None
+        if VLLM_PREFIX and page_table is not None:
+            pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
         for i in live:
-            lg = self._engine.step_logits(int(tokens[i]), int(pos[i]))
+            lg = self._engine.step_logits(int(tokens[i]), int(pos[i]), None if pt is None else pt[i])
             n = min(V, lg.numel(), self._engine.V)
             logits[i, 0, :n] = lg[:n].float()
         self._live_slots = set(live)
