@@ -105,6 +105,10 @@ def test_layer(env):
         a_out, _ = hl.self_attn(hidden_states=a_norm, attention_mask=mask, position_ids=pos[None].expand(3, 1, -1),
                                 position_embeddings=pe[lt], cache=None)
         ref_full = hl(inp, attention_mask=mask, position_ids=pos[None].expand(3, 1, -1), position_embeddings=pe[lt])
+        x2 = (post_a.float().unsqueeze(-1) * a_out.float().unsqueeze(-2) + inp.float()).to(torch.bfloat16)
+        post_f, f_in = hl.ffn_hc(x2)
+        f_norm = hl.post_attention_layernorm(f_in)
+        f_out = hl.mlp(f_norm)
     # ---------------- device
     layer = Hy4Layer(mesh, cfg, w, li, max_ctx=4096, chunk=256)
     Tp = -(-T // 32) * 32
@@ -121,6 +125,26 @@ def test_layer(env):
     got = to_torch0(a_d)[0, 0, :T]
     pa = pcc(got, a_out[0])
     print(f"attention ({layer.attn.kind}): pcc {pa:.6f} max {float((got.float() - a_out[0].float()).abs().max()):.4g}")
+    # FFN half from the reference's own x2 (isolates it from attention error)
+    t2 = torch.zeros(1, cfg.hc_mult, Tp, cfg.hidden, dtype=torch.bfloat16)
+    t2[0, :, :T] = x2[0].transpose(0, 1)
+    X2d = upload(mesh, t2, ttnn.bfloat16)
+    f_in_d, post_fd = layer.ffn_hc.pre(X2d)
+    got = to_torch0(f_in_d)[0, 0, :T]
+    print(f"ffn HC pre: pcc {pcc(got, f_in[0]):.6f} max {float((got.float() - f_in[0].float()).abs().max()):.4g}")
+    fn_d = layer.post_norm(f_in_d)
+    got = to_torch0(fn_d)[0, 0, :T]
+    print(f"post_attention_layernorm: pcc {pcc(got, f_norm[0]):.6f}")
+    # the MLP on the reference's normed input
+    tn = torch.zeros(1, 1, Tp, cfg.hidden, dtype=torch.bfloat16)
+    tn[0, 0, :T] = f_norm[0]
+    fnd = upload(mesh, tn, ttnn.bfloat16)
+    from models.autoports.tencent_hy4_flash.tt.moe import Hy4MoE
+
+    mo = layer.mlp.forward(fnd, T) if isinstance(layer.mlp, Hy4MoE) else layer.mlp.forward(fnd)
+    got = to_torch0(mo)[0, 0, :T]
+    print(f"mlp ({type(layer.mlp).__name__}): pcc {pcc(got, f_out[0]):.6f} max {float((got.float() - f_out[0].float()).abs().max()):.4g} "
+          f"(ref max {float(f_out[0].float().abs().max()):.3g})")
     layer.reset()
     layer2 = layer
     layer2.attn.indexer and layer2.attn.indexer.reset()

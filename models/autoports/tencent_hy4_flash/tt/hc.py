@@ -24,6 +24,8 @@ import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import TILE, ckc, upload
 
+KC = 256  # split-K chunk of the decode mix (8 tiles per core: hc * H / KC = 48 cores at H = 3072)
+
 
 def _ssum(x, mem):
     """Sum over the stream dim (1) in one program (ttnn.sum(dim=1) is transpose + reduce + transpose)."""
@@ -62,13 +64,58 @@ class HyperConnection:
         self.aff_a = upload(mesh, a.reshape(1, 1, 1, TILE), ttnn.float32)
         self.ckc = ckc(mesh, fp32=True)
         self.inv_n = 1.0 / float(hc * hidden)
+        # decode (one 32-row tile row): split-K form. [1, hc, 32, H] and [1, hc * H / KC, 32, KC] share their tile pages
+        # (stream s, tile j -> page s * H/32 + j), so a zero-copy view makes the mix one batched matmul with
+        # hc * H / KC output tiles (one per core) + one reduce over the batch, instead of hc output tiles on hc cores
+        self.splitk = os.environ.get("HY4_HC_SPLITK", "1") == "1" and hidden % KC == 0
+        if self.splitk:
+            nb = hc * hidden // KC
+            wk = torch.zeros(1, nb, KC, TILE, dtype=torch.float32)
+            for i in range(hc):
+                blk = fn[:, i * hidden : (i + 1) * hidden].T  # [H, M]
+                for c in range(hidden // KC):
+                    wk[0, i * (hidden // KC) + c, :, :M] = blk[c * KC : (c + 1) * KC]
+            self.fnK = upload(mesh, wk, ttnn.float32)
+            self.nb = nb
+            key = (id(mesh), nb)
+            if key not in HyperConnection._ONES:  # sum of squares: the same split, a ones column (shared)
+                ones = torch.zeros(1, nb, KC, TILE, dtype=torch.float32)
+                ones[..., 0] = 1.0
+                HyperConnection._ONES[key] = upload(mesh, ones, ttnn.float32)
+            self.onesK = HyperConnection._ONES[key]
+
+    _ONES = {}
+
+    def _weights_splitk(self, xf, mem):
+        """xf fp32 [1, hc, 32, H] -> w [1, 1, 32, 32] (as _weights), via the split-K views."""
+        T = int(xf.shape[-2])
+        xv = ttnn.experimental.view(xf, (1, self.nb, T, KC))
+        mix = ttnn.experimental.fast_reduce_nc(
+            ttnn.matmul(xv, self.fnK, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem),
+            dims=[1], memory_config=mem)
+        sq = ttnn.multiply(xf, xf, memory_config=mem)
+        sv = ttnn.experimental.view(sq, (1, self.nb, T, KC))
+        ss = ttnn.experimental.fast_reduce_nc(
+            ttnn.matmul(sv, self.onesK, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem),
+            dims=[1], memory_config=mem)  # column 0 = sum of squares
+        ttnn.deallocate(sq)
+        ss0 = ttnn.slice(ss, (0, 0, 0, 0), (1, 1, T, 1), memory_config=mem)
+        ttnn.deallocate(ss)
+        r = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss0, self.inv_n, memory_config=mem), self.eps, memory_config=mem),
+                       memory_config=mem)
+        mix = ttnn.multiply(mix, r, memory_config=mem)
+        sig = ttnn.sigmoid(ttnn.add(ttnn.multiply(mix, self.sc, memory_config=mem), self.bs, memory_config=mem),
+                           memory_config=mem)
+        return ttnn.add(ttnn.multiply(sig, self.aff_a, memory_config=mem), self.hc_eps, memory_config=mem)
 
     def _weights(self, xf, mem):
         """xf fp32 [1, hc, T, H] -> w [1, 1, T, 32] fp32: cols 0..hc-1 = pre, hc..2hc-1 = post (pad meaningless)."""
         mix = ttnn.matmul(xf, self.fnT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         mix = _ssum(mix, mem)  # [1, 1, T, 32]
-        ss = _ssum(ttnn.sum(ttnn.multiply(xf, xf, memory_config=mem), dim=-1, keepdim=True, memory_config=mem),
-                   mem)  # [1, 1, T, 1]
+        # NOT fast_reduce_nc on the [1, hc, T, 1] row sums: it returned wrong sums there (2026-11-19: every layer's
+        # output at PCC ~0.3 vs the reference, garbage generations); ttnn.sum over the stream dim is exact
+        ss = ttnn.sum(ttnn.sum(ttnn.multiply(xf, xf, memory_config=mem), dim=-1, keepdim=True, memory_config=mem),
+                      dim=1, keepdim=True, memory_config=mem)  # [1, 1, T, 1]
         r = ttnn.rsqrt(ttnn.add(ttnn.multiply(ss, self.inv_n, memory_config=mem), self.eps, memory_config=mem),
                        memory_config=mem)
         mix = ttnn.multiply(mix, r, memory_config=mem)
@@ -86,7 +133,7 @@ class HyperConnection:
         """X [1, hc, T, H] bf16 -> (sublayer input bf16 [1, 1, T, H], post weights [1, hc, T, 1] fp32 or None)."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         xf = ttnn.typecast(X, ttnn.float32, memory_config=mem)
-        w = self._weights(xf, mem)
+        w = self._weights_splitk(xf, mem) if self.splitk and int(X.shape[-2]) == TILE else self._weights(xf, mem)
         pre = self._per_stream(w, 0, mem)
         s = _ssum(ttnn.multiply(xf, pre, memory_config=mem), mem)
         ttnn.deallocate(xf)
