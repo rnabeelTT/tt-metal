@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
 | 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
 | 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
-| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-19 session 9, first push with image / audio inputs): short chat TTFT 0.47 s, 55.2 / 50.9 tok/s greedy / sampled; new prompts prefill ~1,410-1,570 tok/s from 15K to 126K (125.9K in 89 s); resent prompt 1.1-2.1 s, next chat turn 2.1-2.2 s (engine prefix cache, resumes at the last 2048-token chunk boundary); GSM8K-200 96.0%, IFEval-200 89.5 / 91.0; multimodal suite (images, audio, speech, mixed, prefix cache) passes through the server. |
+| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-19 session 9 with the prefill attention fix, image / audio inputs): short chat TTFT 0.48 s, 54.6 / 49.8 tok/s greedy / sampled; new prompts prefill ~1,430-1,610 tok/s from 15K to 126K (125.9K in 87 s); resent prompt 1.1-2.0 s, next chat turn 1.9-2.0 s (engine prefix cache); GSM8K-200 97.0%, IFEval-200 87.5 / 89.0; greedy output repeats exactly for the same request sequence; multimodal suite passes through the server. |
 
 **Open items (2026-11-19, end of session 9).** The published package is the deliverable; these are what is left.
 1. Prefill of new long prompts: ~1,410-1,570 tok/s through the server (session 9; session 7 ~1,300-1,380) vs M2.7's
@@ -31,7 +31,8 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
 6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
 7. Not yet tested: sustained multi-hour load, several concurrent clients (single-sequence engine: requests queue).
-8. Served greedy decoding is not run-to-run deterministic (session 7 entry); evals move by a few points per run.
+8. Fixed (session 9): served greedy output repeats exactly for the same request sequence. A request can still depend
+   on earlier ones (expert placement carried over; HYB_RESET_PER_REQUEST=1 removes it at ~16-18% speed).
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -622,3 +623,23 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     (1,410; 118.7K took 91.2 s); resent 1.1-2.1 s, next turn 2.1 / 2.2 s (was 1.4 / 1.8: 2048-token chunks redo up to
     2047 tokens); prefix check top-1 identical; multimodal suite and feature checks pass; GSM8K-200 96.0%, IFEval-200
     89.5 / 91.0. The first build failed on an Ubuntu mirror outage (apt in tt-model's runtime stage; retried).
+  - **Served non-determinism, root cause (466e6fd01e1):** prefill attention freed its own relative-bias input.
+    `rq = ttnn.pad(r, ..)` returns r's buffer in TILE layout ([.., 16] -> [.., 32] fits the tile), so
+    `ttnn.deallocate(r)` freed rq, and the SDPA's output, allocated next, landed on it: the kernel wrote attention rows
+    over the Rq tiles it was still reading, corrupting rows' bias depending on core timing. Wrong as well as
+    non-deterministic on 1K-2K-row chunks (a 1500-token prompt's logits moved by up to 12 between identical prefills;
+    the teacher-forced eval never hit it, its allocation order differs). Found by bisection: prefill_bench PF_DET
+    (repeated prefills) with INKLING_PF_LAYER_HASH (first layer: 0, dense: not the hybrid), op hashes inside layer 0
+    (first op: the SDPA, inputs identical), the SDPA launched twice in the model (differed 1 in 4) but never in
+    isolation (tools/sdpa_det_check.py), replayed inputs matching neither model output, then a per-input clean-copy
+    swap showing rq's memory changing after the launch. Fixed at all three pad sites (prefill, decode, verify).
+    After: repeated prefills bit-identical; tools/determinism_check.py greedy output identical across processes.
+  - **Per-request placement reset (d9bd5ab4131, default off since 879e7104f1a):** where an expert runs changes its
+    numbers (device bfp4 / bfp8 vs CPU int4), and the LRU slots / staging carry over between requests, so a request's
+    output depends on the ones before it. HYB_RESET_PER_REQUEST=1 restores the startup placement per request, but costs
+    ~18% prefill / ~16% decode (tools/reset_ab.py: 1,241 vs 1,511 tok/s, 44.0 vs 52.2 tok/s), and the same request
+    sequence already repeats exactly without it: off by default.
+  - **Package with the fix (d27b89640c7 + card), through `tt-model serve` at p300x2-128k:** short chat 0.48 s, 54.6 /
+    49.8 tok/s; prefill 3.8K 1,134 tok/s, 14.9K 1,434, 29.7K 1,612, 65.9K 1,454, 125.9K 1,444 (87.2 s); resent
+    1.1-2.0 s, next turn 1.9 / 2.0 s; multimodal suite, feature checks, prefix check pass; GSM8K-200 97.0%, IFEval-200
+    87.5 / 89.0; teacher-forced gate unchanged (0.8726 / 0.9506 / 0.1998).
