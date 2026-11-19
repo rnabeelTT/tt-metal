@@ -172,7 +172,10 @@ class HybridState:
         # HYB_PF_XPIN: the prefill MoE's host reads (router logits, MoE input rows) land in persistent host tensors
         # viewed by torch (_HostSlots), not a fresh zero-filled host buffer per read plus a copy into a torch tensor
         self.pf_xpin = os.environ.get("HYB_PF_XPIN", "1") == "1"
-        self.reset_per_request = os.environ.get("HYB_RESET_PER_REQUEST", "1") == "1"  # (reset_placement)
+        # HYB_RESET_PER_REQUEST (default 0): every request starts from the startup placement (reset_placement): output
+        # independent of earlier requests, at ~18% prefill / ~16% decode (cold LRU slots: tools/reset_ab.py). Off, the
+        # output still repeats exactly for the same request sequence (a fresh server running the same eval)
+        self.reset_per_request = os.environ.get("HYB_RESET_PER_REQUEST", "0") == "1"
         self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
         self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
         self.pf_cpu_fixed_ms = [
@@ -248,7 +251,7 @@ class HybridState:
         self.reset_stats()
 
     def reset_placement(self):
-        """A new request (HYB_RESET_PER_REQUEST, default 1): the LRU slots and the prefill staging back to their initial
+        """A new request (HYB_RESET_PER_REQUEST=1): the LRU slots and the prefill staging back to their initial
         state. Where an expert runs changes its numbers (device bfp4 / bfp8 vs CPU int4), so without this a request's
         output depends on the requests before it (served greedy decoding did not repeat run to run)."""
         if not self.reset_per_request:
