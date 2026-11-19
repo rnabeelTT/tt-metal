@@ -148,8 +148,10 @@ class Hy4BatchDecoder(Hy4Decoder):
         self.lanes[lane] = None
 
     # ------------------------------------------------------------------ host side of a pass
-    def _host_b(self, rows: dict):
-        """Every per-pass host input (vectorized; ~/m27-work/hy4/hostb_bench.py checks it bit-exact)."""
+    def _host_b(self, rows: dict, with_tok: bool = True):
+        """Every per-pass host input (vectorized; ~/m27-work/hy4/hostb_bench.py checks it bit-exact). with_tok=False:
+        only the position-dependent ones (no token ids / Engram rows: _host_tok adds them; run_batch prebuilds the next
+        pass this way while the device runs)."""
         cfg, L, R0 = self.cfg, self.L, ROWS
         r = cfg.idx_ratio
         gcap, ring = self.gcap, self.ring
@@ -216,7 +218,6 @@ class Hy4BatchDecoder(Hy4Decoder):
             ln["nb"], ln["gb"] = nb, gb
             s += n
         pos[R:] = pos[R - 1] if R else 0
-        h["tok"] = _rm(torch.from_numpy(tok), ttnn.uint32)
         pos_t = torch.from_numpy(pos)
         for k in ("sparse", "swa"):
             c, sn = cos_sin(pos_t, cfg.rope_theta[k], cfg.qk_rope)
@@ -292,7 +293,20 @@ class Hy4BatchDecoder(Hy4Decoder):
         need = max(need, min(self.min_width, L * gcap))
         width = next((b for b in (2048 * 2**i for i in range(12)) if b >= need and b + 32 <= top), None)
         width = width or (L * gcap)
-        # Engram rows per lane (its own n-gram history)
+        if with_tok:
+            self._host_tok(order, h)
+        self._sel = bool(nmask.any())
+        return h, R, width, order
+
+    def _host_tok(self, order, h):
+        """The token-dependent inputs of a pass: token ids and every lane's Engram rows (its own n-gram history)."""
+        R0 = ROWS
+        tok = np.zeros((1, R0), dtype=np.int32)
+        s = 0
+        for _, ids in order:
+            tok[0, s : s + len(ids)] = ids
+            s += len(ids)
+        h["tok"] = _rm(torch.from_numpy(tok), ttnn.uint32)
         eng = self.model.engram
         eli = self.model.engram_li()
         for li in eli:
@@ -315,8 +329,12 @@ class Hy4BatchDecoder(Hy4Decoder):
                 eng.hist, eng.pos = saved
         for li in eli:
             h[f"eng_{li}"] = _tile(h[f"eng_{li}"], ttnn.bfloat16)
-        self._sel = bool(nmask.any())
-        return h, R, width, order
+
+    def _snap(self, rows: dict):
+        """What the position-dependent inputs of a pass depend on (a prebuilt pass is used only on an exact match)."""
+        return (self.min_width,) + tuple(
+            (l, len(rows[l]), self.lanes[l]["pos"], self.lanes[l]["ob"], self.lanes[l]["ogb"], self.lanes[l]["slot"],
+             self.lanes[l]["base"]["sparse"], self.lanes[l]["base"]["swa"]) for l in sorted(rows))
 
     def _copy_b(self, h):
         si, c = self.bsi, ttnn.copy_host_to_device_tensor
@@ -336,7 +354,17 @@ class Hy4BatchDecoder(Hy4Decoder):
         """rows: {lane: [token ids]} (each lane continues its sequence) -> {lane: logits fp32 [n, V]}."""
         tm = os.environ.get("HY4_TIME_BATCH") == "1"
         t0 = time.perf_counter()
-        h, R, width, order = self._host_b(rows)
+        pre, self._pre = getattr(self, "_pre", None), None
+        if pre is not None and pre[0] == self._snap(rows):  # prebuilt during the last pass: add the token inputs
+            h, R, width, order, sel, nbgb = pre[1]
+            order = [(l, list(rows[l])) for l in sorted(rows)]
+            for l, (nb, gb) in nbgb.items():
+                self.lanes[l]["nb"], self.lanes[l]["gb"] = nb, gb
+            self._host_tok(order, h)
+            self._sel = sel
+            self.n_prebuilt = getattr(self, "n_prebuilt", 0) + 1
+        else:
+            h, R, width, order = self._host_b(rows)
         t1 = time.perf_counter()
         self._copy_b(h)
         if tm:
@@ -346,6 +374,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         si.R, si.sel = R, self._sel
         si.width = width if si.sel else 0
         key = ("b", R, si.width)
+        advanced = False
         if not self.trace:
             lg = self.model.step(si, R, mem=self.mem)
             out = self.model.read_logits(lg, R)
@@ -363,24 +392,46 @@ class Hy4BatchDecoder(Hy4Decoder):
                 self._prog_n = self._programs()
             else:
                 ttnn.execute_trace(self.mesh, self.btraces[key], cq_id=0, blocking=False)
+                self._advance(order)
+                if os.environ.get("HY4_PREBUILD", "0") == "1":  # exact, but no gain measured (device-bound): off
+                    self._prebuild(order)  # the next pass's position inputs while the device runs this one
                 out = self.model.read_logits(self.bout[key], R)
+                advanced = True
         if tm:
             t3 = time.perf_counter()
             self._tm = getattr(self, "_tm", [])
             self._tm.append((t1 - t0, t2 - t1, t3 - t2))
             if len(self._tm) % 64 == 0:
                 med = [sorted(x[i] for x in self._tm[-64:])[32] * 1e3 for i in range(3)]
-                logger.info(f"batched pass R={R}: host {med[0]:.2f} ms, copy {med[1]:.2f} ms, device+read {med[2]:.2f} ms")
+                logger.info(f"batched pass R={R}: host {med[0]:.2f} ms, copy {med[1]:.2f} ms, device+read {med[2]:.2f} ms; "
+                            f"prebuilt passes so far {getattr(self, 'n_prebuilt', 0)}")
+        if not advanced:
+            self._advance(order)
         res, s = {}, 0
         for l, ids in order:
             n = len(ids)
             res[l] = out[s : s + n]
-            ln = self.lanes[l]
-            ln["pos"] += n
-            ln["ob"], ln["ogb"] = ln["nb"], ln["gb"]
-            ln["tokens"] += [int(t) for t in ids]
             s += n
         return res
+
+    def _advance(self, order):
+        for l, ids in order:
+            ln = self.lanes[l]
+            ln["pos"] += len(ids)
+            ln["ob"], ln["ogb"] = ln["nb"], ln["gb"]
+            ln["tokens"] += [int(t) for t in ids]
+
+    def _prebuild(self, order):
+        """Position inputs of the likely next pass (the same lanes, one row each)."""
+        nxt = {l: [0] for l, _ in order}
+        if any(self.lanes[l]["pos"] + 1 > (self.lanes[l]["pos"] // 32) * 32 + 64 for l in nxt):
+            return
+        snap = self._snap(nxt)
+        sel_now = self._sel
+        h, R, width, o = self._host_b(nxt, with_tok=False)
+        nbgb = {l: (self.lanes[l]["nb"], self.lanes[l]["gb"]) for l in nxt}
+        self._pre = (snap, (h, R, width, o, self._sel, nbgb))
+        self._sel = sel_now
 
     def _has_traces(self):
         return bool(self.traces) or bool(getattr(self, "btraces", None))

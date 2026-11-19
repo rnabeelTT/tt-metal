@@ -183,7 +183,10 @@ class Hy4BatchEngine:
                 if b <= self.chunk and b < m.max_ctx:
                     self.prefill(0, rnd(b - 1))
                     m.warm_head_blocks(b)
-            for k in range(1, int(os.environ.get("HY4_WARM_LONG", "2")) + 1):
+            # later chunks at every start the slot context allows (their programs change with the indexer's score width
+            # bucket; a 12K prompt after a 6K warm compiled 24 programs at serve time and released every trace)
+            m_fit = max(0, (m.max_ctx - 64 - self.chunk) // self.chunk)
+            for k in range(1, int(os.environ.get("HY4_WARM_LONG", str(m_fit))) + 1):
                 for b in m.PF_BUCKETS:
                     L = self.chunk * k + b - 1
                     if b <= self.chunk and L + 64 < m.max_ctx:
@@ -198,8 +201,10 @@ class Hy4BatchEngine:
         top = dec.L * dec.gcap
         widths = sorted({w for w in (2048 * 2**i for i in range(12)) if w + 32 <= top + 32} | {top})
         dec.trace = False
-        # R = 1 runs solo (the single path) when HY4_BATCH_SOLO=1: slot 0 selects, slot 1 is dense
-        solo = [{0: (None, None, False)}, {1: (None, None, False)}] if self.solo_on and self.S > 1 else []
+        # R = 1 runs solo (the single path) when HY4_BATCH_SOLO=1: slot 0 selects, the others are dense; every slot once,
+        # so every lane is unloaded once (indexer.lane_unload slices at lane * gcap: one program per lane; a lane first
+        # unloaded at serve time compiled and released every trace, served run 2026-11-19)
+        solo = [{s: (None, None, False)} for s in range(self.S)] if self.solo_on and self.S > 1 else []
         for R in range(1, self.S + 1):
             for w in widths:
                 dec.min_width = w
@@ -217,7 +222,7 @@ class Hy4BatchEngine:
         for R in range(1, self.S + 1):
             for _ in range(steps):
                 self.step({s: (None, None, False) for s in range(R)})
-        for r in solo:
+        for r in solo[:2]:  # capture the single-path traces of both regimes
             for _ in range(steps):
                 self.step(r)
         for s in range(self.S):
