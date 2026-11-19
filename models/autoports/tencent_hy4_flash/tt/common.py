@@ -239,9 +239,9 @@ class Boundary:
             # the receive buffers are sharded L1 (rows x ring x H bf16 per site) and an L1 address range is reserved
             # on every core: 8 rows (2 x 192 KB + the zero vectors) crowded the streamed linears' circular buffers off
             # L1. Size for the plain decode row (HY4_BOUNDARY_ROWS, default 1); wider passes take the all-reduce.
-            fb = FabricBoundary(mesh, hidden, eps, max_rows=Boundary.rows())
+            fb = FabricBoundary(mesh, hidden, eps, max_rows=max(Boundary.row_set()))
             zero = {}
-            for r in range(1, Boundary.rows() + 1):
+            for r in sorted(Boundary.row_set()):
                 pages = r * fb.tiles
                 zero[r] = ttnn.from_torch(torch.zeros(fb._flat_shape(pages)), dtype=ttnn.bfloat16,
                                           layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=fb._flat_config(pages),
@@ -253,11 +253,13 @@ class Boundary:
     @staticmethod
     def enabled(mesh, rows=1):
         return (os.environ.get("HY4_FABRIC_BOUNDARY", "1") == "1" and num_devices(mesh) > 1
-                and rows <= Boundary.rows())
+                and rows in Boundary.row_set())
 
     @staticmethod
-    def rows():
-        return int(os.environ.get("HY4_BOUNDARY_ROWS", "1"))
+    def row_set():
+        """The row counts the boundary serves (HY4_BOUNDARY_ROWS, comma separated; default 1): e.g. 1,6 for plain
+        decode and DFly2 verify rows. The receive buffers are sized for the largest."""
+        return {int(v) for v in os.environ.get("HY4_BOUNDARY_ROWS", "1").split(",")}
 
     def __call__(self, part, rows, norm, site):
         """part [1, 1, 32, H] L1 BF16 per-die partial (rows 0..rows-1 real) -> normed [1, 1, rows, H]."""

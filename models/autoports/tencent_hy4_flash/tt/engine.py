@@ -80,9 +80,9 @@ class Hy4Engine:
         self.model, self.cfg = model, model.cfg
         self.k = int(k)
         # k > 0: DFly2 speculative decoding (5 drafts per verify pass: the drafter's block width - 1)
-        self.dec = Hy4SpecDecoder(model, trace=trace) if self.k > 0 else Hy4Decoder(model, trace=trace)
+        self.dec = Hy4SpecDecoder(model, trace=trace, k=self.k) if self.k > 0 else Hy4Decoder(model, trace=trace)
         if self.k > 0:
-            self.k = min(self.k, self.dec.W - 1)
+            self.k = self.dec.k
         self._n = None  # spec: the last pass's last accepted row (None: no pass since the prefill -> a 1-row pass)
         self.trace = bool(trace)
         self.V = int(self.cfg.vocab)

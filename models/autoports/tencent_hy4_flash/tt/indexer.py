@@ -81,6 +81,13 @@ class Hy4Indexer:
     # chunk after a device-pooled one): the device path itself never reads back
     @property
     def mirror(self):
+        pend = self.__dict__.get("_gk_pending")
+        if pend:  # prefill chunks' group keys, kept as bucket-shaped clones (no slice at prompt-dependent offsets)
+            for g0, t, n in pend:
+                if n > 0:
+                    self._mirror[g0 : g0 + n] = to_torch0(t).reshape(-1, self.d)[:n].to(torch.bfloat16)
+            self._gk_pending = []
+            self._mirror_stale = None
         if self._mirror_stale is not None:
             g0, g1 = self._mirror_stale
             self._mirror_stale = None
@@ -127,6 +134,7 @@ class Hy4Indexer:
 
     def reset(self):
         self._mirror_stale = None
+        self._gk_pending = []
         self.n_tok, self.n_groups = 0, 0
         self.open_keys = torch.zeros(0, self.d, dtype=torch.bfloat16)
         self.tk_hist = torch.zeros(0, self.d, dtype=torch.bfloat16)  # the last token keys (staging init)
@@ -244,14 +252,19 @@ class Hy4Indexer:
         for s0 in range(0, G, blk):
             ttnn.experimental.deepseek_prefill.update_padded_kv_cache(
                 self.gkeys, gk, self._off(0), self._off(g0 + s0), 0, 1, 0, input_row_offset=s0, input_rows=blk)
+        gk_keep = ttnn.clone(gk) if (os.environ.get("HY4_MIRROR_CLONES", "1") == "1"
+                                     and not getattr(self, "_traced_pf", False)) else None
         ttnn.deallocate(gk)
         if getattr(self, "_traced_pf", False):
             return  # after_traced_prefill() sets the host views at the real length
         # host bookkeeping (lazy views of the device state)
         n_end = p0 + T
         n_groups = n_end // r
-        prev = self._mirror_stale
-        self._mirror_stale = (prev[0] if prev else g0, n_groups)
+        if os.environ.get("HY4_MIRROR_CLONES", "1") == "1":
+            self.__dict__.setdefault("_gk_pending", []).append((g0, gk_keep, n_groups - g0))
+        else:
+            prev = self._mirror_stale
+            self._mirror_stale = (prev[0] if prev else g0, n_groups)
         self.n_tok, self.n_groups = n_end, n_groups
         n_open = n_end - n_groups * r
         keep = min(T, 128)

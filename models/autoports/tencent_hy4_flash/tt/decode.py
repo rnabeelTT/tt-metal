@@ -345,18 +345,27 @@ class DraftInputs:
 class Hy4SpecDecoder(Hy4Decoder):
     """Hy4Decoder + the DFly2 drafter (tt/dfly.py): draft passes traced per (target pass key, accepted row)."""
 
-    def __init__(self, model, trace: bool = True):
+    def __init__(self, model, trace: bool = True, k: int | None = None):
         super().__init__(model, trace)
         from models.autoports.tencent_hy4_flash.tt.dfly import W, Hy4DFly
 
         self.W = W
         self.dfly = Hy4DFly(model)
+        # drafts per pass (<= W - 1): fewer drafts = fewer sequential correction steps and narrower verify rows
+        self.k = self.dfly.k = min(W - 1, int(k if k is not None else os.environ.get("HY4_SPEC_K", W - 1)))
         self.scratch = self.dfly.layers[0]["attn"].scratch_row
         self.ds = self._alloc_draft()
-        self.dfly.out_buf = self._dev(torch.zeros(1, self.W - 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        self.dfly.out_buf = self._dev(torch.zeros(1, self.k, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         self.dtraces, self.dout = {}, {}
         self.saved = {}  # target pass key -> (last_hn, {layer: sel}) of that pass's trace
         self.last_key = None
+
+    def set_k(self, k: int):
+        """Change the drafts per pass (releases the traces; the draft output buffer is re-allocated)."""
+        self.release()
+        self.k = self.dfly.k = min(self.W - 1, int(k))
+        ttnn.deallocate(self.dfly.out_buf)
+        self.dfly.out_buf = self._dev(torch.zeros(1, self.k, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
 
     def _alloc_draft(self):
         z = torch.zeros
@@ -429,11 +438,11 @@ class Hy4SpecDecoder(Hy4Decoder):
             self._guard_programs("before a draft")
         if not self.trace:
             d = self.dfly.step(self.ds, n, mem=self.mem)
-            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.k]
             pass  # d: the drafter's persistent output buffer
         elif dkey not in self.dtraces:
             d = self.dfly.step(self.ds, n, mem=self.mem)
-            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+            out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.k]
             pass  # d: the drafter's persistent output buffer
             self._guard_programs("the eager pass of a new draft trace")
             tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
@@ -444,10 +453,10 @@ class Hy4SpecDecoder(Hy4Decoder):
             logger.info(f"captured draft trace {dkey}")
         else:
             ttnn.execute_trace(self.mesh, self.dtraces[dkey], cq_id=0, blocking=False)
-            out = ttnn.to_torch(ttnn.get_device_tensors(self.dout[dkey])[0]).reshape(-1)[: self.W - 1]
+            out = ttnn.to_torch(ttnn.get_device_tensors(self.dout[dkey])[0]).reshape(-1)[: self.k]
             if os.environ.get("HY4_DFLY_CHECK") == "1":
                 d = self.dfly.step(self.ds, n, mem=self.mem)
-                e = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
+                e = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.k]
                 pass  # d: the drafter's persistent output buffer
                 logger.info(f"draft {dkey}: trace {out.tolist()} eager {e.tolist()}")
         return [int(v) & 0xFFFFFFFF for v in out.tolist()]

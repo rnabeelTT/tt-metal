@@ -436,16 +436,28 @@ class Hy4Attention:
     def init_stage(self, base: int):
         """After a prefill: the 64-row staging window starting at position `base` (32-aligned) from the cache."""
         r0 = base if self.kind == "sparse" else base % self.rows
-        if r0 + 64 <= self.rows:
-            w = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, r0 + 64, self.width))
-        else:  # the SWA ring wraps inside the window
-            a = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, self.rows, self.width))
-            b = ttnn.slice(self.cache, (0, 0, 0, 0), (1, 1, r0 + 64 - self.rows, self.width))
-            w = ttnn.concat([a, b], dim=2)
-            ttnn.deallocate(a)
-            ttnn.deallocate(b)
-        wt = ttnn.to_layout(w, ttnn.TILE_LAYOUT)
-        ttnn.deallocate(w)
+        if os.environ.get("HY4_STAGE_GATHER", "1") == "1":
+            # the 64 window rows gathered by a runtime index tensor (ttnn.embedding over the row-major cache): a slice
+            # at the prompt's position bakes the offset into its program (one new program per 32-token prompt
+            # position, compiled at serve time, re-capturing every decode trace)
+            pos = torch.arange(base, base + 64)
+            rows = (pos if self.kind == "sparse" else pos % self.rows).to(torch.int32).reshape(1, 64)
+            idx = upload(self.mesh, rows, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+            table = ttnn.reshape(self.cache, (int(self.cache.shape[-2]), self.width))
+            g = ttnn.embedding(idx, table, layout=ttnn.TILE_LAYOUT)
+            ttnn.deallocate(idx)
+            wt = ttnn.reshape(g, (1, 1, 64, self.width))
+        else:
+            if r0 + 64 <= self.rows:
+                w = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, r0 + 64, self.width))
+            else:  # the SWA ring wraps inside the window
+                a = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, self.rows, self.width))
+                b = ttnn.slice(self.cache, (0, 0, 0, 0), (1, 1, r0 + 64 - self.rows, self.width))
+                w = ttnn.concat([a, b], dim=2)
+                ttnn.deallocate(a)
+                ttnn.deallocate(b)
+            wt = ttnn.to_layout(w, ttnn.TILE_LAYOUT)
+            ttnn.deallocate(w)
         if self.stage is None:
             self.stage = wt
         else:

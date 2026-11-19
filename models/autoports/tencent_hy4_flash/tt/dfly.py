@@ -252,7 +252,7 @@ class Hy4DFly:
         drafts = []
         rr = real_rows(1)
         rr.__enter__()
-        for k in range(1, W):
+        for k in range(1, getattr(self, "k", W - 1) + 1):  # k drafts (the block holds W - 1; fewer stop early)
             hk = ttnn.slice(h, (0, 0, k, 0), (1, 1, k + 1, H), memory_config=mem)  # [1, 1, 1, H]
             e = self._embed(prev, 1)
             z = ttnn.concat([self.hc_hnorm(hk, mem), self.hc_enorm(e, mem)], dim=-1, memory_config=mem)

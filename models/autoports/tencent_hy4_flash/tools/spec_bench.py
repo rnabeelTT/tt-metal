@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--chunk", type=int, default=2048)
     ap.add_argument("--layers", default="")
     ap.add_argument("--no-engram", action="store_true")
+    ap.add_argument("--k", type=int, default=5, help="drafts per verify pass")
+    ap.add_argument("--ks", default="", help="sweep: comma-separated draft counts (one model, spec rows only)")
     args = ap.parse_args()
     from transformers import AutoTokenizer
 
@@ -49,9 +51,23 @@ def main():
     mesh = open_mesh()
     try:
         model = build(mesh, args)
-        spec = Hy4SpecDecoder(model, trace=not args.eager)
+        spec = Hy4SpecDecoder(model, trace=not args.eager, k=args.k)
         plain = None if args.no_plain else Hy4Decoder(model, trace=not args.eager)
         eos = model.cfg.eos
+        ks = [int(v) for v in args.ks.split(",")] if args.ks else [args.k]
+        for kk in ks:
+          if args.ks:
+            spec.set_k(kk)
+            logger.info(f"=== k = {kk}")
+          _one(args, model, spec, plain, tok, eos)
+
+    finally:
+        ttnn.close_mesh_device(mesh)
+
+
+def _one(args, model, spec, plain, tok, eos):
+        import os
+        import time
         tot = {"spec_tok": 0, "spec_t": 0.0, "passes": 0, "plain_tok": 0, "plain_t": 0.0, "match": 0, "n": 0}
         tp, td, tv = [], [], []  # per-call wall times (plain step, draft, verify), warm (2nd pass on)
         for pi, prompt in enumerate(PROMPTS[: args.prompts]):
@@ -143,8 +159,6 @@ def main():
                     f"(spec pass {med(td) + med(tv):.1f}); at {tot['spec_tok'] / max(tot['passes'], 1):.2f} tok/pass: "
                     f"{1e3 * tot['spec_tok'] / max(tot['passes'], 1) / max(med(td) + med(tv), 1e-9):.1f} tok/s vs plain "
                     f"{1e3 / max(med(tp), 1e-9):.1f}")
-    finally:
-        ttnn.close_mesh_device(mesh)
 
 
 if __name__ == "__main__":
