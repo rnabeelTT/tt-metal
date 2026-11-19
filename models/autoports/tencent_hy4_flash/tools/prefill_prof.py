@@ -47,22 +47,28 @@ def main():
         ttnn.ReadDeviceProfiler(mesh)
         # the profiled chunk: model.forward's body with a graph capture per layer
         T, p0 = args.T, model.pos
-        Tp = -(-T // 32) * 32
+        import os as _os
+
+        split = model.N > 1 and T >= int(_os.environ.get("HY4_ROW_SPLIT_MIN", "128"))  # as Hy4Model.forward
+        align = 32 * model.N if split else 32
+        Tp = -(-T // align) * align
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         tok[0, :T] = ids[args.start :].to(torch.int32)
         from models.autoports.tencent_hy4_flash.tt.common import upload
 
         ttnn.graph.begin_graph_capture(ttnn.graph.RunMode.NORMAL)
-        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
-        x = ttnn.reshape(ttnn.embedding(tok_t, model.emb, layout=ttnn.TILE_LAYOUT), (1, 1, Tp, cfg.hidden))
+        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1) if split else "rep")
+        x = ttnn.reshape(ttnn.embedding(tok_t, model.emb, layout=ttnn.TILE_LAYOUT),
+                         (1, 1, Tp // model.N if split else Tp, cfg.hidden))
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
         names.append(("embed", graph_ops(ttnn.graph.end_graph_capture())))
         pos = torch.arange(p0, p0 + Tp)
         cos_sin = {k: model.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
-        eng = model._engram_rows(ids[args.start :], p0, Tp)
+        eng = model._engram_rows(ids[args.start :], p0, Tp, split=split)
         for layer in model.layers:
             ttnn.graph.begin_graph_capture(ttnn.graph.RunMode.NORMAL)
-            X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), None, eng.get("keep"))
+            fwd = layer.forward_split if split else layer.forward
+            X = fwd(X, p0, T, cos_sin, eng.get(layer.li), None, eng.get("keep"))
             names.append((f"layer {layer.li}", graph_ops(ttnn.graph.end_graph_capture())))
             ttnn.synchronize_device(mesh)
             ttnn.ReadDeviceProfiler(mesh)

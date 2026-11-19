@@ -20,7 +20,7 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, num_devices,
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, mm, num_devices, wfid,
                                                            stream_enabled, upload)
 
 class _Args:
@@ -74,12 +74,12 @@ class Hy4DenseMLP:
     def forward_part(self, x, T=None, mem=None):
         """forward() without the all-reduce and norm: the per-die down-projection partial."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
-        g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
-        u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
+        g = mm(x, self.w1, wfid(self.ckc, self.w1), mem)
+        u = mm(x, self.w3, wfid(self.ckc, self.w3), mem)
         h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
         ttnn.deallocate(g)
         ttnn.deallocate(u)
-        part = ttnn.matmul(h, self.w2, compute_kernel_config=self.ckc, memory_config=mem)
+        part = mm(h, self.w2, wfid(self.ckc, self.w2), mem)
         ttnn.deallocate(h)
         return part
 
@@ -92,15 +92,15 @@ class Hy4DenseMLP:
             u = ttnn.slice(gu, (0, 0, 0, self.Il), (1, 1, 32, 2 * self.Il), memory_config=mem)
             ttnn.deallocate(gu)
         else:
-            g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
-            u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
+            g = mm(x, self.w1, wfid(self.ckc, self.w1), mem)
+            u = mm(x, self.w3, wfid(self.ckc, self.w3), mem)
         h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
         ttnn.deallocate(g)
         ttnn.deallocate(u)
         if dec:
             part = self.dec["d"](h, mem)
         else:
-            part = ttnn.matmul(h, self.w2, compute_kernel_config=self.ckc, memory_config=mem)
+            part = mm(h, self.w2, wfid(self.ckc, self.w2), mem)
         ttnn.deallocate(h)
         if dec and R is not None and Boundary.enabled(self.mesh, R):
             if getattr(self, "bnd", None) is None:
@@ -175,7 +175,10 @@ class Hy4MoE:
         self.iota = upload(mesh, torch.arange(E, dtype=torch.float32).reshape(1, 1, 1, E), ttnn.float32)
         self.tile = ttnn.Tile([TILE, TILE])
         self.ckc_r = ckc(mesh, ttnn.MathFidelity.HiFi4, fp32=True)
-        self.ckc_e = ckc(mesh, ttnn.MathFidelity.HiFi2, fp32=False)  # tt-metal #49068: no fp32 dest on BH sparse mm
+        # tt-metal #49068: no fp32 dest on BH sparse mm. bfp4 experts: LoFi covers their 3 mantissa bits (as the fused
+        # decode kernels); HY4_PF_EXPERT_FID=HiFi2 restores the old prefill fidelity
+        efid = getattr(ttnn.MathFidelity, os.environ.get("HY4_PF_EXPERT_FID", "LoFi"))
+        self.ckc_e = ckc(mesh, efid, fp32=False)
         self.ckc_s = ckc(mesh, ttnn.MathFidelity.HiFi4, fp32=True)
         self.cfg_gu_g = _smm_cfg(1, 2 * Il, L, target_cores=64, in0_block_w_cap=96)
         self.cfg_dn_g = _smm_cfg(1, L, Il, target_cores=64, in0_block_w_cap=32)
@@ -292,14 +295,22 @@ class Hy4MoE:
         choice = ttnn.add(s, self.bias, memory_config=mem)
         _, ids = ttnn.topk(choice, k=self.k, dim=-1, largest=True, sorted=True, memory_config=mem)
         ttnn.deallocate(choice)
-        # w[t, j] = s[t, ids[t, j]]: one-hot select (exact)
-        idf = ttnn.typecast(ids, ttnn.float32, memory_config=mem)
-        oh = ttnn.eq(ttnn.reshape(idf, (1, T, self.k, 1)), self.iota, memory_config=mem)  # [1,T,k,E]
-        sel = ttnn.multiply(oh, ttnn.reshape(s, (1, T, 1, self.E)), memory_config=mem)
-        ttnn.deallocate(oh)
-        ttnn.deallocate(s)
-        w = ttnn.reshape(ttnn.sum(sel, dim=-1, keepdim=True, memory_config=mem), (1, 1, T, self.k))
-        ttnn.deallocate(sel)
+        # w[t, j] = s[t, ids[t, j]] (exact)
+        if os.environ.get("HY4_ROUTE_GATHER", "1") == "1":
+            # a gather along the expert dim (the one-hot [T, k, E] fp32 select below was ~3.5 ms per layer at 2K rows)
+            gi = ids if ids.dtype in (ttnn.uint16, ttnn.uint32) else ttnn.typecast(ids, ttnn.uint32, memory_config=mem)
+            w = ttnn.gather(s, -1, gi, memory_config=mem)  # [1, 1, T, k] fp32
+            if gi is not ids:
+                ttnn.deallocate(gi)
+            ttnn.deallocate(s)
+        else:
+            idf = ttnn.typecast(ids, ttnn.float32, memory_config=mem)
+            oh = ttnn.eq(ttnn.reshape(idf, (1, T, self.k, 1)), self.iota, memory_config=mem)  # [1,T,k,E]
+            sel = ttnn.multiply(oh, ttnn.reshape(s, (1, T, 1, self.E)), memory_config=mem)
+            ttnn.deallocate(oh)
+            ttnn.deallocate(s)
+            w = ttnn.reshape(ttnn.sum(sel, dim=-1, keepdim=True, memory_config=mem), (1, 1, T, self.k))
+            ttnn.deallocate(sel)
         den = ttnn.add(ttnn.sum(w, dim=-1, keepdim=True, memory_config=mem), 1e-20, memory_config=mem)
         wn = ttnn.multiply(ttnn.div(w, den, memory_config=mem), self.scale, memory_config=mem)
         ttnn.deallocate(w)
@@ -406,12 +417,12 @@ class Hy4MoE:
         return acc
 
     def _shared(self, x, mem):
-        g = ttnn.matmul(x, self.sw1, compute_kernel_config=self.ckc_s, memory_config=mem)
-        u = ttnn.matmul(x, self.sw3, compute_kernel_config=self.ckc_s, memory_config=mem)
+        g = mm(x, self.sw1, wfid(self.ckc_s, self.sw1), mem)
+        u = mm(x, self.sw3, wfid(self.ckc_s, self.sw3), mem)
         h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
         ttnn.deallocate(g)
         ttnn.deallocate(u)
-        out = ttnn.matmul(h, self.sw2, compute_kernel_config=self.ckc_s, memory_config=mem)
+        out = mm(h, self.sw2, wfid(self.ckc_s, self.sw2), mem)
         ttnn.deallocate(h)
         return out
 
@@ -479,14 +490,14 @@ class Hy4MoE:
         if self.fused is None or T > rows_max:
             # trace-safe rows path: per-row gather (the chunk-masked prefill path writes from the host: ttnn.zeros)
             scores, ids = self.route(x, mem)
-            xl = ttnn.matmul(x, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)
+            xl = mm(x, self.wd, wfid(self.ckc_s, self.wd), mem)
             routed = self._gather(xl, scores, ids, T, mem)
             Tp = int(x.shape[-2])
             if Tp != T:
                 routed = ttnn.pad(routed, [(0, 0), (0, 0), (0, Tp - T), (0, 0)], value=0.0)
             for t_ in (xl, scores, ids):
                 ttnn.deallocate(t_)
-            up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)  # [T, 3072]
+            up = mm(routed, self.wu, wfid(self.ckc_s, self.wu), mem)  # [T, 3072]
             ttnn.deallocate(routed)
             sh = self._shared(x, mem)
             part = ttnn.add(sh, up, memory_config=mem)  # rows >= T are padding
@@ -498,13 +509,13 @@ class Hy4MoE:
         Tp = int(x.shape[-2])
         xr = x if T == Tp else ttnn.slice(x, (0, 0, 0, 0), (1, 1, T, int(x.shape[-1])), memory_config=mem)
         self._x_full = xr
-        xl = ttnn.matmul(xr, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)  # [1,1,T,1536]
+        xl = mm(xr, self.wd, wfid(self.ckc_s, self.wd), mem)  # [1,1,T,1536]
         if T == 1:
             routed = self.fused(xl, self.up_gate, self.down)  # model-wide [1,1,1,1536] partial sum
         else:
             routed = self.fused.rows(xl, self.up_gate, self.down)
         ttnn.deallocate(xl)
-        up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)  # partial [T,3072]
+        up = mm(routed, self.wu, wfid(self.ckc_s, self.wu), mem)  # partial [T,3072]
         up = ttnn.multiply(up, self.scale, memory_config=mem)  # the routed scaling (the fused router normalizes to 1)
         sh = self._shared(x, mem)
         part = ttnn.add(sh, up, memory_config=mem)  # [Tp, H] + [T, H]: rows >= T are padding
@@ -522,7 +533,7 @@ class Hy4MoE:
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         Tp = int(x.shape[-2])
         scores, ids = self.route(x, mem)
-        xl = ttnn.matmul(x, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)
+        xl = mm(x, self.wd, wfid(self.ckc_s, self.wd), mem)
         if getattr(self, "_sorted", None) is None:
             from models.autoports.tencent_hy4_flash.tt.prefill_moe import SortedExperts
 
@@ -544,7 +555,7 @@ class Hy4MoE:
                 ttnn.deallocate(t_)
         for t_ in (xl, scores, ids):
             ttnn.deallocate(t_)
-        up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)
+        up = mm(routed, self.wu, wfid(self.ckc_s, self.wu), mem)
         ttnn.deallocate(routed)
         sh = self._shared(x, mem)
         part = ttnn.add(up, sh, memory_config=mem)
@@ -557,7 +568,7 @@ class Hy4MoE:
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         Tp = int(x.shape[-2])
         scores, ids = self.route(x, mem)
-        xl = ttnn.matmul(x, self.wd, compute_kernel_config=self.ckc_s, memory_config=mem)  # [1,1,Tp,1536]
+        xl = mm(x, self.wd, wfid(self.ckc_s, self.wd), mem)  # [1,1,Tp,1536]
         if T <= GATHER_MAX:
             routed = self._gather(xl, scores, ids, T, mem)
             if Tp != T:
@@ -574,7 +585,7 @@ class Hy4MoE:
         ttnn.deallocate(xl)
         ttnn.deallocate(scores)
         ttnn.deallocate(ids)
-        up = ttnn.matmul(routed, self.wu, compute_kernel_config=self.ckc_s, memory_config=mem)  # partial [Tp,3072]
+        up = mm(routed, self.wu, wfid(self.ckc_s, self.wu), mem)  # partial [Tp,3072]
         ttnn.deallocate(routed)
         sh = self._shared(x, mem)
         part = ttnn.add(up, sh, memory_config=mem)

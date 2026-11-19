@@ -25,7 +25,7 @@ import numpy as np
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import RMSNorm, ckc, to_torch0, upload
+from models.autoports.tencent_hy4_flash.tt.common import RMSNorm, ckc, mm, to_torch0, upload
 from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, cos_sin, rope_torch
 
 TOPK = 512
@@ -301,8 +301,7 @@ class Hy4Indexer:
         """-> roped index query [1, 16, Tp, 128] and head weights [1, 1, Tp, 16]. hw / iq: the decode path's fused
         head-weight columns and streamed query projection."""
         Tp = int(x.shape[-2])
-        q = iq(q_resid, mem) if iq is not None else ttnn.matmul(q_resid, self.wq, compute_kernel_config=self.ckc,
-                                                                  memory_config=mem)
+        q = iq(q_resid, mem) if iq is not None else mm(q_resid, self.wq, self.ckc, mem)
         q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
         qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
         qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)

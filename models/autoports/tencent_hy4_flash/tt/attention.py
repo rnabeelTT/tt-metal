@@ -36,8 +36,10 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     StreamLinear,
     TILE,
     ckc,
+    mm,
     num_devices,
     stream_enabled,
+    wfid,
     upload,
 )
 from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope
@@ -71,6 +73,8 @@ class Hy4Attention:
         self.theta = cfg.rope_theta[self.kind]
         self.ar = AllReduce(mesh)
         self.ckc = ckc(mesh, fp32=True)
+        # sparse_sdpa (bf16 q / cache): HY4_SDPA_FID (default HiFi4)
+        self.ckc_sdpa = ckc(mesh, getattr(ttnn.MathFidelity, os.environ.get("HY4_SDPA_FID", "HiFi4")), fp32=True)
         self.ckc_lofi = ckc(mesh, ttnn.MathFidelity.HiFi2, fp32=True)
         self.rope = DeviceRope(mesh, self.rope_d)
         wdt = _dt("HY4_ATTN_DTYPE", "bfp8")
@@ -98,6 +102,9 @@ class Hy4Attention:
         self.post_norm = RMSNorm(mesh, sd["post_proj_norm.weight"], cfg.rms_eps)
         # sinks: q's sink columns per (local, padded) head: [s_hi, s_lo, 0, ...]
         s = sd["learnable_sink_param"].float().reshape(H)
+        # the flash prefill path (first chunk): ttnn SDPA scales the sink with the logits, so it takes sink / scale
+        self.sink_sdpa = upload(mesh, (s / self.scale).reshape(1, H, 1, 1), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                mapper=("shard", 1))
         s_hi = s.to(torch.bfloat16).float()
         s_lo = (s - s_hi).to(torch.bfloat16).float()
         qs = torch.zeros(N, self.Hp, SINK_COLS)
@@ -243,13 +250,13 @@ class Hy4Attention:
         Tp = int(x.shape[-2])
         dec = qa is not None
         if qa is None:
-            qa = ttnn.matmul(x, self.wqa, compute_kernel_config=self.ckc, memory_config=mem)
+            qa = mm(x, self.wqa, wfid(self.ckc, self.wqa), mem)
         q_resid = self.q_norm(qa, mem)
         ttnn.deallocate(qa)
         if dec:
             q = self.dec["qb"](q_resid, mem)
         else:
-            q = ttnn.matmul(q_resid, self.wqb, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,Hd*256]
+            q = mm(q_resid, self.wqb, wfid(self.ckc, self.wqb), mem)  # [1,1,Tp,Hd*256]
         if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
             # one tile row: [1, 1, 32, Hd * 256] and [1, Hd, 32, 256] share their tile pages (head h, tile c -> page
             # 8 h + c): a zero-copy view instead of reshape + permute (~21 us)
@@ -268,7 +275,7 @@ class Hy4Attention:
         """-> the cache rows of these tokens [1,1,Tp,608] TILE: [norm(c) | rope(k_rope) | 0]."""
         Tp = int(x.shape[-2])
         if kv is None:
-            kv = ttnn.matmul(x, self.wkva, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,576]
+            kv = mm(x, self.wkva, wfid(self.ckc, self.wkva), mem)  # [1,1,Tp,576]
         c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
         kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
                        cos, sin, mem)
@@ -295,7 +302,7 @@ class Hy4Attention:
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # sparse_sdpa: DRAM
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc)  # [1,Hp,Tp,512] RM
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)  # [1,Hp,Tp,512] RM
         ttnn.deallocate(q_rm)
         o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
         ttnn.deallocate(o)
@@ -310,14 +317,14 @@ class Hy4Attention:
         if dec:
             g = self.dec["g"](x, mem)
         else:
-            g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
+            g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)
         gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
         if dec:
             part = self.dec["o"](gated, mem)
         else:
-            part = ttnn.matmul(gated, self.wo, compute_kernel_config=self.ckc, memory_config=mem)
+            part = mm(gated, self.wo, wfid(self.ckc, self.wo), mem)
         ttnn.deallocate(gated)
         if dec and R is not None and Boundary.enabled(self.mesh, R):
             if getattr(self, "bnd", None) is None:
@@ -338,15 +345,25 @@ class Hy4Attention:
         q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
         row = self._kv_row(x, cos, sin, mem)
         row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
-        ttnn.deallocate(row)
+        Tp = int(x.shape[-2])
+        # the first chunk attends causally to its own rows only (dense regime / SWA window): flash attention over the
+        # chunk's rows (keys read once per query block) instead of sparse_sdpa's per-row key gathers (HY4_PF_FLASH)
+        flash = (p0 == 0 and os.environ.get("HY4_PF_FLASH", "1") == "1"
+                 and (self.kind == "swa" or Tp <= self.cfg.idx_candidate_topk))
+        kv_t = row if flash else None
+        if not flash:
+            ttnn.deallocate(row)
         self._write_rows(row_rm, p0, self._write_n(row_rm, T))
         ttnn.deallocate(row_rm)
-        Tp = int(x.shape[-2])
         selected = None
         if self.indexer is not None:
             tail = self._idx_tail(p0, T, Tp) if p0 >= self.cfg.idx_candidate_topk else None
             selected = self.indexer.forward(x, q_resid, p0, T, mem, tail=tail)
         ttnn.deallocate(q_resid)
+        if flash:
+            o = self._flash_first_chunk(q_lat, q_rope, kv_t, mem)
+            ttnn.deallocate(kv_t)
+            return self._out_part(x, o, mem)
         if isinstance(selected, tuple):  # the device-built lists of a selecting chunk
             idx, shared = selected[1], False
         else:
@@ -362,7 +379,7 @@ class Hy4Attention:
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc)
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)
         ttnn.deallocate(q_rm)
         if not shared:
             ttnn.deallocate(idx)
@@ -370,16 +387,51 @@ class Hy4Attention:
         ttnn.deallocate(o)
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
+        return self._out_part(x, o, mem)
+
+    def _out_part(self, x, o, mem):
+        """Prefill: the attention output o [1, Hd, Tp, 512] TILE (consumed) -> V-up, output gate, o_proj partial."""
+        Tp = int(x.shape[-2])
         ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)
         ttnn.deallocate(o)
         ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
-        g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
+        g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)
         gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
-        part = ttnn.matmul(gated, self.wo, compute_kernel_config=self.ckc, memory_config=mem)
+        part = mm(gated, self.wo, wfid(self.ckc, self.wo), mem)
         ttnn.deallocate(gated)
         return part
+
+    def _flash_first_chunk(self, q_lat, q_rope, row, mem):
+        """Causal (SWA: windowed) MQA flash attention of a first prefill chunk over its own rows, with the sinks:
+        q [1, Hd, Tp, 576] = [q_lat | roped q], K = V = row[..., :576] -> o [1, Hd, Tp, 512] TILE (V's first 512).
+        (q_lat / q_rope consumed.)"""
+        Tp = int(row.shape[-2])
+        q = ttnn.concat([q_lat, q_rope], dim=-1, memory_config=mem)
+        ttnn.deallocate(q_lat)
+        ttnn.deallocate(q_rope)
+        lw = self.cfg.latent_width
+        k = ttnn.slice(row, (0, 0, 0, 0), (1, 1, Tp, lw), memory_config=mem)
+        v = k  # (ttnn SDPA wants V's head dim = Q's: V = the whole 576-wide row, output sliced to its 512 latents)
+        qc = int(os.environ.get("HY4_PF_FLASH_Q", "128"))  # q 128 x k 128 overflowed L1 at head dim 576
+        kc = int(os.environ.get("HY4_PF_FLASH_K", "64"))
+        while Tp % qc:
+            qc //= 2
+        while Tp % kc:
+            kc //= 2
+        grid = self.mesh.compute_with_storage_grid_size()
+        pc = ttnn.SDPAProgramConfig(compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y), exp_approx_mode=False,
+                                    q_chunk_size=max(qc, 32), k_chunk_size=max(kc, 32))
+        o = ttnn.transformer.scaled_dot_product_attention(
+            q, k, v, is_causal=True, scale=self.scale,
+            sliding_window_size=self.cfg.window + int(os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0")) if self.kind == "swa" else None,
+            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+        ttnn.deallocate(q)
+        ttnn.deallocate(k)
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
+        ttnn.deallocate(o)
+        return o2
 
     _IDX_DEV = {}
 

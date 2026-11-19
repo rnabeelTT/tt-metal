@@ -68,6 +68,60 @@ def ckc(mesh, fidelity=ttnn.MathFidelity.HiFi4, fp32=True, approx=False, l1_acc=
     )
 
 
+_WFID = {}
+
+
+def wfid(base, w):
+    """The compute config of a matmul against weight w: HiFi2 for a bfp8 weight (HY4_BFP8_HIFI2, default 1; covers
+    the weight's 7 mantissa bits, as the decode streams), else base."""
+    if w.dtype != ttnn.bfloat8_b or os.environ.get("HY4_BFP8_HIFI2", "1") != "1":
+        return base
+    c = _WFID.get(id(base))
+    if c is None:
+        c = _WFID[id(base)] = (base, ttnn.init_device_compute_kernel_config(
+            ttnn.get_device_tensors(w)[0].device().arch(), math_fidelity=ttnn.MathFidelity.HiFi2,
+            math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=False))
+    return c[1]
+
+
+_PF_CFG = {}
+
+
+def _largest_div(n, cap):
+    return max(d for d in range(1, cap + 1) if n % d == 0)
+
+
+def mm(x, w, ck, mem=None, **kw):
+    """ttnn.matmul for a prefill-sized [1, 1, M, K] x [1, 1, K, N] (M >= HY4_PF_MCAST_MIN rows, default 256): an explicit
+    2D-multicast program config (<= 8 x 11 cores, K blocks of up to 8 tiles, FP32 DST subblocks of <= 4 tiles): the
+    default config ran these at ~40 TFLOPS (3072 -> 4096 bfp8 at 2048 rows: 1197 -> 532 us). Else the plain matmul."""
+    M, K, N = int(x.shape[-2]), int(x.shape[-1]), int(w.shape[-1])
+    ok = (os.environ.get("HY4_PF_MCAST", "1") == "1" and M >= int(os.environ.get("HY4_PF_MCAST_MIN", "256"))
+          and len(x.shape) == 4 and int(x.shape[0]) == 1 and int(x.shape[1]) == 1 and int(w.shape[1]) == 1
+          and M % TILE == 0 and K % TILE == 0 and N % TILE == 0)
+    if ok:
+        fp32 = bool(getattr(ck, "fp32_dest_acc_en", True))
+        key = (M, K, N, fp32)
+        cfg = _PF_CFG.get(key, False)
+        if cfg is False:
+            Mt, Kt, Nt = M // TILE, K // TILE, N // TILE
+            gy, gx = _largest_div(Mt, 8), _largest_div(Nt, 11)
+            pm, pn = Mt // gy, Nt // gx
+            cfg = None
+            if gy >= 4 and gx >= 4 and pm <= 8 and pn <= 16:
+                lim = 4 if fp32 else 8
+                sw = _largest_div(pn, lim)
+                sh = _largest_div(pm, lim // sw)
+                cfg = ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
+                    compute_with_storage_grid_size=(gx, gy), in0_block_w=_largest_div(Kt, 8), out_subblock_h=sh,
+                    out_subblock_w=sw, per_core_M=pm, per_core_N=pn, transpose_mcast=False, fused_activation=None,
+                    fuse_batch=True)
+            _PF_CFG[key] = cfg
+        if cfg is not None:
+            kw["program_config"] = cfg
+    return ttnn.matmul(x, w, compute_kernel_config=ck, memory_config=mem, **kw)
+
+
 class AllReduce:
     """Sum of a per-die partial over the (1, N) mesh, result replicated on every die.
 
