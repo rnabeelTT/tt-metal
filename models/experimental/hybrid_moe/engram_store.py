@@ -191,17 +191,54 @@ def convert(layers=LAYERS, chunk=1 << 21):
 class EngramStore:
     """The four FP8 tables (memory-mapped; `in_ram=True` reads them into RAM) and their hashers."""
 
-    def __init__(self, layers=LAYERS, in_ram=False):
+    def __init__(self, layers=LAYERS, in_ram=None):
         cfg = text_config()
         wmap = weight_map()
         self.layers = tuple(layers)
         self.pad_id = cfg["engram_pad_id"]
         self.hashers = {li: EngramHasher(li, cfg, wmap) for li in self.layers}
         self.q, self.s = {}, {}
+        if in_ram is None:  # HY4_ENGRAM_RAM: 1 (default) = warm the page cache in the background, 0 = cold memory map
+            in_ram = "warm" if os.environ.get("HY4_ENGRAM_RAM", "1") == "1" else False
         for li in self.layers:
-            mm = "r" if not in_ram else None
+            mm = "r" if in_ram in (False, "warm") else None
             self.q[li] = np.load(os.path.join(OUT, f"L{li}_fp8.npy"), mmap_mode=mm)
             self.s[li] = np.load(os.path.join(OUT, f"L{li}_scale.npy"), mmap_mode=mm)
+        self.loaders = []
+        if in_ram == "warm":
+            # A cold memory-mapped lookup is 64 random NVMe reads per token (~7 ms per Engram layer); from the page
+            # cache it is ~0.05 ms. The tables (~65 GB) are read ONCE, sequentially, by one background thread into the
+            # page cache (evictable; no anonymous copy). Never copy them into process memory: page cache + copy is
+            # ~2x the size, and the reclaim pressure made systemd-oomd kill the whole user scope (2026-11-19).
+            import threading
+
+            th = threading.Thread(target=self._warm, daemon=True, name="engram-warm")
+            th.start()
+            self.loaders.append(th)
+
+    def _warm(self, chunk=1 << 26):
+        files = [os.path.join(OUT, f"L{li}_{n}.npy") for li in self.layers for n in ("scale", "fp8")]
+        need = sum(os.path.getsize(f) for f in files)
+        margin = int(float(os.environ.get("HY4_ENGRAM_WARM_MARGIN_GB", "48")) * 2**30)
+        try:
+            avail = int(next(l for l in open("/proc/meminfo") if l.startswith("MemAvailable")).split()[1]) * 1024
+        except Exception:  # noqa: BLE001
+            avail = 0
+        if avail < need + margin:
+            print(f"engram: page-cache warm skipped (MemAvailable {avail / 2**30:.0f} GiB < tables "
+                  f"{need / 2**30:.0f} + margin {margin / 2**30:.0f} GiB): lookups read the NVMe", flush=True)
+            return
+        t0 = time.time()
+        buf = bytearray(chunk)
+        for f in files:
+            with open(f, "rb", buffering=0) as fh:
+                while fh.readinto(buf):
+                    pass
+        print(f"engram tables in the page cache ({need / 2**30:.0f} GiB, {time.time() - t0:.0f} s)", flush=True)
+
+    def wait_ram(self):
+        for th in self.loaders:
+            th.join()
 
     def mask(self, ids):
         ids = np.asarray(ids)
@@ -235,7 +272,7 @@ class EngramRows:
     store_dir: the converted tables (default HY4_ENGRAM_DIR); ckpt_dir: the checkpoint snapshot dir (config.json,
     model.safetensors.index.json and the shards with the lookup tables / norm weights; default the HF cache)."""
 
-    def __init__(self, store_dir=None, ckpt_dir=None, in_ram=False, layers=LAYERS):
+    def __init__(self, store_dir=None, ckpt_dir=None, in_ram=None, layers=LAYERS):
         global OUT, _SNAP
         if store_dir:
             OUT = store_dir

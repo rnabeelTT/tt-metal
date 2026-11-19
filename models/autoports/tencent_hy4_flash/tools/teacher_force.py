@@ -33,6 +33,10 @@ def main():
     ap.add_argument("--chunk", type=int, default=2048)
     ap.add_argument("--layers", default="")
     ap.add_argument("--no-engram", action="store_true")
+    ap.add_argument("--decode-from", type=int, default=0,
+                    help="P > 0: prefill the first P tokens, then feed the rest through the traced decoder (tt/decode.py) "
+                         "one row per pass: gates the decode path")
+    ap.add_argument("--rows", type=int, default=1, help="rows per decoder pass (--decode-from)")
     args = ap.parse_args()
     from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
 
@@ -42,6 +46,9 @@ def main():
     mesh = open_mesh()
     try:
         model = build(mesh, args)
+        if model.engram is not None and hasattr(model.engram.store, "wait_ram"):
+            model.engram.store.wait_ram()
+        decs = {}
         for name in names:
             ids = torch.tensor(seqs[name], dtype=torch.long)
             ref = np.load(os.path.join(args.ref_dir, f"ref_{name}.npz"))
@@ -49,9 +56,22 @@ def main():
             model.reset()
             t0 = time.time()
             lps = []
-            for c0 in range(0, ids.numel(), args.chunk):
-                lg = model.forward(ids[c0 : c0 + args.chunk], logits_rows="all")
+            P = args.decode_from if 0 < args.decode_from < ids.numel() else ids.numel()
+            for c0 in range(0, P, args.chunk):
+                lg = model.forward(ids[c0 : min(P, c0 + args.chunk)], logits_rows="all")
                 lps.append(torch.log_softmax(lg.float(), dim=-1))
+            if P < ids.numel():
+                from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder
+
+                dec = decs.get("d")
+                if dec is None:
+                    dec = decs["d"] = Hy4Decoder(model, trace=True)
+                dec.start(P)
+                dec.set_history(ids[:P].tolist())
+                for i in range(P, ids.numel(), args.rows):
+                    n = min(args.rows, ids.numel() - i)
+                    lg = dec.run([int(t) for t in ids[i : i + n]], logits_rows="all", p0=i)
+                    lps.append(torch.log_softmax(lg.float().reshape(n, -1), dim=-1))
             lp = torch.cat(lps)  # [T, V]
             T = ids.numel() - 1
             lp = lp[:T]

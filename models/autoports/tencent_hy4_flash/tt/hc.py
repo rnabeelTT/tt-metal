@@ -84,6 +84,14 @@ class HyperConnection:
                 HyperConnection._ONES[key] = upload(mesh, ones, ttnn.float32)
             self.onesK = HyperConnection._ONES[key]
 
+        # decode: the fused HC program's constants (tt/hc_fused), HY4_HC_FUSED=1 (default) on multi-die meshes
+        self.fused = False
+        if os.environ.get("HY4_HC_FUSED", "1") == "1" and hc == 4 and mesh.get_num_devices() > 1:
+            from models.autoports.tencent_hy4_flash.tt.hc_fused import HCFusedOp, fused_consts
+
+            fused_consts(HCFusedOp.get(mesh, hidden), self, fn, base, scale)
+            self.fused = True
+
     _ONES = {}
 
     def _weights_splitk(self, xf, mem):
@@ -144,6 +152,8 @@ class HyperConnection:
     def post(self, X, out, post, mem=None):
         """X' = bf16(post * out + X) (fp32 math): X [1, hc, T, H], out [1, 1, T, H], post [1, hc, T, 1]."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        if int(out.shape[-2]) != int(X.shape[-2]) and int(out.shape[-2]) > 1:  # the boundary's real rows only
+            out = ttnn.pad(out, [(0, 0), (0, 0), (0, int(X.shape[-2]) - int(out.shape[-2])), (0, 0)], value=0.0)
         of = ttnn.typecast(out, ttnn.float32, memory_config=mem)
         y = ttnn.add(ttnn.multiply(post, of, memory_config=mem), ttnn.typecast(X, ttnn.float32, memory_config=mem),
                      memory_config=mem)

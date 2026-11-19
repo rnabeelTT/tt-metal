@@ -128,7 +128,9 @@ class Hy4Decoder:
         lg = ttnn.from_torch(z(1, 1, ROWS, m.Vp), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,
                              mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))
         hn = self._dev(z(1, 1, ROWS, H), ttnn.bfloat16, ttnn.TILE_LAYOUT)
-        m.step_bufs = {"lg": lg, "hn": hn}
+        lr = ttnn.from_torch(z(1, 1, m.LG_ROWS, m.Vp), dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
+                             mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))
+        m.step_bufs = {"lg": lg, "hn": hn, "lg_rows": lr}
         for l in m.layers:
             if l.attn.indexer is not None:
                 l.attn.indexer.sel_buf = self._dev(z(1, 1, ROWS, self.n_sel, dtype=torch.int32), ttnn.uint32,

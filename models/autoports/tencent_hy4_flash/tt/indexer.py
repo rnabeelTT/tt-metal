@@ -270,10 +270,12 @@ class Hy4Indexer:
         self._open_pending = (ttnn.slice(buf, (0, 0, T - n_open, 0), (1, 1, T, d)), n_open) if n_open else None
 
     # ------------------------------------------------------------------ scoring (shared)
-    def _query(self, x, q_resid, cos, sin, mem):
-        """-> roped index query [1, 16, Tp, 128] and head weights [1, 1, Tp, 16]."""
+    def _query(self, x, q_resid, cos, sin, mem, hw=None, iq=None):
+        """-> roped index query [1, 16, Tp, 128] and head weights [1, 1, Tp, 16]. hw / iq: the decode path's fused
+        head-weight columns and streamed query projection."""
         Tp = int(x.shape[-2])
-        q = ttnn.matmul(q_resid, self.wq, compute_kernel_config=self.ckc, memory_config=mem)
+        q = iq(q_resid, mem) if iq is not None else ttnn.matmul(q_resid, self.wq, compute_kernel_config=self.ckc,
+                                                                  memory_config=mem)
         q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
         qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
         qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)
@@ -283,8 +285,10 @@ class Hy4Indexer:
         q = ttnn.concat([qp, qr2], dim=-1, memory_config=mem)
         ttnn.deallocate(qp)
         ttnn.deallocate(qr2)
-        w = ttnn.multiply(ttnn.matmul(x, self.whw, compute_kernel_config=self.ckc, memory_config=mem), self.hw_scale,
-                          memory_config=mem)
+        if hw is None:
+            hw = ttnn.matmul(x, self.whw, compute_kernel_config=self.ckc, memory_config=mem)
+        w = ttnn.multiply(hw, self.hw_scale, memory_config=mem)
+        ttnn.deallocate(hw)
         return q, w
 
     _IOTA = {}
@@ -472,10 +476,14 @@ class Hy4Indexer:
         ttnn.deallocate(kr2)
         return out
 
-    def step(self, x, q_resid, si, mem):
+    def step(self, x, q_resid, si, mem, tk=None, hw=None, iq=None):
         """Token / group staging updates and slab writes; in the sparse regime the index lists of the rows
-        [1, 1, 32, K] uint32 RM (device-built), else si.idx_dense."""
-        tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
+        [1, 1, 32, K] uint32 RM (device-built), else si.idx_dense. tk / hw / iq: the decode path's fused projections."""
+        if tk is None:
+            tk = ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem)
+        tk_raw = tk
+        tk = self.tk_norm(tk_raw, mem)
+        ttnn.deallocate(tk_raw)
         a = ttnn.matmul(si.A, self.tk_stage, compute_kernel_config=self.ckc, memory_config=mem)
         b = ttnn.matmul(si.P, tk, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(tk)
@@ -497,9 +505,11 @@ class Hy4Indexer:
             ttnn.experimental.deepseek_prefill.update_padded_kv_cache(
                 self.gkeys, self.g_stage, si.slot, si.off_grp[j], 0, 1, 0, input_row_offset=32 * j, input_rows=32)
         if not si.sparse:
+            if hw is not None:
+                ttnn.deallocate(hw)
             return si.idx_dense
         cos, sin = si.cos_sin["sparse"]
-        q, w = self._query(x, q_resid, cos, sin, mem)
+        q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
         ids = self._topk(q, w, si.bucket, si.vis, mem)
         ttnn.deallocate(q)
         ttnn.deallocate(w)

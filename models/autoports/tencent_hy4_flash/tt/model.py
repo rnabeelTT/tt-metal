@@ -25,8 +25,10 @@ from models.autoports.tencent_hy4_flash.tt.attention import Hy4Attention
 from models.autoports.tencent_hy4_flash.tt.common import (
     AllGather,
     RMSNorm,
+    StreamLinear,
     ckc,
     num_devices,
+    stream_enabled,
     to_torch_cat,
     upload,
 )
@@ -133,12 +135,46 @@ class Hy4Layer:
         f_in, post = self.ffn_hc.pre(X2, m("hc"))
         f_n = self.post_norm(f_in, m("norm"))
         ttnn.deallocate(f_in)
-        f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"))
+        f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"), R=R)
         ttnn.deallocate(f_n)
         X3 = self.ffn_hc.post(X2, f, post, m("hc"))
         for t_ in (X2, f, post):
             ttnn.deallocate(t_)
         return X3
+
+    def step_fused(self, X, pend, si, R, hcf, mem=None):
+        """step() with the hyper-connections as fused programs (tt/hc_fused): pend = (o, w) of the previous sublayer's
+        HC post (None at layer 0); returns (X, pend) with this layer's MLP output pending."""
+        import os as _os
+
+        parts = _os.environ.get("HY4_L1_PARTS", "hc,attn,moe,norm").split(",")
+        m = lambda k: mem if k in parts else ttnn.DRAM_MEMORY_CONFIG  # noqa: E731
+
+        def run(X, pend, hc):
+            o, wp = pend if pend is not None else (None, None)
+            Xn, inp, w = hcf(X, o, wp, hc)
+            if pend is not None:
+                ttnn.deallocate(X)
+                ttnn.deallocate(o)
+                ttnn.deallocate(wp)
+            return Xn, inp, w
+
+        if self.engram is not None and self.li in si.engram:
+            if pend is not None:
+                X, _, _ = run(X, pend, None)
+                pend = None
+            X2 = self.engram.forward(X, si.engram[self.li], m("engram"))
+            ttnn.deallocate(X)
+            X = X2
+        X, a_in, w_a = run(X, pend, self.attn_hc)
+        a = self.attn.step(self.in_norm(a_in, m("norm")), si, m("attn"))
+        ttnn.deallocate(a_in)
+        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc)
+        f_n = self.post_norm(f_in, m("norm"))
+        ttnn.deallocate(f_in)
+        f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"), R=R)
+        ttnn.deallocate(f_n)
+        return X, (f, w_f)
 
     def reset(self):
         if self.attn.indexer is not None:
@@ -156,6 +192,8 @@ class Hy4Model:
         self.max_ctx, self.chunk = max_ctx, chunk
         self.layer_ids = list(range(cfg.n_layers)) if layers is None else list(layers)
         self.engram = engram
+        if cache_dir:  # the attention / dense modules' decode copies cache next to the other tensors
+            os.environ.setdefault("HY4_TENSOR_CACHE", cache_dir)
         self.ag = AllGather(mesh)
         t0 = time.time()
         # embedding (replicated bf16 table, row-major for ttnn.embedding; tensor-cached: a plain upload of the 742 MB
@@ -176,6 +214,12 @@ class Hy4Model:
         lm_dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b}[os.environ.get("HY4_LM_DTYPE", "bf16")]
         self.lm = upload(mesh, lm.reshape(1, 1, cfg.hidden, self.Vp), lm_dt, mapper=("shard", -1),
                          cache=os.path.join(cache_dir, f"lm_head.{lm_dt}") if cache_dir else None)
+        self.lm_dec = None
+        if stream_enabled(mesh):  # decode LM head: streamed copy, fp32 logits (bit-identical to the interleaved matmul)
+            n = self.Vp // self.N
+            self.lm_dec = StreamLinear(mesh, [lm[:, i * n : (i + 1) * n] for i in range(self.N)], lm_dt,
+                                       cache=os.path.join(cache_dir, f"lm_head.{lm_dt}") if cache_dir else None,
+                                       out_dtype=ttnn.float32)
         del lm
         self.ckc = ckc(mesh, fp32=True)
         self.rope = DeviceRope(mesh, cfg.qk_rope)
@@ -194,28 +238,59 @@ class Hy4Model:
     def step(self, si, R, mem=None):
         """Trace-safe rows pass over si (tt/decode.StepInputs) -> logits [1, 1, 32, Vp / N] fp32 per die."""
         cfg = self.cfg
+        si.R = R  # the real rows (the decode boundary all-reduces only those)
         x = ttnn.embedding(si.tok, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
         x = ttnn.reshape(x, (1, 1, 32, cfg.hidden))
-        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
+        fused_hc = self.head_hc.fused and int(x.shape[-2]) == 32
+        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)),
+                        memory_config=ttnn.DRAM_MEMORY_CONFIG if fused_hc else (mem or ttnn.DRAM_MEMORY_CONFIG))
         ttnn.deallocate(x)
-        for layer in self.layers:
-            X = layer.step(X, si, R, mem)
-        h, _ = self.head_hc.pre(X, mem)
-        ttnn.deallocate(X)
+        if fused_hc:
+            from models.autoports.tencent_hy4_flash.tt.hc_fused import HCFusedOp
+
+            hcf = HCFusedOp.get(self.mesh, cfg.hidden)
+            pend = None
+            for layer in self.layers:
+                X, pend = layer.step_fused(X, pend, si, R, hcf, mem)
+            o, wp = pend
+            X2, h, _w = hcf(X, o, wp, self.head_hc)
+            for t_ in (X, X2, o, wp, _w):
+                ttnn.deallocate(t_)
+        else:
+            for layer in self.layers:
+                X = layer.step(X, si, R, mem)
+            h, _ = self.head_hc.pre(X, mem)
+            ttnn.deallocate(X)
         hn = self.norm(h, mem)
         ttnn.deallocate(h)
-        lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        if self.lm_dec is not None:
+            lg = self.lm_dec(hn, mem)
+        else:
+            lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         bufs = getattr(self, "step_bufs", None)
         if bufs is not None:
             # persistent outputs, allocated before any trace capture: a trace's outputs allocated during its capture
             # can sit in another trace's freed intermediates and be overwritten by that trace's replays
-            ttnn.copy(lg, bufs["lg"])
+            if R <= self.LG_ROWS and "lg_rows" in bufs:
+                # only the real rows leave the device: row-major [LG_ROWS, Vp / N] per die (~120 KB) instead of the
+                # padded fp32 tile block [32, Vp / N] (~3.9 MB per die, 4.2 ms to read); same values
+                lr = ttnn.to_layout(lg, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                ls = ttnn.slice(lr, (0, 0, 0, 0), (1, 1, self.LG_ROWS, int(lg.shape[-1])))
+                ttnn.deallocate(lr)
+                ttnn.copy(ls, bufs["lg_rows"])
+                ttnn.deallocate(ls)
+                out = bufs["lg_rows"]
+            else:
+                ttnn.copy(lg, bufs["lg"])
+                out = bufs["lg"]
             ttnn.copy(hn, bufs["hn"])
             ttnn.deallocate(lg)
             ttnn.deallocate(hn)
-            lg, hn = bufs["lg"], bufs["hn"]
+            lg, hn = out, bufs["hn"]
         self.last_hn = hn  # the final normalized hidden of the rows (kept: the DFly2 drafter's target hidden)
         return lg
+
+    LG_ROWS = 8  # passes of up to this many rows return their logits row-major (tt/decode persistent "lg_rows")
 
     def read_logits(self, lg, R) -> torch.Tensor:
         return to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:R, : self.cfg.vocab].float()

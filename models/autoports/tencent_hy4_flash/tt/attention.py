@@ -31,10 +31,13 @@ import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import (
     AllReduce,
+    Boundary,
     RMSNorm,
+    StreamLinear,
     TILE,
     ckc,
     num_devices,
+    stream_enabled,
     upload,
 )
 from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope
@@ -103,6 +106,9 @@ class Hy4Attention:
                              mapper=("shard", 0))
         self.stage = None  # the decode staging window (init_stage)
         self.indexer = None
+        self.dec = None
+        if stream_enabled(mesh) and share is None:  # (the DFly2 drafter's layers: not yet)
+            self._decode_linears(sd, wdt, layer_idx, False)
         if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
             self.cache, self.rows = share.cache, share.rows
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
@@ -125,6 +131,45 @@ class Hy4Attention:
             from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
 
             self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx)
+
+    def _decode_linears(self, sd, wdt, li, drafter):
+        """Decode-only streamed copies (tt/common.StreamLinear): x -> [q_a | kv_a | (indexer token key | head weights)]
+        in one bf16 linear, the output gate, q_b and o_proj (per-die shards, wdt)."""
+        cfg, N, Hd = self.cfg, self.N, self.Hd
+        import os as _os
+
+        cdir = _os.environ.get("HY4_TENSOR_CACHE")
+        tag = f"dfly{li}" if drafter else f"layers.{li}"
+        cache = (lambda n: _os.path.join(cdir, f"{tag}.attn.{n}")) if cdir else (lambda n: None)
+        T_ = lambda k: sd[k].to(torch.bfloat16).T.contiguous()  # noqa: E731  [in, out]
+        xa = [T_("q_a_proj.weight"), T_("kv_a_proj_with_mqa.weight")]
+        if self.kind == "sparse" and not drafter:
+            p = "compressed_indexer."
+            hw = T_(p + "head_weight_projection.weight")
+            xa += [T_(p + "token_key_projection.weight"), torch.nn.functional.pad(hw, (0, TILE - hw.shape[1]))]
+        xa = torch.cat(xa, dim=1)
+        q, l, d = cfg.q_lora, cfg.latent_width, cfg.idx_dim
+        self.xa_cols = [(0, q), (q, q + l)] + ([(q + l, q + l + d), (q + l + d, q + l + d + cfg.idx_heads)]
+                                              if xa.shape[1] > q + l else [])
+        wg, wqb, wo = T_("linear_gate.weight"), T_("q_b_proj.weight"), T_("o_proj.weight")
+        w = Hd * 256
+        self.dec = {
+            "xa": StreamLinear(self.mesh, [xa] * N, ttnn.bfloat16, cache=cache("xa.bf16")),
+            "g": StreamLinear(self.mesh, [wg[:, i * w : (i + 1) * w] for i in range(N)], wdt, cache=cache(f"g.{wdt}")),
+            "qb": StreamLinear(self.mesh, [wqb[:, i * w : (i + 1) * w] for i in range(N)], wdt,
+                               cache=cache(f"qb.{wdt}")),
+            "o": StreamLinear(self.mesh, [wo[i * w : (i + 1) * w, :] for i in range(N)], wdt, cache=cache(f"o.{wdt}")),
+        }
+        if self.kind == "sparse" and not drafter:
+            wq = T_("compressed_indexer.query_projection.weight")
+            self.dec["iq"] = StreamLinear(self.mesh, [wq] * N, ttnn.bfloat16, cache=cache("iq.bf16"))
+
+    def _xa(self, x, mem):
+        """Decode: the fused x-projections -> [q_a, kv_a, (token key, head weights)] column slices."""
+        y = self.dec["xa"](x, mem)
+        outs = [ttnn.slice(y, (0, 0, 0, a), (1, 1, 32, b), memory_config=mem) for a, b in self.xa_cols]
+        ttnn.deallocate(y)
+        return outs
 
     # ------------------------------------------------------------------ host-side index lists
     def _cache_row(self, pos: np.ndarray) -> np.ndarray:
@@ -187,13 +232,19 @@ class Hy4Attention:
             z = Hy4Attention._ZEROS[key] = ttnn.zeros(tuple(shape), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                                        device=self.mesh)
         return z
-    def _q(self, x, cos, sin, mem):
-        """-> (q_lat [1,Hd,Tp,512], q_rope [1,Hd,Tp,64] roped, q_resid [1,1,Tp,1024])."""
+    def _q(self, x, cos, sin, mem, qa=None):
+        """-> (q_lat [1,Hd,Tp,512], q_rope [1,Hd,Tp,64] roped, q_resid [1,1,Tp,1024]). qa given: the decode path's
+        fused projection (and q_b streamed)."""
         Tp = int(x.shape[-2])
-        qa = ttnn.matmul(x, self.wqa, compute_kernel_config=self.ckc, memory_config=mem)
+        dec = qa is not None
+        if qa is None:
+            qa = ttnn.matmul(x, self.wqa, compute_kernel_config=self.ckc, memory_config=mem)
         q_resid = self.q_norm(qa, mem)
         ttnn.deallocate(qa)
-        q = ttnn.matmul(q_resid, self.wqb, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,Hd*256]
+        if dec:
+            q = self.dec["qb"](q_resid, mem)
+        else:
+            q = ttnn.matmul(q_resid, self.wqb, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,Hd*256]
         q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.Hd, 256)), (0, 2, 1, 3), memory_config=mem)  # [1,Hd,Tp,256]
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
@@ -203,10 +254,11 @@ class Hy4Attention:
         q_rope = self.rope(q_rope, cos, sin, mem)
         return q_lat, q_rope, q_resid
 
-    def _kv_row(self, x, cos, sin, mem):
+    def _kv_row(self, x, cos, sin, mem, kv=None):
         """-> the cache rows of these tokens [1,1,Tp,608] TILE: [norm(c) | rope(k_rope) | 0]."""
         Tp = int(x.shape[-2])
-        kv = ttnn.matmul(x, self.wkva, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,576]
+        if kv is None:
+            kv = ttnn.matmul(x, self.wkva, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,576]
         c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
         kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
                        cos, sin, mem)
@@ -216,7 +268,7 @@ class Hy4Attention:
         ttnn.deallocate(kr)
         return row
 
-    def _attend(self, x, q_lat, q_rope, idx, mem):
+    def _attend(self, x, q_lat, q_rope, idx, mem, dec=False, R=None):
         """sparse_sdpa over idx [1,1,Tp,K] uint32, then V-up, output gate, o_proj, all-reduce, post norm."""
         Tp = int(x.shape[-2])
         qs = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)  # [1,Hd,Tp,32]
@@ -238,12 +290,24 @@ class Hy4Attention:
         ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
-        g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
+        if dec:
+            g = self.dec["g"](x, mem)
+        else:
+            g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
         gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
-        part = ttnn.matmul(gated, self.wo, compute_kernel_config=self.ckc, memory_config=mem)
+        if dec:
+            part = self.dec["o"](gated, mem)
+        else:
+            part = ttnn.matmul(gated, self.wo, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(gated)
+        if dec and R is not None and Boundary.enabled(self.mesh, R):
+            if getattr(self, "bnd", None) is None:
+                self.bnd = Boundary(self.mesh, self.cfg.hidden, self.cfg.rms_eps)
+            out = self.bnd(part, R, self.post_norm, "mixer")
+            ttnn.deallocate(part)
+            return out
         full = self.ar(part, mem)
         ttnn.deallocate(part)
         return self.post_norm(full, mem)
@@ -383,8 +447,10 @@ class Hy4Attention:
         index lists. The KV rows go through the staging window and two 32-row slab writes."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         cos, sin = si.cos_sin[self.kind]
-        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
-        row = self._kv_row(x, cos, sin, mem)
+        dec = self.dec is not None and int(x.shape[-2]) == 32
+        parts = self._xa(x, mem) if dec else [None, None]
+        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem, qa=parts[0])
+        row = self._kv_row(x, cos, sin, mem, kv=parts[1])
         a = ttnn.matmul(si.A, self.stage, compute_kernel_config=self.ckc, memory_config=mem)
         b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(row)
@@ -402,11 +468,13 @@ class Hy4Attention:
         if self.kind == "swa":
             idx = si.idx_swa
         elif self.indexer is not None:
-            idx = self.indexer.step(x, q_resid, si, mem)  # the selection, or si.idx_dense in the dense regime
+            # the selection, or si.idx_dense in the dense regime
+            idx = self.indexer.step(x, q_resid, si, mem, tk=parts[2] if dec else None, hw=parts[3] if dec else None,
+                                    iq=self.dec["iq"] if dec else None)
         else:
             idx = si.idx_dense
         ttnn.deallocate(q_resid)
-        out = self._attend(x, q_lat, q_rope, idx, mem)
+        out = self._attend(x, q_lat, q_rope, idx, mem, dec=dec, R=getattr(si, "R", None))
         ttnn.deallocate(q_lat)
         ttnn.deallocate(q_rope)
         if idx is not si.idx_swa and idx is not si.idx_dense:

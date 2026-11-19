@@ -118,6 +118,134 @@ class RMSNorm:
         self.mesh, self.eps = mesh, float(eps)
         self.w = upload(mesh, weight.to(torch.bfloat16).reshape(1, 1, 1, -1), ttnn.bfloat16)
         self.ckc = ckc(mesh)
+        W = int(weight.numel())
+        self.W = W
+        self.dec = None
+        wt = W // TILE
+        if os.environ.get("HY4_NORM_SHARDED", "1") == "1" and W % TILE == 0 and W >= 1024:
+            # decode rows: width-sharded multi-core norm (the interleaved op runs one core per tile row = 1 core)
+            nc = next(c for c in (16, 8, 4, 2, 1) if wt % c == 0)
+            grid = (nc, 1) if nc <= 8 else (8, nc // 8)
+            self.dec_mem = ttnn.create_sharded_memory_config((TILE, W // nc), ttnn.CoreGrid(x=grid[0], y=grid[1]),
+                                                             ttnn.ShardStrategy.WIDTH, ttnn.ShardOrientation.ROW_MAJOR,
+                                                             use_height_and_width_as_shard_shape=True)
+            bw = wt // nc
+            self.dec_pc = ttnn.LayerNormShardedMultiCoreProgramConfig(
+                compute_with_storage_grid_size=grid, subblock_w=next(b for b in (4, 3, 2, 1) if bw % b == 0),
+                block_h=1, block_w=bw, inplace=False)
+            self.w_rm = upload(mesh, weight.to(torch.bfloat16).reshape(1, 1, wt, TILE), ttnn.bfloat16,
+                               ttnn.ROW_MAJOR_LAYOUT)
+            self.dec = True
 
     def __call__(self, x, mem=None):
+        if self.dec is not None and int(x.shape[-2]) == TILE and int(x.shape[-1]) == self.W and x.dtype == ttnn.bfloat16:
+            xs = ttnn.to_memory_config(x, self.dec_mem)
+            y = ttnn.rms_norm(xs, epsilon=self.eps, weight=self.w_rm, program_config=self.dec_pc,
+                              compute_kernel_config=self.ckc, memory_config=self.dec_mem)
+            ttnn.deallocate(xs)
+            out = ttnn.sharded_to_interleaved(y, mem or ttnn.L1_MEMORY_CONFIG)
+            ttnn.deallocate(y)
+            return out
         return ttnn.rms_norm(x, epsilon=self.eps, weight=self.w, compute_kernel_config=self.ckc, memory_config=mem)
+
+
+
+def stream_enabled(mesh) -> bool:
+    """HY4_STREAM (default 1): decode linears on per-bank streamed weight copies (StreamLinear); prefill unchanged."""
+    return os.environ.get("HY4_STREAM", "1") == "1" and num_devices(mesh) > 1
+
+
+class StreamLinear:
+    """A decode linear [1, 1, 32, K] x [K, N] on a decode-only copy of the weight streamed per DRAM bank (qwen36
+    decode_linear: 6 reader cores per bank, column-major packets; ~2-3x the interleaved matmul at one tile row, LM head
+    ~495 GB/s). bf16 weights give bit-identical results to the interleaved matmul (FP32 DST); all 32 rows are computed
+    (the padded rows of a pass stay defined).
+
+    parts: one torch [K, N] per die (die d's weight: replicated parts and its column shards concatenated, i.e. several
+    linears of the same input fused into one). Prefill keeps the interleaved weights (the copies cost DRAM)."""
+
+    _OPS = {}
+
+    def __init__(self, mesh, parts, dtype, fidelity=None, cache=None, readers=6, out_dtype=None):
+        """fidelity (default by weight dtype, HY4_STREAM_FID_BFP8 overrides bfp8): bf16 HiFi4, bfp8 HiFi2 (the weight's
+        7 mantissa bits in full; at HiFi4 the bfp8 streams were compute bound: o_proj 77 vs 32 us), bfp4 LoFi."""
+        from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
+
+        if fidelity is None:
+            fids = {"HiFi4": ttnn.MathFidelity.HiFi4, "HiFi2": ttnn.MathFidelity.HiFi2, "LoFi": ttnn.MathFidelity.LoFi}
+            fidelity = {ttnn.bfloat16: ttnn.MathFidelity.HiFi4,
+                        ttnn.bfloat8_b: fids[os.environ.get("HY4_STREAM_FID_BFP8", "HiFi2")],
+                        ttnn.bfloat4_b: ttnn.MathFidelity.LoFi}[dtype]
+
+        K, N = int(parts[0].shape[-2]), int(parts[0].shape[-1])
+        key = (id(mesh), K, N, dtype, fidelity, readers)
+        op = StreamLinear._OPS.get(key)
+        if op is None:
+            op = StreamLinear._OPS[key] = DecodeLinear(mesh, K, N, dtype, readers=readers, fidelity=fidelity)
+        self.op, self.K, self.N = op, K, N
+        self.out_dtype = out_dtype or ttnn.bfloat16
+        cname = f"{cache}.stream{readers}" if cache else None
+        self.w = op.weight([p.reshape(K, N).to(torch.bfloat16) for p in parts], cache_file_name=cname)
+
+    def __call__(self, x, mem=None):
+        return self.op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype)
+
+
+def col_split(mesh, cols, out_mem=None):
+    """Slices [c0, c1) of the last dim of a fused StreamLinear output: [(c0, c1), ...] -> callable(y) -> list."""
+    def f(y):
+        return [ttnn.slice(y, (0, 0, 0, a), (1, 1, int(y.shape[-2]), b), memory_config=out_mem) for a, b in cols]
+    return f
+
+
+class Boundary:
+    """Decode layer boundary: all-reduce of the per-die partial + the sublayer's closing RMSNorm as ONE fabric op
+    (qwen36 fabric_boundary, after gpt-oss's DecodeBoundary: packed partial rows multicast over the fabric, summed in
+    slot order on every die, FP32 norm statistics) instead of reduce-scatter + all-gather + a sharded norm (~36 us ->
+    ~8 us). Hy4 has no residual add at this point (the hyper-connection post follows), so the residual is a persistent
+    zero vector. rows <= 8 (the real rows of the pass); returns x [1, 1, rows, H] L1 (rows' normed values).
+    HY4_FABRIC_BOUNDARY=1 (default)."""
+
+    _B = {}
+
+    def __init__(self, mesh, hidden, eps):
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import FabricBoundary
+
+        key = (id(mesh), hidden)
+        st = Boundary._B.get(key)
+        if st is None:
+            # the receive buffers are sharded L1 (rows x ring x H bf16 per site) and an L1 address range is reserved
+            # on every core: 8 rows (2 x 192 KB + the zero vectors) crowded the streamed linears' circular buffers off
+            # L1. Size for the plain decode row (HY4_BOUNDARY_ROWS, default 1); wider passes take the all-reduce.
+            fb = FabricBoundary(mesh, hidden, eps, max_rows=Boundary.rows())
+            zero = {}
+            for r in range(1, Boundary.rows() + 1):
+                pages = r * fb.tiles
+                zero[r] = ttnn.from_torch(torch.zeros(fb._flat_shape(pages)), dtype=ttnn.bfloat16,
+                                          layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=fb._flat_config(pages),
+                                          mesh_mapper=ttnn.ReplicateTensorToMesh(mesh))
+            st = Boundary._B[key] = (fb, zero)
+        self.fb, self.zero = st
+        self.gammas = {}
+
+    @staticmethod
+    def enabled(mesh, rows=1):
+        return (os.environ.get("HY4_FABRIC_BOUNDARY", "1") == "1" and num_devices(mesh) > 1
+                and rows <= Boundary.rows())
+
+    @staticmethod
+    def rows():
+        return int(os.environ.get("HY4_BOUNDARY_ROWS", "1"))
+
+    def __call__(self, part, rows, norm, site):
+        """part [1, 1, 32, H] L1 BF16 per-die partial (rows 0..rows-1 real) -> normed [1, 1, rows, H]."""
+        g = self.gammas.get(id(norm))
+        if g is None:
+            g = self.gammas[id(norm)] = self.fb.gamma(norm.w)
+        p = part if int(part.shape[-2]) == rows else ttnn.slice(part, (0, 0, 0, 0), (1, 1, rows, int(part.shape[-1])),
+                                                                 memory_config=ttnn.L1_MEMORY_CONFIG)
+        res, x = self.fb(self.zero[rows], p, g, site=site)
+        ttnn.deallocate(res)
+        if p is not part:
+            ttnn.deallocate(p)
+        return x

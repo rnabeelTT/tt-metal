@@ -20,7 +20,8 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import AllReduce, RMSNorm, TILE, ckc, num_devices, upload
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, num_devices,
+                                                           stream_enabled, upload)
 
 class _Args:
     """The model-wide cache holder FusedMoEDecode keys its kernels / buffers on."""
@@ -56,6 +57,19 @@ class Hy4DenseMLP:
         self.norm = RMSNorm(mesh, sd["post_fc2_norm.weight"], cfg.rms_eps)
         self.ar = AllReduce(mesh)
         self.ckc = ckc(mesh)
+        self.dec = None
+        if stream_enabled(mesh):  # decode: [gate_d | up_d] in one streamed linear, down_d
+            N = num_devices(mesh)
+            Il = I // N
+            g, u, d = bf(sd["gate_proj.weight"]).T, bf(sd["up_proj.weight"]).T, bf(sd["down_proj.weight"]).T
+            cdir = os.environ.get("HY4_TENSOR_CACHE")
+            cache = (lambda n: os.path.join(cdir, f"layers.0.mlp.{n}")) if cdir else (lambda n: None)
+            self.Il = Il
+            self.dec = {
+                "gu": StreamLinear(mesh, [torch.cat([g[:, i * Il : (i + 1) * Il], u[:, i * Il : (i + 1) * Il]], 1)
+                                          for i in range(N)], dt, cache=cache(f"gu.{dt}")),
+                "d": StreamLinear(mesh, [d[i * Il : (i + 1) * Il, :] for i in range(N)], dt, cache=cache(f"d.{dt}")),
+            }
 
     def forward_part(self, x, T=None, mem=None):
         """forward() without the all-reduce and norm: the per-die down-projection partial."""
@@ -69,15 +83,31 @@ class Hy4DenseMLP:
         ttnn.deallocate(h)
         return part
 
-    def forward(self, x, mem=None):
+    def forward(self, x, mem=None, R=None):
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
-        g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
-        u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
+        dec = self.dec is not None and int(x.shape[-2]) == 32
+        if dec:
+            gu = self.dec["gu"](x, mem)
+            g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, 32, self.Il), memory_config=mem)
+            u = ttnn.slice(gu, (0, 0, 0, self.Il), (1, 1, 32, 2 * self.Il), memory_config=mem)
+            ttnn.deallocate(gu)
+        else:
+            g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
+            u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
         h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
         ttnn.deallocate(g)
         ttnn.deallocate(u)
-        part = ttnn.matmul(h, self.w2, compute_kernel_config=self.ckc, memory_config=mem)
+        if dec:
+            part = self.dec["d"](h, mem)
+        else:
+            part = ttnn.matmul(h, self.w2, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(h)
+        if dec and R is not None and Boundary.enabled(self.mesh, R):
+            if getattr(self, "bnd", None) is None:
+                self.bnd = Boundary(self.mesh, int(part.shape[-1]), self.norm.eps)
+            out = self.bnd(part, R, self.norm, "mlp")
+            ttnn.deallocate(part)
+            return out
         out = self.ar(part, mem)
         ttnn.deallocate(part)
         return self.norm(out, mem)
@@ -102,6 +132,13 @@ class Hy4MoE:
         self.wr = upload(mesh, sd["gate.weight"].float().T.reshape(1, 1, cfg.hidden, self.E), ttnn.float32,
                          cache=cache("router.fp32"))
         self.bias = upload(mesh, sd["gate.e_score_correction_bias"].float().reshape(1, 1, 1, self.E), ttnn.float32)
+        self._bias_host = sd["gate.e_score_correction_bias"].float().reshape(-1).clone()
+        self.route_kernel = os.environ.get("HY4_ROUTE_KERNEL", "1") == "1" and tp > 1
+        self.bias_q23 = None
+        if self.route_kernel:
+            from models.demos.blackhole.qwen36.tt.moe_decode.union import upload_selection_bias
+
+            self.bias_q23 = upload_selection_bias(mesh, self._bias_host)
         # latent projections
         self.wd = upload(mesh, bf(sd["routed_expert_down_proj.weight"]).T.reshape(1, 1, cfg.hidden, self.L), sm_dt,
                          cache=cache(f"latent_down.{sm_dt}"))
@@ -144,10 +181,35 @@ class Hy4MoE:
         self.cfg_dn_g = _smm_cfg(1, L, Il, target_cores=64, in0_block_w_cap=32)
         self.cfg_gu_m = _smm_cfg(PREFILL_CHUNK, 2 * Il, L, target_cores=32, in0_block_w_cap=64)
         self.cfg_dn_m = _smm_cfg(PREFILL_CHUNK, L, Il, target_cores=32, in0_block_w_cap=32)
+        # decode: streamed copies (tt/common.StreamLinear): x -> [latent down | shared gate_d | shared up_d];
+        # [routed partial | shared hidden_d] -> [latent up ; shared down_d] (the add of the two folded into K)
+        self.dec = None
+        if stream_enabled(mesh):
+            Sl = int(sd["shared_experts.gate_proj.weight"].shape[0]) // tp
+            sg, su = bf(sd["shared_experts.gate_proj.weight"]).T, bf(sd["shared_experts.up_proj.weight"]).T
+            sdn = bf(sd["shared_experts.down_proj.weight"]).T
+            wd_t, wu_t = bf(sd["routed_expert_down_proj.weight"]).T, bf(sd["routed_expert_up_proj.weight"]).T
+            self.Sl = Sl
+            # router: x (bf16, exact) against [W_hi | W_lo] (W_hi = bf16(W), W_lo = bf16(W - W_hi)), fp32 out, the two
+            # halves added: ~16 mantissa bits of the fp32 router weight (the interleaved fp32 matmul truncates its
+            # operands to tf32) at stream speed (43 -> ~20 us)
+            wr32 = sd["gate.weight"].float().T.contiguous()  # [H, E]
+            w_hi = wr32.to(torch.bfloat16)
+            w_lo = (wr32 - w_hi.float()).to(torch.bfloat16)
+            self.dec_router = StreamLinear(mesh, [torch.cat([w_hi, w_lo], 1)] * tp, ttnn.bfloat16,
+                                           cache=cache("router_hilo.bf16"), out_dtype=ttnn.float32)
+            self.dec = {
+                "in": StreamLinear(mesh, [torch.cat([wd_t, sg[:, i * Sl : (i + 1) * Sl], su[:, i * Sl : (i + 1) * Sl]], 1)
+                                          for i in range(tp)], sm_dt, cache=cache(f"dec_in.{sm_dt}")),
+                "out": StreamLinear(mesh, [torch.cat([wu_t, sdn[i * Sl : (i + 1) * Sl, :]], 0) for i in range(tp)],
+                                    sm_dt, cache=cache(f"dec_out.{sm_dt}")),
+            }
         # decode: the M2.7 / Qwen fused MoE kernels (route + gate|up + down in 3 programs), with Hy4's SwiGLU clamps
         # (MOE_SWIGLU_LIMIT, moe_decode/kernels SWIGLU_LIMIT), the router run by this port on the full-width hidden
         self.fused = None
-        if os.environ.get("HY4_MOE_FUSED", "0") == "1" and tp > 1:  # top-16 > the kernels' 15 slots: off
+        # decode, one row: the M2.7 / Qwen fused MoE kernels (gate|up and down, 2 programs; top-16 through the 128-byte
+        # route record ROUTE_WIDE; the "keys" router: sigmoid + bias on the Tensix, top-k on the data-movement cores)
+        if os.environ.get("HY4_MOE_FUSED", "1") == "1" and tp > 1 and self.dec is not None:
             os.environ["MOE_SWIGLU_LIMIT"] = str(self.limit)
             from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
 
@@ -156,12 +218,9 @@ class Hy4MoE:
                     mesh, _FUSED_ARGS, hidden=L, inter_local=Il, num_experts=E, k=self.k, tp=tp, dtype=gu_dt,
                     down_dtype=dn_dt, router_weight=None, shared_gate_weight=None, shared_gate_proj=None,
                     shared_up_proj=None, shared_down_proj=None, cache_name=lambda n: None, router_ckc=self.ckc_r,
-                    router="sigb", selection_bias=sd["gate.e_score_correction_bias"],
-                    router_logits=lambda x1: self._logits_fp32(self._x_full),
+                    router="keys", selection_bias=sd["gate.e_score_correction_bias"],
+                    router_logits=lambda x1: self.router_row(self._x_full),
                 )
-                for m in range(2, 33):
-                    if m <= int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8")):
-                        self.fused.rows_ops(m)  # buffers uploaded before any trace capture
 
     def _up(self, t, dtype, dim, cache_name, have_cache, shape):
         kw = {"mesh_mapper": ttnn.ShardTensorToMesh(self.mesh, dim=dim)} if self.N > 1 else {}
@@ -172,6 +231,51 @@ class Hy4MoE:
                               cache_file_name=cache_name, **kw)
 
     # ------------------------------------------------------------------ routing
+    _RS = {}
+
+    def route_decode(self, x, T, mem):
+        """Decode rows: the fp32 router matmul, then the sigmoid + bias top-16 and normalization on one data-movement
+        core per real row (qwen36 moe_decode RouteScores, Q23 fixed point) instead of ttnn.topk over [32, 512] fp32 on
+        one core (~80 us). -> (scores bf16 [1,1,T,16] x 3.998 (new tensor), ids uint16 [1,1,T,16] (persistent: do not
+        deallocate))."""
+        from models.demos.blackhole.qwen36.tt.moe_decode.union import RouteScores, upload_selection_bias
+
+        rs = Hy4MoE._RS.get(id(self.mesh))
+        if rs is None:
+            rs = Hy4MoE._RS[id(self.mesh)] = RouteScores(self.mesh, self.E, self.k, router="keys")
+        row = self.router_row(x)
+        sc, ids = rs(row, T, bias=self.bias_q23)
+        ttnn.deallocate(row)
+        return ttnn.multiply(sc, self.scale, memory_config=mem), ids
+
+    def router_logits_dec(self, x):
+        """Decode rows: fp32 router logits [1, 1, 32, E] from the streamed hi / lo bf16 router."""
+        L1 = ttnn.L1_MEMORY_CONFIG
+        y = self.dec_router(x, L1)
+        a = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, self.E), memory_config=L1)
+        b = ttnn.slice(y, (0, 0, 0, self.E), (1, 1, 32, 2 * self.E), memory_config=L1)
+        ttnn.deallocate(y)
+        lg = ttnn.add(a, b, memory_config=L1)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        return lg
+
+    def router_row(self, x):
+        """[keys | s] FP32 [1, 1, rows, 2E]: s = sigmoid(x W_r) (fp32 logits, as the reference), keys = s + bias (the
+        selection score); the routing kernels (router "keys") take the top-k of the keys and normalize s."""
+        L1 = ttnn.L1_MEMORY_CONFIG
+        if getattr(self, "dec_router", None) is not None and int(x.shape[-2]) == 32:
+            logits = self.router_logits_dec(x)
+        else:
+            logits = self._logits_fp32(x)
+        sg = ttnn.sigmoid(logits, memory_config=L1)
+        ttnn.deallocate(logits)
+        key = ttnn.add(sg, self.bias, memory_config=L1)
+        row = ttnn.concat([key, sg], dim=-1, memory_config=L1)
+        ttnn.deallocate(key)
+        ttnn.deallocate(sg)
+        return row
+
     def route(self, x, mem):
         """-> (weights bf16 [1,1,T,16] incl. x 3.998, ids uint16 [1,1,T,16])."""
         T = int(x.shape[-2])
@@ -317,6 +421,53 @@ class Hy4MoE:
         """Decode / verify rows (T <= 32 real rows of x [1, 1, 32, 3072]): the fused kernels when available."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
+        if self.dec is not None and int(x.shape[-2]) == 32:
+            # streamed linears: [latent down | shared gate | shared up] and [latent up ; shared down]; the experts by
+            # the fused kernels (one row) or the per-row gather (verify rows)
+            y = self.dec["in"](x, mem)
+            L, Sl = self.L, self.Sl
+            xl = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, L), memory_config=mem)
+            g = ttnn.slice(y, (0, 0, 0, L), (1, 1, 32, L + Sl), memory_config=mem)
+            u = ttnn.slice(y, (0, 0, 0, L + Sl), (1, 1, 32, L + 2 * Sl), memory_config=mem)
+            ttnn.deallocate(y)
+            h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+            ttnn.deallocate(g)
+            ttnn.deallocate(u)
+            if self.fused is not None and T == 1:
+                row = self.router_row(x)  # [keys | s] of the 32 rows (streamed router): row 0 is the token's
+                row1 = ttnn.slice(row, (0, 0, 0, 0), (1, 1, 1, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
+                ttnn.deallocate(row)
+                x1 = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, 1, L), memory_config=mem)
+                ttnn.deallocate(xl)
+                part1 = self.fused(x1, self.up_gate, self.down, logits=row1)  # [1, 1, 1, L] partial (model-wide: keep)
+                ttnn.deallocate(x1)
+                r1 = ttnn.multiply(part1, self.scale, memory_config=mem)  # the fused router normalizes to 1
+                routed = ttnn.pad(r1, [(0, 0), (0, 0), (0, 31), (0, 0)], value=0.0)
+                ttnn.deallocate(r1)
+            else:
+                if self.route_kernel:
+                    scores, ids = self.route_decode(x, T, mem)
+                else:
+                    scores, ids = self.route(x, mem)
+                routed = self._gather(xl, scores, ids, T, mem)
+                if T != 32:
+                    routed = ttnn.pad(routed, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
+                for t_ in (xl, scores) + (() if self.route_kernel else (ids,)):
+                    ttnn.deallocate(t_)
+            cat = ttnn.concat([routed, h], dim=-1, memory_config=mem)
+            ttnn.deallocate(routed)
+            ttnn.deallocate(h)
+            part = self.dec["out"](cat, mem)
+            ttnn.deallocate(cat)
+            if Boundary.enabled(self.mesh, T):
+                if getattr(self, "bnd", None) is None:
+                    self.bnd = Boundary(self.mesh, self.cfg.hidden, self.cfg.rms_eps)
+                out = self.bnd(part, T, self.norm, "mlp")
+                ttnn.deallocate(part)
+                return out
+            full = self.ar(part, mem)
+            ttnn.deallocate(part)
+            return self.norm(full, mem)
         if self.fused is None or T > rows_max:
             # trace-safe rows path: per-row gather (the chunk-masked prefill path writes from the host: ttnn.zeros)
             scores, ids = self.route(x, mem)
