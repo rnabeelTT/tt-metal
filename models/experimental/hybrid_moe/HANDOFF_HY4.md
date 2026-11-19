@@ -9,6 +9,41 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## Optimization round 2 (2026-11-19, afternoon): prefill, serving fixes, long-context correctness
+
+Served (vLLM, QB2, single user, greedy, RAM Engram, k=4): decode 42.5 -> 48.5 tok/s mean (35-74); short TTFT 0.30 s;
+first 6.6K-token prompt TTFT 11.6 -> 4.4 s (3.7 s warm); long-context decode 12.7 -> 36-40 tok/s; the same long
+prompt now answers identically request to request.
+
+| prefill TTFT (warm, no Engram) | morning | now |
+|---|---|---|
+| 128 / 512 / 1K tokens | 0.29 / 0.50 / 0.81 s | 0.23 / 0.36 / 0.52 s |
+| 2K / 4K / 8K | 1.43 / 3.05 / 6.32 s | 0.86 / 1.96 / 4.18 s |
+| 16K / 32K | 12.9 / 26.1 s | 8.65 / 17.7 s |
+
+Quality vs the CPU reference: decode-path gate top-1 0.862, KL 0.231; long3k prefill top-1 0.797 -> 0.827, KL 0.490 ->
+0.330; long3k decode path top-1 0.804 -> 0.827, KL 0.442 -> 0.296.
+
+Long-context correctness bug (fixed, aad2085f288): tt/indexer._topk masked the row-major indexer_score_dsa output with
+ttnn.where against a tiled condition; that mixed-layout where wrote wrong values (1.0 everywhere in isolation; in the
+model, rows of the masked scores left unwritten, holding an earlier allocation's data). Every selecting chunk / decode
+step past 2048 tokens picked part of its top-512 groups from garbage, differently per request. Scores are tilized
+first now. Also: the group cache is zeroed per request (keys a previous request left past the context leaked into
+the visible scores: indexer_score_dsa's visible outputs depend on the keys it reads past the causal range).
+
+Changes: router w = gather(s, ids) (no [T,16,512] fp32 one-hot); explicit 2D-multicast matmul configs (common.mm);
+HiFi2 for bfp8 / LoFi for bfp4 expert prefill matmuls; flash SDPA (sinks, sliding window, banded mask + block map)
+for the first chunk and later SWA chunks; nlp head split / concat; cached dummy group mask for the grouped sparse
+matmul; moe_sorted_dispatch kernel without volatile; streamed Engram projections; fused indexer pool; DFly2 k=4;
+warm-up covers later chunks and long-context decode; drafter row slices precompiled.
+
+Tried and dropped: 5-row fabric boundary for verify (-1.4 ms per verify pass, but its L1 reservation made prefill's
+CBs clash while serving); fused HC on 32 cores (slower); lower fidelity for the HC mix / sparse SDPA (no time gain).
+
+Open: fused HC ~105 us per layer (POST math-thread bound); attention glue ~80 small ops per layer; sparse-layer
+sparse_sdpa in later prefill chunks (~12 ms per layer per 2K chunk: per-token key gathers); package rebuild + publish
+(the ttnn moe_sorted_dispatch kernel change needs the image rebuilt).
+
 ## Optimization round 2026-11-19 (decode 8.5 -> 42.5 tok/s served, quality at parity)
 
 Measured on the box (QB2, 4 dies), single user, chat prompts, served through vLLM 0.26 (serve/serve_hy4.sh, dev image
