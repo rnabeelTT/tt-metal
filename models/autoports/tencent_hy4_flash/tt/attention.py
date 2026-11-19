@@ -357,11 +357,18 @@ class Hy4Attention:
         # chunk's rows (keys read once per query block) instead of sparse_sdpa's per-row key gathers (HY4_PF_FLASH)
         flash = (p0 == 0 and os.environ.get("HY4_PF_FLASH", "1") == "1"
                  and (self.kind == "swa" or Tp <= self.cfg.idx_candidate_topk))
+        # later SWA chunks: flash over [the window before the chunk | the chunk] with a banded mask (HY4_PF_FLASH_SWA)
+        flash_swa = (not flash and self.kind == "swa" and p0 >= self.cfg.window and Tp % 64 == 0
+                     and os.environ.get("HY4_PF_FLASH", "1") == "1" and os.environ.get("HY4_PF_FLASH_SWA", "1") == "1")
         kv_t = row if flash else None
         if not flash:
             ttnn.deallocate(row)
         self._write_rows(row_rm, p0, self._write_n(row_rm, T))
         ttnn.deallocate(row_rm)
+        if flash_swa:
+            o = self._flash_swa_chunk(q_lat, q_rope, p0, Tp, mem)
+            ttnn.deallocate(q_resid)
+            return self._out_part(x, o, mem)
         selected = None
         if self.indexer is not None:
             tail = self._idx_tail(p0, T, Tp) if p0 >= self.cfg.idx_candidate_topk else None
@@ -414,6 +421,65 @@ class Hy4Attention:
         part = mm(gated, self.wo, wfid(self.ckc, self.wo), mem)
         ttnn.deallocate(gated)
         return part
+
+    _BAND = {}
+
+    def _band(self, Tp, qc, kc):
+        """The banded SWA mask of a later chunk [1, 1, Tp, W + Tp] (0 visible / -inf; row i sees keys i + 1 .. i + W of
+        [window before | chunk]) and its block map [1, 1, Tp / qc, (W + Tp) / kc] uint32 (cached per shape)."""
+        W = self.cfg.window
+        key = (id(self.mesh), Tp, W, qc, kc)
+        hit = Hy4Attention._BAND.get(key)
+        if hit is None:
+            i = torch.arange(Tp)[:, None]
+            j = torch.arange(W + Tp)[None, :]
+            vis = (j >= i + 1) & (j <= i + W)
+            mask = torch.where(vis, 0.0, float("-inf")).to(torch.bfloat16).reshape(1, 1, Tp, W + Tp)
+            blk = vis.reshape(Tp // qc, qc, (W + Tp) // kc, kc).any(-1).any(1).to(torch.int32)
+            hit = Hy4Attention._BAND[key] = (
+                upload(self.mesh, mask, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+                upload(self.mesh, blk.reshape(1, 1, Tp // qc, (W + Tp) // kc), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT))
+        return hit
+
+    def _flash_swa_chunk(self, q_lat, q_rope, p0, Tp, mem):
+        """A later SWA prefill chunk (its rows already in the ring): flash attention of the chunk's queries over the ring
+        rows of positions p0 - W .. p0 + Tp - 1 with the banded mask and the sinks -> o [1, Hd, Tp, 512] TILE."""
+        W, lw = self.cfg.window, self.cfg.latent_width
+        q = ttnn.concat([q_lat, q_rope], dim=-1, memory_config=mem)
+        ttnn.deallocate(q_lat)
+        ttnn.deallocate(q_rope)
+        start, n = (p0 - W) % self.rows, W + Tp
+        segs = [(start, min(n, self.rows - start))]
+        if segs[0][1] < n:
+            segs.append((0, n - segs[0][1]))
+        parts = [ttnn.slice(self.cache, (0, 0, a, 0), (1, 1, a + m, self.width), memory_config=mem) for a, m in segs]
+        krm = parts[0] if len(parts) == 1 else ttnn.concat(parts, dim=2, memory_config=mem)
+        if len(parts) > 1:
+            for t_ in parts:
+                ttnn.deallocate(t_)
+        kt = ttnn.to_layout(krm, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(krm)
+        k = ttnn.slice(kt, (0, 0, 0, 0), (1, 1, n, lw), memory_config=mem)
+        ttnn.deallocate(kt)
+        qc = int(os.environ.get("HY4_PF_FLASH_Q", "128"))
+        kc = int(os.environ.get("HY4_PF_FLASH_K", "64"))
+        while Tp % qc:
+            qc //= 2
+        while n % kc:
+            kc //= 2
+        mask, bmap = self._band(Tp, qc, kc)
+        grid = self.mesh.compute_with_storage_grid_size()
+        pc = ttnn.SDPAProgramConfig(compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y), exp_approx_mode=False,
+                                    q_chunk_size=qc, k_chunk_size=kc)
+        o = ttnn.transformer.scaled_dot_product_attention(
+            q, k, k, attn_mask=mask, is_causal=False, scale=self.scale, attention_sink=self.sink_sdpa,
+            attn_mask_block_map=bmap if os.environ.get("HY4_PF_FLASH_BMAP", "1") == "1" else None,
+            program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+        ttnn.deallocate(q)
+        ttnn.deallocate(k)
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
+        ttnn.deallocate(o)
+        return o2
 
     def _flash_first_chunk(self, q_lat, q_rope, row, mem):
         """Causal (SWA: windowed) MQA flash attention of a first prefill chunk over its own rows, with the sinks:
