@@ -56,6 +56,7 @@ class StepInputs:
     gcos: object = None
     gsin: object = None
     vis: object = None
+    base_f: object = None  # [1, 1, 32, 1] fp32: the active slot's sparse cache base (added to the selected rows)
     sparse: bool = False
     bucket: int = 0
 
@@ -117,6 +118,7 @@ class Hy4Decoder:
         si.gcos = self._dev(z(1, 1, 32, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.gsin = self._dev(z(1, 1, 32, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.vis = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
+        si.base_f = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
         return si
 
     def _alloc_outputs(self):
@@ -138,6 +140,11 @@ class Hy4Decoder:
                                                    ttnn.ROW_MAJOR_LAYOUT)
 
     # ------------------------------------------------------------------ prefill -> decode
+    def _bases(self):
+        a0 = next(l.attn for l in self.model.layers if l.attn.kind == "sparse")
+        s0 = next((l.attn for l in self.model.layers if l.attn.kind == "swa"), None)
+        return a0.base, (s0.base if s0 is not None else 0)
+
     def start(self, pos: int):
         """After a prefill of `pos` tokens: load the staging windows from the caches."""
         nb = (pos // 32) * 32
@@ -189,8 +196,10 @@ class Hy4Decoder:
                 Ag[i, g - self.ogb] = 1
         h["Ag"], h["Pg"] = _tile(Ag.reshape(1, 1, 64, 64), ttnn.bfloat16), _tile(Pg.reshape(1, 1, 64, 32), ttnn.bfloat16)
         one = lambda v: _rm(torch.tensor([v], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)  # noqa: E731
-        h["off_sparse"] = [one(nb), one(nb + 32)]
-        h["off_swa"] = [one(nb % self.ring), one((nb + 32) % self.ring)] if self.ring else [one(0), one(0)]
+        bs, bw = self._bases()  # the active slot's cache regions
+        h["off_sparse"] = [one(bs + nb), one(bs + nb + 32)]
+        h["off_swa"] = [one(bw + nb % self.ring), one(bw + (nb + 32) % self.ring)] if self.ring else [one(0), one(0)]
+        h["base_f"] = _tile(torch.full((1, 1, ROWS, 1), float(bs)), ttnn.float32)
         h["off_grp"] = [one(gb), one(gb + 32)]
         gpos = torch.zeros(32, dtype=torch.long)
         gpos[:16] = torch.arange(nb, nb + 64, r)
@@ -206,11 +215,11 @@ class Hy4Decoder:
         for s in range(ROWS):
             p = int(pos[s])
             n = min(p + 1, self.K_dense - 1)
-            dense[s, 1 : 1 + n] = np.arange(p + 1 - n, p + 1)
+            dense[s, 1 : 1 + n] = bs + np.arange(p + 1 - n, p + 1)
             w = np.arange(max(0, p - cfg.window + 1), p + 1)
-            swa[s, 1 : 1 + w.size] = w % self.ring if self.ring else w
+            swa[s, 1 : 1 + w.size] = bw + (w % self.ring if self.ring else w)
             own = np.arange((p // r) * r, p + 1)
-            tail[s, 1 : 1 + own.size] = own
+            tail[s, 1 : 1 + own.size] = bs + own
         u = lambda a: _rm(torch.from_numpy(a.view(np.int32)).reshape(1, 1, ROWS, -1), ttnn.uint32)  # noqa: E731
         h["idx_dense"], h["idx_swa"], h["idx_tail"] = u(dense), u(swa), u(tail)
         sparse = p0 >= cfg.idx_candidate_topk
@@ -241,7 +250,7 @@ class Hy4Decoder:
         for k in ("sparse", "swa"):
             c(h[f"cos_{k}"], si.cos_sin[k][0])
             c(h[f"sin_{k}"], si.cos_sin[k][1])
-        for name in ("A", "P", "Ag", "Pg", "idx_dense", "idx_swa", "idx_tail", "gcos", "gsin", "vis"):
+        for name in ("A", "P", "Ag", "Pg", "idx_dense", "idx_swa", "idx_tail", "gcos", "gsin", "vis", "base_f"):
             c(h[name], getattr(si, name))
         for j in range(2):
             c(h["off_sparse"][j], si.off_sparse[j])
@@ -413,12 +422,13 @@ class Hy4SpecDecoder(Hy4Decoder):
         dense = np.full((ROWS, self.K_dense), SENTINEL, dtype=np.uint32)
         tail = np.full((ROWS, self.K_dense - self.n_sel), SENTINEL, dtype=np.uint32)
         dense[:, 0] = tail[:, 0] = self.sink_sparse
-        own = np.arange(((anchor - 1) // r) * r, anchor)
+        bs = self._bases()[0]  # the active slot's sparse cache region
+        own = bs + np.arange(((anchor - 1) // r) * r, anchor)
         for j in range(ROWS):
             jj = min(j, self.W - 1)
             blk = self.scratch + np.arange(jj + 1)
             if not sparse:
-                keys = np.concatenate([np.arange(anchor), blk])
+                keys = np.concatenate([bs + np.arange(anchor), blk])
                 dense[j, 1 : 1 + keys.size] = keys
             t = np.concatenate([own, blk])
             tail[j, 1 : 1 + t.size] = t

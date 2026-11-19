@@ -634,17 +634,19 @@ class Hy4Indexer:
         ttnn.deallocate(kr2)
         return out
 
-    def _pool_fused(self, K, mem, gcos, gsin):
-        """_pool_device in ~14 ops instead of ~35: the r slots stacked on dim 1 ([1, r, 32, .]), one value + gate
-        matmul, the softmax over the r slots as dim-1 reductions."""
+    def _pool_fused(self, K, mem, gcos, gsin, Ecat=None, bias=None, n=32):
+        """_pool_device in ~14 ops instead of ~35: the r slots stacked on dim 1 ([1, r, n, .]), one value + gate
+        matmul, the softmax over the r slots as dim-1 reductions. (Ecat / bias / n: the batched lanes' block forms.)"""
         d, r = self.d, self.r
-        S = ttnn.matmul(self.Ecat, K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        Ecat = self.Ecat if Ecat is None else Ecat
+        bias = self.dvg_bias if bias is None else bias
+        S = ttnn.matmul(Ecat, K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(K)
         vg = ttnn.matmul(S, self.dWvgT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(S)
-        vg = ttnn.add(ttnn.reshape(vg, (1, r, 32, 2 * d)), self.dvg_bias, memory_config=mem)
-        v = ttnn.slice(vg, (0, 0, 0, 0), (1, r, 32, d), memory_config=mem)
-        g = ttnn.slice(vg, (0, 0, 0, d), (1, r, 32, 2 * d), memory_config=mem)
+        vg = ttnn.add(ttnn.reshape(vg, (1, r, n, 2 * d)), bias, memory_config=mem)
+        v = ttnn.slice(vg, (0, 0, 0, 0), (1, r, n, d), memory_config=mem)
+        g = ttnn.slice(vg, (0, 0, 0, d), (1, r, n, 2 * d), memory_config=mem)
         ttnn.deallocate(vg)
         m = ttnn.max(g, dim=1, keepdim=True, memory_config=mem)
         e = ttnn.exp(ttnn.subtract(g, m, memory_config=mem), memory_config=mem)
@@ -657,12 +659,12 @@ class Hy4Indexer:
         pooled = ttnn.div(num, den, memory_config=mem)
         ttnn.deallocate(num)
         ttnn.deallocate(den)
-        n = ttnn.rms_norm(pooled, epsilon=self.eps, compute_kernel_config=self.ckc, memory_config=mem)
-        keys = ttnn.typecast(ttnn.multiply(n, self.dkn, memory_config=mem), ttnn.bfloat16, memory_config=mem)
+        nrm = ttnn.rms_norm(pooled, epsilon=self.eps, compute_kernel_config=self.ckc, memory_config=mem)
+        keys = ttnn.typecast(ttnn.multiply(nrm, self.dkn, memory_config=mem), ttnn.bfloat16, memory_config=mem)
         ttnn.deallocate(pooled)
-        ttnn.deallocate(n)
-        kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, 32, d - self.rope_d), memory_config=mem)
-        kr = ttnn.slice(keys, (0, 0, 0, d - self.rope_d), (1, 1, 32, d), memory_config=mem)
+        ttnn.deallocate(nrm)
+        kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, n, d - self.rope_d), memory_config=mem)
+        kr = ttnn.slice(keys, (0, 0, 0, d - self.rope_d), (1, 1, n, d), memory_config=mem)
         ttnn.deallocate(keys)
         kr2 = self.rope(kr, gcos, gsin, mem)
         ttnn.deallocate(kr)
@@ -670,6 +672,164 @@ class Hy4Indexer:
         ttnn.deallocate(kp)
         ttnn.deallocate(kr2)
         return out
+
+    # ------------------------------------------------------------------ batched decode lanes (tt/decode_batch)
+    def lane_tensors(self, L):
+        """(token window [L 64, d], group window [L 64, d], group keys [L gcap + 64, d]) of the L-lane batched decode
+        (lane l: window rows 64 l .., groups l gcap ..; the last 64 groups: idle lanes' slab target), plus the pooling
+        constants; created (eager) on first use."""
+        lt = self.__dict__.setdefault("_lanes", {})
+        if L not in lt:
+            z = lambda n: ttnn.zeros((1, 1, n, self.d), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,  # noqa: E731
+                                     device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            r, d = self.r, self.d
+            E = torch.zeros(r * 32 * L, 64 * L)
+            for j in range(r):
+                for l in range(L):
+                    for g in range(64 // r):
+                        E[j * 32 * L + 32 * l + g, 64 * l + r * g + j] = 1.0
+            bias = torch.zeros(r, 32 * L, 2 * d)
+            bias[:, :, d:] = self.ape[:, None, :]
+            lt[L] = {"tk": z(L * 64), "g": z(L * 64), "gk": z(L * self.gcap + 64),
+                     "Ecat": upload(self.mesh, E.reshape(1, 1, r * 32 * L, 64 * L), ttnn.float32),
+                     "bias": upload(self.mesh, bias.reshape(1, r, 32 * L, 2 * d), ttnn.float32)}
+        return lt[L]
+
+    def _iota_lane(self, L, n):
+        """Group index per column over the lanes' key tensor, repeated over 32 rows: [1, 1, 32, n] fp32 (cached per
+        width; created at the first, eager, pass of the width)."""
+        T = self.lane_tensors(L)
+        c = T.setdefault("iota", {})
+        if n not in c:
+            one = upload(self.mesh, torch.arange(n, dtype=torch.float32).reshape(1, 1, 1, n), ttnn.float32)
+            c[n] = ttnn.repeat(one, ttnn.Shape((1, 1, 32, 1)))
+            ttnn.deallocate(one)
+        return c[n]
+
+    def _region_offs(self, base, n):
+        key = ("region", base, n)
+        t = self._off_cache.get(key)
+        if t is None:
+            o = torch.zeros(1, 1, 1, -(-n // 8) * 8, dtype=torch.int32)
+            o[0, 0, 0, :n] = base + 32 * torch.arange(n, dtype=torch.int32)
+            t = self._off_cache[key] = upload(self.mesh, o, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        return t
+
+    def lane_load(self, L, lane, Mk, Mp):
+        """Lane `lane` <- this slot's token / group windows (tk_stage / g_stage) and group keys (gkeys)."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        T = self.lane_tensors(L)
+        for name, src in (("tk", self.tk_stage), ("g", self.g_stage)):
+            a = ttnn.matmul(Mk, T[name], compute_kernel_config=self.ckc)
+            b = ttnn.matmul(Mp, src, compute_kernel_config=self.ckc)
+            new = ttnn.add(a, b)
+            ttnn.copy(new, T[name])
+            for t_ in (a, b, new):
+                ttnn.deallocate(t_)
+        n = self.gcap // 32
+        slab_write(self.gkeys, T["gk"], self._region_offs(lane * self.gcap, n), n)
+
+    def lane_unload(self, L, lane, Ms):
+        """This slot's windows / group keys <- lane `lane`."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        T = self.lane_tensors(L)
+        for name, dst in (("tk", self.tk_stage), ("g", self.g_stage)):
+            w = ttnn.matmul(Ms, T[name], compute_kernel_config=self.ckc)
+            ttnn.copy(w, dst)
+            ttnn.deallocate(w)
+        reg = ttnn.slice(T["gk"], (0, 0, lane * self.gcap, 0), (1, 1, (lane + 1) * self.gcap, self.d))
+        n = self.gcap // 32
+        slab_write(reg, self.gkeys, self._region_offs(0, n), n)
+        ttnn.deallocate(reg)
+
+    def step_lanes(self, x, q_resid, si, mem, tk=None, hw=None, iq=None):
+        """step() of a batched pass: every lane's token / group windows at once (block-diagonal maps), the group slabs
+        to the lanes' group-key regions (one slab_write), then the rows' index lists: scores over the lanes' keys
+        [0, si.width) masked per row to its lane's visible groups [lo, hi), top-512, token rows (+ the row's cache
+        offset), [selection | tail] or (rows < 2048 tokens) the dense list, mixed per row in fp32 (sentinel 2^32)."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        L = si.L
+        T = self.lane_tensors(L)
+        if tk is None:
+            tk = ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem)
+        tk_raw = tk
+        tk = self.tk_norm(tk_raw, mem)
+        ttnn.deallocate(tk_raw)
+        a = ttnn.matmul(si.A, T["tk"], compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.P, tk, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(tk)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, T["tk"])
+        ttnn.deallocate(new)
+        K = ttnn.typecast(T["tk"], ttnn.float32, memory_config=mem)
+        gk = self._pool_fused(K, mem, si.gcos, si.gsin, Ecat=T["Ecat"], bias=T["bias"], n=32 * L)
+        a = ttnn.matmul(si.Ag, T["g"], compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.Pg, gk, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(gk)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, T["g"])
+        ttnn.deallocate(new)
+        slab_write(T["g"], T["gk"], si.lane_offs["grp"], 2 * L)
+        cos, sin = si.cos_sin["sparse"]
+        q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
+        W = si.width
+        sc = ttnn.experimental.indexer_score_dsa(q, T["gk"], w, chunk_start_idx=W, kv_len=W + 32)
+        ttnn.deallocate(q)
+        ttnn.deallocate(w)
+        if int(sc.shape[-1]) != W + 32:
+            sc2 = ttnn.slice(sc, (0, 0, 0, 0), (1, 1, 32, W + 32), memory_config=mem)
+            ttnn.deallocate(sc)
+            sc = sc2
+        if sc.layout != ttnn.TILE_LAYOUT:
+            st = ttnn.to_layout(sc, ttnn.TILE_LAYOUT, memory_config=mem)
+            ttnn.deallocate(sc)
+            sc = st
+        sc32 = ttnn.typecast(sc, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(sc)
+        iota = self._iota_lane(L, W + 32)
+        lo = ttnn.lt(iota, si.lo, memory_config=mem)
+        hi = ttnn.ge(iota, si.hi, memory_config=mem)
+        hide = ttnn.logical_or(lo, hi, memory_config=mem)
+        ttnn.deallocate(lo)
+        ttnn.deallocate(hi)
+        m = ttnn.where(hide, float("-inf"), sc32, memory_config=mem)
+        for t_ in (sc32, hide):
+            ttnn.deallocate(t_)
+        mb = ttnn.typecast(m, ttnn.bfloat16, memory_config=mem)
+        ttnn.deallocate(m)
+        rm = ttnn.to_layout(mb, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(mb)
+        ids = ttnn.experimental.topk_large_indices(rm, k=TOPK)
+        ttnn.deallocate(rm)
+        it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(ids)
+        f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(it)
+        n_sel = self.cfg.idx_group_topk - 1
+        f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
+        ttnn.deallocate(f)
+        e0 = self._expand_rows(f511, 32, mem)
+        ttnn.deallocate(f511)
+        e = ttnn.add(e0, si.delta, memory_config=mem)  # + the row's cache base - 4 x its lane's group base
+        ttnn.deallocate(e0)
+        full = ttnn.concat([e, si.tail_f], dim=-1, memory_config=mem)  # [32, K] fp32
+        ttnn.deallocate(e)
+        sel = ttnn.multiply(full, si.nmask, memory_config=mem)
+        ttnn.deallocate(full)
+        mix = ttnn.add(sel, si.dense_f, memory_config=mem)  # dense_f: the dense rows' lists (zero on the other rows)
+        ttnn.deallocate(sel)
+        u = ttnn.typecast(mix, ttnn.uint32, memory_config=mem)
+        ttnn.deallocate(mix)
+        idx = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(u)
+        return idx
 
     def step(self, x, q_resid, si, mem, tk=None, hw=None, iq=None):
         """Token / group staging updates and slab writes; in the sparse regime the index lists of the rows
@@ -718,6 +878,10 @@ class Hy4Indexer:
         ttnn.deallocate(f)
         e = self._expand_rows(f511, 32, mem)
         ttnn.deallocate(f511)
+        if getattr(si, "base_f", None) is not None:  # + the active slot's cache base
+            e2 = ttnn.add(e, si.base_f, memory_config=mem)
+            ttnn.deallocate(e)
+            e = e2
         u = ttnn.typecast(e, ttnn.uint32, memory_config=mem)
         ttnn.deallocate(e)
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)

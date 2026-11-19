@@ -151,7 +151,8 @@ class Hy4Attention:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
         self.sink_row = self.slots * self.rows
         self.scratch_row = self.sink_row + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
-        cache = torch.zeros(1, 1, self.sink_row + 64, self.width, dtype=torch.bfloat16)
+        self.trash_row = self.sink_row + 64  # 32 rows the batched decode's idle lanes write (never read)
+        cache = torch.zeros(1, 1, self.sink_row + 96, self.width, dtype=torch.bfloat16)
         cache[0, 0, self.sink_row, cfg.latent_width] = SINK_KEY
         cache[0, 0, self.sink_row, cfg.latent_width + 1] = SINK_KEY
         self.cache = upload(mesh, cache, ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
@@ -724,6 +725,8 @@ class Hy4Attention:
         parts = self._xa(x, mem) if dec else [None, None]
         q_lat, q_rope, q_resid = self._q(x, cos, sin, mem, qa=parts[0])
         row = self._kv_row(x, cos, sin, mem, kv=parts[1])
+        if getattr(si, "L", 0):
+            return self._step_lanes(x, si, row, q_lat, q_rope, q_resid, parts, dec, mem)
         a = ttnn.matmul(si.A, self.stage, compute_kernel_config=self.ckc, memory_config=mem)
         b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(row)
@@ -751,6 +754,62 @@ class Hy4Attention:
         ttnn.deallocate(q_lat)
         ttnn.deallocate(q_rope)
         if idx is not si.idx_swa and idx is not si.idx_dense:
+            ttnn.deallocate(idx)
+        return out
+
+    # ------------------------------------------------------------------ batched decode (tt/decode_batch)
+    def lane_stage(self, L):
+        """The L-lane staging window [L * 64, 608] TILE (lane l: rows 64 l ..), created zeroed (eager) on first use."""
+        st = self.__dict__.setdefault("_lane_stage", {})
+        if L not in st:
+            st[L] = ttnn.zeros((1, 1, L * 64, self.width), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                               device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        return st[L]
+
+    def lane_load(self, L, lane, Mk, Mp):
+        """Lane `lane` of the L-lane window <- this slot's 64-row window (self.stage, init_stage): stage_L = Mk @ stage_L +
+        Mp @ stage (Mk: identity without the lane's block, Mp: [L 64, 64] placement; device one-hots, eager)."""
+        stL = self.lane_stage(L)
+        a = ttnn.matmul(Mk, stL, compute_kernel_config=self.ckc)
+        b = ttnn.matmul(Mp, self.stage, compute_kernel_config=self.ckc)
+        new = ttnn.add(a, b)
+        ttnn.copy(new, stL)
+        for t_ in (a, b, new):
+            ttnn.deallocate(t_)
+
+    def lane_unload(self, L, lane, Ms):
+        """This slot's 64-row window (self.stage) <- lane `lane` of the L-lane window (Ms: [64, L 64] selection)."""
+        w = ttnn.matmul(Ms, self.lane_stage(L), compute_kernel_config=self.ckc)
+        ttnn.copy(w, self.stage)
+        ttnn.deallocate(w)
+
+    def _step_lanes(self, x, si, row, q_lat, q_rope, q_resid, parts, dec, mem):
+        """step() of a batched pass: every lane's window updated at once (block-diagonal maps), its two 32-row slabs
+        written to its slot's cache region by one slab_write (idle lanes: the trash rows); index lists per row."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        stL = self.lane_stage(si.L)
+        a = ttnn.matmul(si.A, stL, compute_kernel_config=self.ckc, memory_config=mem)
+        b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(row)
+        new = ttnn.add(a, b, memory_config=mem)
+        ttnn.deallocate(a)
+        ttnn.deallocate(b)
+        ttnn.copy(new, stL)
+        ttnn.deallocate(new)
+        st_rm = ttnn.to_layout(stL, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        slab_write(st_rm, self.cache, si.lane_offs[self.kind], 2 * si.L)
+        ttnn.deallocate(st_rm)
+        if self.kind == "swa":
+            idx = si.idx_swa
+        else:
+            idx = self.indexer.step_lanes(x, q_resid, si, mem, tk=parts[2] if dec else None,
+                                          hw=parts[3] if dec else None, iq=self.dec["iq"] if dec else None)
+        ttnn.deallocate(q_resid)
+        out = self._attend(x, q_lat, q_rope, idx, mem, dec=dec, R=getattr(si, "R", None))
+        ttnn.deallocate(q_lat)
+        ttnn.deallocate(q_rope)
+        if idx is not si.idx_swa:
             ttnn.deallocate(idx)
         return out
 

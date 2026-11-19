@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Batched decode quality gate + timing: every text a user (its own slot / lane), the first P tokens prefilled, the
+rest teacher-forced through batched passes (one row per user per pass). Writes OUT_DIR/dev_<TAG>_<name>.npz like
+tools/teacher_force.py (compare with models/experimental/hybrid_moe/compare_hy4.py).
+
+    python -m models.autoports.tencent_hy4_flash.tools.batch_gate TEXTS REF_DIR OUT_DIR TAG --decode-from 32
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+
+import numpy as np
+import torch
+import ttnn
+from loguru import logger
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("texts")
+    ap.add_argument("ref_dir")
+    ap.add_argument("out_dir")
+    ap.add_argument("tag")
+    ap.add_argument("--names", default="")
+    ap.add_argument("--ctx", type=int, default=8192)
+    ap.add_argument("--chunk", type=int, default=2048)
+    ap.add_argument("--layers", default="")
+    ap.add_argument("--no-engram", action="store_true")
+    ap.add_argument("--decode-from", type=int, default=32)
+    ap.add_argument("--users", type=int, default=0, help="users (texts cycled; default: one per text)")
+    args = ap.parse_args()
+    seqs = json.load(open(args.texts))
+    names = [n for n in (args.names.split(",") if args.names else sorted(seqs))]
+    U = args.users or len(names)
+    users = [names[u % len(names)] for u in range(U)]
+    os.environ["HY4_SLOTS"] = str(U)
+    from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
+    from models.autoports.tencent_hy4_flash.tt.decode_batch import Hy4BatchDecoder
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    mesh = open_mesh()
+    try:
+        model = build(mesh, args)
+        if model.engram is not None and hasattr(model.engram.store, "wait_ram"):
+            model.engram.store.wait_ram()
+        dec = Hy4BatchDecoder(model, lanes=max(8, U), trace=True)
+        P = args.decode_from
+        ids, lps, lane = [], [], []
+        for u, name in enumerate(users):
+            t = torch.tensor(seqs[name], dtype=torch.long)
+            ids.append(t)
+            model.set_slot(u)
+            model.reset()
+            out = []
+            for c0 in range(0, P, args.chunk):
+                lg = model.forward(t[c0 : min(P, c0 + args.chunk)], logits_rows="all")
+                out.append(torch.log_softmax(lg.float(), dim=-1))
+            lps.append(out)
+            lane.append(dec.add(u, P, t[:P].tolist()))
+        steps = max(int(t.numel()) for t in ids) - P
+        times = []
+        for i in range(steps):
+            rows = {lane[u]: [int(ids[u][P + i])] for u in range(U) if P + i < ids[u].numel()}
+            t0 = time.perf_counter()
+            out = dec.run_batch(rows)
+            times.append((len(rows), time.perf_counter() - t0))
+            for u in range(U):
+                if lane[u] in out:
+                    lps[u].append(torch.log_softmax(out[lane[u]].float(), dim=-1))
+        for u, name in enumerate(users):
+            if u >= len(names):
+                continue
+            ref = np.load(os.path.join(args.ref_dir, f"ref_{name}.npz"))
+            top_ids = ref["top_ids"].astype(np.int64)
+            lp = torch.cat(lps[u])
+            T = ids[u].numel() - 1
+            lp = lp[:T]
+            nll = (-lp[torch.arange(T), ids[u][1:]]).numpy()
+            np.savez(os.path.join(args.out_dir, f"dev_{args.tag}_{name}.npz"), top1=lp.argmax(-1).numpy(),
+                     lp_at_ref=torch.gather(lp, 1, torch.from_numpy(top_ids[:T])).numpy(), nll=nll)
+            logger.info(f"{name}: nll {nll.mean():.4f}")
+        full = [t for n, t in times[8:] if n == U]
+        if full:
+            med = sorted(full)[len(full) // 2]
+            print(f"BATCH {U} users: median pass {med * 1e3:.2f} ms -> {U / med:.1f} tok/s total, "
+                  f"{1 / med:.1f} tok/s per user", flush=True)
+    finally:
+        ttnn.close_mesh_device(mesh)
+
+
+if __name__ == "__main__":
+    main()
