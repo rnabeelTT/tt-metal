@@ -177,6 +177,10 @@ def main():
             return [text[(off + i) % len(text)] for i in range(n + 1)]
 
         ids = prompt(N, 7919)
+        if os.environ.get("PF_WATCHDOG"):  # a hang: every thread's stack after this many seconds, then exit
+            import faulthandler
+
+            faulthandler.dump_traceback_later(int(os.environ["PF_WATCHDOG"]), exit=True)
         eng.warm()  # compiles every prefill bucket; pins the device-format copies when streaming (HYB_DEV_EXPERTS)
         pre = int(os.environ.get("PF_PRE", "0"))  # a long prefill before the captures (lazy device caches then exist)
         if pre:
@@ -206,6 +210,10 @@ def main():
             prof.enable()
         ops = _op_tally() if os.environ.get("PF_OPS") == "1" else None
         dev = _dev_tally(mesh) if os.environ.get("PF_DEVPROF") == "1" else None
+        if os.environ.get("PF_WATCHDOG"):  # (re-armed: the engine's own watchdog cancels it after a request)
+            import faulthandler
+
+            faulthandler.dump_traceback_later(int(os.environ["PF_WATCHDOG"]), exit=True)
         t0 = time.time()
         last = eng._prefill(ids)
         ttnn.synchronize_device(mesh)
