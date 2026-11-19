@@ -25,6 +25,7 @@ here next.
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 import ttnn
@@ -144,6 +145,20 @@ class InklingAttention:
         )
         self.q_norm = rep(sd["q_norm.weight"])
         self.k_norm = rep(sd["k_norm.weight"])
+        # INKLING_PF_QK_NORM_FUSED: the prefill's q / k norms with their weights in the rms_norm kernel (gamma in the
+        # norm's row-major [1, 1, HD / 32, 32] form) instead of a separate multiply
+        self.pf_qk_fused = os.environ.get("INKLING_PF_QK_NORM_FUSED", "0") == "1"
+        if self.pf_qk_fused:
+            gam = lambda t: ttnn.as_tensor(  # noqa: E731
+                t.reshape(1, 1, -1, 32).to(torch.bfloat16),
+                dtype=ttnn.bfloat16,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=mesh,
+                memory_config=DRAM,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(mesh),
+            )
+            self.q_gamma = gam(sd["q_norm.weight"])
+            self.k_gamma = gam(sd["k_norm.weight"])
         kv_shard = ttnn.ShardTensorToMesh(mesh, dim=-1)
         # explicit matmul precision (ttnn.linear's default config is low fidelity without fp32 accumulation): HiFi2 for
         # block-float weights (more mantissa than bfp8 holds), HiFi4 for bf16; fp32 accumulation
@@ -382,9 +397,13 @@ class InklingAttention:
         k = self.k_sconv.prefill_commit(k, valid)
         v = self.v_sconv.prefill_commit(v, valid)
         q = ttnn.reshape(q, (1, T, NH, HD))
-        q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
         k = ttnn.reshape(k, (1, T, NKV, HD))
-        k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=mc), self.k_norm, memory_config=mc)
+        if self.pf_qk_fused:
+            q = ttnn.rms_norm(q, epsilon=1e-6, weight=self.q_gamma, memory_config=mc)
+            k = ttnn.rms_norm(k, epsilon=1e-6, weight=self.k_gamma, memory_config=mc)
+        else:
+            q = ttnn.multiply(ttnn.rms_norm(q, epsilon=1e-6, memory_config=mc), self.q_norm, memory_config=mc)
+            k = ttnn.multiply(ttnn.rms_norm(k, epsilon=1e-6, memory_config=mc), self.k_norm, memory_config=mc)
         v = ttnn.reshape(v, (1, T, NKV, HD))
         r = ttnn.reshape(r, (1, T, NH, DR))
         if self.log_scaling and p0 + T > 128000:  # tau per row (exact host values; a no-op below 128K)
