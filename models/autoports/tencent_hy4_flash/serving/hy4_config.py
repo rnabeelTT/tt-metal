@@ -47,6 +47,15 @@ class HYV4FlashTextConfig(PretrainedConfig):
         rest.pop("model_type", None)
         for k, v in rest.items():
             setattr(self, k, v)
+        # vLLM 0.26 reads rope_parameters as one flat dict (rope_type, rope_theta: max-length checks only); the checkpoint
+        # nests them per attention type. Keep the nested form as rope_parameters_by_type and expose the sparse layers'.
+        rp = getattr(self, "rope_parameters", None)
+        if isinstance(rp, dict) and rp and all(isinstance(v, dict) for v in rp.values()):
+            self.rope_parameters_by_type = rp
+            src = rp.get("deepseek_sparse_attention") or next(iter(rp.values()))
+            # no mrope keys: vLLM would treat the model as M-RoPE (per-request rope deltas from the prefill); for text
+            # the three planes carry the same position (plain 1-D RoPE), and the TT engine reads config.json itself
+            self.rope_parameters = {"rope_type": src.get("rope_type", "default"), "rope_theta": src.get("rope_theta")}
         # vLLM derives head geometry from these when they exist; MLA layers have no GQA groups.
         if not hasattr(self, "num_key_value_heads"):
             self.num_key_value_heads = getattr(self, "num_attention_heads", None)

@@ -98,13 +98,24 @@ class Hy4Engine:
     def warm(self, prompt_len=None):
         """Compile the programs of a prefill chunk and a decode step (eager: just run them once)."""
         t0 = time.time()
-        self.model.reset()
+        g = torch.Generator().manual_seed(0)
+        # every prefill bucket first (tt/model.py PF_BUCKETS: a prompt's chunks run one of these program sets), so no
+        # program is compiled after the decode / draft traces are captured (which would release and re-capture them)
+        if os.environ.get("HY4_PF_BUCKETS", "1") == "1":
+            for b in self.model.PF_BUCKETS:
+                if b <= self.chunk and b < self.model.max_ctx:
+                    self.prefill(torch.randint(1000, 100000, (b - 1,), generator=g).tolist())
+                    self.model.warm_head_blocks(b)
         n = min(int(prompt_len or 64), self.chunk)
-        self.model.forward(torch.full((n,), int(self.cfg.bos), dtype=torch.long))
-        self.dec.start(n)
-        self.dec.run([int(self.cfg.bos)])
-        self.dec.run([int(self.cfg.bos)])  # (traced: the first pass compiles + captures, the second replays)
+        ids = torch.randint(1000, 100000, (n,), generator=g).tolist()
+        self.prefill(ids)
+        # plain: the first pass compiles + captures, the next replay; spec (k > 0): the 1-row pass, then drafts and
+        # verify rows (every accepted-row draft trace is captured on first use)
+        for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
+            self.step()
         self.model.reset()
+        self._pos = None
+        self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}
         logger.info(f"Hy4 engine warm-up {time.time() - t0:.1f} s")
 
     def capture(self):

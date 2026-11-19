@@ -36,6 +36,20 @@ def _register_config(_module) -> None:
         raise
 
 
+def _register_arch(module) -> None:
+    # vLLM 0.26 validates the checkpoint's architecture (ModelConfig) before the TT plugin maps it to its TT-prefixed
+    # registration; it does not know HYV4FlashForConditionalGeneration, so register the plain name too (lazy: the same
+    # adapter class the plugin registers from EXTRA_MODELS_DIR)
+    try:
+        if "HYV4FlashForConditionalGeneration" not in module.ModelRegistry.get_supported_archs():
+            module.ModelRegistry.register_model(
+                "HYV4FlashForConditionalGeneration",
+                "hy4_vllm_stub:HYV4FlashForConditionalGeneration",
+            )
+    except Exception as e:  # noqa: BLE001
+        print(f"hy4 sitecustomize: architecture registration failed: {e!r}", file=sys.stderr)
+
+
 def _register_reasoning_parser(module) -> None:
     # lazy: the parser module (and its vLLM imports) loads only when "hy_v4" is asked for
     _here_on_path()
@@ -49,6 +63,7 @@ def _register_tool_parser(module) -> None:
 
 # module -> callback run right after that module has executed (each at most once per process)
 _HOOKS = {
+    "vllm.model_executor.models.registry": _register_arch,
     "transformers.models.auto.configuration_auto": _register_config,
     "vllm.reasoning": _register_reasoning_parser,
     "vllm.tool_parsers": _register_tool_parser,

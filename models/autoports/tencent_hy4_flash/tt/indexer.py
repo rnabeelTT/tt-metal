@@ -95,6 +95,11 @@ class Hy4Indexer:
         self._mirror = v
 
     def _materialize(self, pending):
+        """pending: (device tensor, n) -> its first n rows; or (device tensor, a, b) -> rows [a, b) (sliced on the host:
+        a device slice at prompt-dependent offsets is a new program per prompt length)."""
+        if len(pending) == 3:
+            t, a, b = pending
+            return to_torch0(t).reshape(-1, self.d)[a:b].to(torch.bfloat16)
         t, n = pending
         return to_torch0(t).reshape(-1, self.d)[:n].to(torch.bfloat16)
 
@@ -250,10 +255,11 @@ class Hy4Indexer:
         self.n_tok, self.n_groups = n_end, n_groups
         n_open = n_end - n_groups * r
         keep = min(T, 128)
-        self._tk_pending = (ttnn.slice(tk, (0, 0, T - keep, 0), (1, 1, T, d)), keep)
+        full = ttnn.clone(tk)  # (its program depends on the bucket only; the views are sliced on the host when read)
+        self._tk_pending = (full, T - keep, T)
         self.tk_hist_base = n_end - keep
         self._open_keys = torch.zeros(0, d, dtype=torch.bfloat16)
-        self._open_pending = (ttnn.slice(tk, (0, 0, T - n_open, 0), (1, 1, T, d)), n_open) if n_open else None
+        self._open_pending = (full, T - n_open, T) if n_open else None
 
     def after_traced_prefill(self, T: int, Tb: int):
         """Host views after a traced first-chunk prefill of T real tokens (bucket Tb): token keys from the persistent
@@ -376,6 +382,10 @@ class Hy4Indexer:
         q, w = self._query(x, q_resid, cos, sin, mem)
         n_vis_max = (p0 + T - 1) // self.r  # visible complete groups of the last row
         kv_len = -(-n_vis_max // 32) * 32
+        if os.environ.get("HY4_PF_KV_BUCKETS", "1") == "1":
+            # the score width rounded up to a power-of-two bucket of groups (invisible groups are masked by vis): a
+            # chunk's programs then depend on the bucket, not on its position (one compile per bucket per server)
+            kv_len = next((b for b in (512 * 2**i for i in range(10)) if b >= kv_len and b + 32 <= self.gcap), kv_len)
         vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
         vis_t = upload(self.mesh, vis.reshape(1, 1, Tp, 1), ttnn.float32)
         if tail is not None and p0 >= cfg.idx_candidate_topk:

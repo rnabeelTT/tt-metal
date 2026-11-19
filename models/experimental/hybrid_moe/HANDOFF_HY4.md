@@ -9,6 +9,59 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## Optimization round 2026-11-19 (decode 8.5 -> 42.5 tok/s served, quality at parity)
+
+Measured on the box (QB2, 4 dies), single user, chat prompts, served through vLLM 0.26 (serve/serve_hy4.sh, dev image
+with this tree's models/ mounted), greedy, RAM-resident Engram:
+
+| metric | before (d27ad1b) | after |
+|---|---|---|
+| model output | garbage (every layer PCC ~0.3 vs the reference) | top-1 0.863 / KL 0.231 (decode-path gate, 8 seqs) |
+| plain decode step (full model, traced) | 117.9 ms (8.5 tok/s) | 45.2 ms (22.1 tok/s) |
+| device time per step | 76.4 ms | 40.7 ms |
+| served decode, DFly2 k=5 | n/a (drafter broken) | 42.5 tok/s mean (30-62), 2.4 tokens / verify pass |
+| TTFT, short chat | ~0.4 s | 0.25 s |
+
+Correctness bug (fixed, 75652f2a73b): commit 62d4122 switched the HC stream sums to fast_reduce_nc; on the [1, hc, T, 1]
+row sums of squares it returned wrong sums, so every layer's hyper-connection weights were wrong and the pushed branch
+generated garbage. The DFly2 "traced drafts accept 1.00" was this bug (the target was garbage): with it fixed the traced
+drafter accepts 2.4-3.2 tokens per pass and matches eager drafts.
+
+What changed (decode; prefill paths unchanged unless noted):
+- Host: Engram tables in RAM (anon copy loaded in the background, page-cache pages dropped per chunk, throttled on
+  memory pressure; this host's page cache was dropped repeatedly) 27.6 -> 0.5 ms per token; only the real logits rows
+  leave the device 4.2 -> 0.9 ms.
+- Streamed decode linears (qwen36 decode_linear, per-bank column streams, 32-row whole-tile mode + fp32 out added):
+  fused [q_a | kv_a | indexer key | head weights], gate, q_b, o_proj, indexer query, [latent down | shared g | u],
+  [latent up ; shared down], dense MLP, LM head (1255 -> 371 us), router as bf16 hi + lo. bfp8 streams at HiFi2.
+- Width-sharded RMSNorm for decode rows (60 -> 10 us at 3072).
+- Fused hyper-connection program (tt/hc_fused): previous HC post + next HC pre in one program, 16 cores exchanging
+  partials, FP32 weight math, exact hi / lo selections: 176 -> 58 us per sublayer boundary.
+- MoE: the qwen36 fused expert kernels at top-16 (ROUTE_WIDE 128-byte route records, single and multi-row), the
+  "keys" router (sigmoid + bias on the Tensix, integer top-k on the data-movement cores).
+- Fabric boundary (all-reduce + norm in one fabric op) for one-row passes (HY4_BOUNDARY_ROWS=1: its sharded receive
+  buffers reserve L1 on every core; 8 rows crowded the streamed linears' CBs off L1).
+- DFly2: drafter on streamed linears (13.7 -> 8.0 ms per draft pass), verify rows on the multi-row fused MoE (6 rows
+  1.16x a 1-row pass), speculative decoding in the engine (greedy + exact speculative sampling), vLLM adapter returns
+  1..k+1 tokens per step (M2.7 shim).
+- Trace guard (tt/decode.py _guard_programs): programs compiled after a capture can sit in a trace's freed
+  intermediates and get overwritten by replays (hang); traces are released and re-captured whenever the program cache
+  grows. Prefill chunks are padded to buckets (128..2048) compiled at warm-up so short prompts compile nothing at serve.
+- Serving: vLLM 0.26 needed the plain architecture registered (serving/hy4_vllm_stub.py, a model-interface stub) and a
+  flat rope_parameters view without mrope keys (else the plugin takes its M-RoPE prefill path).
+- tt-metal main API drift fixed in the qwen36 kernels (kernel_profiler.hpp path, custom_mm layout enum, rsqrt template,
+  setup_fabric_connection(mesh_device=...)).
+
+Tools: tools/decode_bench.py (traced A/B with saved logits, host cProfile), tools/teacher_force.py --decode-from (the
+decode-path quality gate), tools/gold_probe.py (per-layer streams vs the reference), tools/bench_{dsh,hc,norm,sdpa}.py,
+serve/hy4_client.py (TTFT / tok/s / tool call / needle). Quality gate recipe: ~/m27-work/hy4/run_gate.sh TAG [ENV=..]
+then compare_hy4.py over ~/m27-work/hy4/dev_dec.
+
+Open (next levers): fused HC 58 us x 2 per layer (SFPU slot reductions), attention glue (~150 us per layer: reshapes,
+wuk / wuv batched matmuls, sparse_sdpa over 32 padded rows), Engram layers (~250 us each), boundary for verify rows,
+prompts > 2048 tokens compile per-chunk programs (indexer score width grows with the chunk position) -> re-captures,
+verify-row numerics differ from 1-row numerics (spec output != plain greedy; both valid), package rebuild + publish.
+
 ## Status for takeover (2026-11-18, end of day 1)
 
 Branch `raahem/hy4-flash-hybrid` (rnabeelTT/tt-metal), worktree `~/hy4-flash`, host build (`build_metal_hy4.sh`, CPM

@@ -322,7 +322,7 @@ class Hy4Attention:
         row = self._kv_row(x, cos, sin, mem)
         row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
         ttnn.deallocate(row)
-        self._write_rows(row_rm, p0, T)
+        self._write_rows(row_rm, p0, self._write_n(row_rm, T))
         ttnn.deallocate(row_rm)
         Tp = int(x.shape[-2])
         selected = None
@@ -412,7 +412,7 @@ class Hy4Attention:
         row = self._kv_row(x, cos, sin, mem)
         row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
         ttnn.deallocate(row)
-        self._write_rows(row_rm, p0, T)
+        self._write_rows(row_rm, p0, self._write_n(row_rm, T))
         ttnn.deallocate(row_rm)
         selected = self.indexer.forward(x, q_resid, p0, T, mem) if self.indexer is not None else None
         ttnn.deallocate(q_resid)
@@ -480,6 +480,13 @@ class Hy4Attention:
         if idx is not si.idx_swa and idx is not si.idx_dense:
             ttnn.deallocate(idx)
         return out
+
+    @staticmethod
+    def _write_n(row_rm, T):
+        """Rows a prefill chunk writes: all of its padded rows (HY4_PF_WRITE_PAD=1, default): their KV sits past the
+        prompt and decode / the next chunk rewrites it, and the slice / slice_write programs then depend on the bucket
+        only (a per-length program would be compiled at serve time and re-capture every decode trace)."""
+        return int(row_rm.shape[-2]) if os.environ.get("HY4_PF_WRITE_PAD", "1") == "1" else T
 
     def _write_rows(self, row_rm, p0: int, T: int):
         """Write rows [0, T) of row_rm [1,1,Tp,608] RM to the cache at positions p0.. (ring rows for SWA)."""

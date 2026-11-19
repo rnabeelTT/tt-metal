@@ -336,11 +336,16 @@ class Hy4Model:
         big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
         dense_end = self.cfg.idx_candidate_topk
         lg, i = None, 0
+        bucketed = os.environ.get("HY4_PF_BUCKETS", "1") == "1" and self.N > 1
         while i < ids.numel():
             p = self.pos
             n = dense_end - p if p < dense_end else big
             n = max(128, (n // 128) * 128) if i + n < ids.numel() else n
-            lg = self.forward(ids[i : i + n])
+            rows = 0
+            if bucketed:  # the chunk's rows padded to a bucket (compiled at warm-up: no programs at serve time)
+                m = min(n, ids.numel() - i)
+                rows = next((b for b in self.PF_BUCKETS if b >= m and p + b <= self.max_ctx), 0)
+            lg = self.forward(ids[i : i + n], min_rows=rows)
             i += n
         return lg
 
@@ -424,16 +429,19 @@ class Hy4Model:
             if layer.attn.indexer is not None:
                 layer.attn.indexer.reset()
 
-    def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None) -> torch.Tensor:
+    def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None, min_rows: int = 0) -> torch.Tensor:
         """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows).
-        From HY4_ROW_SPLIT_MIN tokens (default 128) the rows are split over the dies between layers (forward_split)."""
+        From HY4_ROW_SPLIT_MIN tokens (default 128) the rows are split over the dies between layers (forward_split).
+        min_rows: pad the chunk to at least this many rows (a prefill bucket: every prompt length then runs one of a few
+        compiled program sets; padding rows run as real rows past the prompt, their KV / keys rewritten by decode)."""
         cfg, mesh = self.cfg, self.mesh
         T = int(ids.numel())
         p0 = self.pos
         assert p0 + T <= self.max_ctx, f"context {p0 + T} > max_ctx {self.max_ctx}"
-        split = self.N > 1 and T >= int(os.environ.get("HY4_ROW_SPLIT_MIN", "128"))
+        split = self.N > 1 and max(T, min_rows) >= int(os.environ.get("HY4_ROW_SPLIT_MIN", "128"))
         align = 32 * self.N if split else 32
-        Tp = -(-T // align) * align
+        Tp = -(-max(T, min_rows) // align) * align
+        assert p0 + Tp <= self.max_ctx + 64 or Tp == -(-T // align) * align, "bucket padding past the cache"
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         tok[0, :T] = ids.reshape(-1).to(torch.int32)
         tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1) if split else "rep")
@@ -475,6 +483,17 @@ class Hy4Model:
         ttnn.deallocate(lg)
         ttnn.deallocate(hn)
         return out
+
+    def warm_head_blocks(self, Tp):
+        """Compile the head's block slices of a Tp-row bucket (the last row's 32-row block offset depends on the prompt
+        length; ttnn.slice bakes its offsets into the program)."""
+        loc = Tp // self.N
+        X = ttnn.zeros((1, self.cfg.hc_mult, loc, self.cfg.hidden), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                       device=self.mesh)
+        for b in range(0, loc, 32):
+            xs = ttnn.slice(X, (0, 0, b, 0), (1, self.cfg.hc_mult, b + 32, self.cfg.hidden))
+            ttnn.deallocate(xs)
+        ttnn.deallocate(X)
 
     def _head_split(self, X, T, Tp, logits_rows, mem):
         """Head of a row-split chunk: X [1, hc, Tp/N, H] per die. Each die takes the same local 32-row block, the blocks
