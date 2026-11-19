@@ -32,7 +32,7 @@
 namespace {
 constexpr uint32_t cb_x = 0, cb_o = 1, cb_wp = 2, cb_fn = 3, cb_mm = 4, cb_cv = 5, cb_q = 6, cb_xn = 7, cb_s1 = 8,
                    cb_p = 9, cb_slots = 10, cb_w = 11, cb_wm = 12, cb_pre = 13, cb_m = 14, cb_in = 16, cb_wpc = 17,
-                   cb_wc = 18, cb_hi = 19, cb_lo = 20, cb_sdc = 21, cb_fnlo = 22;
+                   cb_wc = 18, cb_hi = 19, cb_lo = 20, cb_sdc = 21, cb_fnlo = 22, cb_ql = 23, cb_prel = 24;
 constexpr uint32_t MM_ONES = 0, MM_SEL = 1, MM_EYE = 9;
 // cb_s1 (S * I, a matmul operand: default unpack) and cb_m (M, FP32 unpack-to-dest copies) must be separate CBs
 // cb_mm: 0 ones, 1 + m: selector of column m (row m all ones), 9 identity; cb_cv: 0 scale, 1 base, 2 affine rows, 3 identity
@@ -72,6 +72,32 @@ void split_hi_lo(uint32_t cb_src, uint32_t cb_copy) {
     cb_wait_front(cb_lo, 1);
 }
 
+// cb_h[i] = hi @ mm[t0 + i], cb_l[i] = lo @ mm[t0 + i], i < 4 (pops cb_hi / cb_lo): a selection kept as its tf32-exact
+// part and the rest, for exact FPU products (x * (h + l) with dest accumulation)
+void sel_hi_lo(uint32_t t0, uint32_t cb_h, uint32_t cb_l) {
+    for (uint32_t h = 0; h < 2; ++h) {
+        const uint32_t cs = h ? cb_lo : cb_hi, cd = h ? cb_l : cb_h;
+        cb_reserve_back(cd, 4);
+        pack_reconfig_data_format(cd);
+        reconfig_data_format(cb_mm, cs);
+        matmul_init(cs, cb_mm, 0);
+        tile_regs_acquire();
+        for (uint32_t i = 0; i < 4; ++i) {
+            matmul_tiles(cs, cb_mm, 0, t0 + i, i);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        for (uint32_t i = 0; i < 4; ++i) {
+            pack_tile(i, cd);
+        }
+        tile_regs_release();
+        cb_push_back(cd, 4);
+        cb_wait_front(cd, 4);
+    }
+    cb_pop_front(cb_hi, 1);
+    cb_pop_front(cb_lo, 1);
+}
+
 // DST[d + i] = (hi + lo) @ mm[t0 + i], i < n (the caller has acquired DST and pops cb_hi / cb_lo afterwards)
 void mm_hi_lo(uint32_t t0, uint32_t n, uint32_t d) {
     reconfig_data_format(cb_mm, cb_hi);
@@ -94,6 +120,11 @@ void kernel_main() {
     constexpr uint32_t DBG = get_compile_time_arg_val(7);
     constexpr uint32_t FNLO = get_compile_time_arg_val(8);  // the lo part of fn (HY4_HCF_FNLO)  // 1: w := sum of mix partials, 2: w := ss, 3: w := sum S
     constexpr uint32_t NT = 4 * J;
+#ifdef DST_FULL
+    constexpr uint32_t PCH = 4;  // POST tiles per DST round (8 FP32 DST tiles: product + x each)
+#else
+    constexpr uint32_t PCH = 2;
+#endif
 
     compute_kernel_hw_startup(cb_x, cb_x, cb_xn);
     cb_wait_front(cb_x, NT);
@@ -105,44 +136,33 @@ void kernel_main() {
         cb_wait_front(cb_o, J);
         cb_wait_front(cb_wpc, 1);
         split_hi_lo(cb_wp, cb_wpc);
-        cb_reserve_back(cb_q, 4);
-        pack_reconfig_data_format(cb_q);
-        tile_regs_acquire();
-        mm_hi_lo(MM_SEL + 4, 4, 0);
-        cb_pop_front(cb_hi, 1);
-        cb_pop_front(cb_lo, 1);
-        tile_regs_commit();
-        tile_regs_wait();
-        for (uint32_t s = 0; s < 4; ++s) {
-            pack_tile(s, cb_q);
-        }
-        tile_regs_release();
-        cb_push_back(cb_q, 4);
-        cb_wait_front(cb_q, 4);
+        sel_hi_lo(MM_SEL + 4, cb_q, cb_ql);  // Q_s = wp @ sel_{4+s}: hi (tf32-exact) and lo parts
         cb_reserve_back(cb_xn, NT);
         pack_reconfig_data_format(cb_xn);
         for (uint32_t s = 0; s < 4; ++s) {
-            for (uint32_t j = 0; j < J; j += 2) {
-                const uint32_t n = J - j < 2 ? J - j : 2;
+            for (uint32_t j = 0; j < J; j += 2 * PCH) {
+                const uint32_t n = J - j < 2 * PCH ? J - j : 2 * PCH;
                 tile_regs_acquire();
-                reconfig_data_format(cb_o, cb_q);
-                mul_init(cb_o, cb_q, false);
-                for (uint32_t i = 0; i < n; ++i) {
-                    mul_tiles(cb_o, cb_q, j + i, s, 2 * i);
-                }
+                // DST = x (bf16, exact), then += o * Q_hi and o * Q_lo (FPU products exact, FP32 accumulation)
                 reconfig_data_format_srca(cb_x);
                 copy_init(cb_x);
                 for (uint32_t i = 0; i < n; ++i) {
-                    copy_tile(cb_x, s * J + j + i, 2 * i + 1);
+                    copy_tile(cb_x, s * J + j + i, i);
                 }
-                add_binary_tile_init();
+                reconfig_data_format(cb_o, cb_q);
+                mul_init(cb_o, cb_q, true);
                 for (uint32_t i = 0; i < n; ++i) {
-                    add_binary_tile(2 * i, 2 * i + 1, 2 * i);
+                    mul_tiles(cb_o, cb_q, j + i, s, i);
+                }
+                reconfig_data_format(cb_o, cb_ql);
+                mul_init(cb_o, cb_ql, true);
+                for (uint32_t i = 0; i < n; ++i) {
+                    mul_tiles(cb_o, cb_ql, j + i, s, i);
                 }
                 tile_regs_commit();
                 tile_regs_wait();
                 for (uint32_t i = 0; i < n; ++i) {
-                    pack_tile(2 * i, cb_xn);
+                    pack_tile(i, cb_xn);
                 }
                 tile_regs_release();
             }
@@ -151,6 +171,7 @@ void kernel_main() {
         cb_wait_front(cb_xn, NT);
         src = cb_xn;
         cb_pop_front(cb_q, 4);
+        cb_pop_front(cb_ql, 4);
         cb_pop_front(cb_o, J);
         cb_pop_front(cb_wp, 1);
         cb_pop_front(cb_wpc, 1);
@@ -191,28 +212,18 @@ void kernel_main() {
         cb_push_back(cb_p, 2);
         }
 
-        // every core's partials (FP32 exact sums)
-        {
-        DeviceZoneScopedN("HC_WAIT");
+        // every core's partials summed on the FPU: DST += slot * 1 (the slots enter at tf32, the accumulation is FP32;
+        // the SFPU copy + add chain took ~15 us)
         cb_wait_front(cb_slots, 2 * NC);
-        }
-        DeviceZoneScopedN("HC_REST");
         cb_reserve_back(cb_s1, 1);
         cb_reserve_back(cb_sdc, 1);
         cb_reserve_back(cb_m, 1);
         tile_regs_acquire();
-        reconfig_data_format_srca(cb_slots);
-        copy_init(cb_slots);
-        copy_tile(cb_slots, 0, 0);
-        copy_tile(cb_slots, 1, 1);
-        for (uint32_t k = 1; k < NC; ++k) {
-            reconfig_data_format_srca(cb_slots);
-            copy_init(cb_slots);
-            copy_tile(cb_slots, 2 * k, 2);
-            copy_tile(cb_slots, 2 * k + 1, 3);
-            add_binary_tile_init();
-            add_binary_tile(0, 2, 0);
-            add_binary_tile(1, 3, 1);
+        reconfig_data_format(cb_slots, cb_mm);
+        mul_init(cb_slots, cb_mm, true);
+        for (uint32_t k = 0; k < NC; ++k) {
+            mul_tiles(cb_slots, cb_mm, 2 * k, MM_ONES, 0);
+            mul_tiles(cb_slots, cb_mm, 2 * k + 1, MM_ONES, 1);
         }
         reconfig_data_format_srca(cb_cv);
         copy_init(cb_cv);
@@ -287,44 +298,36 @@ void kernel_main() {
         cb_wait_front(cb_wm, 1);
         cb_wait_front(cb_wc, 1);
 
-        // P_s = w @ sel_s (hi / lo: the pre weights to ~fp32)
+        // P_s = w @ sel_s, hi (tf32-exact) and lo parts
         split_hi_lo(cb_wm, cb_wc);
-        cb_reserve_back(cb_pre, 4);
-        pack_reconfig_data_format(cb_pre);
-        tile_regs_acquire();
-        mm_hi_lo(MM_SEL, 4, 0);
-        cb_pop_front(cb_hi, 1);
-        cb_pop_front(cb_lo, 1);
-        tile_regs_commit();
-        tile_regs_wait();
-        for (uint32_t s = 0; s < 4; ++s) {
-            pack_tile(s, cb_pre);
-        }
-        tile_regs_release();
-        cb_push_back(cb_pre, 4);
-        cb_wait_front(cb_pre, 4);
+        sel_hi_lo(MM_SEL, cb_pre, cb_prel);
 
-        // in_j = bf16(sum_s X'_{s,j} P_s)
+        // in_j = bf16(sum_s X'_{s,j} (P_hi_s + P_lo_s)): FPU products (exact), FP32 dest accumulation
         cb_reserve_back(cb_in, J);
         pack_reconfig_data_format(cb_in);
-        for (uint32_t j = 0; j < J; ++j) {
+        for (uint32_t j = 0; j < J; j += 2 * PCH) {
+            const uint32_t n = J - j < 2 * PCH ? J - j : 2 * PCH;
             tile_regs_acquire();
-            reconfig_data_format(src, cb_pre);
-            mul_init(src, cb_pre, false);
-            for (uint32_t s = 0; s < 4; ++s) {
-                mul_tiles(src, cb_pre, s * J + j, s, s);
+            for (uint32_t h = 0; h < 2; ++h) {
+                const uint32_t cbp = h ? cb_prel : cb_pre;
+                reconfig_data_format(src, cbp);
+                mul_init(src, cbp, true);
+                for (uint32_t s = 0; s < 4; ++s) {
+                    for (uint32_t i = 0; i < n; ++i) {
+                        mul_tiles(src, cbp, s * J + j + i, s, i);
+                    }
+                }
             }
-            add_binary_tile_init();
-            add_binary_tile(0, 1, 0);
-            add_binary_tile(2, 3, 2);
-            add_binary_tile(0, 2, 0);
             tile_regs_commit();
             tile_regs_wait();
-            pack_tile(0, cb_in);
+            for (uint32_t i = 0; i < n; ++i) {
+                pack_tile(i, cb_in);
+            }
             tile_regs_release();
         }
         cb_push_back(cb_in, J);
         cb_pop_front(cb_pre, 4);
+        cb_pop_front(cb_prel, 4);
         cb_pop_front(cb_wm, 1);
         cb_pop_front(cb_wc, 1);
         cb_pop_front(cb_fn, NT);

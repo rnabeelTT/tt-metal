@@ -99,7 +99,8 @@ class HCFusedOp:
         cbs = [_cb(self.crs, i, dt, tb, n) for i, (dt, tb), n in [
             (0, bf, NT), (1, bf, J), (2, f32, 1), (3, f32, NT), (4, f32, 10), (5, f32, 4), (6, f32, 4), (7, bf, NT),
             (8, f32, 1), (9, f32, 2), (10, f32, 2 * NC), (11, f32, 1), (12, f32, 1), (13, f32, 4), (14, f32, 1),
-            (16, bf, J), (17, f32, 1), (18, f32, 1), (19, f32, 1), (20, f32, 1), (21, f32, 1), (22, bf, NT)]]
+            (16, bf, J), (17, f32, 1), (18, f32, 1), (19, f32, 1), (20, f32, 1), (21, f32, 1), (22, bf, NT),
+            (23, f32, 4), (24, f32, 4)]]
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         fnlo = int(pre and _os.environ.get("HY4_HCF_FNLO", "0") == "1")
         rd_ct = [J, self.HT, int(post), int(pre), 0, 1, 2, 3, 4, 5, 10, 4, 17, 22, fnlo]
@@ -115,10 +116,11 @@ class HCFusedOp:
 
         cp_ct = [J, int(post), int(pre), NC, _bits(hc.eps if pre else 1e-6), _bits(1.0 / n_hc),
                  _bits(hc.hc_eps if pre else 0.0), int(_os.environ.get("HY4_HCF_DBG", "0")), fnlo]
+        full = _os.environ.get("HY4_HCF_DST_FULL", "1") == "1"  # 8 FP32 DST tiles per round (fewer op inits)
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                           math_approx_mode=False)
+                                           math_approx_mode=False, dst_full_sync_en=full)
         modes = [ttnn.UnpackToDestMode.Default] * 64
-        for i in (5, 10, 14, 17, 18, 21):  # cv, slots, M, wp / w / S*I copies: FP32 copies into DST
+        for i in (5, 14, 17, 18, 21):  # cv, M, wp / w / S*I copies: FP32 copies into DST (slots: FPU operands)
             modes[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg.unpack_to_dest_mode = modes
 
@@ -137,7 +139,8 @@ class HCFusedOp:
                                   compile_time_args=wr_ct, runtime_args=rt(wr_rt),
                                   config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0)),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "hc_compute.cpp"), core_ranges=self.crs,
-                                  compile_time_args=cp_ct, runtime_args=rt([[] for _ in range(NC)]), config=cfg),
+                                  compile_time_args=cp_ct, runtime_args=rt([[] for _ in range(NC)]), config=cfg,
+                                  defines=[("DST_FULL", "1")] if full else []),
         ]
         sems = [ttnn.SemaphoreDescriptor(id=i, core_type=ttnn.CoreType.WORKER, core_ranges=self.crs, initial_value=0)
                 for i in (SEM, SEM_READY)]

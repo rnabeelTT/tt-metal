@@ -97,6 +97,9 @@ def main():
         t, _ = timed(mesh, lambda: op(Xt, ot, w1, h2)[1])
         tu, _ = timed(mesh, lambda: h2.pre(h1.post(Xt, ot, post1, L1), L1)[0])
         print(f"fused post+pre {t:6.1f} us vs unfused (split-K) {tu:6.1f} us", flush=True)
+        tpre, _ = timed(mesh, lambda: op(Xt, None, None, h2)[1])
+        tpost, _ = timed(mesh, lambda: op(Xt, ot, w1, None)[0])
+        print(f"fused pre only {tpre:6.1f} us, post only {tpost:6.1f} us", flush=True)
     finally:
         ttnn.close_mesh_device(mesh)
 

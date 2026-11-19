@@ -88,8 +88,10 @@ class Hy4Attention:
         kvb = bf(sd["kv_b_proj.weight"]).reshape(H, self.nope + self.vd, self.kvl)
         wuk = kvb[:, : self.nope, :].contiguous()  # [H, 192, 512]
         wuvT = kvb[:, self.nope :, :].transpose(1, 2).contiguous()  # [H, 512, 256]
-        self.wuk = upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), sdt, mapper=("shard", 1))
-        self.wuvT = upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), sdt, mapper=("shard", 1))
+        udt = _dt("HY4_ATTN_UKV_DTYPE", "bf16")  # the absorbed per-head W_uk / W_uv (batched matmuls over the heads)
+        self.wuk = upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt, mapper=("shard", 1))
+        self.wuvT = upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), udt, mapper=("shard", 1))
+        self.ckc_ukv = self.ckc_lofi if udt != ttnn.bfloat16 else self.ckc  # bfp8: HiFi2
         # output gate (column parallel), o_proj (row parallel), post_proj_norm
         self.wg = upload(mesh, bf(sd["linear_gate.weight"]).T.reshape(1, 1, cfg.hidden, H * self.vd), wdt, mapper=("shard", -1))
         self.wo = upload(mesh, bf(sd["o_proj.weight"]).T.reshape(1, 1, H * self.vd, cfg.hidden), wdt, mapper=("shard", -2))
@@ -254,7 +256,7 @@ class Hy4Attention:
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
         ttnn.deallocate(q)
-        q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,512]
+        q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1,Hd,Tp,512]
         ttnn.deallocate(q_nope)
         q_rope = self.rope(q_rope, cos, sin, mem)
         return q_lat, q_rope, q_resid
@@ -292,7 +294,7 @@ class Hy4Attention:
         ttnn.deallocate(o)
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
-        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,256]
+        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
             ov = ttnn.experimental.view(ov, (1, 1, Tp, self.Hd * self.vd))  # (the same page identity as in _q)
@@ -361,7 +363,7 @@ class Hy4Attention:
         ttnn.deallocate(o)
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
-        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)
+        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)
         ttnn.deallocate(o)
         ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
         g = ttnn.matmul(x, self.wg, compute_kernel_config=self.ckc, memory_config=mem)
