@@ -27,6 +27,7 @@
 #include "api/compute/pack.h"
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
+#include "api/debug/kernel_profiler.hpp"
 
 namespace {
 constexpr uint32_t cb_x = 0, cb_o = 1, cb_wp = 2, cb_fn = 3, cb_mm = 4, cb_cv = 5, cb_q = 6, cb_xn = 7, cb_s1 = 8,
@@ -99,6 +100,7 @@ void kernel_main() {
     cb_wait_front(cb_mm, 10);
     uint32_t src = cb_x;
     if constexpr (POST) {
+        DeviceZoneScopedN("HC_POST");
         cb_wait_front(cb_wp, 1);
         cb_wait_front(cb_o, J);
         cb_wait_front(cb_wpc, 1);
@@ -157,6 +159,8 @@ void kernel_main() {
         cb_wait_front(cb_fn, NT);
         cb_wait_front(cb_cv, 4);
         // this core's partials
+        {
+        DeviceZoneScopedN("HC_PART");
         cb_reserve_back(cb_p, 2);
         pack_reconfig_data_format(cb_p);
         tile_regs_acquire();
@@ -185,9 +189,14 @@ void kernel_main() {
         pack_tile(1, cb_p);
         tile_regs_release();
         cb_push_back(cb_p, 2);
+        }
 
         // every core's partials (FP32 exact sums)
+        {
+        DeviceZoneScopedN("HC_WAIT");
         cb_wait_front(cb_slots, 2 * NC);
+        }
+        DeviceZoneScopedN("HC_REST");
         cb_reserve_back(cb_s1, 1);
         cb_reserve_back(cb_sdc, 1);
         cb_reserve_back(cb_m, 1);

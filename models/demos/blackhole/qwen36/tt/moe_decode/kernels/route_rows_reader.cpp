@@ -44,7 +44,7 @@ void kernel_main() {
     const auto s_ids = TensorAccessor(table_args, table_addr, 2048);
     const auto s_scores = TensorAccessor(scores_args, get_arg_val<uint32_t>(a_scores), 2048);
 #else
-    const auto s_table = TensorAccessor(table_args, table_addr, 64);
+    const auto s_table = TensorAccessor(table_args, table_addr, moe_topk::REC_BYTES);
 #endif
 
     // [logits row: lg_tiles x LG_TILE_L1 bytes][route record: 64 bytes][(ROUTER_SIGB) bias: 4 E bytes]
@@ -60,7 +60,7 @@ void kernel_main() {
     }
     const int32_t* bias = nullptr;
 #ifdef ROUTER_SIGB
-    const uint32_t bias_l1 = moe_topk::align64(rec + 64);
+    const uint32_t bias_l1 = moe_topk::align64(rec + moe_topk::REC_BYTES);
     noc_async_read(get_noc_addr_from_bank_id<true>(0, get_arg_val<uint32_t>(3)), bias_l1, 4 * num_experts);
     bias = reinterpret_cast<const int32_t*>(bias_l1);
 #endif
@@ -78,7 +78,7 @@ void kernel_main() {
     const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
 
     volatile tt_l1_ptr uint16_t* r = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec);
-    for (uint32_t j = 0; j < 32; ++j) {
+    for (uint32_t j = 0; j < moe_topk::REC_U16; ++j) {
         r[j] = 0;
     }
 #ifdef ROUTE_TILES
@@ -102,7 +102,7 @@ void kernel_main() {
     noc_async_write(rec, s_ids.get_noc_addr(0, off), 2 * topk);
     noc_async_write(rec + 64, s_scores.get_noc_addr(0, off), 2 * topk);
 #else
-    noc_async_write(rec, s_table.get_noc_addr(row), 64);
+    noc_async_write(rec, s_table.get_noc_addr(row), moe_topk::REC_BYTES);
 #endif
     noc_async_write_barrier();
 }

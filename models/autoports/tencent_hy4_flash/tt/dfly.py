@@ -24,7 +24,8 @@ import ttnn
 from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.attention import Hy4Attention
-from models.autoports.tencent_hy4_flash.tt.common import AllGather, AllReduce, RMSNorm, ckc, num_devices, upload
+from models.autoports.tencent_hy4_flash.tt.common import (AllGather, AllReduce, RMSNorm, StreamLinear, ckc, num_devices,
+                                                           stream_enabled, upload)
 
 W = 6  # the block: bonus + 5 drafts
 
@@ -45,8 +46,30 @@ class _DraftMLP:
         self.w2 = upload(mesh, bf(sd["down_proj.weight"]).T.reshape(1, 1, I, hidden), dt, mapper=("shard", -2))
         self.ar = AllReduce(mesh)
         self.ckc = ckc(mesh)
+        self.dec = None
+        if stream_enabled(mesh):  # decode-only streamed copies: [gate_d | up_d], down_d
+            N = num_devices(mesh)
+            Il = I // N
+            g, u, d = bf(sd["gate_proj.weight"]).T, bf(sd["up_proj.weight"]).T, bf(sd["down_proj.weight"]).T
+            self.Il = Il
+            self.dec = (StreamLinear(mesh, [torch.cat([g[:, i * Il:(i + 1) * Il], u[:, i * Il:(i + 1) * Il]], 1)
+                                            for i in range(N)], dt),
+                        StreamLinear(mesh, [d[i * Il:(i + 1) * Il, :] for i in range(N)], dt))
 
     def __call__(self, x, mem):
+        if self.dec is not None and int(x.shape[-2]) == 32:
+            gu = self.dec[0](x, mem)
+            g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, 32, self.Il), memory_config=mem)
+            u = ttnn.slice(gu, (0, 0, 0, self.Il), (1, 1, 32, 2 * self.Il), memory_config=mem)
+            ttnn.deallocate(gu)
+            h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+            ttnn.deallocate(g)
+            ttnn.deallocate(u)
+            part = self.dec[1](h, mem)
+            ttnn.deallocate(h)
+            out = self.ar(part, mem)
+            ttnn.deallocate(part)
+            return out
         g = ttnn.matmul(x, self.w1, compute_kernel_config=self.ckc, memory_config=mem)
         u = ttnn.matmul(x, self.w3, compute_kernel_config=self.ckc, memory_config=mem)
         h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
@@ -101,6 +124,23 @@ class Hy4DFly:
         self.ckc = ckc(mesh)
         self.ag = AllGather(mesh)
         self.N = num_devices(mesh)
+        self.ar = AllReduce(mesh)
+        self.dec = None
+        if stream_enabled(mesh):
+            # decode-only streamed copies: eh_proj (once per draft pass); the hidden correction (5 sequential steps per
+            # pass) tensor-parallel: [gate_d | up_d] over the 6144-wide input, down_d + all-reduce (replicated, each die
+            # read ~50 MB bfp8 per draft token)
+            N = self.N
+            hg, hu = bf(w["hidden_correction.gate_proj.weight"]).T, bf(w["hidden_correction.up_proj.weight"]).T
+            hd = bf(w["hidden_correction.down_proj.weight"]).T
+            Ic = int(hg.shape[1]) // N
+            self.Ic = Ic
+            self.dec = {
+                "eh": StreamLinear(mesh, [bf(w["mtp_fusion.eh_proj.weight"]).T] * N, sdt),
+                "hc_gu": StreamLinear(mesh, [torch.cat([hg[:, i * Ic:(i + 1) * Ic], hu[:, i * Ic:(i + 1) * Ic]], 1)
+                                             for i in range(N)], sdt),
+                "hc_d": StreamLinear(mesh, [hd[i * Ic:(i + 1) * Ic, :] for i in range(N)], sdt),
+            }
         # row-0 selector for the fusion, [1, 1, 32, 1]
         m0 = torch.zeros(1, 1, 32, 1, dtype=torch.bfloat16)
         m0[0, 0, 0, 0] = 1
@@ -120,8 +160,15 @@ class Hy4DFly:
     def _argmax_rm(self, c, mem):
         """c [1, 1, 1, H] corrected hidden -> the greedy token [1, 1] uint32 RM (bf16 argmax over the full vocab: the
         fp32 120K-wide row segfaults in untilize_with_unpadding; drafts only steer acceptance, never the output)."""
-        lg = ttnn.matmul(c, self.model.lm, dtype=ttnn.bfloat16, compute_kernel_config=self.model.ckc,
-                         memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if getattr(self.model, "lm_dec", None) is not None:  # the streamed LM head (fp32 out, all 32 rows: row 0 used)
+            l32 = self.model.lm_dec(c, ttnn.DRAM_MEMORY_CONFIG)
+            l1 = ttnn.slice(l32, (0, 0, 0, 0), (1, 1, 1, int(l32.shape[-1])), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(l32)
+            lg = ttnn.typecast(l1, ttnn.bfloat16, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(l1)
+        else:
+            lg = ttnn.matmul(c, self.model.lm, dtype=ttnn.bfloat16, compute_kernel_config=self.model.ckc,
+                             memory_config=ttnn.DRAM_MEMORY_CONFIG)
         full = self.ag(lg, dim=3, mem=ttnn.DRAM_MEMORY_CONFIG) if self.N > 1 else lg
         if full is not lg:
             ttnn.deallocate(lg)
@@ -148,7 +195,8 @@ class Hy4DFly:
         ttnn.deallocate(ht)
         cat = ttnn.concat([self.enorm(x, mem), self.hnorm(htr, mem)], dim=-1, memory_config=mem)
         ttnn.deallocate(htr)
-        f = ttnn.matmul(cat, self.eh, compute_kernel_config=self.ckc, memory_config=mem)
+        f = self.dec["eh"](cat, mem) if self.dec is not None else ttnn.matmul(cat, self.eh, compute_kernel_config=self.ckc,
+                                                                                memory_config=mem)
         ttnn.deallocate(cat)
         f = ttnn.multiply(ttnn.multiply(f, self.fgate, memory_config=mem), self.row0, memory_config=mem)
         x2 = ttnn.add(x, f, memory_config=mem)
@@ -159,9 +207,11 @@ class Hy4DFly:
         for i, L in enumerate(self.layers):
             a = L["attn"]
             xn = L["in_norm"](x, mem)
-            q_lat, q_rope, q_resid = a._q(xn, cos, sin, mem)
+            dec = a.dec is not None
+            parts = a._xa(xn, mem) if dec else [None, None]
+            q_lat, q_rope, q_resid = a._q(xn, cos, sin, mem, qa=parts[0])
             ttnn.deallocate(q_resid)
-            row = a._kv_row(xn, cos, sin, mem)
+            row = a._kv_row(xn, cos, sin, mem, kv=parts[1])
             row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
             ttnn.deallocate(row)
             ttnn.experimental.deepseek_prefill.update_padded_kv_cache(a.cache, row_rm, self.slot0, self.scratch_off,
@@ -176,7 +226,7 @@ class Hy4DFly:
                 ttnn.deallocate(srep)
             else:
                 idx = ds.idx_dense
-            o = a._attend(xn, q_lat, q_rope, idx, mem)
+            o = a._attend(xn, q_lat, q_rope, idx, mem, dec=dec)
             for t_ in (xn, q_lat, q_rope):
                 ttnn.deallocate(t_)
             if idx is not ds.idx_dense:
@@ -201,14 +251,30 @@ class Hy4DFly:
             e = self._embed(prev, 1)
             z = ttnn.concat([self.hc_hnorm(hk, mem), self.hc_enorm(e, mem)], dim=-1, memory_config=mem)
             ttnn.deallocate(e)
-            g = ttnn.matmul(z, self.hc_g, compute_kernel_config=self.ckc, memory_config=mem)
-            u = ttnn.matmul(z, self.hc_u, compute_kernel_config=self.ckc, memory_config=mem)
-            ttnn.deallocate(z)
-            a_ = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
-            ttnn.deallocate(g)
-            ttnn.deallocate(u)
-            d = ttnn.matmul(a_, self.hc_d, compute_kernel_config=self.ckc, memory_config=mem)
-            ttnn.deallocate(a_)
+            if self.dec is not None:
+                gu = self.dec["hc_gu"](z, mem)
+                ttnn.deallocate(z)
+                g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, 1, self.Ic), memory_config=mem)
+                u = ttnn.slice(gu, (0, 0, 0, self.Ic), (1, 1, 1, 2 * self.Ic), memory_config=mem)
+                ttnn.deallocate(gu)
+                a_ = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+                ttnn.deallocate(g)
+                ttnn.deallocate(u)
+                dp = self.dec["hc_d"](a_, mem)
+                ttnn.deallocate(a_)
+                d1 = ttnn.slice(dp, (0, 0, 0, 0), (1, 1, 1, H), memory_config=mem)
+                ttnn.deallocate(dp)
+                d = self.ar(d1, mem)
+                ttnn.deallocate(d1)
+            else:
+                g = ttnn.matmul(z, self.hc_g, compute_kernel_config=self.ckc, memory_config=mem)
+                u = ttnn.matmul(z, self.hc_u, compute_kernel_config=self.ckc, memory_config=mem)
+                ttnn.deallocate(z)
+                a_ = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+                ttnn.deallocate(g)
+                ttnn.deallocate(u)
+                d = ttnn.matmul(a_, self.hc_d, compute_kernel_config=self.ckc, memory_config=mem)
+                ttnn.deallocate(a_)
             c = ttnn.add(hk, d, memory_config=mem)
             ttnn.deallocate(hk)
             ttnn.deallocate(d)

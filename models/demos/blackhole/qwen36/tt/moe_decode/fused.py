@@ -162,13 +162,14 @@ class FusedMoEDecode:
         """Routed-only: the routed tensors stand in for the shared ones (their addresses are passed, never read)."""
         return (self.shared_up_gate, self.shared_down) if self.shared else (up_gate, down)
 
-    def rows(self, x, up_gate, down, out=None):
+    def rows(self, x, up_gate, down, out=None, logits=None):
         """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer, or
         `out` (a [1, 1, M, H] BF16 TILE tensor, e.g. allocated per call in L1 for the fabric boundary: rows >= Mp of its
         tiles are left as they were)."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
-        logits = self._logits(x)
+        if logits is None:  # (logits: the router output when the port computed it)
+            logits = self._logits(x)
         route(logits, b.table, bias=self.bias)
         ttnn.deallocate(logits)
         H, Il, E, k = self._key[:4]

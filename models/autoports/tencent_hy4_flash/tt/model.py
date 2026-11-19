@@ -225,6 +225,9 @@ class Hy4Model:
         self.rope = DeviceRope(mesh, cfg.qk_rope)
         self.pos = 0  # next position of the sequence
         logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}")
+        store = getattr(self.engram, "store", None)
+        if store is not None and hasattr(store, "rewarm") and store.loaders:
+            store.rewarm()  # the tensor-cache load (~90 GB through the page cache) evicted the Engram tables
 
     def dram_report(self) -> str:
         mv = ttnn.get_memory_view(self.mesh, ttnn.BufferType.DRAM)

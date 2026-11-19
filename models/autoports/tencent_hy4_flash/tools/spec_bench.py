@@ -53,6 +53,7 @@ def main():
         plain = None if args.no_plain else Hy4Decoder(model, trace=not args.eager)
         eos = model.cfg.eos
         tot = {"spec_tok": 0, "spec_t": 0.0, "passes": 0, "plain_tok": 0, "plain_t": 0.0, "match": 0, "n": 0}
+        tp, td, tv = [], [], []  # per-call wall times (plain step, draft, verify), warm (2nd pass on)
         for pi, prompt in enumerate(PROMPTS[: args.prompts]):
             text = tok.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False,
                                            add_generation_prompt=True, reasoning_effort="no_think")
@@ -77,7 +78,10 @@ def main():
                 ref = [b]
                 t0 = time.time()
                 while len(ref) < args.max_new and ref[-1] != eos:
+                    t1 = time.time()
                     ref.append(int(torch.argmax(plain.run([ref[-1]]))))
+                    if len(ref) > 3:
+                        tp.append(time.time() - t1)
                 dt = time.time() - t0
                 if pi > 0:
                     tot["plain_tok"] += len(ref) - 1
@@ -94,9 +98,14 @@ def main():
             anchor, n = P + 1, 0
             passes = 0
             while len(out) < args.max_new and out[-1] != eos:
+                t1 = time.time()
                 drafts = spec.draft(out[-1], anchor, n)
+                t2 = time.time()
                 rows = [out[-1]] + drafts
                 lgs = spec.run(rows, logits_rows="all", p0=anchor)
+                if passes > 2:
+                    td.append(t2 - t1)
+                    tv.append(time.time() - t2)
                 picks = lgs.argmax(-1).tolist()
                 acc = 0
                 while acc < len(drafts) and picks[acc] == drafts[acc]:
@@ -129,6 +138,11 @@ def main():
         if tot["plain_t"]:
             logger.info(f"PLAIN: {tot['plain_tok'] / tot['plain_t']:.2f} tok/s")
         logger.info(f"spec == plain greedy on {tot['match']} / {tot['n']} prompts")
+        med = lambda v: 1e3 * sorted(v)[len(v) // 2] if v else float("nan")  # noqa: E731
+        logger.info(f"median ms: plain step {med(tp):.1f}, draft {med(td):.1f}, verify {med(tv):.1f} "
+                    f"(spec pass {med(td) + med(tv):.1f}); at {tot['spec_tok'] / max(tot['passes'], 1):.2f} tok/pass: "
+                    f"{1e3 * tot['spec_tok'] / max(tot['passes'], 1) / max(med(td) + med(tv), 1e-9):.1f} tok/s vs plain "
+                    f"{1e3 / max(med(tp), 1e-9):.1f}")
     finally:
         ttnn.close_mesh_device(mesh)
 

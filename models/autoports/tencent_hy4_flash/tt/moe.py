@@ -221,6 +221,11 @@ class Hy4MoE:
                     router="keys", selection_bias=sd["gate.e_score_correction_bias"],
                     router_logits=lambda x1: self.router_row(self._x_full),
                 )
+                # verify rows (DFly2): the multi-row fused kernels (the union of the rows' experts), up to
+                # HY4_MOE_FUSED_ROWS_MAX rows; their buffers are uploaded here, before any trace capture
+                self.rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
+                for m in range(2, self.rows_max + 1):
+                    self.fused.rows_ops(m)
 
     def _up(self, t, dtype, dim, cache_name, have_cache, shape):
         kw = {"mesh_mapper": ttnn.ShardTensorToMesh(self.mesh, dim=dim)} if self.N > 1 else {}
@@ -433,17 +438,20 @@ class Hy4MoE:
             h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
             ttnn.deallocate(g)
             ttnn.deallocate(u)
-            if self.fused is not None and T == 1:
-                row = self.router_row(x)  # [keys | s] of the 32 rows (streamed router): row 0 is the token's
-                row1 = ttnn.slice(row, (0, 0, 0, 0), (1, 1, 1, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
+            if self.fused is not None and T <= getattr(self, "rows_max", 1):
+                row = self.router_row(x)  # [keys | s] of the 32 rows (streamed router): rows 0..T-1 are the tokens'
+                rowT = ttnn.slice(row, (0, 0, 0, 0), (1, 1, T, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
                 ttnn.deallocate(row)
-                x1 = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, 1, L), memory_config=mem)
+                xT = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, T, L), memory_config=mem)
                 ttnn.deallocate(xl)
-                part1 = self.fused(x1, self.up_gate, self.down, logits=row1)  # [1, 1, 1, L] partial (model-wide: keep)
-                ttnn.deallocate(x1)
-                r1 = ttnn.multiply(part1, self.scale, memory_config=mem)  # the fused router normalizes to 1
-                routed = ttnn.pad(r1, [(0, 0), (0, 0), (0, 31), (0, 0)], value=0.0)
-                ttnn.deallocate(r1)
+                if T == 1:
+                    partT = self.fused(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, 1, L] (model-wide: keep)
+                else:
+                    partT = self.fused.rows(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, T, L] (model-wide)
+                ttnn.deallocate(xT)
+                rT = ttnn.multiply(partT, self.scale, memory_config=mem)  # the fused router normalizes to 1
+                routed = ttnn.pad(rT, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
+                ttnn.deallocate(rT)
             else:
                 if self.route_kernel:
                     scores, ids = self.route_decode(x, T, mem)

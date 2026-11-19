@@ -84,6 +84,7 @@ class Hy4Decoder:
         self.tokens = []  # every token fed so far, by position (Engram history after a rewind)
         self.traces = {}
         self.out = {}
+        self._prog_n = None  # program-cache entries when the live traces were captured (see _guard_programs)
         # HY4_DECODE_L1=1: the step's intermediates in L1 (interleaved) instead of DRAM
         self.mem = ttnn.L1_MEMORY_CONFIG if os.environ.get("HY4_DECODE_L1", "1") == "1" else ttnn.DRAM_MEMORY_CONFIG
 
@@ -250,6 +251,29 @@ class Hy4Decoder:
             if f"eng_{li}" in h:
                 c(h[f"eng_{li}"], t)
 
+    # ------------------------------------------------------------------ trace safety
+    def _programs(self):
+        try:
+            return int(self.mesh.num_program_cache_entries())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _guard_programs(self, where):
+        """A program compiled after a trace capture has its kernel binaries allocated in DRAM, possibly inside that
+        trace's freed intermediates, which every replay overwrites: the next launch runs corrupted kernels and hangs the
+        device (the Inkling streamed-prefill hang; here: a prompt of a new length after the decode / draft captures,
+        2026-11-19). Whenever the program cache grew since the live traces were captured, release them all (they are
+        re-captured on their next use)."""
+        n = self._programs()
+        if n is not None and self._prog_n is not None and n != self._prog_n and self._has_traces():
+            logger.info(f"{n - self._prog_n} programs compiled since the trace captures ({where}): releasing the traces")
+            self.release()
+        if not self._has_traces():
+            self._prog_n = n
+
+    def _has_traces(self):
+        return bool(self.traces)
+
     # ------------------------------------------------------------------ a pass
     def run(self, ids: list[int], logits_rows: str = "last", p0: int | None = None) -> torch.Tensor:
         """Rows `ids` at positions p0 .. p0 + R - 1 (default: right after the last pass) -> logits fp32 [V] (last row)
@@ -269,11 +293,14 @@ class Hy4Decoder:
             lg = self.model.step(self.si, R, mem=self.mem)
             out = self.model.read_logits(lg, R)  # (lg: the persistent logits buffer)
         else:
+            self._guard_programs("before a pass")
             if key not in self.traces:
                 # compile eagerly first (this pass's result is the real one), then capture for the next passes
                 lg = self.model.step(self.si, R, mem=self.mem)
                 out = self.model.read_logits(lg, R)  # (lg: the persistent logits buffer)
+                self._guard_programs("the eager pass of a new trace")
                 self._capture(key, ids, p0)
+                self._prog_n = self._programs()
             else:
                 ttnn.execute_trace(self.mesh, self.traces[key], cq_id=0, blocking=False)
                 if os.environ.get("HY4_TIME_STEPS") == "1":
@@ -297,6 +324,8 @@ class Hy4Decoder:
         logger.info(f"captured decode trace {key}")
 
     def release(self):
+        if self.traces:
+            ttnn.synchronize_device(self.mesh)  # (a non-blocking replay may still run)
         for tid in self.traces.values():
             ttnn.release_trace(self.mesh, tid)
         self.traces, self.out = {}, {}
@@ -396,6 +425,8 @@ class Hy4SpecDecoder(Hy4Decoder):
         for l in self.model.layers:
             if l.li in sel:
                 l.attn.indexer.sel = sel[l.li]
+        if self.trace:
+            self._guard_programs("before a draft")
         if not self.trace:
             d = self.dfly.step(self.ds, n, mem=self.mem)
             out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
@@ -404,10 +435,12 @@ class Hy4SpecDecoder(Hy4Decoder):
             d = self.dfly.step(self.ds, n, mem=self.mem)
             out = ttnn.to_torch(ttnn.get_device_tensors(d)[0]).reshape(-1)[: self.W - 1]
             pass  # d: the drafter's persistent output buffer
+            self._guard_programs("the eager pass of a new draft trace")
             tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
             self.dout[dkey] = self.dfly.step(self.ds, n, mem=self.mem)
             ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
             self.dtraces[dkey] = tid
+            self._prog_n = self._programs()
             logger.info(f"captured draft trace {dkey}")
         else:
             ttnn.execute_trace(self.mesh, self.dtraces[dkey], cq_id=0, blocking=False)
@@ -419,8 +452,12 @@ class Hy4SpecDecoder(Hy4Decoder):
                 logger.info(f"draft {dkey}: trace {out.tolist()} eager {e.tolist()}")
         return [int(v) & 0xFFFFFFFF for v in out.tolist()]
 
+    def _has_traces(self):
+        return bool(self.traces) or bool(self.dtraces)
+
     def release(self):
         super().release()
         for tid in self.dtraces.values():
             ttnn.release_trace(self.mesh, tid)
         self.dtraces, self.dout = {}, {}
+        self.saved = {}

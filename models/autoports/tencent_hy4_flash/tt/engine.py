@@ -29,6 +29,30 @@ class HostSampler:
         else:
             self.gen.seed()
 
+    @property
+    def greedy(self) -> bool:
+        return self.t <= 0.0
+
+    def probs(self, logits: torch.Tensor) -> torch.Tensor:
+        """The sampling distribution (temperature, top-k, top-p) over the vocabulary."""
+        x = logits.float() / self.t
+        if self.k > 0 and self.k < x.numel():
+            kth = torch.topk(x, self.k).values[-1]
+            x = torch.where(x < kth, torch.full_like(x, float("-inf")), x)
+        if self.p < 1.0:
+            sx, si = torch.sort(x, descending=True)
+            cp = sx.softmax(-1).cumsum(-1)
+            drop = cp - sx.softmax(-1) > self.p
+            sx[drop] = float("-inf")
+            x = torch.full_like(x, float("-inf")).scatter(0, si, sx)
+        return x.softmax(-1)
+
+    def draw(self, p: torch.Tensor) -> int:
+        return int(torch.multinomial(p, 1, generator=self.gen))
+
+    def uniform(self) -> float:
+        return float(torch.rand(1, generator=self.gen))
+
     def __call__(self, logits: torch.Tensor) -> int:
         if self.t <= 0.0:
             return int(torch.argmax(logits))
@@ -51,12 +75,15 @@ class Hy4Engine:
     in_trace = False
 
     def __init__(self, model, k: int = 0, trace: bool = True):
-        from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder
+        from models.autoports.tencent_hy4_flash.tt.decode import Hy4Decoder, Hy4SpecDecoder
 
         self.model, self.cfg = model, model.cfg
-        self.dec = Hy4Decoder(model, trace=trace)
         self.k = int(k)
-        assert self.k == 0, "the DFly2 drafter is not wired yet (HY4_SPEC_K=0)"
+        # k > 0: DFly2 speculative decoding (5 drafts per verify pass: the drafter's block width - 1)
+        self.dec = Hy4SpecDecoder(model, trace=trace) if self.k > 0 else Hy4Decoder(model, trace=trace)
+        if self.k > 0:
+            self.k = min(self.k, self.dec.W - 1)
+        self._n = None  # spec: the last pass's last accepted row (None: no pass since the prefill -> a 1-row pass)
         self.trace = bool(trace)
         self.V = int(self.cfg.vocab)
         self.eos = {int(self.cfg.eos)}
@@ -88,14 +115,15 @@ class Hy4Engine:
         t0 = time.time()
         ids = torch.as_tensor(prompt_ids, dtype=torch.long).reshape(-1)
         self.model.reset()
-        lg = None
-        for c0 in range(0, ids.numel(), self.chunk):
-            lg = self.model.forward(ids[c0 : c0 + self.chunk])
+        lg = self.model.prefill(ids)  # the dense-regime chunk first, then the model's chunk (tt/model.py prefill)
         self.last_logits = lg
         self.dec.start(int(ids.numel()))
         self._smp = HostSampler(sampling)
         tok = self._smp(lg)
         self._tok, self._pos = tok, int(ids.numel())
+        if hasattr(self.dec, "set_history"):
+            self.dec.set_history(ids.tolist())
+        self._n = None
         dt = time.time() - t0
         self.stats["t_prefill"] += dt
         self.stats["prefills"] += 1
@@ -105,7 +133,7 @@ class Hy4Engine:
 
     def _decode(self, tok: int) -> torch.Tensor:
         t0 = time.time()
-        lg = self.dec.run([int(tok)])
+        lg = self.dec.run([int(tok)], p0=self._pos)  # (explicit: a verify pass leaves the decoder past rejected rows)
         self.stats["t_step"] += time.time() - t0
         self.stats["steps"] += 1
         return lg
@@ -118,11 +146,54 @@ class Hy4Engine:
             if int(pos) != self._pos:
                 raise RuntimeError(f"step input (tok {tok}, pos {pos}) vs engine (tok {self._tok}, pos {self._pos})")
             self._tok = int(tok)
+        if self.k > 0 and self._n is not None:
+            return self._spec_step()
         lg = self._decode(self._tok)
         nxt = self._smp(lg)
         self._tok, self._pos = nxt, self._pos + 1
         self.stats["emitted"] += 1
+        self._n = 0 if self.k > 0 else None  # (the drafter reads this 1-row pass's row 0)
         return [nxt]
+
+    def _spec_step(self) -> list[int]:
+        """One verify pass: rows [tok, d_1 .. d_k] at positions pos .. pos + k (drafts from DFly2 on the last pass's
+        target state); greedy: the matching prefix + the target's next token; sampled: exact speculative sampling with
+        deterministic drafts (accept d_j with probability p_j(d_j); on a rejection draw from p_j with d_j removed;
+        after k acceptances draw the bonus from p_k)."""
+        t0 = time.time()
+        drafts = self.dec.draft(self._tok, self._pos, self._n)[: self.k]
+        t1 = time.time()
+        rows = [self._tok] + drafts
+        lgs = self.dec.run(rows, logits_rows="all", p0=self._pos)  # [k + 1, V]
+        self.stats["t_draft"] = self.stats.get("t_draft", 0.0) + (t1 - t0)
+        self.stats["t_step"] += time.time() - t0
+        self.stats["steps"] += 1
+        emit = []
+        if self._smp.greedy:
+            picks = lgs.argmax(-1).tolist()
+            acc = 0
+            while acc < len(drafts) and picks[acc] == drafts[acc]:
+                acc += 1
+            emit = drafts[:acc] + [int(picks[acc])]
+        else:
+            acc = 0
+            while acc < len(drafts):
+                p = self._smp.probs(lgs[acc])
+                d = drafts[acc]
+                if self._smp.uniform() < float(p[d]):
+                    acc += 1
+                    continue
+                p[d] = 0.0
+                emit = drafts[:acc] + [self._smp.draw(p / p.sum())]
+                break
+            if not emit:
+                emit = drafts + [self._smp.draw(self._smp.probs(lgs[len(drafts)]))]
+        self._n = acc
+        self._pos += len(emit)
+        self._tok = emit[-1]
+        self.stats["emitted"] += len(emit)
+        self.stats["accepted"] = self.stats.get("accepted", 0) + acc
+        return emit
 
     def step_logits(self, tok: int, pos: int) -> torch.Tensor:
         """Host-sampled step: feed `tok` at `pos` (must continue the sequence), return the next-token logits."""
@@ -132,4 +203,5 @@ class Hy4Engine:
         self._pos += 1
         self._tok = None
         self.adopt_next = True
+        self._n = 0 if self.k > 0 else None  # a 1-row pass: the drafter can continue from its row 0
         return lg

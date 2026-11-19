@@ -107,8 +107,8 @@ class Hy4Attention:
         self.stage = None  # the decode staging window (init_stage)
         self.indexer = None
         self.dec = None
-        if stream_enabled(mesh) and share is None:  # (the DFly2 drafter's layers: not yet)
-            self._decode_linears(sd, wdt, layer_idx, False)
+        if stream_enabled(mesh):  # (the DFly2 drafter's layers too: q_a | kv_a, gate, q_b, o_proj)
+            self._decode_linears(sd, wdt, layer_idx, share is not None)
         if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
             self.cache, self.rows = share.cache, share.rows
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row

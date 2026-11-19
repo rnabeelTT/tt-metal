@@ -86,7 +86,8 @@ class RowsBuffers:
         l1 = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
         self.max_slots = min(num_experts, rows * k) + 1
         self.table = ttnn.from_torch(
-            torch.zeros(rows, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **l1
+            torch.zeros(rows, 64 if k == 16 else 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT,
+            **l1
         )
         self.act = act
         self.out = ttnn.from_torch(
@@ -107,6 +108,11 @@ class RowsBuffers:
         )
 
 
+def rec_bytes(k):
+    """Bytes of one route-table row (router_topk.hpp REC_BYTES): 128 at top-16 (ROUTE_WIDE)."""
+    return 128 if k == 16 else 64
+
+
 class RouteRows:
     """(logits [M, E + 32] BF16 (softmax) / [M, E] FP32 (sigb), table) -> table, one core per row (NCRISC and BRISC
     each take half the logits)."""
@@ -125,7 +131,7 @@ class RouteRows:
         cb_scr, cb_part, cb_lg = 0, 1, 2
         lg_bytes = logits_row_bytes(self.E, self.router)
         cbs = [
-            _cb(self.cores, cb_scr, ttnn.uint16, lg_bytes + 64, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, lg_bytes + (128 if self.k == 16 else 64), 1),
             _cb(self.cores, cb_part, ttnn.uint32, 8 * self.k, 1),
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
         ]
@@ -138,7 +144,7 @@ class RouteRows:
         rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct + ttnn.TensorAccessorArgs(table).get_compile_time_args()
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
-        defines = router_defines(self.router)
+        defines = router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),
@@ -356,7 +362,7 @@ class ExpertGateUpRows:
         cbs = [
             _cb(self.cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),  # + the EP offset (64-byte aligned)
+            _cb(self.cores, cb_scr, ttnn.uint16, rec_bytes(self.k) * self.rows + 128, 1),  # + the EP offset (64-B aligned)
             _cb(self.cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
             # two slots' weight tiles (split-pair: SPLIT_RING slots, the up cores' ring for their partners' g')
             _cb(
@@ -368,7 +374,7 @@ class ExpertGateUpRows:
                 tiny=True,
                 rows=self.trows,
             ),
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, rec_bytes(self.k) * self.rows + 128, 1),
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
         ]
@@ -413,6 +419,7 @@ class ExpertGateUpRows:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
+        defines += [("ROUTE_WIDE", "1")] if self.k == 16 else []
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -478,6 +485,7 @@ class ExpertDownRows:
         """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
         assert not ep_experts or not shared
         self.shared, self.ep_experts = shared, ep_experts
+        self.k = k
         self.banks = len(bank_workers(mesh_device))
         self.kt = inter // TILE
         self.m = hidden // TILE // self.banks
@@ -522,8 +530,8 @@ class ExpertDownRows:
                 rows=self.trows,
             ),
             _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, 2 * self.chunk * self.kt * self.cols),
-            _cb(self.cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),
-            _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
+            _cb(self.cores, cb_scr, ttnn.uint16, rec_bytes(self.k) * self.rows + 128, 1),
+            _cb(self.cores, cb_tab, ttnn.uint16, rec_bytes(self.k) * self.rows + 128, 1),
             _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.groups * self.cols, tiny=True, rows=self.trows),
         ]
         rd_rt, wr_rt = {}, {}
@@ -561,6 +569,7 @@ class ExpertDownRows:
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)
+        defines += [("ROUTE_WIDE", "1")] if self.k == 16 else []
         kernels = _kernels(
             self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
         )

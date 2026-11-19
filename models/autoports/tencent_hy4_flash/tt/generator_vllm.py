@@ -23,6 +23,12 @@ HF_MODEL = "tencent/Hy4-flash"
 BLOCK_SIZE = 64
 SPEC_K = int(os.environ.get("HY4_SPEC_K", "0"))
 
+if SPEC_K > 0:
+    # variable-width block output (1..k+1 tokens per step, -1 padded) through the plugin (the M2.7 / Inkling shim)
+    from models.autoports.minimaxai_minimax_m2_7.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(SPEC_K + 1)
+
 
 def _mtp_sampling(sp, row):
     """(temperature, top_k, top_p, seed) of request `row` from the plugin's sampling params; None when absent."""
@@ -156,12 +162,13 @@ class HYV4FlashForConditionalGeneration:
             for i in live:
                 logits[i, 0, :] = self._engine.step_logits(int(tokens[i]), int(pos[i]))[:V]
             return logits
-        out = torch.full((tokens.numel(), 1), -1, dtype=torch.int32)
+        out = torch.full((tokens.numel(), max(1, SPEC_K + 1) if SPEC_K > 0 else 1), -1, dtype=torch.int32)
         authoritative = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
         for i in live:
             ids = self._engine.step(int(tokens[i]), int(pos[i]), host_authoritative=authoritative,
                                     sampling=_mtp_sampling(sp, i))
-            out[i, : len(ids)] = torch.tensor(ids[:1], dtype=torch.int32)
+            ids = ids if SPEC_K > 0 else ids[:1]
+            out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
         if self._decode_steps % 1024 == 0:
             logger.info(f"Hy4 engine stats: {self._engine.stats}")
         return out

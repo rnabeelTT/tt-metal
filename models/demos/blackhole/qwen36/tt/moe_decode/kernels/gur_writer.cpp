@@ -69,7 +69,7 @@ void kernel_main() {
 
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
     const auto s_act = TensorAccessor(act_args, act_addr, act_page);
-    const auto s_table = TensorAccessor(table_args, table_addr, 64);
+    const auto s_table = TensorAccessor(table_args, table_addr, moe_topk::REC_BYTES);
     const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
     auto zero_l1 = [&](uint32_t addr, uint32_t bytes) {
         for (uint32_t off = 0; off < bytes; off += MEM_ZEROS_SIZE) {
@@ -80,7 +80,7 @@ void kernel_main() {
     cb_reserve_back(cb_tab, 1);
     const uint32_t tab = get_write_ptr(cb_tab);
     for (uint32_t r = 0; r < rows; ++r) {
-        noc_async_read(s_table.get_noc_addr(r), tab + 64 * r, 64);
+        noc_async_read(s_table.get_noc_addr(r), tab + moe_topk::REC_BYTES * r, moe_topk::REC_BYTES);
     }
     cb_reserve_back(cb_x, groups * kx);
     const uint32_t x_l1 = get_write_ptr(cb_x);
@@ -189,15 +189,15 @@ void kernel_main() {
         }
     };
     for (uint32_t r = 0; r < rows; ++r) {
-        put(0, r, table[32 * r + 16]);  // shared expert
+        put(0, r, table[moe_topk::REC_U16 * r + 16]);  // shared expert
         for (uint32_t j = 0; j < topk; ++j) {
 #ifdef EP_EXPERTS
-            if (table[32 * r + j] - ep_off >= EP_EXPERTS) {
+            if (table[moe_topk::REC_U16 * r + j] - ep_off >= EP_EXPERTS) {
                 continue;  // another die's expert
             }
-            const uint32_t e = table[32 * r + j] - ep_off;
+            const uint32_t e = table[moe_topk::REC_U16 * r + j] - ep_off;
 #else
-            const uint32_t e = table[32 * r + j];
+            const uint32_t e = table[moe_topk::REC_U16 * r + j];
 #endif
             uint32_t lo = 0, hi = U;  // uni is ascending
             while (lo < hi) {
@@ -208,7 +208,7 @@ void kernel_main() {
                     hi = mid;
                 }
             }
-            put(1 + lo, r, table[32 * r + 17 + j]);
+            put(1 + lo, r, table[moe_topk::REC_U16 * r + 17 + j]);
         }
     }
 

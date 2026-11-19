@@ -52,12 +52,12 @@ void kernel_main() {
 
     const auto s_act = TensorAccessor(act_args, act_addr, act_page);
     const auto s_out = TensorAccessor(out_args, out_addr, 2048);
-    const auto s_table = TensorAccessor(table_args, table_addr, 64);
+    const auto s_table = TensorAccessor(table_args, table_addr, moe_topk::REC_BYTES);
 
     cb_reserve_back(cb_tab, 1);
     const uint32_t tab = get_write_ptr(cb_tab);
     for (uint32_t r = 0; r < rows; ++r) {
-        noc_async_read(s_table.get_noc_addr(r), tab + 64 * r, 64);
+        noc_async_read(s_table.get_noc_addr(r), tab + moe_topk::REC_BYTES * r, moe_topk::REC_BYTES);
     }
     noc_async_read_barrier();
     invalidate_l1_cache();

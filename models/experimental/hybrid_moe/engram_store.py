@@ -188,6 +188,22 @@ def convert(layers=LAYERS, chunk=1 << 21):
         print(f"layer {li}: {R} rows in {time.time() - t0:.0f}s", flush=True)
 
 
+def _psi_wait(limit=None, max_wait=30.0):
+    """Throttle a bulk host-memory load on the kernel's memory pressure (PSI some avg10): systemd-oomd kills the user
+    scope above 50 % sustained for 30 s; wait while avg10 > HY4_ENGRAM_PSI_MAX (15 %), at most max_wait s per chunk."""
+    limit = float(os.environ.get("HY4_ENGRAM_PSI_MAX", "15")) if limit is None else limit
+    t0 = time.time()
+    while time.time() - t0 < max_wait:
+        try:
+            line = open("/proc/pressure/memory").readline()
+            avg10 = float(line.split()[1].split("=")[1])
+        except Exception:  # noqa: BLE001
+            return
+        if avg10 <= limit:
+            return
+        time.sleep(0.5)
+
+
 class EngramStore:
     """The four FP8 tables (memory-mapped; `in_ram=True` reads them into RAM) and their hashers."""
 
@@ -198,13 +214,23 @@ class EngramStore:
         self.pad_id = cfg["engram_pad_id"]
         self.hashers = {li: EngramHasher(li, cfg, wmap) for li in self.layers}
         self.q, self.s = {}, {}
-        if in_ram is None:  # HY4_ENGRAM_RAM: 1 (default) = warm the page cache in the background, 0 = cold memory map
-            in_ram = "warm" if os.environ.get("HY4_ENGRAM_RAM", "1") == "1" else False
+        if in_ram is None:
+            # HY4_ENGRAM_RAM: anon (default) = one copy in process memory, loaded in the background without passing
+            # through the page cache; warm = page cache only (this host's page cache was dropped repeatedly while the
+            # device model loaded: lookups went back to NVMe); 0 = cold memory map
+            in_ram = {"1": "anon", "anon": "anon", "warm": "warm"}.get(os.environ.get("HY4_ENGRAM_RAM", "anon"), False)
         for li in self.layers:
-            mm = "r" if in_ram in (False, "warm") else None
+            mm = "r" if in_ram in (False, "warm", "anon") else None
             self.q[li] = np.load(os.path.join(OUT, f"L{li}_fp8.npy"), mmap_mode=mm)
             self.s[li] = np.load(os.path.join(OUT, f"L{li}_scale.npy"), mmap_mode=mm)
         self.loaders = []
+        self.mode = in_ram
+        if in_ram == "anon":
+            import threading
+
+            th = threading.Thread(target=self._load_anon, daemon=True, name="engram-anon")
+            th.start()
+            self.loaders.append(th)
         if in_ram == "warm":
             # A cold memory-mapped lookup is 64 random NVMe reads per token (~7 ms per Engram layer); from the page
             # cache it is ~0.05 ms. The tables (~65 GB) are read ONCE, sequentially, by one background thread into the
@@ -235,6 +261,54 @@ class EngramStore:
                 while fh.readinto(buf):
                     pass
         print(f"engram tables in the page cache ({need / 2**30:.0f} GiB, {time.time() - t0:.0f} s)", flush=True)
+
+    def _load_anon(self, chunk=1 << 28):
+        """One thread, sequential: each table into an anonymous array, chunk by chunk, dropping the chunk's page-cache
+        pages after the copy (POSIX_FADV_DONTNEED), so memory holds one copy (~60 GB), never page cache + copy (that
+        doubled footprint made systemd-oomd kill the user scope, 2026-11-19). Lookups use the memory map until a table's
+        copy is complete. Skipped (memory map only) without MemAvailable >= tables + HY4_ENGRAM_WARM_MARGIN_GB (48)."""
+        files = [(li, n) for li in self.layers for n in ("scale", "fp8")]
+        need = sum(os.path.getsize(os.path.join(OUT, f"L{li}_{n}.npy")) for li, n in files)
+        margin = int(float(os.environ.get("HY4_ENGRAM_WARM_MARGIN_GB", "48")) * 2**30)
+        try:
+            avail = int(next(l for l in open("/proc/meminfo") if l.startswith("MemAvailable")).split()[1]) * 1024
+        except Exception:  # noqa: BLE001
+            avail = 0
+        if avail < need + margin:
+            print(f"engram: RAM copy skipped (MemAvailable {avail / 2**30:.0f} GiB < tables {need / 2**30:.0f} + margin "
+                  f"{margin / 2**30:.0f} GiB): lookups read the memory map", flush=True)
+            return
+        t0 = time.time()
+        for li, n in files:
+            d = self.s if n == "scale" else self.q
+            src = d[li]
+            dst = np.empty(src.shape, src.dtype)
+            buf = memoryview(dst.reshape(-1).view(np.uint8))
+            path = os.path.join(OUT, f"L{li}_{n}.npy")
+            with open(path, "rb", buffering=0) as fh:
+                fd = fh.fileno()
+                off = src.offset
+                fh.seek(off)
+                done = 0
+                while done < len(buf):
+                    _psi_wait()
+                    k = fh.readinto(buf[done : done + chunk])
+                    if not k:
+                        raise IOError(f"short read {path}")
+                    os.posix_fadvise(fd, off + done, k, os.POSIX_FADV_DONTNEED)
+                    done += k
+            d[li] = dst
+        print(f"engram tables in RAM ({need / 2**30:.0f} GiB, {time.time() - t0:.0f} s)", flush=True)
+
+    def rewarm(self):
+        if self.mode != "warm":
+            return
+        """Warm the page cache again (after a large load, e.g. the device model's tensor cache, evicted the tables)."""
+        import threading
+
+        th = threading.Thread(target=self._warm, daemon=True, name="engram-rewarm")
+        th.start()
+        self.loaders.append(th)
 
     def wait_ram(self):
         for th in self.loaders:

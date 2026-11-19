@@ -23,6 +23,7 @@ constexpr uint32_t R_NLIVE = 33;
 constexpr uint32_t REC_BYTES = 64;
 constexpr uint32_t R_NLIVE = 15;
 #endif
+constexpr uint32_t REC_U16 = REC_BYTES / 2;  // the route table's row stride (UINT16 slots)
 // BF16 bits -> Q16.16 fixed point (|x| < 2^14).
 inline int32_t bf16_to_q16(uint16_t b) {
     const int32_t e = (b >> 7) & 0xFF;
@@ -446,7 +447,7 @@ inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni)
     uint32_t mask[words] = {};
     for (uint32_t r = 0; r < rows; ++r) {
         for (uint32_t j = 0; j < topk; ++j) {
-            const uint32_t e = table[32 * r + j];
+            const uint32_t e = table[REC_U16 * r + j];
             mask[e >> 5] |= 1u << (e & 31);
         }
     }
