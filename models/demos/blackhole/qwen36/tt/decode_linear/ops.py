@@ -85,10 +85,10 @@ class DecodeLinear:
                               cache_file_name=cache_file_name)
 
     # ---- op ------------------------------------------------------------------------------------------------------------
-    def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16):
+    def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16, out_rows=None):
         """flat = (noc_xy, sem_id): x is a flat BF16 vector on that core, ready once program semaphore sem_id is set.
         out_dtype: bfloat16 (default) or float32 (the FP32 DST packed unrounded, e.g. logits)."""
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), out_dtype, ttnn.TILE_LAYOUT,
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, out_rows or rows, self.n]), out_dtype, ttnn.TILE_LAYOUT,
                                              self.mesh_device, out_memory_config)
         out_page = 4096 if out_dtype == ttnn.float32 else 2048
         cb_x, cb_w, cb_out = 0, 1, 16
@@ -114,6 +114,8 @@ class DecodeLinear:
                 rt[c.x][c.y] = args[(c.x, c.y)]
             return rt
         defines = [("OUT_PAGE_BYTES", str(out_page))] if out_page != 2048 else []
+        if out_rows is not None and out_rows > rows:  # rows read < the output's rows: zero the padded rows
+            defines.append(("ZERO_PAD", "1"))
         if flat is not None:
             (fx, fy), sem = flat
             cb_xf = 2
@@ -143,11 +145,11 @@ class DecodeLinear:
         ]
         return kernels, cbs, [x, w, out], out
 
-    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16):
+    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16, out_rows=None):
         """x: [.., rows, K] BF16 TILE (rows <= 16, or 32: whole tiles, every row defined); w: weight();
         -> [1, 1, rows, N] BF16 TILE."""
         assert 1 <= rows <= 16 or rows == 32
-        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype)
+        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype, out_rows=out_rows)
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return out
 

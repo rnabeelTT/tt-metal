@@ -188,7 +188,29 @@ class StreamLinear:
         self.w = op.weight([p.reshape(K, N).to(torch.bfloat16) for p in parts], cache_file_name=cname)
 
     def __call__(self, x, mem=None):
+        R = DECODE_ROWS[0]
+        if R <= 16 and os.environ.get("HY4_STREAM_REAL_ROWS", "1") == "1":
+            # read only the pass's real rows of the activation (64 B per tile per row instead of the whole 2 KB tile into
+            # every reader core: the compute waited ~28 us for it); the output keeps 32 rows, padded rows zeroed
+            return self.op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=32)
         return self.op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype)
+
+
+DECODE_ROWS = [32]  # the real rows (0 .. R-1) of the decode pass in flight (set by Hy4Model.step / the drafter)
+
+
+class real_rows:
+    """with real_rows(R): the decode linears read rows 0 .. R-1 only."""
+
+    def __init__(self, R):
+        self.R = int(R)
+
+    def __enter__(self):
+        self.prev = DECODE_ROWS[0]
+        DECODE_ROWS[0] = self.R
+
+    def __exit__(self, *a):
+        DECODE_ROWS[0] = self.prev
 
 
 def col_split(mesh, cols, out_mem=None):

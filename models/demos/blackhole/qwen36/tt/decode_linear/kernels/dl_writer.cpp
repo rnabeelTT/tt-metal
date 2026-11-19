@@ -72,8 +72,32 @@ void kernel_main() {
 #define OUT_PAGE_BYTES 2048
 #endif
     const auto s_o = TensorAccessor(o_args, out_addr, OUT_PAGE_BYTES);
+#ifdef ZERO_PAD
+    // only rows 0 .. rows-1 of the activation were read (the rest of cb_x is stale L1): zero output rows >= rows before
+    // the write, so padded rows stay defined (consumers that mix rows: one-hot staging matmuls, X X^T)
+    static_assert(rows <= 16, "ZERO_PAD: faces 0 / 1 rows");
+    constexpr uint32_t FACE = OUT_PAGE_BYTES / 4, ROWB = FACE / 16;
+    const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
+    auto zero = [&](uint32_t dst, uint32_t n) {
+        while (n) {
+            const uint32_t k = n < MEM_ZEROS_SIZE ? n : MEM_ZEROS_SIZE;
+            noc_async_read(zeros, dst, k);
+            dst += k;
+            n -= k;
+        }
+    };
+#endif
     for (uint32_t i = 0; i < ncols; ++i) {
         cb_wait_front(cb_out, 1);
+#ifdef ZERO_PAD
+        {
+            const uint32_t t = get_read_ptr(cb_out);
+            zero(t + rows * ROWB, (16 - rows) * ROWB);         // face 0, rows rows..15
+            zero(t + FACE + rows * ROWB, (16 - rows) * ROWB);  // face 1
+            zero(t + 2 * FACE, 2 * FACE);                      // faces 2, 3 (rows 16..31)
+            noc_async_read_barrier();
+        }
+#endif
         if (out_col0 + i < n_tiles) {
             noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i), OUT_PAGE_BYTES);
             noc_async_writes_flushed();

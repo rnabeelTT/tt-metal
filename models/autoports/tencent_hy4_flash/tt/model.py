@@ -240,6 +240,12 @@ class Hy4Model:
 
     def step(self, si, R, mem=None):
         """Trace-safe rows pass over si (tt/decode.StepInputs) -> logits [1, 1, 32, Vp / N] fp32 per die."""
+        from models.autoports.tencent_hy4_flash.tt.common import real_rows
+
+        with real_rows(R):
+            return self._step(si, R, mem)
+
+    def _step(self, si, R, mem=None):
         cfg = self.cfg
         si.R = R  # the real rows (the decode boundary all-reduces only those)
         x = ttnn.embedding(si.tok, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)

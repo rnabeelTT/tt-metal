@@ -245,7 +245,12 @@ class Hy4Attention:
             q = self.dec["qb"](q_resid, mem)
         else:
             q = ttnn.matmul(q_resid, self.wqb, compute_kernel_config=self.ckc, memory_config=mem)  # [1,1,Tp,Hd*256]
-        q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.Hd, 256)), (0, 2, 1, 3), memory_config=mem)  # [1,Hd,Tp,256]
+        if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
+            # one tile row: [1, 1, 32, Hd * 256] and [1, Hd, 32, 256] share their tile pages (head h, tile c -> page
+            # 8 h + c): a zero-copy view instead of reshape + permute (~21 us)
+            q = ttnn.experimental.view(q, (1, self.Hd, Tp, 256))
+        else:
+            q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.Hd, 256)), (0, 2, 1, 3), memory_config=mem)  # [1,Hd,Tp,256]
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
         ttnn.deallocate(q)
@@ -289,7 +294,10 @@ class Hy4Attention:
         ttnn.deallocate(o2)
         ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc, memory_config=mem)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
-        ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
+        if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
+            ov = ttnn.experimental.view(ov, (1, 1, Tp, self.Hd * self.vd))  # (the same page identity as in _q)
+        else:
+            ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
         if dec:
             g = self.dec["g"](x, mem)
         else:

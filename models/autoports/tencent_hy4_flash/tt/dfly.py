@@ -25,7 +25,7 @@ from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.attention import Hy4Attention
 from models.autoports.tencent_hy4_flash.tt.common import (AllGather, AllReduce, RMSNorm, StreamLinear, ckc, num_devices,
-                                                           stream_enabled, upload)
+                                                           real_rows, stream_enabled, upload)
 
 W = 6  # the block: bonus + 5 drafts
 
@@ -183,6 +183,10 @@ class Hy4DFly:
         return ttnn.reshape(idx, (1, 1))
 
     def step(self, ds, n: int, mem=None):
+        with real_rows(W):  # the block's rows (the per-token correction steps: 1 row, below)
+            return self._step(ds, n, mem)
+
+    def _step(self, ds, n: int, mem=None):
         """One draft pass (trace-safe). ds: the draft inputs (tt/decode.DraftInputs); n: the target pass's last
         accepted row (h_target = model.last_hn row n; the index share = each target layer's sel row n). Returns the
         drafts [1, 5] uint32 RM."""
@@ -246,6 +250,8 @@ class Hy4DFly:
         ttnn.deallocate(x)
         prev = ds.bonus  # [1, 1] uint32 RM
         drafts = []
+        rr = real_rows(1)
+        rr.__enter__()
         for k in range(1, W):
             hk = ttnn.slice(h, (0, 0, k, 0), (1, 1, k + 1, H), memory_config=mem)  # [1, 1, 1, H]
             e = self._embed(prev, 1)
@@ -282,6 +288,7 @@ class Hy4DFly:
             ttnn.deallocate(c)
             drafts.append(tok)
             prev = tok
+        rr.__exit__()
         ttnn.deallocate(h)
         out = ttnn.concat(drafts, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1, 5]
         for t_ in drafts:
