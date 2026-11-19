@@ -34,6 +34,7 @@ class BatchInputs:
     L: int = 0
     R: int = 0
     width: int = 0
+    sel: bool = True  # some row selects (context >= the dense regime): score + top-k; else the dense lists only
     tok: object = None
     cos_sin: dict = field(default_factory=dict)
     engram: dict = field(default_factory=dict)
@@ -278,6 +279,7 @@ class Hy4BatchDecoder(Hy4Decoder):
                 eng.hist, eng.pos = saved
         for li in self.model.engram_li():
             h[f"eng_{li}"] = _tile(h[f"eng_{li}"], ttnn.bfloat16)
+        self._sel = bool(nmask.any())
         return h, R, width, order
 
     def _copy_b(self, h):
@@ -305,8 +307,9 @@ class Hy4BatchDecoder(Hy4Decoder):
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
         si = self.bsi
-        si.R, si.width = R, width
-        key = ("b", R, width)
+        si.R, si.sel = R, self._sel
+        si.width = width if si.sel else 0
+        key = ("b", R, si.width)
         if not self.trace:
             lg = self.model.step(si, R, mem=self.mem)
             out = self.model.read_logits(lg, R)

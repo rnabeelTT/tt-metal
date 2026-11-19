@@ -777,6 +777,11 @@ class Hy4Indexer:
         ttnn.copy(new, T["g"])
         ttnn.deallocate(new)
         slab_write(T["g"], T["gk"], si.lane_offs["grp"], 2 * L)
+        if not getattr(si, "sel", True):  # every row in the dense regime: the host-built dense lists, no scoring
+            u = ttnn.typecast(si.dense_f, ttnn.uint32, memory_config=mem)
+            idx = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(u)
+            return idx
         cos, sin = si.cos_sin["sparse"]
         q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
         W = si.width

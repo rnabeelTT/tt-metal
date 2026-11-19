@@ -207,6 +207,10 @@ class Hy4BatchEngine:
         for r in solo:
             self.step(r)
         dec.min_width = 0
+        # dense-only passes (no row selects: no scoring) at every batch size: slot 0 short again
+        self.prefill(0, rnd(int(prompt_len or 64)))
+        for R in range(2, self.S + 1):
+            self.step({s: (None, None, False) for s in range(R)})
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
         steps = int(os.environ.get("HY4_WARM_STEPS", "3"))
