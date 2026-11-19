@@ -105,20 +105,20 @@ void kernel_main() {
     uint16_t* weights = reinterpret_cast<uint16_t*>(w_l1);
     uint16_t* group_ids = reinterpret_cast<uint16_t*>(gid_l1);
     uint32_t* undispatch = reinterpret_cast<uint32_t*>(und_l1);
-    uint32_t* counts = reinterpret_cast<uint32_t*>(scratch_l1);
-    uint32_t* offsets = counts + E;
-    uint32_t* ranks = offsets + E;
+    // per-expert counts, then (in place) each expert's next free row: one array in the RISC's local data memory (a
+    // static: 4 E bytes) instead of three L1 arrays (every count / rank / offset update was an L1 load + store)
+    static uint32_t cur[E];
+    (void)scratch_l1;
 
     for (uint32_t e = 0; e < E; ++e) {
-        counts[e] = 0;
-        ranks[e] = 0;
+        cur[e] = 0;
     }
     for (uint32_t t = 0; t < T; ++t) {
         const uint32_t b = row_base(t);
         for (uint32_t j = 0; j < K; ++j) {
             const uint32_t e = id_at_o(b + slot_off(j));
             if (e < E) {
-                counts[e] += 1;
+                cur[e] += 1;
             }
         }
     }
@@ -128,12 +128,12 @@ void kernel_main() {
     }
     uint32_t off = 0;
     for (uint32_t e = 0; e < E; ++e) {
-        offsets[e] = off;
-        const uint32_t groups_e = (counts[e] + GS - 1) / GS;
+        const uint32_t groups_e = (cur[e] + GS - 1) / GS;
         const uint32_t g0 = off / GS;
         for (uint32_t g = 0; g < groups_e; ++g) {
             group_ids[g0 + g] = static_cast<uint16_t>(e);
         }
+        cur[e] = off;
         off += groups_e * GS;
     }
     // padding rows: token 0, weight 0
@@ -158,8 +158,7 @@ void kernel_main() {
             const uint32_t e = id_at_o(o);
             uint32_t d;
             if (e < E) {
-                d = offsets[e] + ranks[e];
-                ranks[e] += 1;
+                d = cur[e]++;
                 src_tok[d] = t;
                 weights[d] = scores[o];
             } else {

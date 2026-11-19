@@ -394,6 +394,30 @@ class Hy4Indexer:
         ttnn.deallocate(rm)
         return ids
 
+    _OFFS = {}
+
+    def _expand_rows(self, f511, rows, mem):
+        """Group ids f511 [1, 1, rows, 511] fp32 -> token rows [1, 1, rows, 2044] fp32: g r + j, j < r, group-major.
+        HY4_IDX_EXPAND_RI (default 1): repeat_interleave + one offsets row (2K rows: 5.9 -> 0.8 ms; the broadcast form
+        padded the [rows, 511, 4] intermediate to 32-wide tiles)."""
+        n_sel = int(f511.shape[-1])
+        if os.environ.get("HY4_IDX_EXPAND_RI", "1") != "1":
+            e = ttnn.add(ttnn.reshape(ttnn.multiply(f511, float(self.r), memory_config=mem), (1, rows, n_sel, 1)),
+                         self.offs4, memory_config=mem)
+            return ttnn.reshape(e, (1, 1, rows, n_sel * self.r))
+        key = (id(self.mesh), n_sel, self.r)
+        offs = Hy4Indexer._OFFS.get(key)
+        if offs is None:  # (created at the first, eager, use: before any capture)
+            offs = Hy4Indexer._OFFS[key] = upload(
+                self.mesh, torch.arange(self.r, dtype=torch.float32).repeat(n_sel).reshape(1, 1, 1, n_sel * self.r),
+                ttnn.float32)
+        s4 = ttnn.multiply(f511, float(self.r), memory_config=mem)
+        rep = ttnn.repeat_interleave(s4, self.r, dim=3)
+        ttnn.deallocate(s4)
+        e = ttnn.add(rep, offs, memory_config=mem)
+        ttnn.deallocate(rep)
+        return e
+
     def _expand(self, ids, rows, mem):
         """top-512 group ids [1, 1, rows, 512] uint32 RM -> token rows of the first 511 groups [1, 1, rows, 2044] uint32
         RM (device; the same math as step())."""
@@ -403,10 +427,8 @@ class Hy4Indexer:
         n_sel = self.cfg.idx_group_topk - 1
         f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, rows, n_sel), memory_config=mem)
         ttnn.deallocate(f)
-        e = ttnn.add(ttnn.reshape(ttnn.multiply(f511, float(self.r), memory_config=mem), (1, rows, n_sel, 1)),
-                     self.offs4, memory_config=mem)
+        e = self._expand_rows(f511, rows, mem)
         ttnn.deallocate(f511)
-        e = ttnn.reshape(e, (1, 1, rows, n_sel * self.r))
         u = ttnn.typecast(e, ttnn.uint32, memory_config=mem)
         ttnn.deallocate(e)
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
@@ -671,10 +693,8 @@ class Hy4Indexer:
         n_sel = self.cfg.idx_group_topk - 1
         f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
         ttnn.deallocate(f)
-        e = ttnn.add(ttnn.reshape(ttnn.multiply(f511, float(self.r), memory_config=mem), (1, 32, n_sel, 1)),
-                     self.offs4, memory_config=mem)  # [1, 32, 511, 4]
+        e = self._expand_rows(f511, 32, mem)
         ttnn.deallocate(f511)
-        e = ttnn.reshape(e, (1, 1, 32, n_sel * self.r))
         u = ttnn.typecast(e, ttnn.uint32, memory_config=mem)
         ttnn.deallocate(e)
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
