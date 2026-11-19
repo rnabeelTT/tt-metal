@@ -63,6 +63,14 @@ class Hy4Indexer:
             for g in range(64 // self.r):
                 E[j, g, self.r * g + j] = 1.0
         self.E = [upload(mesh, E[j].reshape(1, 1, 32, 64), ttnn.float32) for j in range(self.r)]
+        # the fused decode pool: all r slots in one [r*32, 64] selection, [Wv^T | Wg^T] in one matrix, the gate biases
+        # (ape) as a full [r*32, 2d] addend (zero over the value columns)
+        self.Ecat = upload(mesh, E.reshape(1, 1, self.r * 32, 64), ttnn.float32)
+        self.dWvgT = upload(mesh, torch.cat([self.Wv.T, self.Wg.T], 1).contiguous().reshape(1, 1, self.d, 2 * self.d),
+                            ttnn.float32)
+        bias = torch.zeros(self.r, 32, 2 * self.d)
+        bias[:, :, self.d:] = self.ape[:, None, :]
+        self.dvg_bias = upload(mesh, bias.reshape(1, self.r, 32, 2 * self.d), ttnn.float32)
         # group cache (TILE) + host mirror
         # + 64: the decode group window's two 32-group slabs past the context; + 32: the spare tile scoring reads
         self.gcap = -(-(max_ctx // self.r + 96) // 2048) * 2048  # a multiple of 2048: any power-of-two slab divides it
@@ -463,6 +471,8 @@ class Hy4Indexer:
     def _pool_device(self, mem, gcos, gsin):
         """The 16 groups of the token staging window -> roped bf16 group keys [1, 1, 32, 128] (rows 16..31 junk)."""
         K = ttnn.typecast(self.tk_stage, ttnn.float32, memory_config=mem)
+        if os.environ.get("HY4_IDX_POOL_FUSED", "1") == "1":
+            return self._pool_fused(K, mem, gcos, gsin)
         vals, gates = [], []
         for j in range(self.r):
             S = ttnn.matmul(self.E[j], K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
@@ -491,6 +501,43 @@ class Hy4Indexer:
         ttnn.deallocate(n)
         kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, 32, self.d - self.rope_d), memory_config=mem)
         kr = ttnn.slice(keys, (0, 0, 0, self.d - self.rope_d), (1, 1, 32, self.d), memory_config=mem)
+        ttnn.deallocate(keys)
+        kr2 = self.rope(kr, gcos, gsin, mem)
+        ttnn.deallocate(kr)
+        out = ttnn.concat([kp, kr2], dim=-1, memory_config=mem)
+        ttnn.deallocate(kp)
+        ttnn.deallocate(kr2)
+        return out
+
+    def _pool_fused(self, K, mem, gcos, gsin):
+        """_pool_device in ~14 ops instead of ~35: the r slots stacked on dim 1 ([1, r, 32, .]), one value + gate
+        matmul, the softmax over the r slots as dim-1 reductions."""
+        d, r = self.d, self.r
+        S = ttnn.matmul(self.Ecat, K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(K)
+        vg = ttnn.matmul(S, self.dWvgT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
+        ttnn.deallocate(S)
+        vg = ttnn.add(ttnn.reshape(vg, (1, r, 32, 2 * d)), self.dvg_bias, memory_config=mem)
+        v = ttnn.slice(vg, (0, 0, 0, 0), (1, r, 32, d), memory_config=mem)
+        g = ttnn.slice(vg, (0, 0, 0, d), (1, r, 32, 2 * d), memory_config=mem)
+        ttnn.deallocate(vg)
+        m = ttnn.max(g, dim=1, keepdim=True, memory_config=mem)
+        e = ttnn.exp(ttnn.subtract(g, m, memory_config=mem), memory_config=mem)
+        ttnn.deallocate(g)
+        ttnn.deallocate(m)
+        num = ttnn.sum(ttnn.multiply(e, v, memory_config=mem), dim=1, keepdim=True, memory_config=mem)
+        den = ttnn.sum(e, dim=1, keepdim=True, memory_config=mem)
+        ttnn.deallocate(e)
+        ttnn.deallocate(v)
+        pooled = ttnn.div(num, den, memory_config=mem)
+        ttnn.deallocate(num)
+        ttnn.deallocate(den)
+        n = ttnn.rms_norm(pooled, epsilon=self.eps, compute_kernel_config=self.ckc, memory_config=mem)
+        keys = ttnn.typecast(ttnn.multiply(n, self.dkn, memory_config=mem), ttnn.bfloat16, memory_config=mem)
+        ttnn.deallocate(pooled)
+        ttnn.deallocate(n)
+        kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, 32, d - self.rope_d), memory_config=mem)
+        kr = ttnn.slice(keys, (0, 0, 0, d - self.rope_d), (1, 1, 32, d), memory_config=mem)
         ttnn.deallocate(keys)
         kr2 = self.rope(kr, gcos, gsin, mem)
         ttnn.deallocate(kr)

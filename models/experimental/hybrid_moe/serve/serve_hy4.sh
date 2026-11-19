@@ -22,7 +22,7 @@ docker run -d --name hy4-serve \
   -e TT_METAL_LOGGER_LEVEL=Error -e VLLM_ENGINE_READY_TIMEOUT_S=7200 \
   -e EXTRA_MODELS_DIR=/opt/tt-metal/models/autoports/tencent_hy4_flash/vllm_bundle \
   -e HY4_TENSOR_CACHE=/weight-cache/hy4_tt -e HY4_ENGRAM_DIR=/weight-cache/hy4_engram \
-  -e HY4_TRACE_REGION=419430400 -e HY4_SPEC_K=${SPEC:-5} ${EXTRA_ENV:-} \
+  -e HY4_TRACE_REGION=419430400 -e HY4_SPEC_K=${SPEC:-4} ${EXTRA_ENV:-} \
   -e PYTHONPATH=/opt/tt-metal/models/autoports/tencent_hy4_flash/serving:/opt/tt-metal \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve tencent/Hy4-flash --max-model-len $CTX \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name hy4-flash \

@@ -106,6 +106,9 @@ class Hy4Attention:
             qs[d, :Hd, 1] = s_lo[d * Hd : (d + 1) * Hd]
         self.q_sink = upload(mesh, qs[:, :Hd].reshape(N, Hd, 1, SINK_COLS), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                              mapper=("shard", 0))
+        # decode passes: the sink columns repeated over the 32 rows once (constant; a lazy copy made inside a trace
+        # capture would hold nothing until that trace's first replay)
+        self._qs32 = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, TILE, 1)), memory_config=ttnn.DRAM_MEMORY_CONFIG)
         self.stage = None  # the decode staging window (init_stage)
         self.indexer = None
         self.dec = None
@@ -278,9 +281,13 @@ class Hy4Attention:
     def _attend(self, x, q_lat, q_rope, idx, mem, dec=False, R=None):
         """sparse_sdpa over idx [1,1,Tp,K] uint32, then V-up, output gate, o_proj, all-reduce, post norm."""
         Tp = int(x.shape[-2])
-        qs = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)  # [1,Hd,Tp,32]
-        qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)  # [1,Hd,Tp,608]
-        ttnn.deallocate(qs)
+        if dec and os.environ.get("HY4_QSINK_CACHE", "1") == "1":
+            qs = self._qs32
+            qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)  # [1,Hd,Tp,608]
+        else:
+            qs = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, Tp, 1)), memory_config=mem)  # [1,Hd,Tp,32]
+            qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)  # [1,Hd,Tp,608]
+            ttnn.deallocate(qs)
         if self.Hp != self.Hd:
             q2 = ttnn.concat([qcat, self._zeros((1, self.Hp - self.Hd, Tp, self.width))], dim=1, memory_config=mem)
             ttnn.deallocate(qcat)

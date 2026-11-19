@@ -50,7 +50,7 @@ class Hy4Layer:
         self.post_norm = RMSNorm(mesh, sd["post_attention_layernorm.weight"], cfg.rms_eps)
         self.attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), li, max_ctx, chunk)
         self.mlp = Hy4MoE(mesh, cfg, sd.sub("mlp."), li, cache_dir) if cfg.is_moe(li) else Hy4DenseMLP(mesh, cfg, sd.sub("mlp."))
-        self.engram = Hy4EngramDevice(mesh, cfg, sd.sub("engram_layer.")) if li in cfg.engram_layers else None
+        self.engram = Hy4EngramDevice(mesh, cfg, sd.sub("engram_layer."), li) if li in cfg.engram_layers else None
 
     def forward(self, X, p0, T, cos_sin, engram_emb=None, mem=None, engram_keep=None):
         """X: the residual streams [1, hc, Tp, H] bf16 (replicated). Returns the updated streams."""

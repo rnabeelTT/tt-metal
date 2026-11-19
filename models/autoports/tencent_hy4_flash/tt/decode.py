@@ -352,7 +352,7 @@ class Hy4SpecDecoder(Hy4Decoder):
         self.W = W
         self.dfly = Hy4DFly(model)
         # drafts per pass (<= W - 1): fewer drafts = fewer sequential correction steps and narrower verify rows
-        self.k = self.dfly.k = min(W - 1, int(k if k is not None else os.environ.get("HY4_SPEC_K", W - 1)))
+        self.k = self.dfly.k = min(W - 1, int(k if k is not None else os.environ.get("HY4_SPEC_K", min(4, W - 1))))
         self.scratch = self.dfly.layers[0]["attn"].scratch_row
         self.ds = self._alloc_draft()
         self.dfly.out_buf = self._dev(torch.zeros(1, self.k, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)

@@ -42,7 +42,8 @@ class HCFusedOp:
     _OPS = {}
 
     @classmethod
-    def get(cls, mesh, hidden, nc=16):
+    def get(cls, mesh, hidden, nc=None):
+        nc = nc or int(_os.environ.get("HY4_HCF_NC", "16"))
         key = (id(mesh), hidden, nc)
         if key not in cls._OPS:
             cls._OPS[key] = cls(mesh, hidden, nc)
