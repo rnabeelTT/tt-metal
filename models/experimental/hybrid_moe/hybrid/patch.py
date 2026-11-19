@@ -169,6 +169,9 @@ class HybridState:
         self.pf_bgstream = os.environ.get("HYB_PF_BGSTREAM", "0") == "1"
         # HYB_PF_XRM (default 1): the prefill MoE input read back row-major (untilized on the device, see _pf_pre)
         self.pf_xrm = os.environ.get("HYB_PF_XRM", "1") == "1"
+        # HYB_PF_XPIN: the prefill MoE's host reads (router logits, MoE input rows) land in persistent host tensors
+        # viewed by torch (_HostSlots), not a fresh zero-filled host buffer per read plus a copy into a torch tensor
+        self.pf_xpin = os.environ.get("HYB_PF_XPIN", "1") == "1"
         self.pf_copy_ms = float(os.environ.get("HYB_PF_COPY_MS", "0.28"))
         self.pf_cpu_ms = [float(v) for v in os.environ.get("HYB_PF_CPU_MS", "0.3,0.02").split(",")]
         self.pf_cpu_fixed_ms = [
@@ -2185,6 +2188,7 @@ def _route_prefill_host(self, x4, T):
     ttnn.deallocate(lg_rm)
     t1 = time.perf_counter()
     ids, sc = _select_host(self, lg.numpy())
+    _HOST_SLOTS.put(ctx["s_lg"])
     HYB.st["t_pf_route_sel"] = HYB.st.get("t_pf_route_sel", 0.0) + time.perf_counter() - t1
     HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + t1 - t0
     k = ids.shape[1]
@@ -2268,6 +2272,53 @@ def _pf_device(self, x4, dec, ids, scores, T, mode, first_ev=None):
     return _plus_shared(self, routed, x4)
 
 
+
+class _HostSlots:
+    """Persistent row-major host tensors for the prefill MoE's device -> host reads, viewed by torch through DLPack.
+    The read cache pins a host tensor the first time it is a read target, and the device then writes it directly: no
+    host allocation, zero fill or copy per read. A slot stays out of the free list while its view is in use (the CPU
+    experts read the MoE input rows until the layer's finish())."""
+
+    _TORCH = {}
+
+    def __init__(self):
+        self.free = {}
+        self.ok = True
+
+    def get(self, dev_t):
+        """-> (key, host tensor, torch view [T, last dim]) for a die tensor, or None (the plain read then)."""
+        if not self.ok:
+            return None
+        key = (tuple(int(d) for d in dev_t.shape), dev_t.dtype)
+        lst = self.free.setdefault(key, [])
+        if lst:
+            return lst.pop()
+        try:
+            tdt = {ttnn.bfloat16: torch.bfloat16, ttnn.float32: torch.float32}[dev_t.dtype]
+            ht = ttnn.allocate_tensor_on_host(dev_t.shape, dev_t.dtype, ttnn.ROW_MAJOR_LAYOUT, dev_t.device())
+            shard = ht.host_buffer().get_shard(ttnn.MeshCoordinate(0, 0))
+            view = torch.from_dlpack(shard).view(tdt).reshape(-1, key[0][-1])
+            return key, ht, view
+        except Exception as e:  # noqa: BLE001
+            print(f"HYB_PF_XPIN: persistent host reads unavailable ({e!r}); plain reads", flush=True)
+            self.ok = False
+            return None
+
+    def read(self, dev_t):
+        """A non-blocking read of dev_t into a slot: -> (slot, None), or (None, host tensor) from a plain read."""
+        slot = self.get(dev_t) if dev_t.layout == ttnn.ROW_MAJOR_LAYOUT else None
+        if slot is None:
+            return None, ttnn.from_device(dev_t, blocking=False)
+        ttnn.copy_device_to_host_tensor(dev_t, slot[1], blocking=False)
+        return slot, None
+
+    def put(self, slot):
+        if slot is not None:
+            self.free[slot[0]].append(slot)
+
+
+_HOST_SLOTS = _HostSlots()
+
 def _pf_finish(self, out, dec, host_fut, orig, partial):
     """Prefill MoE, end: the CPU experts' rows (waited for) added to out, then the reduction."""
     if host_fut is not None:
@@ -2320,12 +2371,17 @@ def _pf_pre(self, x, mode="prefill"):
         else None
     )
     t1 = time.perf_counter()
-    h_lg = ttnn.from_device(_die0(lg_rm), blocking=False)
-    h_x = ttnn.from_device(_die0(x_rm if x_rm is not None else x4), blocking=False)
+    s_lg = s_x = None
+    if HYB.pf_xpin:
+        s_lg, h_lg = _HOST_SLOTS.read(_die0(lg_rm))
+        s_x, h_x = _HOST_SLOTS.read(_die0(x_rm if x_rm is not None else x4))
+    else:
+        h_lg = ttnn.from_device(_die0(lg_rm), blocking=False)
+        h_x = ttnn.from_device(_die0(x_rm if x_rm is not None else x4), blocking=False)
     t2 = time.perf_counter()
     ev = ttnn.record_event(self.device, 0)
     t3 = time.perf_counter()
-    ctx = dict(orig=orig, T=T, x4=x4, lg_rm=lg_rm, x_rm=x_rm, h_lg=h_lg, h_x=h_x, ev=ev)
+    ctx = dict(orig=orig, T=T, x4=x4, lg_rm=lg_rm, x_rm=x_rm, h_lg=h_lg, h_x=h_x, s_lg=s_lg, s_x=s_x, ev=ev)
     st = HYB.st
     st["t_pf_pre"] = st.get("t_pf_pre", 0.0) + t3 - t0
     st["t_pf_pre_ops"] = st.get("t_pf_pre_ops", 0.0) + t1 - t0  # the router, layouts
@@ -2349,7 +2405,10 @@ def _pf_plan(self, ctx, mode="prefill"):
     t0 = time.perf_counter()
     ttnn.event_synchronize(ctx["ev"])
     t1 = time.perf_counter()
-    lg = ttnn.to_torch(ctx["h_lg"]).reshape(T, -1).float().numpy()
+    if ctx["s_lg"] is not None:  # (_select_host reads it before returning, and copies what it keeps)
+        lg = ctx["s_lg"][2].reshape(T, -1).numpy()
+    else:
+        lg = ttnn.to_torch(ctx["h_lg"]).reshape(T, -1).float().numpy()
     ttnn.deallocate(ctx["lg_rm"])
     if ctx.get("x_rm") is not None:
         ttnn.deallocate(ctx["x_rm"])
@@ -2366,13 +2425,20 @@ def _pf_plan(self, ctx, mode="prefill"):
     # the next hybrid layer's prefetch goes on CQ1 before this step's routing
     HYB.stream.step(self.layer_num, _nonresident_hot_first, HYB.st)
     t1 = time.perf_counter()
-    xh_fn = lambda: ttnn.to_torch(ctx["h_x"]).reshape(T, -1)  # noqa: E731 (read already complete: the event above)
+    if ctx["s_x"] is not None:  # the slot's view itself (the CPU experts read it until finish() frees the slot)
+        xh_fn = lambda: ctx["s_x"][2].reshape(T, -1)  # noqa: E731
+    else:
+        xh_fn = lambda: ttnn.to_torch(ctx["h_x"]).reshape(T, -1)  # noqa: E731 (read already complete: the event above)
     dec = _decide_core(self, x4, idh, sch, mode, defer_host=HYB.pf_host_async, xh_fn=xh_fn)
     HYB.st["t_pf_decide"] = HYB.st.get("t_pf_decide", 0.0) + time.perf_counter() - t1
     ref_ids = SimpleNamespace(shape=(1, 1, T, k), dtype=ttnn.uint16, layout=ttnn.TILE_LAYOUT)
     ref_sc = SimpleNamespace(shape=(1, 1, T, k), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
     # the CPU experts on the pool (the int4 kernel releases the GIL) while the device runs the queued work
     host_fut = HYB.pool.submit(HYB.host_compute, *dec["job"]) if dec["host"] is None else None
+    s_x = ctx["s_x"]
+    if host_fut is None:  # no CPU experts in flight: the rows are no longer read
+        _HOST_SLOTS.put(s_x)
+        s_x = None
     # HYB_PF_BGSTREAM: the first staging round's copies go to pinx's background writer on CQ1 now; the caller may run
     # other host work (CQ0 only) before go() flushes them and queues the device experts behind their event
     bg = False
@@ -2395,7 +2461,11 @@ def _pf_plan(self, ctx, mode="prefill"):
         out = _pf_device(self, x4, dec, ref_ids, ref_sc, T, mode, first_ev=ev)
 
         def finish():
-            return _pf_finish(self, out, dec, host_fut, orig, partial=False)
+            try:
+                return _pf_finish(self, out, dec, host_fut, orig, partial=False)
+            finally:
+                if s_x is not None and (host_fut is None or host_fut.done()):
+                    _HOST_SLOTS.put(s_x)
 
         return finish
 
