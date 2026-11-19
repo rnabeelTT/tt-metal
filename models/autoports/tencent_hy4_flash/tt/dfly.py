@@ -104,6 +104,8 @@ class Hy4DFly:
             sd = w.sub(f"{i}.")
             tgt = by_li[self.kv_layers[i]].attn
             attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), self.kv_layers[i], 0, 0, share=tgt)
+            attn.slot, attn.base = tgt.slot, tgt.base
+            model.__dict__.setdefault("_shared_attn", []).append(attn)  # (Hy4Model.set_slot moves its base)
             self.layers.append(dict(
                 attn=attn,
                 tgt=tgt,

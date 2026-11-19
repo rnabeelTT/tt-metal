@@ -41,14 +41,14 @@ from models.autoports.tencent_hy4_flash.tt.weights import Hy4Weights
 
 
 class Hy4Layer:
-    def __init__(self, mesh, cfg, w: Hy4Weights, li: int, max_ctx: int, chunk: int, cache_dir=None):
+    def __init__(self, mesh, cfg, w: Hy4Weights, li: int, max_ctx: int, chunk: int, cache_dir=None, slots: int = 1):
         self.li, self.cfg = li, cfg
         sd = w.layer(li)
         self.attn_hc = sublayer_hc(mesh, sd, "hc_attn_layer", cfg)
         self.ffn_hc = sublayer_hc(mesh, sd, "hc_mlp_layer", cfg)
         self.in_norm = RMSNorm(mesh, sd["input_layernorm.weight"], cfg.rms_eps)
         self.post_norm = RMSNorm(mesh, sd["post_attention_layernorm.weight"], cfg.rms_eps)
-        self.attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), li, max_ctx, chunk)
+        self.attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), li, max_ctx, chunk, slots=slots)
         self.mlp = Hy4MoE(mesh, cfg, sd.sub("mlp."), li, cache_dir) if cfg.is_moe(li) else Hy4DenseMLP(mesh, cfg, sd.sub("mlp."))
         self.engram = Hy4EngramDevice(mesh, cfg, sd.sub("engram_layer."), li) if li in cfg.engram_layers else None
 
@@ -240,9 +240,11 @@ class Hy4Layer:
 
 class Hy4Model:
     def __init__(self, mesh, cfg: Hy4Config | None = None, w: Hy4Weights | None = None, max_ctx: int = 32768,
-                 chunk: int = 2048, layers: list[int] | None = None, engram=None, cache_dir=None):
-        """layers: a subset of decoder layers (probes / tests); engram: a host Engram store (None: zero rows, tests)."""
+                 chunk: int = 2048, layers: list[int] | None = None, engram=None, cache_dir=None, slots: int | None = None):
+        """layers: a subset of decoder layers (probes / tests); engram: a host Engram store (None: zero rows, tests);
+        slots: sequences the caches hold, max_ctx tokens each (default HY4_SLOTS, else 1)."""
         self.mesh = mesh
+        self.slots = int(slots if slots is not None else os.environ.get("HY4_SLOTS", "1"))
         self.cfg = cfg = cfg or Hy4Config.load()
         self.w = w = w or Hy4Weights()
         self.N = num_devices(mesh)
@@ -260,7 +262,7 @@ class Hy4Model:
         logger.info(f"embedding loaded ({time.time() - t0:.0f} s)")
         self.layers = []
         for li in self.layer_ids:
-            self.layers.append(Hy4Layer(mesh, cfg, w, li, max_ctx, chunk, cache_dir))
+            self.layers.append(Hy4Layer(mesh, cfg, w, li, max_ctx, chunk, cache_dir, slots=self.slots))
             logger.info(f"layer {li} loaded ({time.time() - t0:.0f} s)")
         self.head_hc = head_hc(mesh, w, cfg)
         self.norm = RMSNorm(mesh, w.get("model.norm.weight"), cfg.rms_eps)
@@ -280,7 +282,9 @@ class Hy4Model:
         del lm
         self.ckc = ckc(mesh, fp32=True)
         self.rope = DeviceRope(mesh, cfg.qk_rope)
-        self.pos = 0  # next position of the sequence
+        self.pos = 0  # next position of the sequence (of the active slot)
+        self.slot = 0
+        self._slot_state = {}  # parked slots: (pos, Engram history / positions)
         logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}")
         store = getattr(self.engram, "store", None)
         if store is not None and hasattr(store, "rewarm") and store.loaders:
@@ -360,6 +364,27 @@ class Hy4Model:
 
     def read_logits(self, lg, R) -> torch.Tensor:
         return to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:R, : self.cfg.vocab].float()
+
+    def set_slot(self, u: int):
+        """Make sequence slot u active: prefill / reset / staging address its cache regions and state (max_ctx tokens
+        each; HY4_SLOTS / the slots argument sets how many the caches hold)."""
+        if u == self.slot:
+            return
+        assert 0 <= u < self.slots, (u, self.slots)
+        eng = self.engram
+        self._slot_state[self.slot] = (self.pos, (dict(eng.hist), dict(eng.pos)) if eng is not None and hasattr(eng, "hist") else None)
+        pos, es = self._slot_state.pop(u, (0, None))
+        self.pos = pos
+        if eng is not None and hasattr(eng, "hist"):
+            if es is None:
+                eng.reset()
+            else:
+                eng.hist, eng.pos = dict(es[0]), dict(es[1])
+        for layer in self.layers:
+            layer.attn.set_slot(u)
+        for a in getattr(self, "_shared_attn", []):  # the DFly2 drafter's KV-sharing layers
+            a.slot, a.base = u, u * a.rows
+        self.slot = u
 
     def reset(self):
         self.pos = 0

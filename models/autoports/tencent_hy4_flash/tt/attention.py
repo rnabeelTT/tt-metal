@@ -56,10 +56,12 @@ def _dt(name, default):
 
 
 class Hy4Attention:
-    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None):
-        """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity (sparse layers); chunk: the
-        largest rows per forward (prefill chunk), which sizes the SWA ring."""
+    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None, slots: int = 1):
+        """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity per sequence (sparse layers);
+        chunk: the largest rows per forward (prefill chunk), which sizes the SWA ring. slots: sequences the cache holds
+        (one region of `rows` rows each; set_slot picks the active one; the sink / scratch rows follow the regions)."""
         self.mesh, self.cfg, self.li = mesh, cfg, layer_idx
+        self.slots, self.slot, self.base = max(1, int(slots)), 0, 0
         self.kind = cfg.layer_kind[layer_idx]
         self.N = N = num_devices(mesh)
         self.H = H = cfg.heads[self.kind]
@@ -139,6 +141,7 @@ class Hy4Attention:
         if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
             self.cache, self.rows = share.cache, share.rows
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
+            self.slots, self.share = share.slots, share
             return
         # caches (row-major bf16, replicated): sparse layers hold every position + a sink block at the end; SWA layers
         # a ring of `ring` rows + the sink block
@@ -146,9 +149,9 @@ class Hy4Attention:
             self.rows = -(-max_ctx // 32) * 32 + 64  # + the decode staging window's lookahead (two 32-row slabs)
         else:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
-        self.sink_row = self.rows
-        self.scratch_row = self.rows + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
-        cache = torch.zeros(1, 1, self.rows + 64, self.width, dtype=torch.bfloat16)
+        self.sink_row = self.slots * self.rows
+        self.scratch_row = self.sink_row + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
+        cache = torch.zeros(1, 1, self.sink_row + 64, self.width, dtype=torch.bfloat16)
         cache[0, 0, self.sink_row, cfg.latent_width] = SINK_KEY
         cache[0, 0, self.sink_row, cfg.latent_width + 1] = SINK_KEY
         self.cache = upload(mesh, cache, ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
@@ -157,7 +160,7 @@ class Hy4Attention:
         if self.kind == "sparse":
             from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
 
-            self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx)
+            self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx, slots=self.slots)
 
     def _decode_linears(self, sd, wdt, li, drafter):
         """Decode-only streamed copies (tt/common.StreamLinear): x -> [q_a | kv_a | (indexer token key | head weights)]
@@ -200,7 +203,7 @@ class Hy4Attention:
 
     # ------------------------------------------------------------------ host-side index lists
     def _cache_row(self, pos: np.ndarray) -> np.ndarray:
-        return pos if self.kind == "sparse" else pos % self.rows
+        return self.base + (pos if self.kind == "sparse" else pos % self.rows)
 
     def index_lists(self, p0: int, T: int, selected: np.ndarray | None, Tp: int | None = None) -> torch.Tensor:
         """[1, 1, Tp, K] uint32 per query row p = p0 + s: [sink | keys... | sentinels]. keys: every position <= p
@@ -210,7 +213,7 @@ class Hy4Attention:
         Tp = Tp or -(-T // 32) * 32
         key = None
         if selected is None or self.kind == "swa":  # position-only lists: shared by every layer of the kind
-            key = (self.kind, p0, T, Tp, self.rows, self.sink_row)
+            key = (self.kind, p0, T, Tp, self.rows, self.sink_row, self.base)
             hit = Hy4Attention._IDX_CACHE.get(key)
             if hit is not None:
                 return hit
@@ -418,6 +421,13 @@ class Hy4Attention:
         ttnn.deallocate(o2)
         return self._out_part(x, o, mem)
 
+    def set_slot(self, u: int):
+        """The sequence slot the following prefill / staging calls address (its cache region starts at u * rows)."""
+        assert 0 <= u < self.slots, (u, self.slots)
+        self.slot, self.base = u, u * self.rows
+        if self.indexer is not None:
+            self.indexer.set_slot(u)
+
     def rows_ok(self, p0: int, Tp: int) -> bool:
         """The row-parallel selecting-chunk path applies (sparse layer, every row selects, rows split evenly)."""
         return (self.rp is not None and self.indexer is not None and p0 >= self.cfg.idx_candidate_topk
@@ -428,7 +438,7 @@ class Hy4Attention:
     def _rows_const(self, kind, p0, T, Tp):
         """Row-sharded per-chunk constants, shared by the sparse layers of the chunk: ("tail", ...) the index list
         tails (as _idx_tail), ("rope", ...) this layer kind's RoPE tables, die d holding rows d Tp/N .. (d+1) Tp/N."""
-        key = (id(self.mesh), kind, p0, T, Tp, self.sink_row if kind == "tail" else self.theta)
+        key = (id(self.mesh), kind, p0, T, Tp, (self.sink_row, self.base) if kind == "tail" else self.theta)
         t = Hy4Attention._ROWS_DEV.get(key)
         if t is None:
             for k in [k for k in Hy4Attention._ROWS_DEV if k[1] == kind]:
@@ -446,7 +456,7 @@ class Hy4Attention:
                 for s_ in range(Tp):
                     p = p0 + min(s_, T - 1)
                     own = np.arange((p // cfg.idx_ratio) * cfg.idx_ratio, p + 1)
-                    tail[s_, 1 : 1 + own.size] = own
+                    tail[s_, 1 : 1 + own.size] = self.base + own
                 t = upload(self.mesh, torch.from_numpy(tail.view(np.int32)).reshape(1, 1, Tp, -1), ttnn.uint32,
                            ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 2))
             Hy4Attention._ROWS_DEV[key] = t
@@ -556,7 +566,7 @@ class Hy4Attention:
         # the ring rows gathered by a runtime index tensor (ttnn.embedding over the row-major cache, as init_stage): a
         # slice bakes its offsets into the program, and the ring offset differs at every chunk position (a program
         # compiled at serve time re-captures the decode traces)
-        rows_idx = (torch.arange(p0 - W, p0 - W + n) % self.rows).to(torch.int32).reshape(1, n)
+        rows_idx = (self.base + torch.arange(p0 - W, p0 - W + n) % self.rows).to(torch.int32).reshape(1, n)
         idx = upload(self.mesh, rows_idx, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         table = ttnn.reshape(self.cache, (int(self.cache.shape[-2]), self.width))
         g = ttnn.embedding(idx, table, layout=ttnn.TILE_LAYOUT, memory_config=mem)
@@ -620,7 +630,7 @@ class Hy4Attention:
         """[1, 1, Tp, K - 2044] uint32: per row [sink, own group's positions up to p, sentinels] (device, shared by the
         sparse layers of the chunk)."""
         cfg = self.cfg
-        key = (id(self.mesh), "tail", p0, T, Tp, self.sink_row)
+        key = (id(self.mesh), "tail", p0, T, Tp, self.sink_row, self.base)
         t = Hy4Attention._IDX_DEV.get(key)
         if t is None:
             for k in [k for k in Hy4Attention._IDX_DEV if k[1] == "tail"]:
@@ -632,7 +642,7 @@ class Hy4Attention:
             for s_ in range(Tp):
                 p = p0 + min(s_, T - 1)
                 own = np.arange((p // cfg.idx_ratio) * cfg.idx_ratio, p + 1)
-                tail[s_, 1 : 1 + own.size] = own
+                tail[s_, 1 : 1 + own.size] = self.base + own
             t = Hy4Attention._IDX_DEV[key] = upload(self.mesh, torch.from_numpy(tail.view(np.int32)).reshape(1, 1, Tp, -1),
                                                     ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         return t
@@ -642,7 +652,7 @@ class Hy4Attention:
         by every layer of the kind (-> (tensor, True)); selection lists are per layer (-> (tensor, False))."""
         if selected is not None and self.kind != "swa":
             return upload(self.mesh, self.index_lists(p0, T, selected, Tp), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT), False
-        key = (id(self.mesh), self.kind, p0, T, Tp, self.rows, self.sink_row)
+        key = (id(self.mesh), self.kind, p0, T, Tp, self.rows, self.sink_row, self.base)
         t = Hy4Attention._IDX_DEV.get(key)
         if t is None:
             stale = [k for k in Hy4Attention._IDX_DEV if k[1] == self.kind and k[2] != 0]  # p0 = 0: traced chunks
@@ -675,19 +685,20 @@ class Hy4Attention:
     # ------------------------------------------------------------------ trace-safe step (decode / verify rows)
     def init_stage(self, base: int):
         """After a prefill: the 64-row staging window starting at position `base` (32-aligned) from the cache."""
-        r0 = base if self.kind == "sparse" else base % self.rows
+        r0 = self.base + (base if self.kind == "sparse" else base % self.rows)
         if os.environ.get("HY4_STAGE_GATHER", "1") == "1":
             # the 64 window rows gathered by a runtime index tensor (ttnn.embedding over the row-major cache): a slice
             # at the prompt's position bakes the offset into its program (one new program per 32-token prompt
             # position, compiled at serve time, re-capturing every decode trace)
             pos = torch.arange(base, base + 64)
-            rows = (pos if self.kind == "sparse" else pos % self.rows).to(torch.int32).reshape(1, 64)
+            rows = (self.base + (pos if self.kind == "sparse" else pos % self.rows)).to(torch.int32).reshape(1, 64)
             idx = upload(self.mesh, rows, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
             table = ttnn.reshape(self.cache, (int(self.cache.shape[-2]), self.width))
             g = ttnn.embedding(idx, table, layout=ttnn.TILE_LAYOUT)
             ttnn.deallocate(idx)
             wt = ttnn.reshape(g, (1, 1, 64, self.width))
         else:
+            assert self.base == 0, "HY4_STAGE_GATHER=0 supports one slot"
             if r0 + 64 <= self.rows:
                 w = ttnn.slice(self.cache, (0, 0, r0, 0), (1, 1, r0 + 64, self.width))
             else:  # the SWA ring wraps inside the window
@@ -754,9 +765,9 @@ class Hy4Attention:
         """Write rows [0, T) of row_rm [1,1,Tp,608] RM to the cache at positions p0.. (ring rows for SWA)."""
         start = p0 if self.kind == "sparse" else p0 % self.rows
         first = min(T, self.rows - start)
-        segs = [(0, start, first)]
-        if first < T:  # SWA ring wrap
-            segs.append((first, 0, T - first))
+        segs = [(0, self.base + start, first)]
+        if first < T:  # SWA ring wrap (inside the slot's region)
+            segs.append((first, self.base, T - first))
         for src, dst, n in segs:
             part = row_rm if (src == 0 and n == int(row_rm.shape[-2])) else ttnn.slice(
                 row_rm, (0, 0, src, 0), (1, 1, src + n, self.width))

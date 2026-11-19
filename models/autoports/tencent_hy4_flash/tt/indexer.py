@@ -33,7 +33,10 @@ SCORE_ROWS = int(os.environ.get("HY4_IDX_SCORE_ROWS", "256"))
 
 
 class Hy4Indexer:
-    def __init__(self, mesh, cfg, sd, max_ctx: int):
+    _SLOT_ATTRS = ("gkeys", "_mirror", "_mirror_stale", "_gk_pending", "n_tok", "n_groups", "_open_keys",
+                   "_open_pending", "_tk_hist", "_tk_pending", "tk_hist_base", "tk_stage", "g_stage")
+
+    def __init__(self, mesh, cfg, sd, max_ctx: int, slots: int = 1):
         self.mesh, self.cfg = mesh, cfg
         self.nh, self.d, self.r = cfg.idx_heads, cfg.idx_dim, cfg.idx_ratio
         self.rope_d = cfg.qk_rope
@@ -84,6 +87,26 @@ class Hy4Indexer:
         self.tk_stage = None
         self.g_stage = None
         self.reset()
+        # one sequence state per slot (group cache, host mirror, token history, staging windows); set_slot swaps them
+        self.slot = 0
+        self._slots = {}
+        for u in range(1, max(1, int(slots))):
+            self._slots[u] = {"gkeys": upload(mesh, torch.zeros(1, 1, self.gcap, self.d, dtype=torch.bfloat16),
+                                              ttnn.bfloat16),
+                              "_mirror": torch.zeros(self.gcap, self.d, dtype=torch.bfloat16), "fresh": True}
+
+    def set_slot(self, u: int):
+        if u == self.slot:
+            return
+        self._slots[self.slot] = {a: self.__dict__.get(a) for a in self._SLOT_ATTRS}
+        st = self._slots.pop(u)
+        fresh = st.pop("fresh", False)
+        for a, v in st.items():
+            self.__dict__[a] = v
+        self.slot = u
+        if fresh:
+            self.tk_stage = self.g_stage = None
+            self.reset()
 
     # host views of the device-pooled prefill's state, materialized on first use (decode's init_stage, a host-pooled
     # chunk after a device-pooled one): the device path itself never reads back
