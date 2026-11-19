@@ -413,6 +413,55 @@ class Hy4Indexer:
         ttnn.deallocate(u)
         return urm
 
+    # ------------------------------------------------------------------ row-parallel selecting chunk (prefill)
+    def forward_rows(self, x, x_own, q_resid_own, p0: int, T: int, mem, tail_own):
+        """A selecting chunk (p0 >= 2048) with the selection split by rows over the dies: the group keys take every row
+        of x (all rows, replicated), the query / scores / top-k / index lists only this die's rows (x_own, q_resid_own,
+        the row-sharded list tails tail_own). -> index lists [1, 1, Tp / N, K] uint32 RM of this die's rows."""
+        Tp = int(x.shape[-2])
+        cos_own, sin_own = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta, shard_rows=True)
+        vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
+        vis_own = upload(self.mesh, vis.reshape(1, 1, Tp, 1), ttnn.float32, mapper=("shard", 2))
+        tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
+        if (os.environ.get("HY4_PF_DEVICE_POOL", "1") == "1" and p0 == self.n_tok and p0 % self.r == 0
+                and Tp % (32 * self.r) == 0 and (p0 // self.r) % 32 == 0
+                and self._open_pending is None and self._open_keys.shape[0] == 0):
+            self._pool_prefill_device(tk, p0, T, Tp, mem)
+        else:
+            tk_host = to_torch0(tk).reshape(Tp, self.d)[:T].to(torch.bfloat16)
+            self._append_tokens(tk_host, p0)
+        ttnn.deallocate(tk)
+        q, w = self._query(x_own, q_resid_own, cos_own, sin_own, mem)
+        Tq = int(x_own.shape[-2])
+        n_vis_max = (p0 + T - 1) // self.r
+        kv_len = -(-n_vis_max // 32) * 32
+        if os.environ.get("HY4_PF_KV_BUCKETS", "1") == "1":
+            kv_len = next((b for b in (512 * 2**i for i in range(10)) if b >= kv_len and b + 32 <= self.gcap), kv_len)
+        parts = []
+        SR = self._score_rows(kv_len, Tq)
+        for r0 in range(0, Tq, SR):
+            r1 = min(Tq, r0 + SR)
+            if r0 == 0 and r1 == Tq:
+                qs, ws, vs = q, w, vis_own
+            else:
+                qs = ttnn.slice(q, (0, 0, r0, 0), (1, self.nh, r1, self.d), memory_config=mem)
+                ws = ttnn.slice(w, (0, 0, r0, 0), (1, 1, r1, self.nh), memory_config=mem)
+                vs = ttnn.slice(vis_own, (0, 0, r0, 0), (1, 1, r1, 1), memory_config=mem)
+            ids = self._topk(qs, ws, kv_len, vs, mem)
+            parts.append(self._expand(ids, r1 - r0, mem))
+            ttnn.deallocate(ids)
+            if qs is not q:
+                for t_ in (qs, ws, vs):
+                    ttnn.deallocate(t_)
+        sel = parts[0] if len(parts) == 1 else ttnn.concat(parts, dim=2, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        if len(parts) > 1:
+            for t_ in parts:
+                ttnn.deallocate(t_)
+        idx = ttnn.concat([sel, tail_own], dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        for t_ in (sel, q, w, cos_own, sin_own, vis_own):
+            ttnn.deallocate(t_)
+        return idx
+
     # ------------------------------------------------------------------ eager (prefill)
     def forward(self, x, q_resid, p0: int, T: int, mem, tail=None):
         """Updates the group keys with these T tokens; returns selected group ids [T, 512] (numpy, sorted by score) for

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Fused hyper-connection (decode), compute. Core c owns hidden tiles [c J, c J + J) of the 4 streams (tile s * J + jj).
+// Fused hyper-connection, compute. Core c owns hidden tiles [c J, c J + J) of the 4 streams (tile s * J + jj); one
+// iteration per row tile r = g, g + G, ... < TR of its group (decode: one).
 //
 // POST (the previous sublayer's HC post): Q_s = wp @ sel_{4+s} (every column = stream s's post weight),
 //   X'_{s,j} = bf16(X_{s,j} + o_j * Q_s)  (the product exact on the FPU, the add fp32 on the SFPU).
@@ -119,7 +120,10 @@ void kernel_main() {
     constexpr uint32_t heps_bits = get_compile_time_arg_val(6);
     constexpr uint32_t DBG = get_compile_time_arg_val(7);
     constexpr uint32_t FNLO = get_compile_time_arg_val(8);  // the lo part of fn (HY4_HCF_FNLO)  // 1: w := sum of mix partials, 2: w := ss, 3: w := sum S
+    constexpr uint32_t TR = get_compile_time_arg_val(9);
+    constexpr uint32_t G = get_compile_time_arg_val(10);
     constexpr uint32_t NT = 4 * J;
+    const uint32_t g = get_arg_val<uint32_t>(0);
 #ifdef DST_FULL
     constexpr uint32_t PCH = 4;  // POST tiles per DST round (8 FP32 DST tiles: product + x each)
 #else
@@ -127,8 +131,16 @@ void kernel_main() {
 #endif
 
     compute_kernel_hw_startup(cb_x, cb_x, cb_xn);
-    cb_wait_front(cb_x, NT);
     cb_wait_front(cb_mm, 10);
+    if constexpr (PRE) {
+        cb_wait_front(cb_fn, NT);
+        cb_wait_front(cb_cv, 4);
+        if constexpr (FNLO) {
+            cb_wait_front(cb_fnlo, NT);
+        }
+    }
+    for (uint32_t r = g; r < TR; r += G) {
+    cb_wait_front(cb_x, NT);
     uint32_t src = cb_x;
     if constexpr (POST) {
         DeviceZoneScopedN("HC_POST");
@@ -177,8 +189,6 @@ void kernel_main() {
         cb_pop_front(cb_wpc, 1);
     }
     if constexpr (PRE) {
-        cb_wait_front(cb_fn, NT);
-        cb_wait_front(cb_cv, 4);
         // this core's partials
         {
         DeviceZoneScopedN("HC_PART");
@@ -191,13 +201,11 @@ void kernel_main() {
             matmul_tiles(src, cb_fn, t, t, 0);
         }
         if constexpr (FNLO) {
-            cb_wait_front(cb_fnlo, NT);
             reconfig_data_format(cb_fnlo, src);
             matmul_init(src, cb_fnlo, 0);
             for (uint32_t t = 0; t < NT; ++t) {
                 matmul_tiles(src, cb_fnlo, t, t, 0);
             }
-            cb_pop_front(cb_fnlo, NT);
         }
         reconfig_data_format(src, src);
         matmul_init(src, src, 1);  // in1 transposed: X'_t @ X'_t^T
@@ -248,6 +256,7 @@ void kernel_main() {
 
         cb_reserve_back(cb_w, 1);
         cb_reserve_back(cb_wm, 1);
+        cb_reserve_back(cb_wc, 1);
         tile_regs_acquire();
         mm_hi_lo(MM_ONES, 1, 1);  // ss in every column
         cb_pop_front(cb_hi, 1);
@@ -330,9 +339,15 @@ void kernel_main() {
         cb_pop_front(cb_prel, 4);
         cb_pop_front(cb_wm, 1);
         cb_pop_front(cb_wc, 1);
-        cb_pop_front(cb_fn, NT);
-        cb_pop_front(cb_cv, 4);
     }
     cb_pop_front(cb_x, NT);
+    }  // row tiles
+    if constexpr (PRE) {
+        cb_pop_front(cb_fn, NT);
+        cb_pop_front(cb_cv, 4);
+        if constexpr (FNLO) {
+            cb_pop_front(cb_fnlo, NT);
+        }
+    }
     cb_pop_front(cb_mm, 10);
 }

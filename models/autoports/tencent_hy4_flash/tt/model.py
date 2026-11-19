@@ -89,11 +89,16 @@ class Hy4Layer:
         a_n = self.in_norm(a_in, mem)
         ttnn.deallocate(a_in)
         a_full = ag(a_n)
-        ttnn.deallocate(a_n)
-        part = self.attn.forward_part(a_full, p0, T, cos_sin, mem)
-        ttnn.deallocate(a_full)
-        a_loc = rs(part)
-        ttnn.deallocate(part)
+        if self.attn.rows_ok(p0, int(a_full.shape[-2])):  # selecting chunk, rows split: this die's rows directly
+            a_loc = self.attn.forward_part_rows(a_full, a_n, p0, T, cos_sin, mem)
+            ttnn.deallocate(a_n)
+            ttnn.deallocate(a_full)
+        else:
+            ttnn.deallocate(a_n)
+            part = self.attn.forward_part(a_full, p0, T, cos_sin, mem)
+            ttnn.deallocate(a_full)
+            a_loc = rs(part)
+            ttnn.deallocate(part)
         a = self.attn.post_norm(a_loc, mem)
         ttnn.deallocate(a_loc)
         X2 = self.attn_hc.post(X, a, post, mem)
@@ -114,6 +119,58 @@ class Hy4Layer:
         for t_ in (X2, f, post):
             ttnn.deallocate(t_)
         return X3
+
+    def forward_split_fused(self, X, pend, p0, T, cos_sin, hcf, engram_emb=None, mem=None, engram_keep=None):
+        """forward_split() with the hyper-connections as fused programs over this die's rows (tt/hc_fused; one program
+        per sublayer boundary: the previous sublayer's HC post + this one's pre). pend = (o, w) of the previous
+        sublayer's HC post (None at the first layer); returns (X, pend) with this layer's MLP output pending."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        ag = lambda t: ttnn.all_gather(t, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=mem)  # noqa
+        rs = lambda t: ttnn.reduce_scatter(t, 2, cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=mem)  # noqa
+
+        def run(X, pend, hc):
+            o, wp = pend if pend is not None else (None, None)
+            Xn, inp, w = hcf(X, o, wp, hc)
+            if pend is not None:
+                for t_ in (X, o, wp):
+                    ttnn.deallocate(t_)
+            return Xn, inp, w
+
+        if self.engram is not None and engram_emb is not None:
+            if pend is not None:
+                X, _, _ = run(X, pend, None)
+                pend = None
+            X2 = self.engram.forward(X, engram_emb, mem, engram_keep)
+            ttnn.deallocate(X)
+            X = X2
+        X, a_in, w_a = run(X, pend, self.attn_hc)
+        a_n = self.in_norm(a_in, mem)
+        ttnn.deallocate(a_in)
+        a_full = ag(a_n)
+        if self.attn.rows_ok(p0, int(a_full.shape[-2])):  # selecting chunk, rows split: this die's rows directly
+            a_loc = self.attn.forward_part_rows(a_full, a_n, p0, T, cos_sin, mem)
+            ttnn.deallocate(a_n)
+            ttnn.deallocate(a_full)
+        else:
+            ttnn.deallocate(a_n)
+            part = self.attn.forward_part(a_full, p0, T, cos_sin, mem)
+            ttnn.deallocate(a_full)
+            a_loc = rs(part)
+            ttnn.deallocate(part)
+        a = self.attn.post_norm(a_loc, mem)
+        ttnn.deallocate(a_loc)
+        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc)
+        f_n = self.post_norm(f_in, mem)
+        ttnn.deallocate(f_in)
+        f_full = ag(f_n)
+        ttnn.deallocate(f_n)
+        part = self.mlp.forward_part(f_full, T, mem)
+        ttnn.deallocate(f_full)
+        f_loc = rs(part)
+        ttnn.deallocate(part)
+        f = self.mlp.norm(f_loc, mem)
+        ttnn.deallocate(f_loc)
+        return X, (f, w_f)
 
     def step(self, X, si, R, mem=None):
         """Trace-safe rows pass (tt/decode.py): every position-dependent input in si. HY4_L1_PARTS (default all):
@@ -459,11 +516,20 @@ class Hy4Model:
         pos = torch.arange(p0, p0 + Tp)
         cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
         eng = self._engram_rows(ids.reshape(-1), p0, Tp, split=split)
+        hcf = self._pf_hcf(split)
+        pend = None
         for layer in self.layers:
-            if split:
+            if hcf is not None:
+                X, pend = layer.forward_split_fused(X, pend, p0, T, cos_sin, hcf, eng.get(layer.li), mem, eng.get("keep"))
+            elif split:
                 X = layer.forward_split(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
             else:
                 X = layer.forward(X, p0, T, cos_sin, eng.get(layer.li), mem, eng.get("keep"))
+        if pend is not None:  # the last MLP's HC post
+            X2, _, _ = hcf(X, pend[0], pend[1], None)
+            for t_ in (X, pend[0], pend[1]):
+                ttnn.deallocate(t_)
+            X = X2
         for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
             ttnn.deallocate(t_)
         self.pos = p0 + T
@@ -481,6 +547,15 @@ class Hy4Model:
         if logits_rows == "last":
             return out[(T - 1) - ((T - 1) // 32) * 32]
         return out[:T]
+
+    def _pf_hcf(self, split):
+        """The fused HC program for row-split prefill chunks (HY4_PF_HCF, default 1), else None."""
+        if not (split and os.environ.get("HY4_PF_HCF", "1") == "1" and self.head_hc.fused
+                and all(l.attn_hc.fused and l.ffn_hc.fused for l in self.layers)):
+            return None
+        from models.autoports.tencent_hy4_flash.tt.hc_fused import HCFusedOp
+
+        return HCFusedOp.get(self.mesh, self.cfg.hidden)
 
     def _logits(self, h, mem):
         hn = self.norm(h, mem)

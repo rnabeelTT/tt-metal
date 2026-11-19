@@ -116,6 +116,21 @@ class Hy4Attention:
         # decode passes: the sink columns repeated over the 32 rows once (constant; a lazy copy made inside a trace
         # capture would hold nothing until that trace's first replay)
         self._qs32 = ttnn.repeat(self.q_sink, ttnn.Shape((1, 1, TILE, 1)), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        # row-parallel selecting chunks (sparse layers, p0 >= 2048; HY4_PF_RP): every head's q_b / W_uk / W_uv / gate /
+        # o_proj on every die (each die attends its quarter of the chunk's rows with all heads)
+        self.rp = None
+        if (self.kind == "sparse" and share is None and N > 1 and H % 32 == 0
+                and os.environ.get("HY4_PF_RP", "1") == "1"):
+            qs_all = torch.zeros(1, H, 1, SINK_COLS)
+            qs_all[0, :, 0, 0], qs_all[0, :, 0, 1] = s_hi, s_lo
+            self.rp = {
+                "qb": upload(mesh, bf(sd["q_b_proj.weight"]).T.reshape(1, 1, cfg.q_lora, H * 256), wdt),
+                "wuk": upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt),
+                "wuvT": upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), udt),
+                "wg": upload(mesh, bf(sd["linear_gate.weight"]).T.reshape(1, 1, cfg.hidden, H * self.vd), wdt),
+                "wo": upload(mesh, bf(sd["o_proj.weight"]).T.reshape(1, 1, H * self.vd, cfg.hidden), wdt),
+                "qs": upload(mesh, qs_all, ttnn.bfloat16),
+            }
         self.stage = None  # the decode staging window (init_stage)
         self.indexer = None
         self.dec = None
@@ -402,6 +417,95 @@ class Hy4Attention:
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
         return self._out_part(x, o, mem)
+
+    def rows_ok(self, p0: int, Tp: int) -> bool:
+        """The row-parallel selecting-chunk path applies (sparse layer, every row selects, rows split evenly)."""
+        return (self.rp is not None and self.indexer is not None and p0 >= self.cfg.idx_candidate_topk
+                and Tp % (32 * self.N) == 0)
+
+    _ROWS_DEV = {}
+
+    def _rows_const(self, kind, p0, T, Tp):
+        """Row-sharded per-chunk constants, shared by the sparse layers of the chunk: ("tail", ...) the index list
+        tails (as _idx_tail), ("rope", ...) this layer kind's RoPE tables, die d holding rows d Tp/N .. (d+1) Tp/N."""
+        key = (id(self.mesh), kind, p0, T, Tp, self.sink_row if kind == "tail" else self.theta)
+        t = Hy4Attention._ROWS_DEV.get(key)
+        if t is None:
+            for k in [k for k in Hy4Attention._ROWS_DEV if k[1] == kind]:
+                v = Hy4Attention._ROWS_DEV.pop(k)
+                for t_ in (v if isinstance(v, tuple) else (v,)):
+                    ttnn.deallocate(t_)
+            if kind == "rope":
+                t = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta, shard_rows=True)
+            else:
+                cfg = self.cfg
+                K = -(-(cfg.idx_candidate_topk + 1) // K_CHUNK) * K_CHUNK
+                n_sel = (cfg.idx_group_topk - 1) * cfg.idx_ratio
+                tail = np.full((Tp, K - n_sel), SENTINEL, dtype=np.uint32)
+                tail[:, 0] = self.sink_row
+                for s_ in range(Tp):
+                    p = p0 + min(s_, T - 1)
+                    own = np.arange((p // cfg.idx_ratio) * cfg.idx_ratio, p + 1)
+                    tail[s_, 1 : 1 + own.size] = own
+                t = upload(self.mesh, torch.from_numpy(tail.view(np.int32)).reshape(1, 1, Tp, -1), ttnn.uint32,
+                           ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 2))
+            Hy4Attention._ROWS_DEV[key] = t
+        return t
+
+    def forward_part_rows(self, x, x_own, p0: int, T: int, cos_sin, mem=None):
+        """A selecting chunk split by rows: x [1, 1, Tp, 3072] every row (replicated: the cache rows and the indexer's
+        group keys), x_own [1, 1, Tp / N, 3072] this die's rows. -> this die's rows of the o_proj output summed over
+        every head [1, 1, Tp / N, 3072] (no reduce-scatter)."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        cfg, H, rp = self.cfg, self.H, self.rp
+        cos, sin = cos_sin[self.kind]
+        Tp, Tq = int(x.shape[-2]), int(x_own.shape[-2])
+        row = self._kv_row(x, cos, sin, mem)
+        row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        ttnn.deallocate(row)
+        self._write_rows(row_rm, p0, self._write_n(row_rm, T))
+        ttnn.deallocate(row_rm)
+        # this die's rows, every head
+        qa = mm(x_own, self.wqa, wfid(self.ckc, self.wqa), mem)
+        q_resid = self.q_norm(qa, mem)
+        ttnn.deallocate(qa)
+        q = mm(q_resid, rp["qb"], wfid(self.ckc, rp["qb"]), mem)  # [1, 1, Tq, H * 256]
+        q2 = ttnn.experimental.nlp_create_qkv_heads(q, num_heads=H, num_kv_heads=0, transpose_k_heads=False,
+                                                    memory_config=mem)[0]
+        ttnn.deallocate(q)
+        q_nope = ttnn.slice(q2, (0, 0, 0, 0), (1, H, Tq, self.nope), memory_config=mem)
+        q_rope = ttnn.slice(q2, (0, 0, 0, self.nope), (1, H, Tq, 256), memory_config=mem)
+        ttnn.deallocate(q2)
+        q_lat = ttnn.matmul(q_nope, rp["wuk"], compute_kernel_config=self.ckc_ukv, memory_config=mem)
+        ttnn.deallocate(q_nope)
+        cos_o, sin_o = self._rows_const("rope", p0, T, Tp)
+        q_r = self.rope(q_rope, cos_o, sin_o, mem)
+        ttnn.deallocate(q_rope)
+        idx = self.indexer.forward_rows(x, x_own, q_resid, p0, T, mem, self._rows_const("tail", p0, T, Tp))
+        ttnn.deallocate(q_resid)
+        qs = ttnn.repeat(rp["qs"], ttnn.Shape((1, 1, Tq, 1)), memory_config=mem)
+        qcat = ttnn.concat([q_lat, q_r, qs], dim=-1, memory_config=mem)  # [1, H, Tq, 608]
+        for t_ in (qs, q_lat, q_r):
+            ttnn.deallocate(t_)
+        q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(qcat)
+        o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)  # [1, H, Tq, 512] RM
+        ttnn.deallocate(q_rm)
+        ttnn.deallocate(idx)
+        ot = ttnn.to_layout(o, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(o)
+        ov = ttnn.matmul(ot, rp["wuvT"], compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1, H, Tq, 256]
+        ttnn.deallocate(ot)
+        ov2 = ttnn.experimental.nlp_concat_heads(ov, memory_config=mem)  # [1, 1, Tq, H * 256]
+        ttnn.deallocate(ov)
+        g = mm(x_own, rp["wg"], wfid(self.ckc, rp["wg"]), mem)
+        gated = ttnn.multiply(ov2, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        ttnn.deallocate(ov2)
+        ttnn.deallocate(g)
+        out = mm(gated, rp["wo"], wfid(self.ckc, rp["wo"]), mem)
+        ttnn.deallocate(gated)
+        return out
 
     def _out_part(self, x, o, mem):
         """Prefill: the attention output o [1, Hd, Tp, 512] TILE (consumed) -> V-up, output gate, o_proj partial."""

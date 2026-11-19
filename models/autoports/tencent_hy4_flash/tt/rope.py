@@ -63,14 +63,16 @@ class DeviceRope:
                      memory_config=mem)
         return ttnn.typecast(y, ttnn.bfloat16, memory_config=mem)
 
-    def tables(self, positions: torch.Tensor, theta: float):
-        """Upload fp32 copies of the bf16 cos / sin for these positions: [1, 1, n_pad32, 64] each."""
+    def tables(self, positions: torch.Tensor, theta: float, shard_rows: bool = False):
+        """Upload fp32 copies of the bf16 cos / sin for these positions: [1, 1, n_pad32, 64] each (shard_rows: split
+        over the dies by rows, die d holding the d-th quarter; n a multiple of 32 x dies)."""
         n = int(positions.numel())
         npad = -(-n // 32) * 32
         pos = torch.zeros(npad, dtype=torch.long)
         pos[:n] = positions.reshape(-1)
         c, s = cos_sin(pos, theta, self.dim)
+        mp = ("shard", 2) if shard_rows else "rep"
         return (
-            upload(self.mesh, c.float().reshape(1, 1, npad, self.dim), ttnn.float32),
-            upload(self.mesh, s.float().reshape(1, 1, npad, self.dim), ttnn.float32),
+            upload(self.mesh, c.float().reshape(1, 1, npad, self.dim), ttnn.float32, mapper=mp),
+            upload(self.mesh, s.float().reshape(1, 1, npad, self.dim), ttnn.float32, mapper=mp),
         )
