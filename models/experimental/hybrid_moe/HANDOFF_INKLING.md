@@ -14,14 +14,16 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
 | 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
 | 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
-| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-17 session 7, built from 9e85a433d56 + card): short chat TTFT 0.43 s, 49.8 / 47.1 tok/s greedy / sampled; new prompts prefill ~1,300-1,380 tok/s from 15K to 118K (118.7K in 91 s); resent prompt / next chat turn 1.3-1.8 s (engine prefix cache); GSM8K-200 96.0%, IFEval-200 89.0 / 89.0 (rerun 86.5 / 88.0); clean `tt-model stop` and restart without a board reset. **Multimodal not started.** |
+| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-19 session 9, first push with image / audio inputs): short chat TTFT 0.47 s, 55.2 / 50.9 tok/s greedy / sampled; new prompts prefill ~1,410-1,570 tok/s from 15K to 126K (125.9K in 89 s); resent prompt 1.1-2.1 s, next chat turn 2.1-2.2 s (engine prefix cache, resumes at the last 2048-token chunk boundary); GSM8K-200 96.0%, IFEval-200 89.5 / 91.0; multimodal suite (images, audio, speech, mixed, prefix cache) passes through the server. |
 
-**Open items (2026-11-17, end of session 7).** The published package is the deliverable; these are what is left.
-1. Prefill of new long prompts: ~1,300-1,380 tok/s (session 7; was ~1,150-1,200) vs M2.7's ~2,300. Now partly
-   bound by the command queue / device (staging copies queued behind compute) and the staging memcpy; levers in the
-   session-7 entry (zero-copy, MoE glue ops, sharded host-rows upload).
-2. Multimodal (vision / audio): not started; the package is text-only.
-3. Prefix cache holds one entry (the last long prompt): interleaved users lose the 1.3-2 s next-turn TTFT. Several
+**Open items (2026-11-19, end of session 9).** The published package is the deliverable; these are what is left.
+1. Prefill of new long prompts: ~1,410-1,570 tok/s through the server (session 9; session 7 ~1,300-1,380) vs M2.7's
+   ~2,300. Bound by the staging copies (~3.9 GB per 2048-token chunk through the command queue): faster dispatch only
+   moves the wait (session-9 entry). Levers left: zero-copy pinned writes (item 6), or more CPU experts with a CPU
+   library as exact as the streamed bfp4 / bfp8 copies (int4 fails the gate; a bfp kernel costs 1.5-1.8x per expert).
+   Speed is bimodal per process (~10%); measure with prefill_bench PF_SWEEP.
+2. Multimodal: shipped (host-side towers; session 8 commits f46b4c271f5..69c81ae7745).
+3. Prefix cache holds one entry (the last long prompt): interleaved users lose the ~2 s next-turn TTFT. Several
    snapshots cost host RAM for the rings (+ device buffers for the convs) per entry.
 4. Speculative decode: k=2 MTP. Wider passes lose on host-expert cost per verify row; suffix drafts at k=2 give
    nothing (session 6). A suffix win needs wider verify widths used only on long copy matches (traces for widths up to
@@ -581,3 +583,42 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     decode fetch (CQ1 copies "resident from the next replay"), the prefill CPU / stream split or the staging-slot reuse
     across requests (state carried between requests), socket-mode timing. Pre-existing (the published package does it);
     worth finding: a deterministic server would make evals comparable run to run.
+- **2026-11-19, session 9: long-context prefill host work (43d6d35c52e..4ca5ab25fb6).** Default 128K profile config
+  (2048-token chunks, group 8, 32 staging slots), 16K of held-out text, prefill_bench as served (PF_CAPTURE=1).
+  - **Measure with in-process sweeps.** Prefill speed is bimodal per process (and sometimes switches within one):
+    fast ~1,470-1,490 tok/s, slow ~1,330-1,360, every main-thread CPU step ~30% slower in the slow mode at steady
+    clocks. Cross-process A/Bs are unreliable; prefill_bench PF_SWEEP (one repeat per value, interleaved; `HYB.<attr>`
+    sets the hybrid state directly) gives values that repeat to +-0.5% within a process. Cause not found: not the main
+    thread's SMT sibling alone (isolating it changes the mean by 0), not tt-metal's dispatch threads (below).
+  - **Kept:** hostk_route_inkling single-pass top-k (routing -35%, same picks); HYB_PF_XPIN (default 1: the router
+    logits / MoE input reads land in persistent host tensors viewed through DLPack, no allocation or copy per read);
+    a fix to it (6a037826b95: the logits slot was never returned, one pinned [T, E] fp32 host tensor leaked per
+    layer-chunk; never in a published package); prefill timers (t_pf_part1, t_pf_merge, per-repeat lines);
+    PF_WATCHDOG; readback / upload microbenches. Quality gate on HEAD (2048 / group 8 / 32 slots): 0.8726 / 0.9506 /
+    0.1998, identical to the shipped config. 16K: ~1,350 -> ~1,470-1,490 tok/s (fast mode).
+  - **Where the time goes (PF_PROF / PF_OPS, 16K, 11.3 s):** staging copies (pinx write_at2, the copy path through
+    the command queue) 2.5 s, ttnn op dispatch 3.3 s for 49.6K ops (148 per layer-chunk), from_torch 1.1 s, routing /
+    planning ~1 s. Small ops cost 120-500 us and record_event ~2.5 ms because every mesh enqueue hands per-device work
+    to tt-metal's dispatch thread pool and sleeps until it is done; the pool's workers are pinned to fixed cores
+    (single NUMA node: round robin), which the CPU experts keep busy, so each enqueue pays scheduler wake-ups.
+    TT_MESH_PASS_THROUGH_THREAD_POOL=1 (the main thread dispatches itself) or isolating the main thread cut that time
+    (t_pf_pre_ev 540 -> 10, t_pf_part1 -35%) but t_stream grows by the same amount: **the ceiling is the staging
+    copies (~3.9 GB per chunk through the command queue / host memory bandwidth)**, not dispatch.
+  - **Rejected (measured):** prefill segment traces (the attention half of each hybrid layer captured once and
+    replayed; work kept in ~/inkling-work/shelved): fixed two hangs (the check mode bypassed hybrid/seg.py's
+    segmented-trace wrapper; the shared attention uploads stayed alive across replays) but logits drift beyond eager
+    run-to-run noise (mean |d| 0.94 vs 0.17-0.20) and no speedup (the replay ordering serializes what the eager
+    pipeline overlaps). Host-rows upload sharded over the dies: no change. Main-thread isolation, passthrough pool:
+    no net change. **HYB_PF_COPY_MS:** 9 is +7.5% at 16K (in-process sweep; 4 -> 1,473, 9 -> 1,588) by putting more
+    missed experts on the CPU, but int4 CPU experts fail the gate (11-17: 8 -> 0.8679 / 0.9476 / 0.2120); layers
+    18-41 only at 14: 0.8697 / 0.9486 / 0.2021, also worse on every metric. **A CPU kernel on the device-format
+    bytes** (bfp4 gate/up, bfp8 down, already pinned on the host; decoding verified bit-exact against ttnn.to_torch,
+    scratch bench) would make that shift quality-neutral, but it reads 18.3 MB per expert vs 6.6 MB of int4 and costs
+    1.5-1.8x per expert at 1-4 rows, which uses up the CPU's slack (~810 of ~1,330 ms per chunk at copy cost 9): not
+    pursued on this host.
+  - **Package (built from this commit + card), through `tt-model serve` at p300x2-128k:** short chat TTFT 0.47 s, 55.2 /
+    50.9 tok/s greedy / sampled (session 7: 49.8 / 47.1; the session-8 decode work ships here); prefill 3.8K 3.7 s,
+    14.9K 9.5 s (1,567 tok/s; was 1,376), 29.8K 19.9 s (1,495; was 1,383), 65.9K 45.3 s (1,456), 125.9K 89.3 s
+    (1,410; 118.7K took 91.2 s); resent 1.1-2.1 s, next turn 2.1 / 2.2 s (was 1.4 / 1.8: 2048-token chunks redo up to
+    2047 tokens); prefix check top-1 identical; multimodal suite and feature checks pass; GSM8K-200 96.0%, IFEval-200
+    89.5 / 91.0. The first build failed on an Ubuntu mirror outage (apt in tt-model's runtime stage; retried).
