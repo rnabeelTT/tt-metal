@@ -149,6 +149,7 @@ class Hy4BatchDecoder(Hy4Decoder):
 
     # ------------------------------------------------------------------ host side of a pass
     def _host_b(self, rows: dict):
+        """Every per-pass host input (vectorized; ~/m27-work/hy4/hostb_bench.py checks it bit-exact)."""
         cfg, L, R0 = self.cfg, self.L, ROWS
         r = cfg.idx_ratio
         gcap, ring = self.gcap, self.ring
@@ -156,24 +157,33 @@ class Hy4BatchDecoder(Hy4Decoder):
         R = sum(len(ids) for _, ids in order)
         assert R <= R0
         h = {}
-        tok = torch.zeros(1, R0, dtype=torch.int32)
-        pos = torch.zeros(R0, dtype=torch.long)
-        lane_of = np.full(R0, -1)
-        A = torch.zeros(64 * L, 64 * L)
-        P = torch.zeros(64 * L, R0)
-        Ag = torch.zeros(64 * L, 64 * L)
-        Pg = torch.zeros(64 * L, 32 * L)
-        offs = {k: np.zeros(-(-2 * L // 8) * 8, dtype=np.int32) for k in ("sparse", "swa", "grp")}
-        gpos = torch.zeros(32 * L, dtype=torch.long)
-        s = 0
+        tok = np.zeros((1, R0), dtype=np.int32)
+        pos = np.zeros(R0, dtype=np.int64)
+        # per-row lane data (rows < R): lane, sparse base, swa base
+        row_l = np.zeros(R0, dtype=np.int64)
+        row_bs = np.zeros(R0, dtype=np.int64)
+        row_bw = np.zeros(R0, dtype=np.int64)
+        nL = 64 * L
+        A = np.zeros((nL, nL), dtype=np.float32)
+        P = np.zeros((nL, R0), dtype=np.float32)
+        Ag = np.zeros((nL, nL), dtype=np.float32)
+        Pg = np.zeros((nL, 32 * L), dtype=np.float32)
+        no = -(-2 * L // 8) * 8
+        offs = {k: np.zeros(no, dtype=np.int32) for k in ("sparse", "swa", "grp")}
+        gpos = np.zeros(32 * L, dtype=np.int64)
+        i64 = np.arange(64)
         active = {l for l, _ in order}
-        for l in range(L):
-            if l not in active:  # idle lane: windows kept, slabs to the trash rows
-                A[64 * l : 64 * l + 64, 64 * l : 64 * l + 64] = torch.eye(64)
-                Ag[64 * l : 64 * l + 64, 64 * l : 64 * l + 64] = torch.eye(64)
-                offs["sparse"][2 * l : 2 * l + 2] = self.a0.trash_row
-                offs["swa"][2 * l : 2 * l + 2] = self.s0.trash_row if self.s0 else 0
+        idle = [l for l in range(L) if l not in active]
+        if idle:  # idle lanes: windows kept (identity blocks), slabs to the trash rows
+            d = (64 * np.asarray(idle)[:, None] + i64[None, :]).ravel()
+            A[d, d] = 1
+            Ag[d, d] = 1
+            t_s, t_w = self.a0.trash_row, (self.s0.trash_row if self.s0 else 0)
+            for l in idle:
+                offs["sparse"][2 * l : 2 * l + 2] = t_s
+                offs["swa"][2 * l : 2 * l + 2] = t_w
                 offs["grp"][2 * l : 2 * l + 2] = L * gcap
+        s = 0
         for l, ids in order:
             ln = self.lanes[l]
             p0, n = ln["pos"], len(ids)
@@ -181,103 +191,129 @@ class Hy4BatchDecoder(Hy4Decoder):
             assert p0 + n <= nb + 64, "rows must fit the 64-row staging window"
             gw0 = nb // r
             gb = (gw0 // 32) * 32
-            tok[0, s : s + n] = torch.tensor(ids, dtype=torch.int32)
-            pos[s : s + n] = torch.arange(p0, p0 + n)
-            lane_of[s : s + n] = l
-            for i in range(64):
-                q = nb + i
-                if p0 <= q < p0 + n:
-                    P[64 * l + i, s + q - p0] = 1
-                elif q < p0 and ln["ob"] <= q < ln["ob"] + 64:
-                    A[64 * l + i, 64 * l + q - ln["ob"]] = 1
-                g = gb + i
-                if gw0 <= g < gw0 + 16:
-                    Pg[64 * l + i, 32 * l + g - gw0] = 1
-                elif ln["ogb"] <= g < ln["ogb"] + 64:
-                    Ag[64 * l + i, 64 * l + g - ln["ogb"]] = 1
+            ob, ogb = ln["ob"], ln["ogb"]
             bs, bw = ln["base"]["sparse"], ln["base"]["swa"]
+            if n:
+                tok[0, s : s + n] = ids
+                pos[s : s + n] = np.arange(p0, p0 + n)
+                row_l[s : s + n] = l
+                row_bs[s : s + n] = bs
+                row_bw[s : s + n] = bw
+            q = nb + i64
+            mP = (q >= p0) & (q < p0 + n)
+            mA = ~mP & (q < p0) & (q >= ob) & (q < ob + 64)
+            P[64 * l + i64[mP], s + q[mP] - p0] = 1
+            A[64 * l + i64[mA], 64 * l + q[mA] - ob] = 1
+            g = gb + i64
+            mPg = (g >= gw0) & (g < gw0 + 16)
+            mAg = ~mPg & (g >= ogb) & (g < ogb + 64)
+            Pg[64 * l + i64[mPg], 32 * l + g[mPg] - gw0] = 1
+            Ag[64 * l + i64[mAg], 64 * l + g[mAg] - ogb] = 1
             offs["sparse"][2 * l : 2 * l + 2] = [bs + nb, bs + nb + 32]
             offs["swa"][2 * l : 2 * l + 2] = [bw + nb % ring, bw + (nb + 32) % ring] if ring else [0, 0]
             offs["grp"][2 * l : 2 * l + 2] = [l * gcap + gb, l * gcap + gb + 32]
-            gpos[32 * l : 32 * l + 16] = torch.arange(nb, nb + 64, r)
+            gpos[32 * l : 32 * l + 16] = np.arange(nb, nb + 64, r)
             ln["nb"], ln["gb"] = nb, gb
             s += n
         pos[R:] = pos[R - 1] if R else 0
-        h["tok"] = _rm(tok, ttnn.uint32)
+        h["tok"] = _rm(torch.from_numpy(tok), ttnn.uint32)
+        pos_t = torch.from_numpy(pos)
         for k in ("sparse", "swa"):
-            c, sn = cos_sin(pos, cfg.rope_theta[k], cfg.qk_rope)
+            c, sn = cos_sin(pos_t, cfg.rope_theta[k], cfg.qk_rope)
             h[f"cos_{k}"] = _tile(c.float().reshape(1, 1, R0, -1), ttnn.float32)
             h[f"sin_{k}"] = _tile(sn.float().reshape(1, 1, R0, -1), ttnn.float32)
         for name, t in (("A", A), ("P", P), ("Ag", Ag), ("Pg", Pg)):
-            h[name] = _tile(t.reshape(1, 1, *t.shape), ttnn.bfloat16)
+            h[name] = _tile(torch.from_numpy(t).to(torch.bfloat16).reshape(1, 1, *t.shape), ttnn.bfloat16)
         for k, v in offs.items():
             h[f"offs_{k}"] = _rm(torch.from_numpy(v).reshape(1, 1, 1, -1), ttnn.uint32)
-        gc, gs = cos_sin(gpos, cfg.rope_theta["sparse"], cfg.qk_rope)
+        gc, gs = cos_sin(torch.from_numpy(gpos), cfg.rope_theta["sparse"], cfg.qk_rope)
         h["gcos"] = _tile(gc.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
         h["gsin"] = _tile(gs.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
-        # per-row lists
-        swa = np.full((R0, self.K_swa), SENTINEL, dtype=np.uint32)
+        # per-row lists (rows >= R: padding, the sink only)
+        K_swa, K_dense, n_sel = self.K_swa, self.K_dense, self.n_sel
+        W, topk = cfg.window, cfg.idx_candidate_topk
+        swa = np.full((R0, K_swa), SENTINEL, dtype=np.uint32)
         swa[:, 0] = self.sink_swa
-        lo = torch.zeros(R0, 1)
-        hi = torch.zeros(R0, 1)
-        delta = torch.zeros(R0, 1)
-        nmask = torch.zeros(R0, 1)
-        tail = torch.full((R0, self.K_dense - self.n_sel), SENT_F)
+        lo = np.zeros((R0, 1), dtype=np.float32)
+        hi = np.zeros((R0, 1), dtype=np.float32)
+        delta = np.zeros((R0, 1), dtype=np.float32)
+        nmask = np.zeros((R0, 1), dtype=np.float32)
+        tail = np.full((R0, K_dense - n_sel), SENT_F, dtype=np.float32)
         tail[:, 0] = float(self.sink_sparse)
-        dense = torch.zeros(R0, self.K_dense)
+        dense = np.zeros((R0, K_dense), dtype=np.float32)
+        dense[R:, :] = SENT_F
+        dense[R:, 0] = float(self.sink_sparse)
         need = 0
-        for i in range(R0):
-            if i >= R:  # padding rows: the sink only
-                dense[i, :] = SENT_F
-                dense[i, 0] = float(self.sink_sparse)
-                continue
-            l = int(lane_of[i])
-            ln = self.lanes[l]
-            p = int(pos[i])
-            bs, bw = ln["base"]["sparse"], ln["base"]["swa"]
-            w = np.arange(max(0, p - cfg.window + 1), p + 1)
-            swa[i, 1 : 1 + w.size] = bw + (w % ring if ring else w)
+        if R:
+            p, rl, rbs, rbw = pos[:R], row_l[:R], row_bs[:R], row_bw[:R]
+            # sliding window: positions max(0, p - W + 1) .. p
+            st = np.maximum(0, p - W + 1)
+            j = np.arange(W)
+            w = st[:, None] + j[None, :]
+            ok = j[None, :] < (p - st + 1)[:, None]
+            v = rbw[:, None] + (w % ring if ring else w)
+            sub = swa[:R, 1 : 1 + W]
+            sub[ok] = v[ok]
             vis = p // r
-            lo[i, 0], hi[i, 0] = l * gcap, l * gcap + vis
-            need = max(need, l * gcap + vis)
-            delta[i, 0] = bs - r * l * gcap
-            if p < cfg.idx_candidate_topk:
-                dense[i, :] = SENT_F
-                dense[i, 0] = float(self.sink_sparse)
-                dense[i, 1 : 2 + p] = (bs + torch.arange(0, p + 1)).float()
-            else:
-                nmask[i, 0] = 1.0
-                own = torch.arange((p // r) * r, p + 1)
-                tail[i, 1 : 1 + own.numel()] = (bs + own).float()
+            lg = rl * gcap
+            lo[:R, 0] = lg
+            hi[:R, 0] = lg + vis
+            need = max(0, int((lg + vis).max()))
+            delta[:R, 0] = rbs - r * lg
+            dn = p < topk
+            if dn.any():  # dense regime rows: sink, then 0 .. p
+                pd, bd = p[dn], rbs[dn]
+                jd = np.arange(K_dense - 1)
+                blk = np.full((pd.size, K_dense), SENT_F, dtype=np.float32)
+                blk[:, 0] = float(self.sink_sparse)
+                okd = jd[None, :] < (pd + 1)[:, None]
+                vd = (bd[:, None] + jd[None, :]).astype(np.float32)
+                bsub = blk[:, 1:]
+                bsub[okd] = vd[okd]
+                dense[:R][dn] = blk
+            sl = ~dn
+            if sl.any():  # selecting rows: tail = sink, own group's positions
+                nmask[:R, 0][sl] = 1.0
+                ps, bss = p[sl], rbs[sl]
+                o0 = (ps // r) * r
+                jt = np.arange(K_dense - n_sel - 1)
+                okt = jt[None, :] < (ps - o0 + 1)[:, None]
+                vt = (bss[:, None] + o0[:, None] + jt[None, :]).astype(np.float32)
+                tsub = tail[:R][sl]
+                ts = tsub[:, 1:]
+                ts[okt] = vt[okt]
+                tail[:R][sl] = tsub
         h["idx_swa"] = _rm(torch.from_numpy(swa.view(np.int32)).reshape(1, 1, R0, -1), ttnn.uint32)
         for name, t in (("lo", lo), ("hi", hi), ("delta", delta), ("nmask", nmask)):
-            h[name] = _tile(t.reshape(1, 1, R0, 1), ttnn.float32)
-        h["tail_f"] = _tile(tail.reshape(1, 1, R0, -1), ttnn.float32)
-        h["dense_f"] = _tile(dense.reshape(1, 1, R0, -1), ttnn.float32)
+            h[name] = _tile(torch.from_numpy(t).reshape(1, 1, R0, 1), ttnn.float32)
+        h["tail_f"] = _tile(torch.from_numpy(tail).reshape(1, 1, R0, -1), ttnn.float32)
+        h["dense_f"] = _tile(torch.from_numpy(dense).reshape(1, 1, R0, -1), ttnn.float32)
         top = L * gcap + 32
         need = max(need, min(self.min_width, L * gcap))
         width = next((b for b in (2048 * 2**i for i in range(12)) if b >= need and b + 32 <= top), None)
         width = width or (L * gcap)
         # Engram rows per lane (its own n-gram history)
         eng = self.model.engram
-        for li in self.model.engram_li():
-            e = torch.zeros(1, 1, R0, 1536, dtype=torch.bfloat16)
-            h[f"eng_{li}"] = e
-        if eng is not None and self.model.engram_li():
+        eli = self.model.engram_li()
+        for li in eli:
+            h[f"eng_{li}"] = torch.zeros(1, 1, R0, 1536, dtype=torch.bfloat16)
+        if eng is not None and eli and _eng_batched(eng, eli, order, self.lanes, h):
+            pass
+        elif eng is not None and eli:
             saved = (dict(eng.hist), dict(eng.pos)) if hasattr(eng, "hist") else None
             s = 0
             for l, ids in order:
                 ln = self.lanes[l]
                 if ln["eng"] is not None:
                     eng.hist, eng.pos = dict(ln["eng"][0]), dict(ln["eng"][1])
-                for li in self.model.engram_li():
+                for li in eli:
                     h[f"eng_{li}"][0, 0, s : s + len(ids)] = eng.rows(li, torch.tensor(ids), ln["pos"])
                 if ln["eng"] is not None:
                     ln["eng"] = (dict(eng.hist), dict(eng.pos))
                 s += len(ids)
             if saved is not None:
                 eng.hist, eng.pos = saved
-        for li in self.model.engram_li():
+        for li in eli:
             h[f"eng_{li}"] = _tile(h[f"eng_{li}"], ttnn.bfloat16)
         self._sel = bool(nmask.any())
         return h, R, width, order
@@ -356,3 +392,48 @@ class Hy4BatchDecoder(Hy4Decoder):
             for tid in self.btraces.values():
                 ttnn.release_trace(self.mesh, tid)
             self.btraces, self.bout = {}, {}
+
+
+def _eng_batched(eng, eli, order, lanes, h):
+    """All lanes' Engram rows of a layer in ONE table gather + dequant + RMSNorm (instead of one EngramRows.rows call
+    per lane and layer). Row-wise math, so bit-identical to the per-lane calls; per-lane history / position updated
+    exactly as EngramRows.rows does. Only for EngramRows-like objects with every active lane holding its own state
+    (ln["eng"] set, as add() does); otherwise returns False and the caller takes the per-lane path."""
+    store = getattr(eng, "store", None)
+    if store is None or not hasattr(eng, "norm_w") or not hasattr(store, "hashers") or not order:
+        return False
+    if any(lanes[l]["eng"] is None for l, _ in order):
+        return False
+    from models.experimental.hybrid_moe.engram_store import FP32_EPS, dequant
+
+    keep = eng.keep
+    st = {l: (dict(lanes[l]["eng"][0]), dict(lanes[l]["eng"][1])) for l, _ in order}
+    for li in eli:
+        hs = store.hashers[li]
+        ngs, idss = [], []
+        for l, ids in order:
+            hist, pos = st[l]
+            p0 = lanes[l]["pos"]
+            a = np.asarray(ids, dtype=np.int64).reshape(-1)
+            if p0 == 0:
+                hist[li], pos[li] = np.zeros(0, np.int64), 0
+            if p0 != pos[li]:
+                raise ValueError(f"engram rows: layer {li} expected position {pos[li]}, got {p0} (call reset())")
+            ngs.append(hs.ngram_tokens(a, p0, hist[li] if p0 else None))
+            idss.append(a)
+        ng = np.concatenate(ngs)
+        T = ng.shape[0]
+        rows = hs.rows(ng)
+        q8 = torch.from_numpy(store.q[li][rows.reshape(-1)])
+        sc = torch.from_numpy(store.s[li][rows.reshape(-1)].astype(np.uint16)).view(torch.bfloat16)[:, None]
+        x = dequant(q8, sc).view(T, hs.moduli.shape[0], -1)
+        xf = x.float()
+        y = (xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + FP32_EPS) * eng.norm_w[li].float()).to(torch.bfloat16)
+        h[f"eng_{li}"][0, 0, :T] = y.flatten(1)
+        for (l, _), a in zip(order, idss):
+            hist, pos = st[l]
+            hist[li] = np.concatenate([hist[li], a])[-keep:]
+            pos[li] = lanes[l]["pos"] + len(a)
+    for l, _ in order:
+        lanes[l]["eng"] = st[l]
+    return True
