@@ -196,6 +196,7 @@ class Qwen35MoeModel(_M27Model):
                     )
                 if pipe and hyb is not None and layer.prefill_pipelined():
                     self._prefill_layer_pipelined(layer, li, grp, xs, start, page_table_host, hyb, on_layer, ahead)
+                    self._layer_hash(li, grp, xs)
                     continue
                 for i, (c0, n, Tp, valid) in enumerate(grp):
                     if hyb is not None:
@@ -208,6 +209,7 @@ class Qwen35MoeModel(_M27Model):
                     if on_layer is not None:
                         on_layer(li, start + c0 + n, "attn")
                         on_layer(li, start + c0 + n, "mlp")
+                self._layer_hash(li, grp, xs)
             for (c0, n, Tp, _), x in zip(grp, xs):
                 if on_chunk is not None:
                     on_chunk(c0, n, Tp, x)
@@ -231,6 +233,23 @@ class Qwen35MoeModel(_M27Model):
                 ttnn.deallocate(x)
         res = torch.cat(out)
         return res[-1] if logits_rows == "last" else res
+
+    def _layer_hash(self, li, grp, xs):
+        """INKLING_PF_LAYER_HASH=1 (debug: where do two prefills of one prompt part?): every chunk's residual after layer li
+        read back (die 0) and hashed, valid rows and padding rows apart, into self.layer_hashes [(li, c0, valid, pad)]."""
+        if os.environ.get("INKLING_PF_LAYER_HASH") != "1":
+            return
+        import hashlib
+
+        import torch
+        import ttnn
+
+        hs = self.__dict__.setdefault("layer_hashes", [])
+        for (c0, n, Tp, _), x in zip(grp, xs):
+            t = ttnn.to_torch(ttnn.get_device_tensors(x)[0]).reshape(Tp, -1).contiguous()
+            v = hashlib.sha1(t[:n].view(torch.int16).numpy().tobytes()).hexdigest()[:12]
+            pd = hashlib.sha1(t[n:].view(torch.int16).numpy().tobytes()).hexdigest()[:12] if n < Tp else "-"
+            hs.append((li, c0, v, pd))
 
     @staticmethod
     def _prefill_layer_pipelined(layer, li, grp, xs, start, page_table_host, hyb, on_layer, ahead):

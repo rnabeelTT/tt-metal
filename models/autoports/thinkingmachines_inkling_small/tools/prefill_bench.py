@@ -202,6 +202,8 @@ def main():
             print(f"earlier request: {n_prev} prompt tokens in {time.time() - t0:.1f} s", flush=True)
         st0 = dict(HYB.st) if HYB is not None else {}
         eng._reset()
+        if HYB is not None:
+            HYB.reset_placement()
         prof = None
         if os.environ.get("PF_PROF") == "1":  # the main thread's time by function (where the host blocks or works)
             import cProfile
@@ -214,6 +216,8 @@ def main():
             import faulthandler
 
             faulthandler.dump_traceback_later(int(os.environ["PF_WATCHDOG"]), exit=True)
+        if hasattr(eng.model, "layer_hashes"):
+            eng.model.layer_hashes = []
         t0 = time.time()
         last = eng._prefill(ids)
         ttnn.synchronize_device(mesh)
@@ -257,6 +261,28 @@ def main():
                     ),
                     flush=True,
                 )
+        det = int(os.environ.get("PF_DET", "0"))  # PF_DET=n: n more prefills of the prompt, last-row logits vs the first
+        if det and last is not None:
+            ref, same = last.float().cpu().clone(), 0
+            ref_h = list(getattr(eng.model, "layer_hashes", []))
+            for r in range(det):
+                eng._reset()
+                if HYB is not None:
+                    HYB.reset_placement()
+                eng.model.layer_hashes = []
+                lr = eng._prefill(ids).float().cpu()
+                if ref_h:  # INKLING_PF_LAYER_HASH=1: the first layer whose residual differs from the first prefill's
+                    first = next(((a, b) for a, b in zip(ref_h, eng.model.layer_hashes) if a != b), None)
+                    if first:
+                        print(f"det repeat {r + 1}: first difference after layer {first[0][0]} chunk {first[0][1]}: "
+                              f"valid rows {'differ' if first[0][2] != first[1][2] else 'same'}, padding rows "
+                              f"{'differ' if first[0][3] != first[1][3] else 'same'}", flush=True)
+                    else:
+                        print(f"det repeat {r + 1}: every layer's residual identical", flush=True)
+                d = (lr - ref).abs().max().item()
+                same += d == 0
+                print(f"det repeat {r + 1}: max |d| {d:.4g}, argmax {int(lr.argmax())} vs {int(ref.argmax())}", flush=True)
+            print(f"DET {N} tokens: {same} of {det} repeats bit-identical to the first", flush=True)
         if os.environ.get("PF_DUMP") and last is not None:  # the last row's logits, for bit-identity checks
             torch.save(last.cpu(), os.environ["PF_DUMP"])
             print(f"saved {os.environ['PF_DUMP']}: logits {tuple(last.shape)}, argmax {int(last.argmax())}", flush=True)
