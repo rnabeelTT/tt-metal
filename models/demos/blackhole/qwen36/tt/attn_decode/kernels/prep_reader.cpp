@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 namespace {
 constexpr uint32_t BF_FACE = 512, BF_ROW = 32, BF_TILE = 2048;

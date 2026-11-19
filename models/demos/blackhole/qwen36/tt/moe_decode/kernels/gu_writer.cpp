@@ -26,7 +26,7 @@
 #include "ckernel_defs.h"
 #include "gu_layout.hpp"
 #include "router_topk.hpp"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -59,7 +59,7 @@ void kernel_main() {
 
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
     const auto s_act = TensorAccessor(act_args, act_addr, act_row_bytes);
-    const auto s_route = TensorAccessor(route_args, route_addr, 64);
+    const auto s_route = TensorAccessor(route_args, route_addr, moe_topk::REC_BYTES);
     const auto s_lg = TensorAccessor(lg_args, logits_addr, moe_topk::LG_PAGE);
 
     // logits [E / 2, E) (they gate the expert stream)
@@ -107,7 +107,7 @@ void kernel_main() {
     // this die's window: positions beyond route[15] hold no expert (positions ascend per core); the compute takes the
     // count through the mailboxes
     uint32_t mine = 0;
-    while (mine < num_slots && get_arg_val<uint32_t>(7 + mine) <= route[15]) {
+    while (mine < num_slots && get_arg_val<uint32_t>(7 + mine) <= route[moe_topk::R_NLIVE]) {
         ++mine;
     }
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, mine);
@@ -121,7 +121,7 @@ void kernel_main() {
         ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, static_cast<uint32_t>(route[16 + s]) << 16);
     }
     if (route_owner) {
-        noc_async_write(route_l1, s_route.get_noc_addr(0), 64);
+        noc_async_write(route_l1, s_route.get_noc_addr(0), moe_topk::REC_BYTES);
     }
 
     for (uint32_t i = 0; i < mine; ++i) {

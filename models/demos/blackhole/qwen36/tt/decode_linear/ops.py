@@ -85,16 +85,18 @@ class DecodeLinear:
                               cache_file_name=cache_file_name)
 
     # ---- op ------------------------------------------------------------------------------------------------------------
-    def _parts(self, x, w, rows, out_memory_config, flat=None):
-        """flat = (noc_xy, sem_id): x is a flat BF16 vector on that core, ready once program semaphore sem_id is set."""
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+    def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16):
+        """flat = (noc_xy, sem_id): x is a flat BF16 vector on that core, ready once program semaphore sem_id is set.
+        out_dtype: bfloat16 (default) or float32 (the FP32 DST packed unrounded, e.g. logits)."""
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), out_dtype, ttnn.TILE_LAYOUT,
                                              self.mesh_device, out_memory_config)
+        out_page = 4096 if out_dtype == ttnn.float32 else 2048
         cb_x, cb_w, cb_out = 0, 1, 16
         fmt = lambda i, dt, page, pages: ttnn.CBDescriptor(
             total_size=page * pages, core_ranges=self.cores,
             format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=dt, page_size=page)])
         cbs = [fmt(cb_x, ttnn.bfloat16, 2048, self.kt), fmt(cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
-               fmt(cb_out, ttnn.bfloat16, 2048, 2)]
+               fmt(cb_out, out_dtype, out_page, 2)]
         rd_ct = [cb_w, self.kt, self.tile_bytes, self.page_bytes, self.buffers]
         wr_ct = [cb_x, cb_out, self.kt, rows, self.n_tiles]
         wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args() + ttnn.TensorAccessorArgs(out).get_compile_time_args()
@@ -111,12 +113,12 @@ class DecodeLinear:
             for c in ttnn.corerange_to_cores(cores, row_wise=True):
                 rt[c.x][c.y] = args[(c.x, c.y)]
             return rt
-        defines = []
+        defines = [("OUT_PAGE_BYTES", str(out_page))] if out_page != 2048 else []
         if flat is not None:
             (fx, fy), sem = flat
             cb_xf = 2
             cbs.append(fmt(cb_xf, ttnn.bfloat16, self.kt * 64, 1))
-            defines = [("X_FROM_FLAT", "1"), ("X_NOC_X", str(fx)), ("X_NOC_Y", str(fy)), ("X_SEM", str(sem)),
+            defines += [("X_FROM_FLAT", "1"), ("X_NOC_X", str(fx)), ("X_NOC_Y", str(fy)), ("X_SEM", str(sem)),
                        ("CB_XF", str(cb_xf))]
         dm = ttnn.DataMovementConfigDescriptor
         kernels = []
@@ -141,10 +143,11 @@ class DecodeLinear:
         ]
         return kernels, cbs, [x, w, out], out
 
-    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG):
-        """x: [.., rows, K] BF16 TILE (rows <= 16); w: weight(); -> [1, 1, rows, N] BF16 TILE."""
-        assert 1 <= rows <= 16
-        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config)
+    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16):
+        """x: [.., rows, K] BF16 TILE (rows <= 16, or 32: whole tiles, every row defined); w: weight();
+        -> [1, 1, rows, N] BF16 TILE."""
+        assert 1 <= rows <= 16 or rows == 32
+        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype)
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return out
 

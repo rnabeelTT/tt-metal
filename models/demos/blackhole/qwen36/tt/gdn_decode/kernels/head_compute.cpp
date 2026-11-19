@@ -36,7 +36,7 @@
 #include "api/compute/tile_move_copy.h"
 #include "api/compute/transpose.h"
 #include "api/dataflow/circular_buffer.h"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 #ifdef TRISC_MATH
 namespace ckernel::sfpu {

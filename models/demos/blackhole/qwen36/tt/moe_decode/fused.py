@@ -92,7 +92,7 @@ class FusedMoEDecode:
                 **kw,
             )
 
-        if router == "sigb":
+        if router in ("sigb", "keys"):
             assert router_logits is not None and selection_bias is not None
             self.bias = upload_selection_bias(mesh_device, selection_bias)
         else:

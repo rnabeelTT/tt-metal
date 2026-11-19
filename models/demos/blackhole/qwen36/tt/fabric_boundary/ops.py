@@ -286,7 +286,7 @@ class FabricBoundary:
             fabric_args.append(1 if hops > 0 else 0)
             if hops > 0:
                 fabric_args += ttnn.setup_fabric_connection(
-                    src_fabric_node_id=src,
+                    mesh_device=self.mesh_device, src_fabric_node_id=src,
                     dst_fabric_node_id=self.mesh_device.get_fabric_node_id(self._neighbor(idx, step)),
                     link_idx=0, program_descriptor=program, worker_core=self.core,
                 )

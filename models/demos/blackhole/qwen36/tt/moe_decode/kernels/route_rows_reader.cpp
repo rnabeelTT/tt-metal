@@ -81,16 +81,23 @@ void kernel_main() {
     for (uint32_t j = 0; j < 32; ++j) {
         r[j] = 0;
     }
+#ifdef ROUTE_TILES
+    // the weights straight at the 64-byte aligned rec + 64 (rec[32, 32 + k)): with k = 16 the table layout's
+    // [17, 17 + k) would reach rec[32] and be overwritten by a copy
+    for (uint32_t j = 0; j < topk; ++j) {
+        r[j] = static_cast<uint16_t>(ids[j]);
+        r[32 + j] = w[j];
+    }
+#else
     for (uint32_t j = 0; j < topk; ++j) {
         r[j] = static_cast<uint16_t>(ids[j]);
         r[17 + j] = w[j];
     }
     r[16] = w_shared;
+#endif
 #ifdef ROUTE_TILES
-    // row r of a 2-byte [32, 32] tile: face 2 (r / 16), row r % 16; the ids at rec[0, k), the weights at rec[17, 17 + k)
-    for (uint32_t j = 0; j < topk; ++j) {
-        r[32 + j] = r[17 + j];  // 64-byte aligned copy of the weights (rec + 64)
-    }
+    // row r of a 2-byte [32, 32] tile: face 2 (r / 16), row r % 16; the ids at rec[0, k), the weights at rec[32, 32 + k)
+    (void)w_shared;
     const uint32_t off = (row / 16) * 1024 + (row % 16) * 32;
     noc_async_write(rec, s_ids.get_noc_addr(0, off), 2 * topk);
     noc_async_write(rec + 64, s_scores.get_noc_addr(0, off), 2 * topk);

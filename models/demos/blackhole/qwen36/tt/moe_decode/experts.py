@@ -67,7 +67,16 @@ def gu_ring(kt, m, nb, tile_bytes, want, even=False):
     return n
 
 
-ROUTERS = ("softmax", "sigb")  # Qwen3.5-MoE softmax top-k + gated shared expert; GLM-4.5-Air sigmoid + selection bias
+ROUTERS = ("softmax", "sigb", "keys")  # Qwen3.5-MoE softmax top-k + gated shared expert; GLM-4.5-Air sigmoid + selection
+# bias; "keys" (Hy4-flash): the sigb router with the sigmoid / key precomputed on the Tensix (logits row [keys | s] FP32)
+
+
+def router_defines(router):
+    return {"softmax": [], "sigb": [("ROUTER_SIGB", "1")], "keys": [("ROUTER_SIGB", "1"), ("ROUTER_KEYS", "1")]}[router]
+
+
+def is_sig(router):
+    return router in ("sigb", "keys")
 
 
 def ep_offsets(mesh_device, experts_per_die):
@@ -95,6 +104,8 @@ def _ep_defines(ep_experts, gate_first=False):
 def logits_row_bytes(num_experts, router):
     """L1 bytes of one gathered router-logits row (kernels/router_topk.hpp): BF16 with the shared-gate column (softmax),
     FP32 without it (sigb), + the sigb selection bias (Q23 int32 per expert)."""
+    if router == "keys":
+        return 128 * (2 * num_experts // TILE) + 4 * num_experts + 64  # [keys | s] FP32, then the (unused) bias
     if router == "sigb":
         return 128 * (num_experts // TILE) + 4 * num_experts + 64  # + 64: the bias lands 64-byte aligned
     return 64 * (num_experts // TILE + 1)
@@ -285,8 +296,9 @@ class MoEDecodeBuffers:
             else {}
         )
         kw = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
-        self.route = ttnn.from_torch(
-            torch.zeros(1, 1, 1, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
+        self.route = ttnn.from_torch(  # k = 16: the 128-byte record (ROUTE_WIDE)
+            torch.zeros(1, 1, 1, 64 if k == 16 else 32, dtype=torch.int32), dtype=ttnn.uint16,
+            layout=ttnn.ROW_MAJOR_LAYOUT, **kw
         )
         self.act = ttnn.from_torch(
             torch.zeros(1, 1, k + 1, inter, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
@@ -315,7 +327,7 @@ class ExpertGateUp:
         self.n_tiles = 2 * inter // TILE
         self.pairs = self.n_tiles // 2
         self.m, self.nb, self.groups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
-        assert num_experts % 64 == 0 and k <= 15, (num_experts, k)
+        assert num_experts % 64 == 0 and k <= 16, (num_experts, k)  # k = 16: ROUTE_WIDE
         self.E, self.k, self.inter = num_experts, k, inter
         self.readers = min(readers, k)
         self.slots = [([0] if r == 0 and shared else []) + list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
@@ -334,7 +346,7 @@ class ExpertGateUp:
     def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None, ep_offset=None):
         """(kernels, cbs). notify = (semaphore id, [(NOC x, y)] of the down cores) for the one-program MoE. bias: the
         sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
-        assert (bias is not None) == (self.router == "sigb") and (notify is None or self.router == "softmax")
+        assert (bias is not None) == is_sig(self.router) and (notify is None or self.router == "softmax")
         assert (ep_offset is not None) == bool(self.ep_experts) and (notify is None or not self.ep_experts)
         cb_x, cb_w, cb_route, cb_scr, cb_part, cb_lg, cb_act = 0, 1, 2, 3, 4, 5, 16
         lg_bytes = logits_row_bytes(self.E, self.router)
@@ -364,8 +376,7 @@ class ExpertGateUp:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, self.kt, self.m, self.banks]
         defines = [] if notify is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(notify[0]))]
-        if self.router == "sigb":
-            defines.append(("ROUTER_SIGB", "1"))
+        defines += router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
         defines += _ep_defines(self.ep_experts, self.gate_first)
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs
 
@@ -437,6 +448,8 @@ class ExpertDown:
         defines = [] if wait is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(wait[0])), ("MOE_NOTIFIERS", str(wait[1]))]
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
+        if self.k == 16:
+            defines.append(("ROUTE_WIDE", "1"))
         defines += _ep_defines(self.ep_experts)
         return _kernels(self.cores, "dn", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines), cbs
 

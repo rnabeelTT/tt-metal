@@ -119,8 +119,12 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
+    // (tt-metal main: the custom_mm templates take one layout enum instead of split_acc / dense_packing)
+    constexpr CustomMmDestLayout mm_layout = dense_packing
+        ? (split_acc ? CustomMmDestLayout::DenseSplitAcc : CustomMmDestLayout::Dense)
+        : (split_acc ? CustomMmDestLayout::DefaultSplitAcc : CustomMmDestLayout::Default);
     constexpr uint32_t ct = m;  // one bank block's columns
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+    custom_mm_block_init<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
 
 #ifdef EP_EXPERTS
     uint32_t num_slots = 0;  // this die's window of the top-k: the live slot count from BRISC
@@ -136,7 +140,7 @@ void kernel_main() {
         tile_regs_acquire();
         gu_layout::static_for<nb>([&](auto h) {
             cb_wait_front(cb_w, kt * m);
-            custom_mm_block<true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
+            custom_mm_block<mm_layout, true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
             cb_pop_front(cb_w, kt * m);
         });
 
@@ -145,10 +149,10 @@ void kernel_main() {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
 #ifdef GATE_FIRST
             SWIGLU_CLAMP_GATE(u);
-            SWIGLU_CLAMP_UP(gu_layout::gate_dst<m, banks>(u));
+            SWIGLU_CLAMP_UP((gu_layout::gate_dst<m, banks>(u)));
             silu_rows(u);  // [gate | up] packing: the first-half column is the gate
 #else
-            SWIGLU_CLAMP_GATE(gu_layout::gate_dst<m, banks>(u));
+            SWIGLU_CLAMP_GATE((gu_layout::gate_dst<m, banks>(u)));
             SWIGLU_CLAMP_UP(u);
             silu_rows(gu_layout::gate_dst<m, banks>(u));
 #endif
@@ -174,8 +178,8 @@ void kernel_main() {
         tile_regs_release();
         cb_push_back(cb_act, np);
 
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+        custom_mm_block_init_short<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
     }
     cb_pop_front(cb_x, kt);
-    custom_mm_block_uninit<dense_packing>();
+    custom_mm_block_uninit<mm_layout>(cb_act);
 }

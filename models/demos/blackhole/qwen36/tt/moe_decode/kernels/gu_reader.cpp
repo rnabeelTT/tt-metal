@@ -31,7 +31,7 @@
 #include "gu_layout.hpp"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t logits_addr = get_arg_val<uint32_t>(0);
@@ -158,7 +158,7 @@ void kernel_main() {
         route[j] = static_cast<uint16_t>(j < n_live ? ids[j] : 0);
         route[16 + 1 + j] = j < n_live ? w[j] : 0;
     }
-    route[15] = static_cast<uint16_t>(n_live);
+    route[moe_topk::R_NLIVE] = static_cast<uint16_t>(n_live);
     route[16] = w_shared;
     cb_push_back(cb_route, 1);
     }

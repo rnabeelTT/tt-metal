@@ -122,8 +122,12 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
+    // (tt-metal main: the custom_mm templates take one layout enum instead of split_acc / dense_packing)
+    constexpr CustomMmDestLayout mm_layout = dense_packing
+        ? (split_acc ? CustomMmDestLayout::DenseSplitAcc : CustomMmDestLayout::Dense)
+        : (split_acc ? CustomMmDestLayout::DefaultSplitAcc : CustomMmDestLayout::Default);
     constexpr uint32_t ct = m;  // one bank block's columns
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+    custom_mm_block_init<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
 
     uint32_t n = 0;
     UNPACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
@@ -139,10 +143,10 @@ void kernel_main() {
             tile_regs_acquire();
             gu_layout::static_for<nb>([&](auto h) {
                 constexpr uint32_t hb = decltype(h)::value;
-                custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+                custom_mm_block<mm_layout, true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
             });
-            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
-            custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
+            custom_mm_block_init_short<transpose, mm_layout>(cb_sc, cb_id, cb_act, 1);
+            custom_mm_block<mm_layout, true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
 #ifdef SPLIT_PAIR
 #ifdef ROLE_GATE
@@ -163,7 +167,7 @@ void kernel_main() {
             pack_tile(0, cb_act);
             tile_regs_release();
             cb_push_back(cb_act, 1);
-            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+            custom_mm_block_init_short<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
             continue;
 #endif
             silu_tile_init();
@@ -171,10 +175,10 @@ void kernel_main() {
                 constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
 #ifdef GATE_FIRST
                 SWIGLU_CLAMP_GATE(u);
-                SWIGLU_CLAMP_UP(gu_layout::gate_dst<m, banks>(u));
+                SWIGLU_CLAMP_UP((gu_layout::gate_dst<m, banks>(u)));
                 silu_rows(u);  // [gate | up] packing: the first-half column is the gate
 #else
-                SWIGLU_CLAMP_GATE(gu_layout::gate_dst<m, banks>(u));
+                SWIGLU_CLAMP_GATE((gu_layout::gate_dst<m, banks>(u)));
                 SWIGLU_CLAMP_UP(u);
                 silu_rows(gu_layout::gate_dst<m, banks>(u));
 #endif
@@ -194,12 +198,12 @@ void kernel_main() {
             tile_regs_release();
             cb_push_back(cb_act, np);
 
-            custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+            custom_mm_block_init_short<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
         }
         cb_pop_front(cb_sc, 2 * groups);
         cb_pop_front(cb_w, nb * kt * m);
     }
     cb_pop_front(cb_id, 2);
     cb_pop_front(cb_x, groups * kt);
-    custom_mm_block_uninit<dense_packing>();
+    custom_mm_block_uninit<mm_layout>(cb_act);
 }

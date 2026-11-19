@@ -27,6 +27,8 @@ from .experts import (
     KERNEL_DIR,
     RING_BYTES,
     ROUTERS,
+    is_sig,
+    router_defines,
     TILE,
     TILE_BYTES,
     _cb,
@@ -119,7 +121,7 @@ class RouteRows:
 
     def __call__(self, logits, table, bias=None):
         """bias: the sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
-        assert (bias is not None) == (self.router == "sigb")
+        assert (bias is not None) == is_sig(self.router)
         cb_scr, cb_part, cb_lg = 0, 1, 2
         lg_bytes = logits_row_bytes(self.E, self.router)
         cbs = [
@@ -136,7 +138,7 @@ class RouteRows:
         rd_ct = [cb_scr, cb_part, self.E, self.k] + lg_ct + ttnn.TensorAccessorArgs(table).get_compile_time_args()
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
-        defines = [("ROUTER_SIGB", "1")] if self.router == "sigb" else []
+        defines = router_defines(self.router)
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),
@@ -183,7 +185,7 @@ class RouteScores(RouteRows):
         return self._out[rows]
 
     def __call__(self, logits, rows, bias=None):
-        assert (bias is not None) == (self.router == "sigb")
+        assert (bias is not None) == is_sig(self.router)
         scores, ids = self.outputs(rows)
         cb_scr, cb_part, cb_lg = 0, 1, 2
         lg_bytes = logits_row_bytes(self.E, self.router)
@@ -206,7 +208,7 @@ class RouteScores(RouteRows):
         )
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
-        defines = [("ROUTE_TILES", "1")] + ([("ROUTER_SIGB", "1")] if self.router == "sigb" else [])
+        defines = [("ROUTE_TILES", "1")] + router_defines(self.router)
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),

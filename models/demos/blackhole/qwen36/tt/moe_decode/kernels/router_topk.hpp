@@ -13,6 +13,16 @@
 #include <stdint.h>
 
 namespace moe_topk {
+// The 1-row route record (gu_reader -> gu_writer -> DRAM route buffer -> down kernels), UINT16 slots: ids [0, k),
+// shared weight 16, routed weights [17, 17 + k), the live count (EP) at R_NLIVE. ROUTE_WIDE (k = 16, Hy4-flash):
+// 128 bytes, the live count past the weights (id 15 would sit on slot 15).
+#ifdef ROUTE_WIDE
+constexpr uint32_t REC_BYTES = 128;
+constexpr uint32_t R_NLIVE = 33;
+#else
+constexpr uint32_t REC_BYTES = 64;
+constexpr uint32_t R_NLIVE = 15;
+#endif
 // BF16 bits -> Q16.16 fixed point (|x| < 2^14).
 inline int32_t bf16_to_q16(uint16_t b) {
     const int32_t e = (b >> 7) & 0xFF;
@@ -281,26 +291,92 @@ inline void sigmoid_weights(const uint32_t* f32, const uint32_t* ids, uint16_t* 
     }
 }
 
+// ---- ROUTER_KEYS (with ROUTER_SIGB; Hy4-flash): the Tensix computes s = sigmoid(logit) and the selection key s + b in
+// FP32 (two SFPU ops), the row is [keys (E) | s (E)] FP32; here only the top-k of the keys' order bits (a compare per
+// expert, no fixed-point sigmoid: that cost ~40 us per row on the data-movement cores) and the weights s_j / sum s.
+inline uint32_t f32_order_key(uint32_t b) { return (b & 0x80000000u) ? ~b : (b | 0x80000000u); }
+
+template <uint32_t topk>
+inline void select_range_keys(const uint32_t* f32, uint32_t i0, uint32_t i1, uint32_t* keys_out, uint32_t* ids_out) {
+    uint32_t keys[topk], ids[topk];
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys[j] = 0;
+        ids[j] = 0;
+    }
+#pragma GCC unroll 1
+    for (uint32_t i = i0; i < i1; ++i) {
+        const uint32_t key = f32_order_key(f32[i]);
+        if (key > keys[topk - 1]) {
+            keys[topk - 1] = key;
+            ids[topk - 1] = i;
+#pragma GCC unroll 16
+            for (uint32_t j = topk - 1; j > 0; --j) {
+                if (keys[j] > keys[j - 1]) {
+                    const uint32_t tk = keys[j], ti = ids[j];
+                    keys[j] = keys[j - 1];
+                    ids[j] = ids[j - 1];
+                    keys[j - 1] = tk;
+                    ids[j - 1] = ti;
+                }
+            }
+        }
+    }
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys_out[j] = keys[j];
+        ids_out[j] = ids[j];
+    }
+}
+
+// weights_j = s_j / sum s (BF16 bits), s the FP32 sigmoids at f32[num_experts + id] (in (0, 1): Q23 via f32_to_q24 / 2)
+template <uint32_t topk>
+inline void keys_weights(const uint32_t* f32, uint32_t num_experts, const uint32_t* ids, uint16_t* weights) {
+    uint64_t s[topk];
+    uint64_t sum = 0;
+    for (uint32_t j = 0; j < topk; ++j) {
+        const int32_t q = f32_to_q24(f32[num_experts + ids[j]]);
+        s[j] = q > 0 ? static_cast<uint64_t>(q) >> 1 : 0;
+        sum += s[j];
+    }
+    if (sum == 0) {
+        sum = 1;
+    }
+    const uint64_t inv = (1ull << 59) / sum;
+    for (uint32_t j = 0; j < topk; ++j) {
+        weights[j] = fixed_to_bf16((s[j] * inv) >> 32, 27);
+    }
+}
+
 // The logits row as the routing kernels read it: one row of each [32, 32] TILE page, faces 0 and 1 back to back.
 #ifdef ROUTER_SIGB
 constexpr uint32_t LG_PAGE = 4096;   // FP32 tile
 constexpr uint32_t LG_HALF = 64;     // 16 FP32 values of a face row
 constexpr uint32_t LG_FACE1 = 1024;  // face 1 offset
 inline uint32_t lg_row_off(uint32_t r) { return (r / 16) * 2048 + (r % 16) * 64; }
+#ifdef ROUTER_KEYS
+constexpr uint32_t lg_tiles(uint32_t e) { return 2 * e / 32; }  // [keys | s]
+constexpr uint32_t sel_tiles(uint32_t e) { return e / 32; }     // the keys: what the writer's half reads
+#else
 constexpr uint32_t lg_tiles(uint32_t e) { return e / 32; }  // no shared-gate column
+constexpr uint32_t sel_tiles(uint32_t e) { return lg_tiles(e); }
+#endif
 #else
 constexpr uint32_t LG_PAGE = 2048;
 constexpr uint32_t LG_HALF = 32;
 constexpr uint32_t LG_FACE1 = 512;
 inline uint32_t lg_row_off(uint32_t r) { return (r / 16) * 1024 + (r % 16) * 32; }
 constexpr uint32_t lg_tiles(uint32_t e) { return e / 32 + 1; }  // + the shared-gate logit's tile
+constexpr uint32_t sel_tiles(uint32_t e) { return lg_tiles(e); }
 #endif
 constexpr uint32_t LG_TILE_L1 = 2 * LG_HALF;  // bytes per tile of the gathered row
 
 // Router of one row: experts [e0, e1) of the gathered row `lg` (bias: Q23 per expert, ROUTER_SIGB only).
 template <uint32_t topk>
 inline void route_select(uint32_t lg, const int32_t* bias, uint32_t e0, uint32_t e1, uint32_t* keys, uint32_t* ids) {
-#ifdef ROUTER_SIGB
+#if defined(ROUTER_KEYS)
+    select_range_keys<topk>(reinterpret_cast<const uint32_t*>(lg), e0, e1, keys, ids);
+#elif defined(ROUTER_SIGB)
     select_range_sigb<topk>(reinterpret_cast<const uint32_t*>(lg), bias, e0, e1, keys, ids);
 #else
     select_range<topk>(reinterpret_cast<const uint32_t*>(lg), e0 / 2, e1 / 2, keys, ids);
@@ -309,7 +385,10 @@ inline void route_select(uint32_t lg, const int32_t* bias, uint32_t e0, uint32_t
 // Routing weights of the selected (BF16 bits) and the shared-expert weight.
 template <uint32_t topk, uint32_t num_experts>
 inline uint16_t route_weights(uint32_t lg, const uint32_t* ids, uint16_t* w) {
-#ifdef ROUTER_SIGB
+#if defined(ROUTER_KEYS)
+    keys_weights<topk>(reinterpret_cast<const uint32_t*>(lg), num_experts, ids, w);
+    return 0x3F80;
+#elif defined(ROUTER_SIGB)
     sigmoid_weights<topk>(reinterpret_cast<const uint32_t*>(lg), ids, w);
     return 0x3F80;  // ungated shared expert
 #else
