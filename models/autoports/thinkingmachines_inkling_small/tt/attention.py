@@ -63,6 +63,15 @@ def _pf_upload(key, mesh, make):
     return t
 
 
+def _free_unless_shared(src, dst):
+    """Frees src unless dst (an op's result from src) is the same buffer. ttnn.pad of r [.., 16] to [.., 32] in TILE
+    layout returns r's own buffer (the tile already holds 32 columns): freeing r freed rq, and the prefill SDPA's
+    output, allocated next, landed on it, so the kernel overwrote the Rq tiles it was still reading (rows' relative
+    bias corrupted depending on core timing: non-deterministic prefill attention on 1K-2K-row chunks)."""
+    if src.buffer_address() != dst.buffer_address():
+        ttnn.deallocate(src)
+
+
 def prefill_uploads_clear():
     for t in _PF_UPLOADS.values():
         ttnn.deallocate(t)
@@ -284,7 +293,7 @@ class InklingAttention:
         ttnn.deallocate(q)
         r = ttnn.reshape(r, (1, 1, NH, DR))
         rq = ttnn.pad(r, [1, 1, NH, 32], [0, 0, 0, 0], 0.0, memory_config=DRAM)
-        ttnn.deallocate(r)
+        _free_unless_shared(r, rq)
         o = inkling_sdpa_decode(
             q_in, self.k_cache, self.v_cache, cur_pos, pt, rq, self.table, self.scale, self.W, self.E
         )
@@ -357,7 +366,7 @@ class InklingAttention:
         q_in = ttnn.to_memory_config(q, DRAM)
         ttnn.deallocate(q)
         rq = ttnn.pad(r, [1, R, NH, 32], [0, 0, 0, 0], 0.0, memory_config=DRAM)
-        ttnn.deallocate(r)
+        _free_unless_shared(r, rq)
         pt_rows = self._rows_page_table(pt, R)
         o = inkling_sdpa_decode(
             q_in, self.k_cache, self.v_cache, positions, pt_rows, rq, self.table, self.scale, self.W, self.E
@@ -439,7 +448,7 @@ class InklingAttention:
         ttnn.deallocate(k)
         ttnn.deallocate(v)
         rq = ttnn.pad(r, [1, T, NH, 32], [0, 0, 0, 0], 0.0, memory_config=mc)
-        ttnn.deallocate(r)
+        _free_unless_shared(r, rq)
         positions = _pf_upload(
             ("pos", p0, T), self.mesh, lambda: torch.arange(p0, p0 + T, dtype=torch.int32).reshape(-1, 8)
         )
