@@ -800,6 +800,9 @@ class InklingSpecServing:
         image / audio rows (tt/mm.py build(); their placeholder positions take them instead of token embeddings)."""
         self._arm()
         try:
+            hyb = _hyb()
+            if hyb is not None and hyb.enabled:  # the expert placement as at startup: output independent of earlier requests
+                hyb.reset_placement()
             return self._prefill_request(prompt_ids, sampling, mm)
         finally:
             self._disarm()

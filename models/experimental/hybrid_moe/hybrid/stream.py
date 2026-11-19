@@ -145,6 +145,12 @@ class PrefillStream:
         b = self.layers.index(layer) % 2
         return range(b * half, min((b + 1) * half, self.NS - 1))
 
+    def reset(self):
+        """A new request: the staging holds nothing (the next prefill copies what it needs), so a request's CPU / device
+        split does not depend on the experts earlier requests left staged."""
+        self.content = [None] * (self.NS - 1)
+        self.where = {}
+
     def begin_prefill(self, tokens):
         """A prefill of `tokens` positions starts: bank the staging and prefetch when it is long enough; from
         HYB_STREAM_LONG_FROM tokens on, stream experts from HYB_STREAM_MIN_LONG tokens (long prompts: every miss on

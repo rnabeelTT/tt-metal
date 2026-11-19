@@ -156,6 +156,26 @@ class FetchCache:
         self.stamp[layer] = np.full(E, -1, dtype=np.int64)
         return [int(i) for i in static_ids[:S]] + [-1] * D + [-1]
 
+    def reset_placement(self, slot_of):
+        """A new request: every LRU slot back to its initial state (empty, in plan_layer's free order), the routing
+        history and the fetch draw's generator reset, so which experts a request runs on the device (bfp4 / bfp8) or
+        the CPU (int4) depends on that request only. The slots' device bytes stay; no expert maps to them until a
+        fetch rewrites them. Writes still pending (async) are dropped: they land in slots nothing maps to."""
+        self.pending = []
+        for layer, lru in self.lru.items():
+            so = slot_of.get(layer)
+            if so is not None:
+                for e in lru:
+                    so[e] = -1
+            lru.clear()
+            S = self._static_n[layer]
+            self.free[layer] = list(range(S, S + self.d_of(layer)))
+            self.stamp[layer].fill(-1)
+        self.step = 0
+        self.rng = np.random.default_rng(int(os.environ.get("HYB_FETCH_SEED", "0")))
+        self.score.clear()
+        self.miss_ema.clear()
+
     def load_host(self, layer, experts):
         """The device-format copies of a layer's missable experts (host RAM; read once at build). A layer whose copies
         are already pinned (an earlier elastic demotion) is not read again."""
