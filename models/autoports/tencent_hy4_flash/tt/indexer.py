@@ -372,6 +372,13 @@ class Hy4Indexer:
             sc2 = ttnn.slice(sc, (0, 0, 0, 0), (1, 1, rows, kv_len + 32), memory_config=mem)
             ttnn.deallocate(sc)
             sc = sc2
+        if sc.layout != ttnn.TILE_LAYOUT and os.environ.get("HY4_IDX_TILIZE", "1") == "1":
+            # the score op writes row-major; ttnn.where over a row-major fp32 operand and tiled condition / iota wrote
+            # wrong values (1.0 for the visible columns in isolation; in the model, rows left unwritten that kept a
+            # previous request's data: request-to-request nondeterminism of the selecting chunks). Tilize first.
+            st = ttnn.to_layout(sc, ttnn.TILE_LAYOUT, memory_config=mem)
+            ttnn.deallocate(sc)
+            sc = st
         sc32 = ttnn.typecast(sc, ttnn.float32, memory_config=mem)
         ttnn.deallocate(sc)
         iota = self._iota_rows(rows, kv_len + 32)  # cached [1, 1, rows, n] (one broadcast per op: vis is a column)
@@ -413,7 +420,7 @@ class Hy4Indexer:
         cfg = self.cfg
         Tp = int(x.shape[-2])
         tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
-        if (os.environ.get("HY4_PF_DEVICE_POOL", "0") == "1" and p0 == self.n_tok and p0 % self.r == 0
+        if (os.environ.get("HY4_PF_DEVICE_POOL", "1") == "1" and p0 == self.n_tok and p0 % self.r == 0
                 and Tp % (32 * self.r) == 0 and (p0 // self.r) % 32 == 0
                 and self._open_pending is None and self._open_keys.shape[0] == 0):
             self._pool_prefill_device(tk, p0, T, Tp, mem)
