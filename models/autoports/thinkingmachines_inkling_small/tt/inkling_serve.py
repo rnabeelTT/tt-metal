@@ -525,13 +525,14 @@ class InklingSpecServing:
                 len(ids) - 1 - start
             )  # the streaming threshold / prefetch banking by prompt length
             if hyb.hostk:
-                hyb.hostk_threads = 0  # prefill: the host kernel's whole pool (compute-bound)
+                # prefill: the host kernel's whole pool (compute-bound), or INKLING_PREFILL_HOSTK_THREADS of it
+                hyb.hostk_threads = int(os.environ.get("INKLING_PREFILL_HOSTK_THREADS", "0"))
         hook = self._mtp_prompt_hook(ids, start, snap, mm) if self.mtp_prompt else None
         on_layer = None
         if snap is not None:
             on_layer = lambda li, end, part: self._px_save(li, part) if end == snap else None  # noqa: E731
         try:
-            self.model.prefill_tokens(
+            return self.model.prefill_tokens(  # the last prompt row's logits [V] (tools/prefill_bench.py PF_DUMP)
                 torch.as_tensor(ids[start:-1]),
                 self.pt_host,
                 start=start,

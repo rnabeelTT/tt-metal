@@ -4,8 +4,10 @@
 the hybrid overlay's host counters per chunk (t_* keys of HYB.st). Dev signal.
 
 usage (hybrid env as tools/eval_hybrid.sh, TOOL=prefill_bench.py): prefill_bench.py [N=8192]
-env: PF_PROF (1: cProfile of the timed prefill's main thread), PF_OPS (1: ttnn op calls by op / call site), PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures),
-     PF_TEXT (a json of token-id documents: real text instead of spread synthetic ids)
+env: PF_PROF (1: cProfile of the timed prefill's main thread), PF_OPS (1: ttnn op calls by op / call site),
+     PF_DEVPROF (1: device time per op by call site; see _dev_tally), PF_MTP_PROMPT (1: with the drafter's prompt pass, as served), ENGINE_CTX, PF_CAPTURE (1: traces captured and a\n     generation before the timed prefill, as served), PF_PRE (a long prefill of this many tokens before the captures),
+     PF_TEXT (a json of token-id documents: real text instead of spread synthetic ids), PF_DUMP (a path: the last
+     prompt row's logits saved, for bit-identity checks: tools/pf_cmp.py)
 """
 
 import os
@@ -77,6 +79,76 @@ class _op_tally:
             print(f"  {self.n[key] / units:6.2f}/lc {1e3 * self.t[key]:8.1f} ms  {key[0]}  @ {key[1]}", flush=True)
 
 
+class _dev_tally:
+    """PF_DEVPROF=1: exact device time (DEVICE FW DURATION, die 0) of every top-level ttnn op of the timed prefill,
+    by call site: each op is followed by a device sync and a profiler read (tools/op_prof.py's method), so the wall time
+    of that run is not the served one; the device total vs the unprofiled wall time is the host-bound share. Needs
+    TT_METAL_DEVICE_PROFILER=1 TT_METAL_PROFILER_MID_RUN_DUMP=1 TT_METAL_PROFILER_CPP_POST_PROCESS=1."""
+
+    def __init__(self, mesh):
+        import collections
+
+        import ttnn._ttnn.profiler as P
+        from ttnn import decorators as dec
+
+        self.us, self.n, self.progs = collections.Counter(), collections.Counter(), collections.Counter()
+        self.done = 0
+        tally = self
+
+        def read():
+            ttnn.synchronize_device(mesh)
+            ttnn.ReadDeviceProfiler(mesh)
+            data = P.get_latest_programs_perf_data()
+            if not data:
+                return 0, 0.0
+            n, us = 0, 0.0
+            for prog in data[sorted(data)[0]]:
+                res = prog.program_analyses_results
+                k = "DEVICE FW DURATION [ns]" if "DEVICE FW DURATION [ns]" in res else next(iter(res))
+                us += res[k].duration / 1e3
+                n += 1
+            return n, us
+
+        read()  # drop what ran before
+        orig = dec.FastOperation.__call__
+
+        def call(op, *a, **k):
+            if dec.OPERATION_CALL_STACK:
+                return orig(op, *a, **k)
+            f = sys._getframe(1)
+            while f is not None and ("/ttnn/ttnn/" in f.f_code.co_filename):
+                f = f.f_back
+            site = f"{f.f_code.co_filename.split('/tt-metal/')[-1]}:{f.f_lineno}({f.f_code.co_name})" if f else "?"
+            out = orig(op, *a, **k)
+            n, us = read()
+            key = (op.python_fully_qualified_name.replace("ttnn.", ""), site)
+            tally.us[key] += us
+            tally.n[key] += 1
+            tally.progs[key] += n
+            tally.done += 1
+            if tally.done % 500 == 0:  # progress (a profiled prefill is slow; a silent run looks hung)
+                print(f"DEV progress: {tally.done} ops, {sum(tally.us.values()) / 1e3:.0f} ms device so far", flush=True)
+            return out
+
+        dec.FastOperation.__call__ = call
+        self._undo = lambda: setattr(dec.FastOperation, "__call__", orig)
+
+    def report(self, nch):
+        self._undo()
+        tot = sum(self.us.values())
+        print(f"DEV: device total {tot / 1e3:.1f} ms ({tot / 1e3 / nch:.0f} ms per chunk, die 0), "
+              f"{sum(self.n.values())} top-level ops, {sum(self.progs.values())} programs", flush=True)
+        fam = {}
+        for (op, site), us in self.us.items():
+            fn = site.split("(")[-1].rstrip(")")
+            fam[fn] = fam.get(fn, 0.0) + us
+        print("DEV by function (ms per chunk):", "  ".join(f"{k} {v / 1e3 / nch:.1f}" for k, v in
+              sorted(fam.items(), key=lambda kv: -kv[1])[:25]), flush=True)
+        print("DEV by site (top 50, ms per chunk | calls per chunk):", flush=True)
+        for key in sorted(self.us, key=self.us.get, reverse=True)[:50]:
+            print(f"  {self.us[key] / 1e3 / nch:8.2f} ms  {self.n[key] / nch:7.1f}  {key[0]}  @ {key[1]}", flush=True)
+
+
 def main():
     Ns = [int(v) for v in (sys.argv[1] if len(sys.argv) > 1 else "8192").split(",")]
     N = Ns[-1]
@@ -133,10 +205,43 @@ def main():
             prof = cProfile.Profile()
             prof.enable()
         ops = _op_tally() if os.environ.get("PF_OPS") == "1" else None
+        dev = _dev_tally(mesh) if os.environ.get("PF_DEVPROF") == "1" else None
         t0 = time.time()
-        eng._prefill(ids)
+        last = eng._prefill(ids)
         ttnn.synchronize_device(mesh)
         dt = time.time() - t0
+        # PF_REPEAT=n: n more timed prefills of the same prompt (run-to-run noise); PF_SWEEP="ENV=v1,v2,..": one
+        # repeat per value, the env var set before each (e.g. INKLING_PREFILL_HOSTK_THREADS=8,7,6)
+        reps = int(os.environ.get("PF_REPEAT", "0"))
+        sweep = os.environ.get("PF_SWEEP")
+        vals = [None] * reps
+        if sweep:
+            key, vs = sweep.split("=", 1)
+            vals = [(key, v) for v in vs.split(",")] * max(1, reps)
+        for kv in vals:
+            if kv is not None and kv[0].startswith("HYB."):  # an attribute of the hybrid state, e.g. HYB.pf_copy_ms
+                obj, *path = kv[0].split(".")[1:]
+                tgt = HYB
+                for part in [obj] + path[:-1]:
+                    tgt = getattr(tgt, part)
+                name = (path or [obj])[-1] if path else obj
+                tgt = HYB if not path else tgt
+                cur = getattr(tgt, name)
+                setattr(tgt, name, type(cur)(kv[1]))
+            elif kv is not None:
+                os.environ[kv[0]] = kv[1]
+            eng._reset()
+            t1 = time.time()
+            eng._prefill(ids)
+            ttnn.synchronize_device(mesh)
+            d1 = time.time() - t1
+            print(f"repeat{'' if kv is None else ' ' + kv[0] + '=' + kv[1]}: {N} tokens {d1:.2f} s ({N / d1:.0f} tok/s)",
+                  flush=True)
+        if os.environ.get("PF_DUMP") and last is not None:  # the last row's logits, for bit-identity checks
+            torch.save(last.cpu(), os.environ["PF_DUMP"])
+            print(f"saved {os.environ['PF_DUMP']}: logits {tuple(last.shape)}, argmax {int(last.argmax())}", flush=True)
+        if dev is not None:
+            dev.report(-(-N // eng.chunk))
         if ops is not None:
             ops.report(-(-N // eng.chunk) * len(eng.model.layers))
         if prof is not None:
