@@ -2188,7 +2188,6 @@ def _route_prefill_host(self, x4, T):
     ttnn.deallocate(lg_rm)
     t1 = time.perf_counter()
     ids, sc = _select_host(self, lg.numpy())
-    _HOST_SLOTS.put(ctx["s_lg"])
     HYB.st["t_pf_route_sel"] = HYB.st.get("t_pf_route_sel", 0.0) + time.perf_counter() - t1
     HYB.st["t_pf_route_read"] = HYB.st.get("t_pf_route_read", 0.0) + t1 - t0
     k = ids.shape[1]
@@ -2415,6 +2414,7 @@ def _pf_plan(self, ctx, mode="prefill"):
     HYB.st["t_pf_wait"] = HYB.st.get("t_pf_wait", 0.0) + t1 - t0
     t1 = time.perf_counter()
     ids_np, sc_np = _select_host(self, lg)
+    _HOST_SLOTS.put(ctx["s_lg"])  # (_select_host copied what it keeps)
     k = ids_np.shape[1]
     # the same values the device round trip gave (_route_prefill_host -> _decide): bf16 scores, integer ids
     idh = torch.from_numpy(ids_np).long()
