@@ -1163,22 +1163,24 @@ int hostk_route_inkling(
         for (int e = 0; e < E; e++) {
             sg[e] = 1.0f / (1.0f + expf(-z[e]));
         }
-        for (int e = 0; e < R; e++) {
-            key[e] = sg[e] + bias[e];
-        }
         int64_t* id = ids + (int64_t)r * k;
         float* s = sc + (int64_t)r * k;
-        for (int j = 0; j < kr; j++) {
-            int b = 0;
-            float bv = -INFINITY;
-            for (int e = 0; e < R; e++) {
-                if (key[e] > bv) {
-                    bv = key[e];
-                    b = e;
-                }
+        // one pass keeping the kr best keys sorted descending, ties in index order (a later equal key goes after):
+        // the picks and their order of kr repeated first-max scans
+        int n = 0;
+        for (int e = 0; e < R; e++) {
+            const float v = sg[e] + bias[e];
+            if (n == kr && !(v > key[kr - 1])) {
+                continue;
             }
-            id[j] = b;
-            key[b] = -INFINITY;
+            int p = n < kr ? n++ : kr - 1;
+            while (p > 0 && v > key[p - 1]) {
+                key[p] = key[p - 1];
+                id[p] = id[p - 1];
+                p--;
+            }
+            key[p] = v;
+            id[p] = e;
         }
         for (int e = R; e < E; e++) {
             id[kr + e - R] = e;
