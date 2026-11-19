@@ -313,11 +313,10 @@ class Boundary:
     def row_set():
         """The row counts the boundary serves (HY4_BOUNDARY_ROWS, comma separated; default 1): e.g. 1,6 for plain
         decode and DFly2 verify rows. The receive buffers are sized for the largest."""
-        rows = os.environ.get("HY4_BOUNDARY_ROWS")
-        if rows is None:  # plain decode + the DFly2 verify pass (k + 1 rows; 6 rows do not fit the boundary's CBs)
-            k = int(os.environ.get("HY4_SPEC_K", "4"))
-            rows = "1" if not 0 < k < 5 else f"1,{k + 1}"
-        return {int(v) for v in rows.split(",")}
+        # default 1: e.g. 1,5 (the k = 4 verify width) took the 5-row verify pass 36.72 -> 35.36 ms device, but its
+        # receive buffers keep ~330 KB of L1 reserved on every core while serving, and the prefill programs' circular
+        # buffers (flash SDPA, the grouped expert matmuls) then clash with them
+        return {int(v) for v in os.environ.get("HY4_BOUNDARY_ROWS", "1").split(",")}
 
     def __call__(self, part, rows, norm, site):
         """part [1, 1, 32, H] L1 BF16 per-die partial (rows 0..rows-1 real) -> normed [1, 1, rows, H]."""

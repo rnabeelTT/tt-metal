@@ -141,6 +141,17 @@ class Hy4Indexer:
         self._open_keys, self._open_pending = v, None
 
     def reset(self):
+        # every request starts from a zeroed group cache: decode scores a bucket of groups past the context, and keys
+        # left there by an earlier request leaked into the visible scores (HY4_IDX_ZERO_RESET)
+        if os.environ.get("HY4_IDX_ZERO_RESET", "1") == "1":
+            z = Hy4Indexer._ZERO.get((id(self.mesh), tuple(self.gkeys.shape)))
+            if z is None:
+                z = Hy4Indexer._ZERO[(id(self.mesh), tuple(self.gkeys.shape))] = upload(
+                    self.mesh, torch.zeros(tuple(self.gkeys.shape), dtype=torch.bfloat16), ttnn.bfloat16)
+            ttnn.copy(z, self.gkeys)
+            # the host mirror too: _write_mirror uploads whole 32-group slabs, whose rows past the complete groups
+            # carried the previous request's keys back into the device cache
+            self._mirror.zero_()
         self._mirror_stale = None
         self._gk_pending = []
         self.n_tok, self.n_groups = 0, 0
@@ -324,6 +335,7 @@ class Hy4Indexer:
         return q, w
 
     _IOTA = {}
+    _ZERO = {}
 
     def _iota_rows(self, rows, n):
         """Group index per column, repeated over `rows` rows: [1, 1, rows, n] fp32, cached per shape (shared by the
@@ -346,8 +358,15 @@ class Hy4Indexer:
         return min(rows, Tp)
 
     def _topk(self, q, w, kv_len, vis, mem):
-        """Masked scores against the first kv_len groups -> top-512 group ids [1, 1, rows, 512] uint32 RM."""
-        sc = ttnn.experimental.indexer_score_dsa(q, self.gkeys, w, chunk_start_idx=kv_len, kv_len=kv_len + 32)
+        """Masked scores against the first kv_len groups -> top-512 group ids [1, 1, rows, 512] uint32 RM. (The score
+        op's visible scores depend on the group keys it reads past the rows' visible range: reset() zeroes the cache.)"""
+        kw = {}
+        hg = os.environ.get("HY4_IDX_HG")
+        if hg is not None:  # the score op's program config: heads resident per pass (0 = all), q / k chunk rows
+            kw["program_config"] = ttnn.IndexerScoreProgramConfig(
+                q_chunk_size=int(os.environ.get("HY4_IDX_QC", "32")), k_chunk_size=int(os.environ.get("HY4_IDX_KC", "32")),
+                head_group_size=int(hg))
+        sc = ttnn.experimental.indexer_score_dsa(q, self.gkeys, w, chunk_start_idx=kv_len, kv_len=kv_len + 32, **kw)
         rows = int(sc.shape[-2])
         if int(sc.shape[-1]) != kv_len + 32:  # the op's output spans the whole cache; only [0, kv_len) is written
             sc2 = ttnn.slice(sc, (0, 0, 0, 0), (1, 1, rows, kv_len + 32), memory_config=mem)
@@ -394,7 +413,7 @@ class Hy4Indexer:
         cfg = self.cfg
         Tp = int(x.shape[-2])
         tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
-        if (os.environ.get("HY4_PF_DEVICE_POOL", "1") == "1" and p0 == self.n_tok and p0 % self.r == 0
+        if (os.environ.get("HY4_PF_DEVICE_POOL", "0") == "1" and p0 == self.n_tok and p0 % self.r == 0
                 and Tp % (32 * self.r) == 0 and (p0 // self.r) % 32 == 0
                 and self._open_pending is None and self._open_keys.shape[0] == 0):
             self._pool_prefill_device(tk, p0, T, Tp, mem)

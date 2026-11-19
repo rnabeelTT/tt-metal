@@ -434,6 +434,18 @@ class Hy4SpecDecoder(Hy4Decoder):
         for l in self.model.layers:
             if l.li in sel:
                 l.attn.indexer.sel = sel[l.li]
+        if self.trace and sparse not in self.__dict__.setdefault("_pre_n", set()):
+            # the drafter slices row n (the last accepted row) of the target's last hidden rows and selections, and a
+            # slice bakes its offset into its program: compile every row's slice now (one trace release, here at the
+            # first draft of the regime, typically in warm-up), not one per new accepted count while serving
+            self._pre_n.add(sparse)
+            H = int(self.model.last_hn.shape[-1])
+            for m in range(self.W):
+                ttnn.deallocate(ttnn.slice(self.model.last_hn, (0, 0, m, 0), (1, 1, m + 1, H), memory_config=self.mem))
+                if sparse:
+                    for li, t_ in sel.items():
+                        ttnn.deallocate(ttnn.slice(t_, (0, 0, m, 0), (1, 1, m + 1, int(t_.shape[-1]))))
+                        break  # (every layer's selection has the same shape)
         if self.trace:
             self._guard_programs("before a draft")
         if not self.trace:

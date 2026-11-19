@@ -1,7 +1,7 @@
 #!/bin/bash
 # Serve tencent/Hy4-flash (dev) on the QB2: the tt-model image with this checkout's models/ mounted over the image's.
 # usage: serve/serve_hy4.sh ; logs -> serve/server_hy4.log. env: CTX (default 32768), SPEC (drafts per verify pass, 0 =
-# plain decode, default 5), PORT (8000), IMG (default the local hy4-flash-qb2 image).
+# plain decode, default 4), PORT (8000), IMG (default the local hy4-flash-qb2 image).
 CTX=${CTX:-32768}
 IMG=${IMG:-tt-model/hy4-flash-qb2:1e7f2ff5eaab}
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -28,4 +28,4 @@ docker run -d --name hy4-serve \
     --max-num-seqs 1 --block-size 64 --additional-config '$TT_CFG' --served-model-name hy4-flash \
     --enable-auto-tool-choice --tool-call-parser hy_v4 --reasoning-parser hy_v4 --port 8000" \
   && (docker logs -f hy4-serve > $P/serve/server_hy4.log 2>&1 &)
-echo "started (CTX $CTX, SPEC ${SPEC:-5}); tail -f $P/serve/server_hy4.log"
+echo "started (CTX $CTX, SPEC ${SPEC:-4}); tail -f $P/serve/server_hy4.log"

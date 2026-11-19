@@ -106,6 +106,16 @@ class Hy4Engine:
                 if b <= self.chunk and b < self.model.max_ctx:
                     self.prefill(torch.randint(1000, 100000, (b - 1,), generator=g).tolist())
                     self.model.warm_head_blocks(b)
+            # later chunks (p0 >= the first chunk) run other programs: the sparse layers' selecting regime (its score
+            # width bucket grows with the context: 1024 groups to 4K tokens, 2048 to 8K, ...) and the SWA flash over the
+            # window; HY4_WARM_LONG (default 2): prompts whose last chunk (every bucket) starts at 2048 * m, m <= 2
+            m_max = int(os.environ.get("HY4_WARM_LONG", "2"))
+            for m in range(1, m_max + 1):
+                for b in self.model.PF_BUCKETS:
+                    L = self.chunk * m + b - 1
+                    if b <= self.chunk and L + 64 < self.model.max_ctx:
+                        self.prefill(torch.randint(1000, 100000, (L,), generator=g).tolist())
+                        self.model.warm_head_blocks(b)
         n = min(int(prompt_len or 64), self.chunk)
         ids = torch.randint(1000, 100000, (n,), generator=g).tolist()
         self.prefill(ids)
@@ -113,6 +123,13 @@ class Hy4Engine:
         # verify rows (every accepted-row draft trace is captured on first use)
         for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
             self.step()
+        if os.environ.get("HY4_PF_BUCKETS", "1") == "1" and int(os.environ.get("HY4_WARM_LONG", "2")) > 0:
+            # decode past the dense regime (context > 2048: the indexer selects, other programs and traces)
+            L = self.chunk + 1000
+            if L + 64 < self.model.max_ctx:
+                self.prefill(torch.randint(1000, 100000, (L,), generator=g).tolist())
+                for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
+                    self.step()
         self.model.reset()
         self._pos = None
         self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}

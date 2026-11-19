@@ -448,17 +448,16 @@ class Hy4Attention:
         q = ttnn.concat([q_lat, q_rope], dim=-1, memory_config=mem)
         ttnn.deallocate(q_lat)
         ttnn.deallocate(q_rope)
-        start, n = (p0 - W) % self.rows, W + Tp
-        segs = [(start, min(n, self.rows - start))]
-        if segs[0][1] < n:
-            segs.append((0, n - segs[0][1]))
-        parts = [ttnn.slice(self.cache, (0, 0, a, 0), (1, 1, a + m, self.width), memory_config=mem) for a, m in segs]
-        krm = parts[0] if len(parts) == 1 else ttnn.concat(parts, dim=2, memory_config=mem)
-        if len(parts) > 1:
-            for t_ in parts:
-                ttnn.deallocate(t_)
-        kt = ttnn.to_layout(krm, ttnn.TILE_LAYOUT, memory_config=mem)
-        ttnn.deallocate(krm)
+        n = W + Tp
+        # the ring rows gathered by a runtime index tensor (ttnn.embedding over the row-major cache, as init_stage): a
+        # slice bakes its offsets into the program, and the ring offset differs at every chunk position (a program
+        # compiled at serve time re-captures the decode traces)
+        rows_idx = (torch.arange(p0 - W, p0 - W + n) % self.rows).to(torch.int32).reshape(1, n)
+        idx = upload(self.mesh, rows_idx, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        table = ttnn.reshape(self.cache, (int(self.cache.shape[-2]), self.width))
+        g = ttnn.embedding(idx, table, layout=ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(idx)
+        kt = ttnn.reshape(g, (1, 1, n, self.width))
         k = ttnn.slice(kt, (0, 0, 0, 0), (1, 1, n, lw), memory_config=mem)
         ttnn.deallocate(kt)
         qc = int(os.environ.get("HY4_PF_FLASH_Q", "128"))
