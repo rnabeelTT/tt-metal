@@ -16,6 +16,7 @@ import statistics
 import sys
 import time
 import urllib.request
+import uuid
 
 here = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(here))
@@ -38,8 +39,10 @@ doc = "".join(p.read_text() for p in files)
 N_ASKED = [0]
 
 
-def ask(content):
+def ask(content, salt=None):
     body = dict(model=model, messages=[{"role": "user", "content": content}], max_tokens=a.max_tokens, temperature=0)
+    if salt:  # a vLLM cache namespace of its own: a new prompt really prefills (vLLM's prefix cache keeps old prompts)
+        body["cache_salt"] = salt
     if a.sampled:
         body.update(temperature=1.0, top_p=0.95, top_k=40, seed=N_ASKED[0])
     N_ASKED[0] += 1
@@ -71,8 +74,8 @@ def ask(content):
 rows = {}
 
 
-def run(kind, content):
-    r = ask(content)
+def run(kind, content, salt=None):
+    r = ask(content, salt)
     rows.setdefault(kind, []).append(r)
     print(json.dumps({"kind": kind, **r}), flush=True)
 
@@ -83,8 +86,9 @@ for _ in range(a.runs):
 for chars in a.long:
     content = "Here is some Python code:\n\n" + doc[:chars] + "\n\nWhat does this code do? Answer briefly."
     for _ in range(a.cycles):
-        run(f"long {chars}", content)
-        run(f"long {chars} resent", content)
+        salt = uuid.uuid4().hex
+        run(f"long {chars}", content, salt)
+        run(f"long {chars} resent", content, salt)
         run(f"short after long {chars}", HELDOUT[0])
 for kind, rs in rows.items():
     m = lambda k: statistics.mean(r[k] for r in rs)  # noqa: E731

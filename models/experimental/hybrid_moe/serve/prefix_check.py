@@ -7,6 +7,7 @@ import pathlib
 import sys
 import time
 import urllib.request
+import uuid
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 CHARS = [int(v) for v in (sys.argv[2] if len(sys.argv) > 2 else "56000").split(",")]
@@ -19,8 +20,13 @@ here = pathlib.Path(__file__).resolve().parent.parent  # models/experimental/hyb
 doc = "".join(p.read_text() for p in sorted((here / "hybrid").glob("*.py")) + sorted(here.glob("*.py")))
 
 
+SALT = [None]  # the cache namespace of the requests (clear(): a new one)
+
+
 def post(body, stream=False):
     body = dict(model=model, **body)
+    if SALT[0]:
+        body["cache_salt"] = SALT[0]
     if stream:
         body.update(stream=True, stream_options={"include_usage": True})
     req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
@@ -51,7 +57,9 @@ def top5(msgs):
 
 
 def clear():
-    post(dict(messages=[{"role": "user", "content": "Say hi."}], max_tokens=2, temperature=0))
+    """Forget every cached prefix: the requests after it use a new vLLM cache namespace (cache_salt); vLLM's prefix
+    cache keeps many prompts, so a short request no longer evicts the last one."""
+    SALT[0] = uuid.uuid4().hex
 
 
 def cmp(name, a, b):

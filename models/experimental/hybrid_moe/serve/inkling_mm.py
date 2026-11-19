@@ -92,7 +92,8 @@ def case(name, parts, expect, gate=True):
         if gate:
             ok_all &= ok
         tag = ("PASS" if ok else "FAIL") if gate else ("info match" if ok else "info miss")
-        print(f"{tag} {name}: {pt} prompt tokens, TTFT {ttft:.2f}s | {text[:160]!r}", flush=True)
+        at = f"TTFT {ttft:.2f}s" if ttft is not None else "no answer within the token budget (reasoned instead)"
+        print(f"{tag} {name}: {pt} prompt tokens, {at} | {text[:160]!r}", flush=True)
         return text
     except Exception as e:  # noqa: BLE001
         ok_all = False
