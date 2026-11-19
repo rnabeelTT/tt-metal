@@ -231,12 +231,24 @@ def main():
             elif kv is not None:
                 os.environ[kv[0]] = kv[1]
             eng._reset()
+            sr = dict(HYB.st) if HYB is not None else {}
             t1 = time.time()
             eng._prefill(ids)
             ttnn.synchronize_device(mesh)
             d1 = time.time() - t1
             print(f"repeat{'' if kv is None else ' ' + kv[0] + '=' + kv[1]}: {N} tokens {d1:.2f} s ({N / d1:.0f} tok/s)",
                   flush=True)
+            if HYB is not None:  # this repeat's host timers (ms per chunk): what grows in a slow repeat
+                nc = -(-N // eng.chunk)
+                print(
+                    "  repeat timers: "
+                    + " ".join(
+                        f"{k} {1e3 * (v - sr.get(k, 0)) / nc:.0f}"
+                        for k, v in sorted(HYB.st.items())
+                        if k.startswith("t_") and isinstance(v, (int, float)) and v - sr.get(k, 0) > 0.0005 * nc
+                    ),
+                    flush=True,
+                )
         if os.environ.get("PF_DUMP") and last is not None:  # the last row's logits, for bit-identity checks
             torch.save(last.cpu(), os.environ["PF_DUMP"])
             print(f"saved {os.environ['PF_DUMP']}: logits {tuple(last.shape)}, argmax {int(last.argmax())}", flush=True)
@@ -264,7 +276,7 @@ def main():
         if HYB is not None:
             d = {k: HYB.st[k] - st0.get(k, 0) for k in HYB.st if isinstance(HYB.st[k], (int, float))}
             print(
-                "hybrid host timers (ms per chunk): "
+                f"hybrid host timers (ms per chunk, summed over the {1 + len(vals)} prefills): "
                 + " ".join(f"{k} {1e3 * v / nch:.0f}" for k, v in sorted(d.items()) if k.startswith("t_") and v > 0),
                 flush=True,
             )

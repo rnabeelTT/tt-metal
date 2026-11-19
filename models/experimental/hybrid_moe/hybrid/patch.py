@@ -2218,6 +2218,7 @@ def _pf_device(self, x4, dec, ids, scores, T, mode, first_ev=None):
     if merged is not None:
         dec = dict(dec, ids=merged[0], sc=merged[1])
         stream = stream[1:]
+    HYB.st["t_pf_merge"] = HYB.st.get("t_pf_merge", 0.0) + time.perf_counter() - t1  # the merged round's layout
     n_ids = _upload_like(self, dec["ids"], ids, torch.int32)
     n_sc = _upload_like(self, dec["sc"], scores, torch.bfloat16)
     rounds = [
@@ -2272,14 +2273,11 @@ def _pf_device(self, x4, dec, ids, scores, T, mode, first_ev=None):
     return _plus_shared(self, routed, x4)
 
 
-
 class _HostSlots:
     """Persistent row-major host tensors for the prefill MoE's device -> host reads, viewed by torch through DLPack.
     The read cache pins a host tensor the first time it is a read target, and the device then writes it directly: no
     host allocation, zero fill or copy per read. A slot stays out of the free list while its view is in use (the CPU
     experts read the MoE input rows until the layer's finish())."""
-
-    _TORCH = {}
 
     def __init__(self):
         self.free = {}
@@ -2318,6 +2316,7 @@ class _HostSlots:
 
 
 _HOST_SLOTS = _HostSlots()
+
 
 def _pf_finish(self, out, dec, host_fut, orig, partial):
     """Prefill MoE, end: the CPU experts' rows (waited for) added to out, then the reduction."""

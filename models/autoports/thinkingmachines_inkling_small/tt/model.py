@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 from loguru import logger
 
@@ -240,7 +241,10 @@ class Qwen35MoeModel(_M27Model):
 
         def issue(j):
             c0, n, Tp, valid = grp[j]
+            t0 = time.perf_counter()
             pre[j] = layer.prefill_pre(xs[j], start + c0, page_table_host, valid=valid)
+            # host time of part 1 (the attention segment's dispatch; its _pf_pre share is t_pf_pre)
+            hyb.st["t_pf_part1"] = hyb.st.get("t_pf_part1", 0.0) + time.perf_counter() - t0
             if on_layer is not None:
                 on_layer(li, start + c0 + n, "attn")
 
