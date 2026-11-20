@@ -37,7 +37,10 @@ def main():
                     help="P > 0: prefill the first P tokens, then feed the rest through the traced decoder (tt/decode.py) "
                          "one row per pass: gates the decode path")
     ap.add_argument("--rows", type=int, default=1, help="rows per decoder pass (--decode-from)")
+    ap.add_argument("--slot", type=int, default=0, help="run in this sequence slot (cache region u x rows)")
     args = ap.parse_args()
+    if args.slot:
+        os.environ["HY4_SLOTS"] = str(max(int(os.environ.get("HY4_SLOTS", "1")), args.slot + 1))
     from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
 
     seqs = json.load(open(args.texts))
@@ -49,6 +52,8 @@ def main():
         if model.engram is not None and hasattr(model.engram.store, "wait_ram"):
             model.engram.store.wait_ram()
         decs = {}
+        if args.slot:
+            model.set_slot(args.slot)
         for name in names:
             ids = torch.tensor(seqs[name], dtype=torch.long)
             ref = np.load(os.path.join(args.ref_dir, f"ref_{name}.npz"))

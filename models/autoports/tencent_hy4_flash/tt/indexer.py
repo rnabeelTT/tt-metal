@@ -441,6 +441,17 @@ class Hy4Indexer:
         ttnn.deallocate(rep)
         return e
 
+    cache_base = 0  # the active slot's first cache row (set by Hy4Attention.set_slot)
+    _BASE_T = {}
+
+    def _base_t(self):
+        key = (id(self.mesh), int(self.cache_base))
+        t = Hy4Indexer._BASE_T.get(key)
+        if t is None:
+            t = Hy4Indexer._BASE_T[key] = upload(self.mesh, torch.full((1, 1, 1, 1), float(self.cache_base)),
+                                                 ttnn.float32)
+        return t
+
     def _expand(self, ids, rows, mem):
         """top-512 group ids [1, 1, rows, 512] uint32 RM -> token rows of the first 511 groups [1, 1, rows, 2044] uint32
         RM (device; the same math as step())."""
@@ -450,8 +461,11 @@ class Hy4Indexer:
         n_sel = self.cfg.idx_group_topk - 1
         f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, rows, n_sel), memory_config=mem)
         ttnn.deallocate(f)
-        e = self._expand_rows(f511, rows, mem)
+        e0 = self._expand_rows(f511, rows, mem)
         ttnn.deallocate(f511)
+        # + the active slot's cache base (always added, also 0: one program; slots > 0 selected slot 0's rows before)
+        e = ttnn.add(e0, self._base_t(), memory_config=mem)
+        ttnn.deallocate(e0)
         u = ttnn.typecast(e, ttnn.uint32, memory_config=mem)
         ttnn.deallocate(e)
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)

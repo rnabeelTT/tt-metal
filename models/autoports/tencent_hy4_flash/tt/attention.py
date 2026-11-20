@@ -494,6 +494,7 @@ class Hy4Attention:
         self.slot, self.base = u, u * self.rows
         if self.indexer is not None:
             self.indexer.set_slot(u)
+            self.indexer.cache_base = self.base
 
     def rows_ok(self, p0: int, Tp: int) -> bool:
         """The row-parallel selecting-chunk path applies (sparse layer, every row selects, rows split evenly)."""

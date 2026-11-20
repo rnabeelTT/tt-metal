@@ -9,6 +9,65 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## Round 3 (2026-11-19, evening): multi-user serving (up to 8 users), prefill
+
+Target (decided): up to 8 concurrent users (buckets 1/2/4/8), maximize throughput and TTFT; 16+ rows per pass hit the
+MoE cliff (HY4_MOE_FUSED_ROWS_MAX=8: 1/4/8/16/32 rows = 32/38/42/139/252 ms per pass).
+
+Commits: 4c5eb46aeb3 + 87593ec516a prefill (fused HC over row tiles, row-parallel sparse attention, repeat_interleave
+index expansion, dispatch counters in RISC local memory: 32K TTFT 17.7 -> 12.03 s); 80c7a9e45c4 stage 1 (cache slots,
+model.set_slot, tt/slab_write); 9666fb76725 stage 2 (tt/decode_batch.py: batched decode); 16fdce8448f stage 3
+(tt/engine_batch.py + adapter); 0299fe60a24 dense-only passes skip the indexer score; 60e7e3c5187 vectorized host
+inputs; e3000600fab warm-up covers every lane / long chunks; d4a497afb88 packed prefill of simultaneous prompts.
+
+Design (details ~/m27-work/hy4/BATCH_DESIGN.md): every request owns a model slot (its cache regions: base = slot x rows;
+per-slot indexer / Engram state); while it decodes it holds a lane of Hy4BatchDecoder: lane l's 64-row KV / token /
+group windows are rows 64 l .. of L-lane staging tensors, updated in one pass by block-diagonal one-hot maps, written to
+each slot's cache with one slab_write per cache (idle lanes -> trash rows). Sparse layers: one indexer score over the
+lanes' group keys masked per row to its lane's visible groups (skipped when every row is < 2048 tokens: dense lists).
+Traces per (rows, score width). One live request decodes on the single path (lane written back: no lane overhead);
+it rejoins the batch on the next multi-request step or prefill. Spec decoding: only with --max-num-seqs 1.
+
+| decode, no Engram, 12K slots (tools/serve_batch_smoke.py) | 1 user | 2 | 4 | 8 |
+|---|---|---|---|---|
+| ms per step | 32.0 | 40.1 | 44.4 | 51.0 |
+| tok/s total | 31.2 | 49.9 | 90.1 | 156.9 |
+
+8-user gate (tools/batch_gate.py, Engram on, 8 texts teacher-forced as 8 users): top-1 0.8650 / KL 0.2229 vs single
+path 0.8624 / 0.2306; pass 69.9 -> 58.5 ms over the round (dense-only skip, vectorized host). Batched vs single top-1
+differ at 7.9% of positions, split evenly vs HF (122 / 112): device numerics, not a bug; outputs are identical across
+arrival order / remap / host-sampled steps; no state leak from a slot's previous request.
+
+Served (vLLM, NSEQS=8 CTX=12288, Engram on, greedy, 256 tokens, first run: Engram still loading into RAM):
+1 / 2 / 4 / 8 users -> 25.7 / 39.5 / 68.7 / 110.0 tok/s aggregate (13.7 per user at 8); TTFT median 0.43 / 0.92 /
+1.57 / 2.72 s (simultaneous arrivals are prefilled one after another, ~0.35 s each).
+Second run (every fix above, benchmark after "engram tables in RAM", 933 s after start): 1 / 2 / 4 / 8 users ->
+28.1 / 44.8 / 82.1 / 142.6 tok/s aggregate (17.8 per user at 8); TTFT median 0.27 / 0.47 / 0.94 / 1.85 s; chat checks
+decode 28.5 tok/s, TTFT 0.24 s; 8.8K-token prompt TTFT 12.84 -> 3.95 s; zero trace releases over the session.
+
+Serving: `NSEQS=8 CTX=12288 serve/serve_hy4.sh` (SPEC forced 0 above 1 user; the script mounts
+moe_sorted_dispatch.cpp over the image's, which predates it). Budget: users x max_model_len <= 98304
+(HY4_SLOT_TOKENS_MAX): 8 x 16K runs out of DRAM on a long prefill after warm-up (0.32 GiB free), 8 x 12K leaves
+0.91 GiB (a 12K prompt with 7 live users: TTFT 4.6 s, then 61 ms steps). serve/hy4_conc.py: N concurrent streams.
+
+Correctness bug fixed after the served runs: prefill chunks past 2048 tokens build their index lists on the device
+(indexer._expand: group ids -> token rows) without the slot's cache base, so a long prompt in any slot > 0 attended to
+slot 0's KV (served needle check: one wrong token in every multi-user run; single-user / slot 0 and every gate were
+unaffected). Fixed: Hy4Indexer.cache_base (set by Hy4Attention.set_slot) added in _expand; long3k prefill gate on
+slot 3 (teacher_force --slot 3) = slot-0 baseline exactly (top-1 0.8269 / KL 0.2933).
+
+Known gaps / next:
+- Engram loads into RAM in the background (~930 s); until then long prompts read the NVMe (8.8K-token TTFT 12.6 s).
+- Burst TTFT: simultaneous short prompts now share one packed prefill pass (Hy4Model.forward_packed: prompts on the
+  flash attention's batch dimension, B x Tb an existing bucket; HY4_PF_PACK=1): 2 / 4 / 8 prompts 0.49 / 1.03 / 2.05 s ->
+  0.35 / 0.67 / 1.10 s; 8-user gate with packed prefill top1 0.8625 / KL 0.2317. The rest is device time per row.
+- Serial prefill is itself sensitive to the bucket a prompt is padded to: one layer (3) gives last-row logits differing
+  by 1.44 for the same 77-token prompt at 128 vs 256 rows (others ~0.09). Not investigated; packed prefill inherits it.
+- Served step ~10 ms above the engine step (vLLM per-step host work); the plugin's async mode needs the sampled token
+  and Engram rows on device to pipeline (host sampling + host Engram block it).
+- Device: the batched pass costs ~+2.1 ms / 6 layers over a single-path 8-row pass: indexer score (fixed for dense
+  passes), lane one-hot window matmuls (+810 us / 6 layers: a per-lane ring window would drop the 512x512 keep maps).
+
 ## Optimization round 2 (2026-11-19, afternoon): prefill, serving fixes, long-context correctness
 
 Served (vLLM, QB2, single user, greedy, RAM Engram, k=4): decode 42.5 -> 48.5 tok/s mean (35-74); short TTFT 0.30 s;
