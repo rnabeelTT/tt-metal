@@ -54,7 +54,14 @@ Correctness bug fixed after the served runs: prefill chunks past 2048 tokens bui
 (indexer._expand: group ids -> token rows) without the slot's cache base, so a long prompt in any slot > 0 attended to
 slot 0's KV (served needle check: one wrong token in every multi-user run; single-user / slot 0 and every gate were
 unaffected). Fixed: Hy4Indexer.cache_base (set by Hy4Attention.set_slot) added in _expand; long3k prefill gate on
-slot 3 (teacher_force --slot 3) = slot-0 baseline exactly (top-1 0.8269 / KL 0.2933).
+slot 3 (teacher_force --slot 3) = slot-0 baseline exactly (top-1 0.8269 / KL 0.2933); long3k decode on slot 3 = baseline
+(0.8273 / 0.2930). Second cause of the needle failure: single-path decode score buckets were powers of two that fit
+the slot (12K slot: up to 8192 tokens), so decode at 8846 tokens raised "past the largest indexer bucket" and vLLM ended
+the request after its first token (a 32K single-user slot fails the same way past 16K). Fixed: a last bucket at the
+slot's full group capacity (tt/decode.py), and the indexer iota padded 32 columns past it (a full-width ttnn.slice
+aliased the iota, which _iota_rows then deallocated). Engine-level needle (8845-token prompt, Engram on): slot 0
+alone, slot 2 alone, slot 2 with 7 live users give the same full reply (the model declines to repeat the code: model
+behaviour, not yet compared with the CPU reference). The new bucket is not in the warm-up yet (one serve-time compile).
 
 Known gaps / next:
 - Engram loads into RAM in the background (~930 s); until then long prompts read the NVMe (8.8K-token TTFT 12.6 s).

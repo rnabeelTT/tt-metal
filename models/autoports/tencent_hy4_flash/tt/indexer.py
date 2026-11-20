@@ -82,7 +82,9 @@ class Hy4Indexer:
         self._mirror_stale = None  # (g0, g1): device groups newer than the host mirror (device-pooled prefill)
         self._tk_pending = self._open_pending = None
         self._off_cache = {}
-        self.iota = upload(mesh, torch.arange(self.gcap, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
+        # 32 columns past any score width (<= gcap): a slice of the whole tensor would alias it, and _iota_rows
+        # deallocates its slice (the full-capacity decode bucket freed self.iota)
+        self.iota = upload(mesh, torch.arange(self.gcap + 32, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
         self.offs4 = upload(mesh, torch.arange(self.r, dtype=torch.float32).reshape(1, 1, 1, self.r), ttnn.float32)
         self.tk_stage = None
         self.g_stage = None

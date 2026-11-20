@@ -78,6 +78,11 @@ class Hy4Decoder:
         self.n_sel = (cfg.idx_group_topk - 1) * cfg.idx_ratio
         self.gcap = a0.indexer.gcap if a0.indexer is not None else 0
         self.buckets = [b // cfg.idx_ratio for b in BUCKETS_TOKENS if b // cfg.idx_ratio + 32 <= self.gcap]
+        # the last bucket: every group the cache holds (a context past the largest power-of-two bucket that fits, e.g.
+        # 8846 tokens in a 12K slot, raised "past the largest indexer bucket" and ended the served request)
+        cap = ((self.gcap - 32) // 32) * 32
+        if self.gcap and (not self.buckets or cap > self.buckets[-1]):
+            self.buckets.append(cap)
         self.si = self._alloc()
         self._alloc_outputs()
         self.ob = self.ogb = None  # the staging windows' bases
