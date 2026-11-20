@@ -261,7 +261,7 @@ card:
     ~16-18% speed).
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
-    - A new long prompt prefills at ~1,480-1,610 tok/s from ~15K tokens on (a 126K-token prompt takes ~85 s); shorter
+    - A new long prompt prefills at ~1,460-1,610 tok/s from ~15K tokens on (a 126K-token prompt takes ~86 s); shorter
       prompts are slower per token. The prefix cache keeps the last 16 long prompts.
     - Requests with min_p, logit_bias, logprobs, bad words or structured outputs decode one token per step (~25 tok/s).
     - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
