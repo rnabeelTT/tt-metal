@@ -376,6 +376,16 @@ class Hy4Indexer:
             ttnn.deallocate(one)
         return t
 
+    def _kv_bucket(self, kv_len):
+        """A prefill chunk's score width: the power-of-two bucket of groups, else the full-capacity bucket (a context past
+        the largest power-of-two bucket that fits, e.g. 8192+ tokens in a 12K slot, scored at its exact width and
+        compiled ~9 programs per 128 tokens of context at serve time, releasing the decode traces; served run 5)."""
+        b = next((b for b in (512 * 2**i for i in range(10)) if b >= kv_len and b + 32 <= self.gcap), None)
+        if b is None:
+            cap = ((self.gcap - 32) // 32) * 32
+            b = cap if cap >= kv_len else kv_len
+        return b
+
     def _score_rows(self, kv_len, Tp):
         """Rows per scoring block: the fp32 score block within HY4_IDX_SCORE_MB (default 64 MB)."""
         budget = int(os.environ.get("HY4_IDX_SCORE_MB", "64")) << 20
@@ -497,7 +507,7 @@ class Hy4Indexer:
         n_vis_max = (p0 + T - 1) // self.r
         kv_len = -(-n_vis_max // 32) * 32
         if os.environ.get("HY4_PF_KV_BUCKETS", "1") == "1":
-            kv_len = next((b for b in (512 * 2**i for i in range(10)) if b >= kv_len and b + 32 <= self.gcap), kv_len)
+            kv_len = self._kv_bucket(kv_len)
         parts = []
         SR = self._score_rows(kv_len, Tq)
         for r0 in range(0, Tq, SR):
@@ -547,7 +557,7 @@ class Hy4Indexer:
         if os.environ.get("HY4_PF_KV_BUCKETS", "1") == "1":
             # the score width rounded up to a power-of-two bucket of groups (invisible groups are masked by vis): a
             # chunk's programs then depend on the bucket, not on its position (one compile per bucket per server)
-            kv_len = next((b for b in (512 * 2**i for i in range(10)) if b >= kv_len and b + 32 <= self.gcap), kv_len)
+            kv_len = self._kv_bucket(kv_len)
         vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
         vis_t = upload(self.mesh, vis.reshape(1, 1, Tp, 1), ttnn.float32)
         if tail is not None and p0 >= cfg.idx_candidate_topk:

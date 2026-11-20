@@ -83,6 +83,7 @@ class Hy4Decoder:
         cap = ((self.gcap - 32) // 32) * 32
         if self.gcap and (not self.buckets or cap > self.buckets[-1]):
             self.buckets.append(cap)
+        self.min_bucket = 0  # warm-up: force a larger score bucket than the context needs (compile / capture it)
         self.si = self._alloc()
         self._alloc_outputs()
         self.ob = self.ogb = None  # the staging windows' bases
@@ -230,7 +231,7 @@ class Hy4Decoder:
         sparse = p0 >= cfg.idx_candidate_topk
         bucket = 0
         if sparse:
-            need = int(vis.max())
+            need = max(int(vis.max()), self.min_bucket)
             bucket = next((b for b in self.buckets if b >= need), None)
             if bucket is None:
                 raise RuntimeError(f"context {p0 + R} past the largest indexer bucket")

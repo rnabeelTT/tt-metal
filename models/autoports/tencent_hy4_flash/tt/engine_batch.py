@@ -249,6 +249,11 @@ class Hy4BatchEngine:
                 self.step({s: (None, None, False) for s in range(R)})
         for r in solo:
             self.step(r)
+        # the single path's larger score buckets (slot 0 selects): a context past the first bucket compiled at serve time
+        for b in dec.buckets[1:] if solo else []:
+            dec.min_bucket = b
+            self.step(solo[0])
+        dec.min_bucket = 0
         dec.min_width = 0
         # dense-only passes (no row selects: no scoring) at every batch size: slot 0 short again
         self.prefill(0, rnd(int(prompt_len or 64)))
@@ -263,6 +268,11 @@ class Hy4BatchEngine:
         for r in solo[:2]:  # capture the single-path traces of both regimes
             for _ in range(steps):
                 self.step(r)
+        for b in dec.buckets[1:] if solo else []:  # and of every larger score bucket
+            dec.min_bucket = b
+            for _ in range(steps):
+                self.step(solo[0])
+        dec.min_bucket = 0
         for s in range(self.S):
             self.finish(s)
             m.set_slot(s)
