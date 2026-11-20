@@ -26,7 +26,7 @@ import torch
 import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import RMSNorm, ckc, mm, to_torch0, upload
-from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, cos_sin, rope_torch
+from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, cos_sin, rkey, rope_torch, rpos
 
 TOPK = 512
 SCORE_ROWS = int(os.environ.get("HY4_IDX_SCORE_ROWS", "256"))
@@ -194,7 +194,7 @@ class Hy4Indexer:
         pooled = (values * gates.softmax(dim=1)).sum(dim=1)
         var = pooled.pow(2).mean(-1, keepdim=True)
         keys = (self.kn_w * (pooled * torch.rsqrt(var + self.eps))).to(torch.bfloat16)
-        pos = torch.arange(g0, g0 + G) * self.r
+        pos = rpos(torch.arange(g0, g0 + G) * self.r)
         cos, sin = cos_sin(pos, self.theta, self.rope_d)
         rot = rope_torch(keys[:, self.d - self.rope_d :], cos, sin)
         return torch.cat([keys[:, : self.d - self.rope_d], rot], dim=-1)
@@ -271,13 +271,13 @@ class Hy4Indexer:
         kp = ttnn.slice(keys, (0, 0, 0, 0), (1, 1, G, d - self.rope_d), memory_config=mem)
         kr = ttnn.slice(keys, (0, 0, 0, d - self.rope_d), (1, 1, G, d), memory_config=mem)
         ttnn.deallocate(keys)
-        gkey = (p0, Tp)
+        gkey = (p0, Tp, rkey())
         cache = self.__dict__.setdefault("_gtab", {})
         if gkey not in cache:
-            for k in [k for k in cache if k[0] != 0]:  # p0 = 0 tables stay (a traced first chunk reads them)
+            for k in [k for k in cache if k[0] != 0 or k[2] is not None]:  # p0 = 0 tables stay (a traced first chunk reads them)
                 for t_ in cache.pop(k):
                     ttnn.deallocate(t_)
-            cache[gkey] = self.rope.tables(torch.arange(p0, p0 + Tp, r), self.theta)
+            cache[gkey] = self.rope.tables(rpos(torch.arange(p0, p0 + Tp, r)), self.theta)
         gcos, gsin = cache[gkey]
         kr2 = self.rope(kr, gcos, gsin, mem)
         ttnn.deallocate(kr)
@@ -490,7 +490,7 @@ class Hy4Indexer:
         of x (all rows, replicated), the query / scores / top-k / index lists only this die's rows (x_own, q_resid_own,
         the row-sharded list tails tail_own). -> index lists [1, 1, Tp / N, K] uint32 RM of this die's rows."""
         Tp = int(x.shape[-2])
-        cos_own, sin_own = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta, shard_rows=True)
+        cos_own, sin_own = self.rope.tables(rpos(torch.arange(p0, p0 + Tp)), self.theta, shard_rows=True)
         vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
         vis_own = upload(self.mesh, vis.reshape(1, 1, Tp, 1), ttnn.float32, mapper=("shard", 2))
         tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
@@ -550,7 +550,7 @@ class Hy4Indexer:
         ttnn.deallocate(tk)
         if p0 + T - 1 < cfg.idx_candidate_topk:
             return None
-        cos, sin = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta)
+        cos, sin = self.rope.tables(rpos(torch.arange(p0, p0 + Tp)), self.theta)
         q, w = self._query(x, q_resid, cos, sin, mem)
         n_vis_max = (p0 + T - 1) // self.r  # visible complete groups of the last row
         kv_len = -(-n_vis_max // 32) * 32

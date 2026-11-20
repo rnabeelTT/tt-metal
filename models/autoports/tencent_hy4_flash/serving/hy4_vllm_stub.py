@@ -13,7 +13,7 @@ from torch import nn
 
 
 class HYV4FlashForConditionalGeneration(nn.Module):
-    supports_multimodal = False
+    supports_multimodal = False  # HY4_VISION=1 (default): image inputs (hy4_mm.register below)
 
     def __init__(self, *, vllm_config=None, prefix: str = "") -> None:
         super().__init__()
@@ -28,3 +28,11 @@ class HYV4FlashForConditionalGeneration(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
+
+
+try:
+    import hy4_mm
+except ImportError:  # imported as a package module
+    from models.autoports.tencent_hy4_flash.serving import hy4_mm
+if hy4_mm.enabled():
+    HYV4FlashForConditionalGeneration = hy4_mm.register(HYV4FlashForConditionalGeneration)

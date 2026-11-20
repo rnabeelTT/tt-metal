@@ -19,10 +19,55 @@ import ttnn
 from models.autoports.tencent_hy4_flash.tt.common import ckc, upload
 
 
+MROPE_SECTION = (12, 10, 10)  # config rope_parameters mrope_section (t, h, w), interleaved
+
+# Image prompts (tt/vision_host.py): a sequence's rope positions are not its slot indices. POSMAPS[slot] maps slot
+# indices to the 3 M-RoPE planes; rpos() applies the active slot's map (Hy4Model.set_slot), identity without one.
+POSMAPS: dict = {}
+_ACTIVE = [0]
+
+
+def set_active(slot: int):
+    _ACTIVE[0] = int(slot)
+
+
+def rpos(slots: torch.Tensor, slot: int | None = None) -> torch.Tensor:
+    m = POSMAPS.get(_ACTIVE[0] if slot is None else slot)
+    return slots if m is None else m(slots)
+
+
+def rkey(slot: int | None = None):
+    """Cache-key part of the active map (None: plain positions)."""
+    m = POSMAPS.get(_ACTIVE[0] if slot is None else slot)
+    return None if m is None else id(m)
+
+
+def rpos_rows(pos: torch.Tensor, slots) -> torch.Tensor:
+    """Per-row maps (batched decode rows of several sequences): pos [n] slot indices, slots [n] their model slots."""
+    slots = [int(s) for s in slots]
+    if not any(s in POSMAPS for s in set(slots)):
+        return pos
+    out = pos.reshape(1, -1).repeat(3, 1)
+    sl = torch.tensor(slots)
+    for s in set(slots):
+        if s in POSMAPS:
+            m = sl == s
+            out[:, m] = POSMAPS[s](pos[m])
+    return out
+
+
 def cos_sin(positions: torch.Tensor, theta: float, dim: int = 64) -> tuple[torch.Tensor, torch.Tensor]:
-    """-> bf16 cos_rep, sin_rep [n, dim] exactly as HF builds them for these positions."""
+    """-> bf16 cos_rep, sin_rep [n, dim] exactly as HF builds them for these positions ([n], or [3, n] M-RoPE planes:
+    HF recomposition_frequencies, frequency i from plane 1 / 2 when i % 3 == 1 / 2 and i < 3 x section)."""
     inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
-    freqs = positions.reshape(-1, 1).float() * inv_freq.reshape(1, -1)  # [n, dim/2]
+    if positions.dim() == 2 and positions.shape[0] == 3:
+        f3 = positions.float()[..., None] * inv_freq.reshape(1, 1, -1)  # [3, n, dim/2]
+        freqs = f3[0].clone()
+        for j in (1, 2):
+            idx = slice(j, MROPE_SECTION[j] * 3, 3)
+            freqs[:, idx] = f3[j][:, idx]
+    else:
+        freqs = positions.reshape(-1, 1).float() * inv_freq.reshape(1, -1)  # [n, dim/2]
     emb = torch.cat((freqs, freqs), dim=-1)
     cos, sin = emb.cos().to(torch.bfloat16), emb.sin().to(torch.bfloat16)
     cos = cos[..., : dim // 2].repeat_interleave(2, dim=-1)
@@ -66,10 +111,16 @@ class DeviceRope:
     def tables(self, positions: torch.Tensor, theta: float, shard_rows: bool = False):
         """Upload fp32 copies of the bf16 cos / sin for these positions: [1, 1, n_pad32, 64] each (shard_rows: split
         over the dies by rows, die d holding the d-th quarter; n a multiple of 32 x dies)."""
-        n = int(positions.numel())
-        npad = -(-n // 32) * 32
-        pos = torch.zeros(npad, dtype=torch.long)
-        pos[:n] = positions.reshape(-1)
+        if positions.dim() == 2 and positions.shape[0] == 3:  # M-RoPE planes
+            n = int(positions.shape[1])
+            npad = -(-n // 32) * 32
+            pos = torch.zeros(3, npad, dtype=torch.long)
+            pos[:, :n] = positions
+        else:
+            n = int(positions.numel())
+            npad = -(-n // 32) * 32
+            pos = torch.zeros(npad, dtype=torch.long)
+            pos[:n] = positions.reshape(-1)
         c, s = cos_sin(pos, theta, self.dim)
         mp = ("shard", 2) if shard_rows else "rep"
         return (

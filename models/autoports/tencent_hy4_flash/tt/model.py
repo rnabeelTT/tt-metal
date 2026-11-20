@@ -36,7 +36,7 @@ from models.autoports.tencent_hy4_flash.tt.config import Hy4Config
 from models.autoports.tencent_hy4_flash.tt.engram import Hy4EngramDevice
 from models.autoports.tencent_hy4_flash.tt.hc import head_hc, sublayer_hc
 from models.autoports.tencent_hy4_flash.tt.moe import Hy4DenseMLP, Hy4MoE
-from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope
+from models.autoports.tencent_hy4_flash.tt.rope import POSMAPS, DeviceRope, rkey, rpos, set_active
 from models.autoports.tencent_hy4_flash.tt.weights import Hy4Weights
 
 
@@ -284,6 +284,8 @@ class Hy4Model:
         self.rope = DeviceRope(mesh, cfg.qk_rope)
         self.pos = 0  # next position of the sequence (of the active slot)
         self.slot = 0
+        set_active(0)
+        self._img = None  # (slot, image embeddings, their slot indices): set_images
         self._slot_state = {}  # parked slots: (pos, Engram history / positions)
         logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}")
         store = getattr(self.engram, "store", None)
@@ -385,13 +387,49 @@ class Hy4Model:
         for a in getattr(self, "_shared_attn", []):  # the DFly2 drafter's KV-sharing layers
             a.slot, a.base = u, u * a.rows
         self.slot = u
+        set_active(u)
 
     def reset(self):
         self.pos = 0
+        POSMAPS.pop(self.slot, None)  # image prompt state of the slot's previous sequence
+        self._img = None
         for layer in self.layers:
             layer.reset()
         if self.engram is not None:
             self.engram.reset()
+
+    def set_images(self, pos3, delta: int, embeds: torch.Tensor, idx: torch.Tensor):
+        """The active slot's next prompt holds images (after reset(), before prefill): rope positions pos3 [3, L] /
+        delta (tt/vision_host.prompt_positions), embeds bf16 [n, 3072] replacing the embeddings of the prompt's
+        image-pad tokens at slot indices idx [n] (tt/vision.py features, in order)."""
+        from models.autoports.tencent_hy4_flash.tt.vision_host import PosMap
+
+        POSMAPS[self.slot] = PosMap(pos3, delta)
+        self._img = (self.slot, embeds.to(torch.bfloat16), torch.as_tensor(idx, dtype=torch.long).reshape(-1))
+
+    def _inject_images(self, X, p0, T, Tp, split):
+        """X [1, 1, rows, H] (the embedded chunk) with the image rows of [p0, p0 + T) replaced: X * keep + img
+        (keep 0 / img the feature at image rows: exact)."""
+        if self._img is None or self._img[0] != self.slot:
+            return X
+        _, emb, idx = self._img
+        sel = (idx >= p0) & (idx < p0 + T)
+        if not bool(sel.any()):
+            return X
+        H = self.cfg.hidden
+        img = torch.zeros(Tp, H, dtype=torch.bfloat16)
+        keep = torch.ones(Tp, 1, dtype=torch.bfloat16)
+        img[idx[sel] - p0] = emb[sel]
+        keep[idx[sel] - p0] = 0
+        mp = ("shard", 2) if split else "rep"
+        img_t = upload(self.mesh, img.reshape(1, 1, Tp, H), ttnn.bfloat16, mapper=mp)
+        keep_t = upload(self.mesh, keep.reshape(1, 1, Tp, 1), ttnn.bfloat16, mapper=mp)
+        Xk = ttnn.multiply(X, keep_t)
+        ttnn.deallocate(X)
+        X2 = ttnn.add(Xk, img_t)
+        for t_ in (Xk, img_t, keep_t):
+            ttnn.deallocate(t_)
+        return X2
 
     def _engram_rows(self, ids: torch.Tensor, p0: int, Tp: int, split: bool = False) -> dict:
         """{layer: [1,1,Tp,1536] device rows} for this pass (zeros past the real rows)."""
@@ -419,7 +457,7 @@ class Hy4Model:
         (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary."""
         ids = ids.reshape(-1)
         if (self.pos == 0 and os.environ.get("HY4_PF_TRACE", "0") == "1" and self.N > 1
-                and 0 < ids.numel() <= self.cfg.idx_candidate_topk and self.engram_keep_all(ids)):
+                and 0 < ids.numel() <= self.cfg.idx_candidate_topk and self.engram_keep_all(ids) and rkey() is None):
             return self._prefill_traced(ids)
         big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
         dense_end = self.cfg.idx_candidate_topk
@@ -536,9 +574,10 @@ class Hy4Model:
         x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(tok_t)
         x = ttnn.reshape(x, (1, 1, Tp // self.N if split else Tp, cfg.hidden))
+        x = self._inject_images(x, p0, T, Tp, split)
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))  # the 4 streams start equal
         ttnn.deallocate(x)
-        pos = torch.arange(p0, p0 + Tp)
+        pos = rpos(torch.arange(p0, p0 + Tp))
         cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
         eng = self._engram_rows(ids.reshape(-1), p0, Tp, split=split)
         hcf = self._pf_hcf(split)

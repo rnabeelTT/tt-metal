@@ -70,8 +70,15 @@ def _resample(smp, sampling):
     return HostSampler(sampling)
 
 
+try:  # image inputs (HY4_VISION=1, default): the multimodal processor (serving/hy4_mm.py)
+    import hy4_mm as _hy4_mm
+except ImportError:
+    from models.autoports.tencent_hy4_flash.serving import hy4_mm as _hy4_mm
+_VISION = _hy4_mm.enabled()
+
+
 class HYV4FlashForConditionalGeneration:
-    """vLLM bridge (HF arch HYV4FlashForConditionalGeneration; text only)."""
+    """vLLM bridge (HF arch HYV4FlashForConditionalGeneration; text + images with HY4_VISION=1)."""
 
     supports_multimodal = False
     model_capabilities = {
@@ -125,7 +132,12 @@ class HYV4FlashForConditionalGeneration:
                          engram=engram, cache_dir=cache_dir, slots=B)
         engine = Hy4BatchEngine(model) if B > 1 else Hy4Engine(model, SPEC_K)
         logger.info(f"{cls.__name__}: max_model_len={max_seq_len} users={B} layers={len(model.layers)} spec k={SPEC_K}")
-        return cls(model, engine, mesh_device, max_seq_len)
+        self = cls(model, engine, mesh_device, max_seq_len)
+        if _VISION:  # the vision tower (tt/vision.py: tensor parallel, ~0.22 GB per die in bf16)
+            from models.autoports.tencent_hy4_flash.tt.vision import Hy4Vision
+
+            self.vit = Hy4Vision(mesh_device)
+        return self
 
     # ------------------------------------------------------------------ KV: a token budget only
     @classmethod
@@ -143,6 +155,8 @@ class HYV4FlashForConditionalGeneration:
 
     # ------------------------------------------------------------------ warm-up
     def warmup_model_prefill(self, kv_cache, enable_trace, *args, **kwargs):
+        if getattr(self, "vit", None) is not None and not self._warmed:
+            self.vit.warm(self.model)  # every ViT bucket + the image-row splice before any trace capture
         if not self._warmed:
             self._engine.warm()
             self._warmed = True
@@ -163,11 +177,12 @@ class HYV4FlashForConditionalGeneration:
             raise NotImplementedError("prefix caching / chunked prefill are off for Hy4 (start_pos must be 0)")
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         sp = kwargs.get("sampling_params")
+        mms = self._images(tokens, plens, kwargs)
         if self.multi:
-            return self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"))
+            return self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"), mms)
         out = []
         for u in range(N):
-            out.append(self._engine.prefill(tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
+            out.append(self._engine.prefill(tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u), mm=mms[u]))
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
         self._engine.adopt_next = True
@@ -176,7 +191,20 @@ class HYV4FlashForConditionalGeneration:
         logits[:, 0, :] = self._engine.last_logits[:V]
         return logits
 
-    def _prefill_multi(self, tokens, plens, sp, rows):
+    def _images(self, tokens, plens, kwargs):
+        """Per request: Hy4Model.set_images kwargs of its images (the ViT runs here), or None (text)."""
+        N = int(tokens.shape[0])
+        if getattr(self, "vit", None) is None or not kwargs.get("pixel_values"):
+            return [None] * N
+        from models.autoports.tencent_hy4_flash.tt.vision import request_images
+
+        out = []
+        for u in range(N):
+            imgs = request_images(kwargs, u)
+            out.append(self.vit.prepare(tokens[u, : plens[u]].tolist(), imgs) if imgs else None)
+        return out
+
+    def _prefill_multi(self, tokens, plens, sp, rows, mms=None):
         N = int(tokens.shape[0])
         rows = list(range(N)) if rows is None else [int(r) for r in rows]
         eng = self._engine
@@ -189,7 +217,17 @@ class HYV4FlashForConditionalGeneration:
             self._row_slot[row] = slot
             slots.append(slot)
             reqs.append((slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
-        out = eng.prefill_many(reqs)  # simultaneous short prompts: one packed prefill pass
+        if mms is not None and any(m is not None for m in mms):  # image prompts one by one, the text ones packed
+            txt = [i for i, m in enumerate(mms) if m is None]
+            out = [None] * len(reqs)
+            for i, t in zip(txt, eng.prefill_many([reqs[i] for i in txt]) if txt else []):
+                out[i] = t
+            for i, m in enumerate(mms):
+                if m is not None:
+                    slot, ids, smp = reqs[i]
+                    out[i] = eng.prefill(slot, ids, smp, mm=m)
+        else:
+            out = eng.prefill_many(reqs)  # simultaneous short prompts: one packed prefill pass
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
         for slot in slots:
@@ -279,5 +317,8 @@ class HYV4FlashForConditionalGeneration:
     def process_decode_output_host(self, tt_out, is_tokens=True):
         return tt_out
 
+
+if _VISION:
+    HYV4FlashForConditionalGeneration = _hy4_mm.register(HYV4FlashForConditionalGeneration)
 
 __all__ = ["HYV4FlashForConditionalGeneration", "HF_MODEL"]

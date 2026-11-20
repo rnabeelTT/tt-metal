@@ -65,7 +65,8 @@ class Hy4BatchEngine:
         return sorted(self.seqs)
 
     # ------------------------------------------------------------------ prefill / decode
-    def prefill(self, slot: int, prompt_ids, sampling=None) -> int:
+    def prefill(self, slot: int, prompt_ids, sampling=None, mm=None) -> int:
+        """mm: image inputs of the prompt (Hy4Model.set_images kwargs, tt/vision.py Hy4Vision.prepare)."""
         t0 = time.time()
         slot = int(slot)
         self.finish(slot)
@@ -78,6 +79,8 @@ class Hy4BatchEngine:
         m = self.model
         m.set_slot(slot)
         m.reset()
+        if mm is not None:
+            m.set_images(**mm)
         lg = m.prefill(ids)
         lane = self.dec.add(slot, n, ids.tolist())
         smp = HostSampler(sampling)

@@ -23,7 +23,7 @@ import ttnn
 from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.attention import K_CHUNK, SENTINEL
-from models.autoports.tencent_hy4_flash.tt.rope import cos_sin
+from models.autoports.tencent_hy4_flash.tt.rope import cos_sin, rpos
 
 ROWS = 32
 BUCKETS_TOKENS = [int(b) for b in os.environ.get("HY4_IDX_BUCKETS", "8192,16384,32768,65536,131072,262144,524288,1048576").split(",")]
@@ -180,7 +180,7 @@ class Hy4Decoder:
         pos = torch.full((ROWS,), p0 + R - 1, dtype=torch.long)
         pos[:R] = torch.arange(p0, p0 + R)
         for k in ("sparse", "swa"):
-            c, s = cos_sin(pos, cfg.rope_theta[k], cfg.qk_rope)
+            c, s = cos_sin(rpos(pos), cfg.rope_theta[k], cfg.qk_rope)
             h[f"cos_{k}"] = _tile(c.float().reshape(1, 1, ROWS, -1), ttnn.float32)
             h[f"sin_{k}"] = _tile(s.float().reshape(1, 1, ROWS, -1), ttnn.float32)
         A = torch.zeros(64, 64)
@@ -209,7 +209,7 @@ class Hy4Decoder:
         h["off_grp"] = [one(gb), one(gb + 32)]
         gpos = torch.zeros(32, dtype=torch.long)
         gpos[:16] = torch.arange(nb, nb + 64, r)
-        gc, gs = cos_sin(gpos, cfg.rope_theta["sparse"], cfg.qk_rope)
+        gc, gs = cos_sin(rpos(gpos), cfg.rope_theta["sparse"], cfg.qk_rope)
         h["gcos"] = _tile(gc.float().reshape(1, 1, 32, -1), ttnn.float32)
         h["gsin"] = _tile(gs.float().reshape(1, 1, 32, -1), ttnn.float32)
         vis = torch.tensor([(int(pos[s])) // r for s in range(ROWS)], dtype=torch.float32)
@@ -422,7 +422,7 @@ class Hy4SpecDecoder(Hy4Decoder):
         h["bonus"] = _rm(torch.tensor([[bonus]], dtype=torch.int32), ttnn.uint32)
         pos = torch.full((ROWS,), anchor + self.W - 1, dtype=torch.long)
         pos[: self.W] = torch.arange(anchor, anchor + self.W)
-        c, s = cos_sin(pos, cfg.rope_theta["sparse"], cfg.qk_rope)
+        c, s = cos_sin(rpos(pos), cfg.rope_theta["sparse"], cfg.qk_rope)
         h["cos"] = _tile(c.float().reshape(1, 1, ROWS, -1), ttnn.float32)
         h["sin"] = _tile(s.float().reshape(1, 1, ROWS, -1), ttnn.float32)
         dense = np.full((ROWS, self.K_dense), SENTINEL, dtype=np.uint32)

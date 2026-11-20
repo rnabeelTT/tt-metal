@@ -139,10 +139,13 @@ class Hy4Engine:
         """Decode traces are captured on first use per (rows, regime, context bucket) by tt/decode.Hy4Decoder."""
 
     # ------------------------------------------------------------------ prefill / decode
-    def prefill(self, prompt_ids, sampling=None) -> int:
+    def prefill(self, prompt_ids, sampling=None, mm=None) -> int:
+        """mm: image inputs of the prompt (Hy4Model.set_images kwargs, tt/vision.py Hy4Vision.prepare)."""
         t0 = time.time()
         ids = torch.as_tensor(prompt_ids, dtype=torch.long).reshape(-1)
         self.model.reset()
+        if mm is not None:
+            self.model.set_images(**mm)
         lg = self.model.prefill(ids)  # the dense-regime chunk first, then the model's chunk (tt/model.py prefill)
         self.last_logits = lg
         self.dec.start(int(ids.numel()))

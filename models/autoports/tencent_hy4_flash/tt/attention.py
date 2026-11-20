@@ -42,7 +42,7 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     wfid,
     upload,
 )
-from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope
+from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, rkey, rpos
 
 SKF = getattr(ttnn.transformer, "SparseKVFormat", None) or getattr(ttnn, "SparseKVFormat", None)
 SENTINEL = 0xFFFFFFFF
@@ -506,7 +506,7 @@ class Hy4Attention:
     def _rows_const(self, kind, p0, T, Tp):
         """Row-sharded per-chunk constants, shared by the sparse layers of the chunk: ("tail", ...) the index list
         tails (as _idx_tail), ("rope", ...) this layer kind's RoPE tables, die d holding rows d Tp/N .. (d+1) Tp/N."""
-        key = (id(self.mesh), kind, p0, T, Tp, (self.sink_row, self.base) if kind == "tail" else self.theta)
+        key = (id(self.mesh), kind, p0, T, Tp, (self.sink_row, self.base) if kind == "tail" else (self.theta, rkey()))
         t = Hy4Attention._ROWS_DEV.get(key)
         if t is None:
             for k in [k for k in Hy4Attention._ROWS_DEV if k[1] == kind]:
@@ -514,7 +514,7 @@ class Hy4Attention:
                 for t_ in (v if isinstance(v, tuple) else (v,)):
                     ttnn.deallocate(t_)
             if kind == "rope":
-                t = self.rope.tables(torch.arange(p0, p0 + Tp), self.theta, shard_rows=True)
+                t = self.rope.tables(rpos(torch.arange(p0, p0 + Tp)), self.theta, shard_rows=True)
             else:
                 cfg = self.cfg
                 K = -(-(cfg.idx_candidate_topk + 1) // K_CHUNK) * K_CHUNK

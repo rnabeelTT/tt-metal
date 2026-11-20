@@ -24,7 +24,7 @@ from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.attention import K_CHUNK, SENTINEL
 from models.autoports.tencent_hy4_flash.tt.decode import ROWS, Hy4Decoder, _rm, _tile
-from models.autoports.tencent_hy4_flash.tt.rope import cos_sin
+from models.autoports.tencent_hy4_flash.tt.rope import POSMAPS, cos_sin, rpos_rows
 
 SENT_F = float(2**32)
 
@@ -219,6 +219,9 @@ class Hy4BatchDecoder(Hy4Decoder):
             s += n
         pos[R:] = pos[R - 1] if R else 0
         pos_t = torch.from_numpy(pos)
+        if POSMAPS:  # image prompts: every row's rope planes through its sequence's map
+            rl = row_l[np.minimum(np.arange(R0), max(R - 1, 0))]
+            pos_t = rpos_rows(pos_t, [self.lanes[int(x)]["slot"] if R and self.lanes[int(x)] else -1 for x in rl])
         for k in ("sparse", "swa"):
             c, sn = cos_sin(pos_t, cfg.rope_theta[k], cfg.qk_rope)
             h[f"cos_{k}"] = _tile(c.float().reshape(1, 1, R0, -1), ttnn.float32)
@@ -227,7 +230,11 @@ class Hy4BatchDecoder(Hy4Decoder):
             h[name] = _tile(torch.from_numpy(t).to(torch.bfloat16).reshape(1, 1, *t.shape), ttnn.bfloat16)
         for k, v in offs.items():
             h[f"offs_{k}"] = _rm(torch.from_numpy(v).reshape(1, 1, 1, -1), ttnn.uint32)
-        gc, gs = cos_sin(torch.from_numpy(gpos), cfg.rope_theta["sparse"], cfg.qk_rope)
+        gpos_t = torch.from_numpy(gpos)
+        if POSMAPS:
+            gpos_t = rpos_rows(gpos_t, [self.lanes[i // 32]["slot"] if self.lanes[i // 32] else -1
+                                        for i in range(gpos_t.numel())])
+        gc, gs = cos_sin(gpos_t, cfg.rope_theta["sparse"], cfg.qk_rope)
         h["gcos"] = _tile(gc.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
         h["gsin"] = _tile(gs.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
         # per-row lists (rows >= R: padding, the sink only)
