@@ -573,6 +573,98 @@ class Hy4Model:
             return out[(T - 1) - ((T - 1) // 32) * 32]
         return out[:T]
 
+    def pack_plan(self, lens):
+        """(B, Tb) of a packed first-chunk prefill of prompts with these lengths, or None: every prompt in the dense
+        regime, B = the prompt count rounded up to a power of two (dummy segments fill it), B x Tb a prefill bucket <=
+        the chunk (every row-wise program is then one already compiled for that bucket)."""
+        n = len(lens)
+        if n < 2 or self.N < 2 or os.environ.get("HY4_PF_PACK", "1") != "1":
+            return None
+        Tb = next((b for b in self.PF_BUCKETS if b >= max(lens)), None)
+        B = 1 << (n - 1).bit_length()
+        if Tb is None or B * Tb > min(self.chunk, max(self.PF_BUCKETS)) or B * Tb not in self.PF_BUCKETS:
+            return None
+        if max(lens) >= self.cfg.idx_candidate_topk or Tb + 64 > self.max_ctx:
+            return None
+        return B, Tb
+
+    def forward_packed(self, seqs, plan, mem=None) -> list:
+        """First-chunk prefill of several prompts in one pass: seqs [(slot, ids)], plan (B, Tb) from pack_plan. Each
+        slot is reset and left at its prompt's length (pos, Engram history, indexer state); -> each prompt's last-row
+        logits fp32 [V], in order. The prompts must be ordinary text (no Engram-masked tokens)."""
+        cfg, mesh = self.cfg, self.mesh
+        B, Tb = plan
+        Tp = B * Tb
+        tok = torch.zeros(1, Tp, dtype=torch.int32)
+        eng_rows = ({l.li: torch.zeros(Tp, 1536, dtype=torch.bfloat16) for l in self.layers if l.engram is not None}
+                    if self.engram is not None else {})  # (no store: the Engram blocks are skipped, as in forward())
+        segs = []
+        for b, (slot, ids) in enumerate(seqs):
+            ids = torch.as_tensor(ids).reshape(-1)
+            T = int(ids.numel())
+            tok[0, b * Tb : b * Tb + T] = ids.to(torch.int32)
+            self.set_slot(slot)
+            self.reset()
+            if self.engram is not None:
+                for li in eng_rows:
+                    eng_rows[li][b * Tb : b * Tb + T] = self.engram.rows(li, ids, 0)
+            self.pos = T  # (parked with the slot by the next set_slot)
+            segs.append((slot, T))
+        segs += [(None, 0)] * (B - len(segs))
+        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1))
+        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(tok_t)
+        x = ttnn.reshape(x, (1, 1, Tp // self.N, cfg.hidden))
+        X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
+        ttnn.deallocate(x)
+        pos = torch.arange(Tb).repeat(B)
+        cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
+        eng = {li: upload(mesh, r.reshape(1, 1, Tp, -1), ttnn.bfloat16, mapper=("shard", 2)) for li, r in eng_rows.items()}
+        hcf = self._pf_hcf(True)
+        for layer in self.layers:
+            layer.attn._segs = (segs, Tb)
+        try:
+            pend = None
+            for layer in self.layers:
+                if hcf is not None:
+                    X, pend = layer.forward_split_fused(X, pend, 0, Tp, cos_sin, hcf, eng.get(layer.li), mem, None)
+                else:
+                    X = layer.forward_split(X, 0, Tp, cos_sin, eng.get(layer.li), mem, None)
+            if pend is not None:
+                X2, _, _ = hcf(X, pend[0], pend[1], None)
+                for t_ in (X, pend[0], pend[1]):
+                    ttnn.deallocate(t_)
+                X = X2
+        finally:
+            for layer in self.layers:
+                layer.attn._segs = None
+        for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
+            ttnn.deallocate(t_)
+        rows = self._head_rows(X, Tp, [b * Tb + T - 1 for b, (slot, T) in enumerate(segs) if slot is not None], mem)
+        ttnn.deallocate(X)
+        return rows
+
+    def _head_rows(self, X, Tp, want, mem):
+        """Logits of the global rows `want` of a row-split chunk X [1, hc, Tp/N, H] per die (one gathered 32-row block
+        per distinct local block offset)."""
+        cfg, N = self.cfg, self.N
+        loc = Tp // N
+        by_b = {}
+        for g in want:
+            by_b.setdefault(((g % loc) // 32) * 32, []).append(g)
+        rows = {}
+        for b, gs in sorted(by_b.items()):
+            xs = ttnn.slice(X, (0, 0, b, 0), (1, cfg.hc_mult, b + 32, cfg.hidden), memory_config=mem)
+            xg = ttnn.all_gather(xs, dim=2, cluster_axis=1, topology=ttnn.Topology.Linear)
+            ttnn.deallocate(xs)
+            h, _ = self.head_hc.pre(xg, mem)
+            ttnn.deallocate(xg)
+            lg = self._logits(h, mem)  # [32 N, V]: die d's rows at d * 32
+            ttnn.deallocate(h)
+            for g in gs:
+                rows[g] = lg[(g // loc) * 32 + (g % loc) - b]
+        return [rows[g] for g in want]
+
     def _pf_hcf(self, split):
         """The fused HC program for row-split prefill chunks (HY4_PF_HCF, default 1), else None."""
         if not (split and os.environ.get("HY4_PF_HCF", "1") == "1" and self.head_hc.fused

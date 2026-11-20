@@ -46,8 +46,8 @@ class Hy4BatchEngine:
         self.stats = {"steps": 0, "rows": 0, "t_step": 0.0, "t_prefill": 0.0, "prefills": 0, "prefill_tokens": 0}
 
     # ------------------------------------------------------------------ slots
-    def alloc(self) -> int:
-        free = [s for s in range(self.S) if s not in self.seqs]
+    def alloc(self, taken=()) -> int:
+        free = [s for s in range(self.S) if s not in self.seqs and s not in taken]
         if not free:
             raise RuntimeError(f"Hy4: all {self.S} slots busy")
         return free[0]
@@ -90,6 +90,38 @@ class Hy4BatchEngine:
         self.stats["prefill_tokens"] += n
         logger.info(f"Hy4 prefill {n} tokens into slot {slot} (lane {lane}) in {dt:.2f} s; live {self.live}")
         return tok
+
+    def prefill_many(self, reqs) -> list:
+        """reqs [(slot, ids, sampling)] -> first tokens. Simultaneous short prompts (dense regime, ordinary text) run as
+        one packed prefill pass (Hy4Model.forward_packed: B prompts on the attention's batch dimension); otherwise one
+        prefill each."""
+        m = self.model
+        idl = [torch.as_tensor(ids, dtype=torch.long).reshape(-1) for _, ids, _ in reqs]
+        plan = m.pack_plan([int(t.numel()) for t in idl])
+        if plan is None or not all(m.engram_keep_all(t) for t in idl):
+            return [self.prefill(slot, ids, sp) for (slot, _, sp), ids in zip(reqs, idl)]
+        t0 = time.time()
+        for slot, _, _ in reqs:
+            self.finish(slot)
+        if self.solo is not None:
+            self._exit_solo()
+        lgs = m.forward_packed([(slot, ids) for (slot, _, _), ids in zip(reqs, idl)], plan)
+        out = []
+        for (slot, _, sp), ids, lg in zip(reqs, idl, lgs):
+            lane = self.dec.add(slot, int(ids.numel()), ids.tolist())
+            smp = HostSampler(sp)
+            tok = smp(lg)
+            self.seqs[slot] = {"lane": lane, "tok": tok, "pos": int(ids.numel()), "smp": smp, "adopt": False,
+                               "toks": ids.tolist()}
+            self.last_logits[slot] = lg
+            out.append(tok)
+        dt = time.time() - t0
+        self.stats["t_prefill"] += dt
+        self.stats["prefills"] += len(reqs)
+        self.stats["prefill_tokens"] += sum(int(t.numel()) for t in idl)
+        logger.info(f"Hy4 packed prefill of {len(reqs)} prompts {[int(t.numel()) for t in idl]} (plan {plan}) into slots "
+                    f"{[r[0] for r in reqs]} in {dt:.2f} s; live {self.live}")
+        return out
 
     def _enter_solo(self, slot):
         q = self.seqs[slot]
@@ -192,6 +224,12 @@ class Hy4BatchEngine:
                     if b <= self.chunk and L + 64 < m.max_ctx:
                         self.prefill(0, rnd(L))
                         m.warm_head_blocks(b)
+        # packed prefills: every (B, Tb) plan up to the slot count (their batched attention / segment slices)
+        for B in (2, 4, 8, 16):
+            for Tb in m.PF_BUCKETS:
+                if B <= self.S and m.pack_plan([Tb - 1] * B) == (B, Tb):
+                    self.prefill_many([(s, rnd(Tb - 1), None) for s in range(B)])
+                    m.warm_head_blocks(B * Tb)
         logger.info(f"warm: prefill buckets done; {m.dram_report()}")
         # batched programs: slot 0 past the dense regime (its rows select), the others short (dense rows)
         long_n = self.chunk + 1000 if self.chunk + 1064 < m.max_ctx else int(prompt_len or 64)

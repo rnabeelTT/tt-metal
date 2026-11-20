@@ -363,10 +363,14 @@ class Hy4Attention:
         return self.post_norm(full, mem)
 
     # ------------------------------------------------------------------ eager (prefill)
+    _segs = None  # a packed first-chunk prefill (Hy4Model.forward_packed): ([(slot | None, T), ...], Tb)
+
     def forward_part(self, x, p0: int, T: int, cos_sin, mem=None):
         """forward() without its all-reduce and post norm: the per-die o_proj partial [1, 1, Tp, 3072] (the row-split
         prefill reduce-scatters it over rows and norms each die's rows)."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        if self._segs is not None:
+            return self._forward_packed(x, cos_sin, mem)
         cos, sin = cos_sin[self.kind]
         q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
         row = self._kv_row(x, cos, sin, mem)
@@ -421,6 +425,68 @@ class Hy4Attention:
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
         return self._out_part(x, o, mem)
+
+    def _forward_packed(self, x, cos_sin, mem):
+        """B prompts' first chunks at once (each padded to Tb rows, segment b = rows b Tb ..; slot None: a dummy
+        segment): every row-wise op on the B Tb rows, each segment's KV rows / indexer group keys into its slot's regions,
+        and one batched causal (SWA: windowed) flash attention with the prompts on the batch dimension."""
+        segs, Tb = self._segs
+        B = len(segs)
+        cos, sin = cos_sin[self.kind]
+        q_lat, q_rope, q_resid = self._q(x, cos, sin, mem)
+        row = self._kv_row(x, cos, sin, mem)
+        row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=mem)
+        cur = self.slot
+        for b, (slot, T) in enumerate(segs):
+            if slot is None:
+                continue
+            self.set_slot(slot)
+            part = ttnn.slice(row_rm, (0, 0, b * Tb, 0), (1, 1, (b + 1) * Tb, self.width))
+            self._write_rows(part, 0, self._write_n(part, T))
+            ttnn.deallocate(part)
+            if self.indexer is not None:
+                xs = ttnn.slice(x, (0, 0, b * Tb, 0), (1, 1, (b + 1) * Tb, int(x.shape[-1])), memory_config=mem)
+                qr = ttnn.slice(q_resid, (0, 0, b * Tb, 0), (1, 1, (b + 1) * Tb, int(q_resid.shape[-1])),
+                                memory_config=mem)
+                sel = self.indexer.forward(xs, qr, 0, T, mem)
+                assert sel is None, "packed prefill: dense-regime prompts only"
+                ttnn.deallocate(xs)
+                ttnn.deallocate(qr)
+        self.set_slot(cur)
+        ttnn.deallocate(row_rm)
+        ttnn.deallocate(q_resid)
+        # q [1, Hd, B Tb, d] -> [B, Hd, Tb, d]; K = V = the rows [B, 1, Tb, 576]
+        q = ttnn.concat([q_lat, q_rope], dim=-1, memory_config=mem)
+        ttnn.deallocate(q_lat)
+        ttnn.deallocate(q_rope)
+        Hd, dq = int(q.shape[1]), int(q.shape[-1])
+        qb = ttnn.permute(ttnn.reshape(q, (Hd, B, Tb, dq)), (1, 0, 2, 3), memory_config=mem)
+        ttnn.deallocate(q)
+        lw = self.cfg.latent_width
+        k = ttnn.slice(row, (0, 0, 0, 0), (1, 1, B * Tb, lw), memory_config=mem)
+        ttnn.deallocate(row)
+        kb = ttnn.reshape(k, (B, 1, Tb, lw))
+        qc = int(os.environ.get("HY4_PF_FLASH_Q", "128"))
+        kc = int(os.environ.get("HY4_PF_FLASH_K", "64"))
+        while Tb % qc:
+            qc //= 2
+        while Tb % kc:
+            kc //= 2
+        grid = self.mesh.compute_with_storage_grid_size()
+        pc = ttnn.SDPAProgramConfig(compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y), exp_approx_mode=False,
+                                    q_chunk_size=max(qc, 32), k_chunk_size=max(kc, 32))
+        o = ttnn.transformer.scaled_dot_product_attention(
+            qb, kb, kb, is_causal=True, scale=self.scale,
+            sliding_window_size=self.cfg.window + int(os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0")) if self.kind == "swa" else None,
+            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+        ttnn.deallocate(qb)
+        ttnn.deallocate(k)
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (B, Hd, Tb, self.kvl), memory_config=mem)
+        ttnn.deallocate(o)
+        o3 = ttnn.permute(o2, (1, 0, 2, 3), memory_config=mem)  # [Hd, B, Tb, 512]
+        ttnn.deallocate(o2)
+        o4 = ttnn.reshape(o3, (1, Hd, B * Tb, self.kvl))
+        return self._out_part(x, o4, mem)
 
     def set_slot(self, u: int):
         """The sequence slot the following prefill / staging calls address (its cache region starts at u * rows)."""

@@ -180,15 +180,16 @@ class HYV4FlashForConditionalGeneration:
         N = int(tokens.shape[0])
         rows = list(range(N)) if rows is None else [int(r) for r in rows]
         eng = self._engine
-        out, slots = [], []
+        slots, reqs = [], []
         for u, row in enumerate(rows):
             old = self._row_slot.pop(row, None)  # the row's previous request is gone
             if old is not None:
                 eng.finish(old)
-            slot = eng.alloc()
+            slot = eng.alloc(taken=slots)
             self._row_slot[row] = slot
             slots.append(slot)
-            out.append(eng.prefill(slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
+            reqs.append((slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
+        out = eng.prefill_many(reqs)  # simultaneous short prompts: one packed prefill pass
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
         for slot in slots:

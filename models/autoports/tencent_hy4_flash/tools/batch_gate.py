@@ -33,6 +33,8 @@ def main():
     ap.add_argument("--no-engram", action="store_true")
     ap.add_argument("--decode-from", type=int, default=32)
     ap.add_argument("--users", type=int, default=0, help="users (texts cycled; default: one per text)")
+    ap.add_argument("--pack", action="store_true", help="re-prefill every user in one packed pass before decoding "
+                    "(the prefill positions' scores stay the serial ones; decode reads the packed caches)")
     args = ap.parse_args()
     seqs = json.load(open(args.texts))
     names = [n for n in (args.names.split(",") if args.names else sorted(seqs))]
@@ -62,6 +64,14 @@ def main():
                 out.append(torch.log_softmax(lg.float(), dim=-1))
             lps.append(out)
             lane.append(dec.add(u, P, t[:P].tolist()))
+        if args.pack:
+            plan = model.pack_plan([P] * U) or (1 << (U - 1).bit_length(), 128)
+            for l in lane:
+                dec.drop(l)
+            t0 = time.perf_counter()
+            model.forward_packed([(u, ids[u][:P]) for u in range(U)], plan)
+            logger.info(f"packed prefill of {U} x {P} tokens (plan {plan}) in {time.perf_counter() - t0:.2f} s")
+            lane = [dec.add(u, P, ids[u][:P].tolist()) for u in range(U)]
         steps = max(int(t.numel()) for t in ids) - P
         times = []
         for i in range(steps):

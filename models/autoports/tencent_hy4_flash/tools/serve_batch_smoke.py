@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--no-bench", action="store_true")
     ap.add_argument("--stale-check", action="store_true")
     ap.add_argument("--long-check", action="store_true")
+    ap.add_argument("--pack-check", action="store_true")
     args = ap.parse_args()
     B = args.users
     os.environ["HY4_SLOTS"] = str(B)
@@ -176,6 +177,33 @@ def main():
                     "once": (0, False, False, list(range(B)))}
         for v in filter(None, args.variants.split(",")):
             phase_b(v, *variants[v])
+        if args.pack_check:
+            # simultaneous prompts: one packed prefill pass vs one prefill each (logits, greedy streams, time)
+            def stream(st, n_new):
+                while min(len(v[0]) for v in st.values()) < n_new:
+                    nx = decode(st)
+                    for r, v in nx.items():
+                        st[r][0].append(v)
+                        st[r][1] += 1
+                return {r: v[0] for r, v in st.items()}
+
+            for n in [k for k in (2, 3, 4, 8) if k <= B]:
+                ps = [prompts[u][: min(len(prompts[u]), 250)] for u in range(n)]
+                t1 = time.perf_counter()
+                ser = [prefill([r], [p])[0] for r, p in enumerate(ps)]
+                t_ser = time.perf_counter() - t1
+                lg_ser = [eng.last_logits[ad._row_slot[r]].clone() for r in range(n)]
+                s_ser = stream({r: [[ser[r]], len(ps[r])] for r in range(n)}, 24)
+                t1 = time.perf_counter()
+                pk = prefill(list(range(n)), ps)
+                t_pk = time.perf_counter() - t1
+                lg_pk = [eng.last_logits[ad._row_slot[r]].clone() for r in range(n)]
+                s_pk = stream({r: [[pk[r]], len(ps[r])] for r in range(n)}, 24)
+                dmax = max(float((a - b).abs().max()) for a, b in zip(lg_ser, lg_pk))
+                top = sum(int(a.argmax()) == int(b.argmax()) for a, b in zip(lg_ser, lg_pk))
+                agree = [next((i for i in range(24) if s_ser[r][i] != s_pk[r][i]), 24) for r in range(n)]
+                print(f"PACK {n} prompts {[len(p) for p in ps]}: one each {t_ser:.2f} s, packed {t_pk:.2f} s; first-token "
+                      f"logits max |diff| {dmax:.4f}, top-1 same {top}/{n}; greedy prefix match (of 24) {agree}", flush=True)
         if args.long_check:
             # worst case: every row live, row 0 re-prefilled with a near-max prompt (its TTFT), then batched steps
             gj = torch.Generator().manual_seed(2)
