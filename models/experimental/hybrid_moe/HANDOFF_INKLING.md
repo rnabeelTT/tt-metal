@@ -14,7 +14,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
 | 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
 | 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
-| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-19 session 9 with the prefill attention fix, image / audio inputs): short chat TTFT 0.48 s, 54.6 / 49.8 tok/s greedy / sampled; new prompts prefill ~1,430-1,610 tok/s from 15K to 126K (125.9K in 87 s); resent prompt 1.1-2.0 s, next chat turn 1.9-2.0 s (engine prefix cache); GSM8K-200 97.0%, IFEval-200 87.5 / 89.0; greedy output repeats exactly for the same request sequence; multimodal suite passes through the server. |
+| 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-20 session 9: the prefill attention fix, vLLM prefix caching with prefix-state slots, image / audio inputs): short chat TTFT 0.42 s, 56.8 / 52.5 tok/s greedy / sampled; new prompts prefill ~1,480-1,610 tok/s from 15K to 126K (125.9K in 85 s); resent prompt 1.1-1.8 s, next chat turn 1.9-2.0 s, two users' interleaved next turns 1.3 / 0.4 s (vLLM's prefix cache, 16 cached prompts); GSM8K-200 96.5%, IFEval-200 87.0 / 89.5; multimodal suite passes through the server. |
 
 **Open items (2026-11-19, end of session 9).** The published package is the deliverable; these are what is left.
 1. Prefill of new long prompts: ~1,410-1,570 tok/s through the server (session 9; session 7 ~1,300-1,380) vs M2.7's
@@ -23,16 +23,21 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
    library as exact as the streamed bfp4 / bfp8 copies (int4 fails the gate; a bfp kernel costs 1.5-1.8x per expert).
    Speed is bimodal per process (~10%); measure with prefill_bench PF_SWEEP.
 2. Multimodal: shipped (host-side towers; session 8 commits f46b4c271f5..69c81ae7745).
-3. Prefix cache holds one entry (the last long prompt): interleaved users lose the ~2 s next-turn TTFT. Several
-   snapshots cost host RAM for the rings (+ device buffers for the convs) per entry.
+3. Done (session 9): vLLM's prefix cache + the plugin's prefix-state slots, as the Qwen / M2.7 ports; 16 cached prompts,
+   interleaved users each resume from their own. The drafter's depth 1 (a global layer that never runs over the
+   prompt) attends to stale KV at prompt positions: its drafts depend on leftover cache contents (target exact; draft
+   quality and run-to-run numerics through the acceptance pattern). Fix: run depth >= 1 over the prompt, or mask prompt
+   positions for it.
 4. Speculative decode: k=2 MTP. Wider passes lose on host-expert cost per verify row; suffix drafts at k=2 give
    nothing (session 6). A suffix win needs wider verify widths used only on long copy matches (traces for widths up to
    ~8, HYB_ROWS / socket FIFOs and trace region sized for them, DRAM is ~0.7 GiB free at 128K).
 5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
 6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
 7. Not yet tested: sustained multi-hour load, several concurrent clients (single-sequence engine: requests queue).
-8. Fixed (session 9): served greedy output repeats exactly for the same request sequence. A request can still depend
-   on earlier ones (expert placement carried over; HYB_RESET_PER_REQUEST=1 removes it at ~16-18% speed).
+8. Session 9: the engine repeats exactly for the same request sequence (determinism_check across processes). Through
+   the full vLLM server two fresh servers agree on 118 / 200 GSM8K answers (the first 74 identical): a server-level
+   source remains (likely extra decode steps of async scheduling moving the expert placement history), plus the
+   drafter's stale prompt KV (item 3). A request can depend on earlier ones (HYB_RESET_PER_REQUEST=1, ~16-18% speed).
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
@@ -643,3 +648,18 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     49.8 tok/s; prefill 3.8K 1,134 tok/s, 14.9K 1,434, 29.7K 1,612, 65.9K 1,454, 125.9K 1,444 (87.2 s); resent
     1.1-2.0 s, next turn 1.9 / 2.0 s; multimodal suite, feature checks, prefix check pass; GSM8K-200 97.0%, IFEval-200
     87.5 / 89.0; teacher-forced gate unchanged (0.8726 / 0.9506 / 0.1998).
+  - **vLLM prefix caching (c80d3cb1add; plugin inkling-mm c73069c):** as the other ports. vLLM pages the global layers'
+    KV (the engine maps each request's block table into its page table; a block vLLM has not allocated yet maps to an
+    engine scratch block, counted as kv_unbacked: 0 in every served run, the scheduler's lookahead raised to
+    INKLING_KV_LOOKAHEAD = 4 (k + 1)); the conv states and sliding rings at a prefix's end go to the plugin's
+    prefix-state slots (INKLING_PREFIX_SLOTS 16, host RAM ~200 MB each), one snapshot per prompt at its last chunk
+    boundary before the last token (new plugin policy keys prompt_end_align / prompt_end_before_last), saved by the
+    engine's chunk-end hooks and restored with host -> device copies (no new device programs). Served: two users'
+    interleaved next turns 1.3 / 0.4 s cached vs 9.1 / 20.3 s fresh, first token identical (serve/prefix_multi.py);
+    card_bench / prefix_check now send new prompts with a cache_salt of their own (vLLM keeps old prompts).
+  - **Placement independence:** prefill and the first verify bit-identical under identity / shifted / permuted block
+    tables (prefill_bench PF_DET_PT + PF_DET_VERIFY; tools/sdpa_pt_check.py for the SDPA alone), k = 1 generation
+    identical; k = 2 differs only through the drafter's depth 1 reading stale prompt KV (item 3).
+  - **Package (8d7feb6c186 + card):** short chat 0.42 s, 56.8 / 52.5 tok/s; prefill 3.8K 1,155, 14.9K 1,578, 29.7K
+    1,609, 65.9K 1,558, 125.9K 1,485 tok/s (84.8 s); resent 1.1-1.8 s; next turn 1.9 / 2.0 s; GSM8K-200 96.5%,
+    IFEval-200 87.0 / 89.5; multimodal suite (now reports a reasoned-only answer as a miss) and feature checks pass.
