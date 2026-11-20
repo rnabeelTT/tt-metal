@@ -10,7 +10,9 @@ One step (k drafts d_1..d_k pending from the previous step, last emitted token x
            speculative sampling (min(1, p / q) accept, residual resample: M2.7's SpecSampler)
   commit   the target's conv states advance past the n + 1 accepted rows
   draft    MTP depth 0 over the n + 1 accepted rows (the target's normed hidden of row j, the token after it), its last
-           row -> d'_1; depths 1 .. k - 1 chain one row each -> d'_2 .. d'_k
+           row -> d'_1; depth j = 1 .. k - 1 over n + 1 + j rows (its carried row, depth j - 1's rows; the accepted
+           tokens then d'_1 .. d'_j), its last row -> d'_(j+1). Every depth follows every position (prompt included),
+           as trained; see _dj
 Emits d_1 .. d_n, next. The output equals plain greedy decode token for token (tools/spec_bench.py checks it).
 
 Traces (trace=True): every verify width 1 .. k + 1 and its commits (n = 1 .. R), the drafter's depth 0 per (verify
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import os
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -152,6 +155,26 @@ class InklingSpecServing:
         # INKLING_MTP_PROMPT (default 1): drafter depth 0 also runs over the prompt in prefill (its KV / conv state then
         # holds the prompt, as vLLM's MTP does), instead of starting each request from an empty cache
         self.mtp_prompt = self.mtp is not None and os.environ.get("INKLING_MTP_PROMPT", "1") == "1"
+        # depth j >= 1's carried row (depth j - 1's last committed output: the input of depth j's next row, see _dj);
+        # zero at a sequence start; part of the prefix snapshots like a conv state
+        self.carry = {}
+        self.pw = 2 * self.k  # the drafter's widest rows: w + j <= (k + 1) + (k - 1)
+        if self.mtp is not None:
+            for j in range(1, self.mtp.n_depth):
+                z = ttnn.from_torch(
+                    torch.zeros(1, 1, 1, int(args.dim)),
+                    dtype=ttnn.bfloat16,
+                    layout=ttnn.TILE_LAYOUT,
+                    device=mesh,
+                    mesh_mapper=self.rep,
+                )
+                self.carry[j] = SimpleNamespace(st=ttnn.clone(z), _zero=z)
+        self._d_next = None
+        self._dlog = None
+        self._ckc_exact = ttnn.init_device_compute_kernel_config(
+            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
+            packer_l1_acc=False,
+        )
         # INKLING_SUFFIX (default 0): prompt-lookup ("suffix") drafts, M2.7's hybrid/suffix_draft.py. The continuation
         # of the longest earlier occurrence of the context's last tokens replaces the MTP drafts (same verify width)
         # when the request's head-to-head tally for that match length favours it; the drafter still runs every pass.
@@ -181,12 +204,16 @@ class InklingSpecServing:
         self.paged = False
         self._ps = {}
         if self.px_on:
-            blocks = list(model.layers) + ([self.mtp.depths[0].block] if self.mtp_prompt else [])
+            depths = list(enumerate(self.mtp.depths)) if self.mtp_prompt else []
+            blocks = list(model.layers) + [dp.block for _, dp in depths]
             convs = lambda bl: (bl.attention.k_sconv, bl.attention.v_sconv, bl.attn_sconv, bl.mlp_sconv)  # noqa: E731
             # snapshot buffers allocated here, before any trace capture (a buffer allocated after the captures can land
-            # in a trace's freed intermediates); copies into / out of them run the program reset() compiles
+            # in a trace's freed intermediates); copies into / out of them run the program reset() compiles. A drafter
+            # depth j >= 1 also snapshots its carried row (as a fifth state)
+            extra = [()] * len(model.layers) + [((self.carry[j],) if j else ()) for j, _ in depths]
             self._px_convs = [
-                [(c, ttnn.clone(c._zero, memory_config=c.st.memory_config())) for c in convs(bl)] for bl in blocks
+                [(c, ttnn.clone(c._zero, memory_config=c.st.memory_config())) for c in tuple(convs(bl)) + ex]
+                for bl, ex in zip(blocks, extra)
             ]
             self._px_rings = [
                 t for bl in blocks if bl.attention.sliding for t in (bl.attention.k_cache, bl.attention.v_cache)
@@ -212,7 +239,7 @@ class InklingSpecServing:
         self.t0, self.tj = {}, {}
         self.tc = {}  # greedy draft chains: (verify width, accepted rows) -> (trace, ids [1, k])
         self.chain = os.environ.get("INKLING_DRAFT_CHAIN", "1") == "1"
-        self.d_ids = self.d_pos = self.prev = None
+        self.d_ids = self.d_pm = self.hb = self.j_ids = None
         self._prog_n = None
         self.recaptures = 0
         self.captured = False
@@ -390,46 +417,75 @@ class InklingSpecServing:
             qs.append(q)
         return d
 
-    def _draft_eager(self, hrows, toks, p0, k, smp):
-        mtp, model = self.mtp, self.model
-        R = len(toks)
-        dp = mtp.depths[0]
-        e = model.embd(self._dev(self._ids_host(toks)))
-        e = mtp._gather(ttnn.reshape(e, (1, 1, R, e.shape[-1])))
-        out = dp.block.forward_rows(
-            mtp.inproj(dp, hrows, e), self._dev(self._pos_host(p0, R)), self.pt, commit_all=True
-        )
+    # Every depth runs over every position, as the drafter was trained (models/experimental/hybrid_moe/mtp_inkling_ref.py:
+    # depth j at index t reads depth j - 1's output at t and the token at t + j + 1). Depth j's index t sits at position
+    # t + j (the chunk-aligned positions of depth 0; attention is relative, so the offset is free). One step, the w
+    # accepted rows at positions p0 .. p0 + w - 1 (indices p0 .. for depth 0): depth j runs w + j rows at positions
+    # p0 .. p0 + w + j - 1 -- its carried row (depth j - 1's last committed row of the previous step), then depth j - 1's
+    # w + j - 1 rows -- with the tokens toks + d_1 .. d_j; its first w rows are known (committed), the last j rows hold
+    # drafts (their KV is rewritten by the next step's rows at the same positions; the conv states never see them).
+    # Before this every depth >= 1 ran one draft row per step: its cache never saw the prompt or the positions between
+    # its rows, and attended to whatever those KV slots held (other requests' leftovers, placement-dependent).
+    def _d_out(self, out, R):
+        """A depth's rows output (fractured) -> (row-major logits of its last row, the rows [1, 1, R, H] bf16)."""
+        mtp = self.mtp
         full = mtp._gather(out)
-        prev = ttnn.slice(full, (0, 0, R - 1, 0), (1, 1, R, full.shape[-1]))
+        last = ttnn.slice(full, (0, 0, R - 1, 0), (1, 1, R, full.shape[-1]))
+        lg = self._rm_logits(self.model._lm_head(ttnn.multiply(last, mtp.inv_mup)))
+        if full.dtype != ttnn.bfloat16:
+            full = ttnn.typecast(full, ttnn.bfloat16)
+        return lg, full
+
+    def _d0(self, w, hrows, ids, pos):
+        """Depth 0 over the w accepted rows (the target's normed hidden of row j, the token after it): all committed."""
+        mtp, model = self.mtp, self.model
+        dp = mtp.depths[0]
+        e = model.embd(ids)
+        e = mtp._gather(ttnn.reshape(e, (1, 1, w, e.shape[-1])))
+        p = ttnn.slice(pos, (0,), (w,))
+        out = dp.block.forward_rows(mtp.inproj(dp, hrows, e), p, self.pt, commit_all=True)
+        return self._d_out(out, w)
+
+    def _dj(self, j, w, hprev, ids, pos):
+        """Depth j >= 1 over w + j rows (see above): hprev = depth j - 1's rows [1, 1, w + j - 1, H] bf16, ids [1, w + j]
+        (the accepted tokens, then d_1 .. d_j), pos [>= w + j] from p0. Commits w rows; carries hprev's row w - 1."""
+        mtp, model = self.mtp, self.model
+        dp = mtp.depths[j]
+        R = w + j
+        cj = self.carry[j].st
+        h = ttnn.concat([cj, hprev], dim=2)
+        ttnn.copy(ttnn.slice(hprev, (0, 0, w - 1, 0), (1, 1, w, hprev.shape[-1])), cj)
+        e = model.embd(ids)
+        e = mtp._gather(ttnn.reshape(e, (1, 1, R, e.shape[-1])))
+        p = ttnn.slice(pos, (0,), (R,))
+        out = dp.block.forward_rows(mtp.inproj(dp, h, e), p, self.pt, commit_all=False)
+        dp.block.commit_rows(w)
+        return self._d_out(out, R)
+
+    def _draft_eager(self, hrows, toks, p0, k, smp):
+        w = len(toks)
+        pos = self._dev(self._pos_host(p0, self.pw))
+        lg, full = self._d0(w, hrows, self._dev(self._ids_host(toks)), pos)
         drafts, qs = [], []
-        d = self._pick(model._lm_head(ttnn.multiply(prev, mtp.inv_mup)), smp, qs, drafts)
-        drafts.append(d)
-        for j in range(1, k):
-            lg, prev = mtp.step(
-                j, prev, self._dev(self._ids_host([d])), self._dev(self._pos_host(p0 + R - 1 + j, 1)), self.pt
-            )
-            d = self._pick(lg, smp, qs, drafts)
-            drafts.append(d)
-        return drafts, (None if smp.greedy else qs)
+        drafts.append(self._pick(lg, smp, qs, drafts))
+        for j in range(1, self.k):  # every depth runs (its state follows every position), k or not
+            lg, full = self._dj(j, w, full, self._dev(self._ids_host(list(toks) + drafts)), pos)
+            drafts.append(self._pick(lg, smp, qs, drafts))
+        return drafts[:k], (None if smp.greedy else qs[:k])
 
     def _d_depth0(self, R_src, w):
-        mtp, model = self.mtp, self.model
-        dp = mtp.depths[0]
         h = self.out[R_src][1]
         hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, w, h.shape[-1]))
-        e = model.embd(self.d_ids[w])
-        e = mtp._gather(ttnn.reshape(e, (1, 1, w, e.shape[-1])))
-        out = dp.block.forward_rows(mtp.inproj(dp, hrows, e), self.d_pos[w], self.pt, commit_all=True)
-        full = mtp._gather(out)
-        last = ttnn.slice(full, (0, 0, w - 1, 0), (1, 1, w, full.shape[-1]))
-        lg = self._rm_logits(model._lm_head(ttnn.multiply(last, mtp.inv_mup)))
-        ttnn.copy(ttnn.typecast(last, ttnn.bfloat16) if last.dtype != ttnn.bfloat16 else last, self.prev)
+        lg, full = self._d0(w, hrows, self.d_ids[w], self.d_pm)
+        if self.k > 1:
+            ttnn.copy(full, self.hb[(0, w)])
         return lg
 
-    def _d_depth(self, j):
-        lg, full = self.mtp.step(j, self.prev, self.d_ids[1], self.d_pos[1], self.pt)
-        ttnn.copy(ttnn.typecast(full, ttnn.bfloat16) if full.dtype != ttnn.bfloat16 else full, self.prev)
-        return self._rm_logits(lg)
+    def _d_depth(self, j, w):
+        lg, full = self._dj(j, w, self.hb[(j - 1, w)], self.j_ids[(j, w)], self.d_pm)
+        if j + 1 < self.k:
+            ttnn.copy(full, self.hb[(j, w)])
+        return lg
 
     def _argmax_dev(self, lg_rm):
         """Greedy pick on the device: the real-vocab argmax of a row-major [1, 1, 1, Vp] logits row -> [1, 1] uint32."""
@@ -439,12 +495,14 @@ class InklingSpecServing:
     def _d_chain(self, R_src, w):
         """Greedy drafts without host round trips: depth 0, then each deeper depth fed the previous depth's device
         argmax; -> the k draft ids [1, k] uint32 (one readback per step instead of one per depth)."""
-        toks = [self._argmax_dev(self._d_depth0(R_src, w))]
-        prev = self.prev
+        h = self.out[R_src][1]
+        hrows = ttnn.slice(h, (0, 0, 0, 0), (1, 1, w, h.shape[-1]))
+        lg, full = self._d0(w, hrows, self.d_ids[w], self.d_pm)
+        toks = [self._argmax_dev(lg)]
         for j in range(1, self.k):
-            lg, full = self.mtp.step(j, prev, toks[-1], self.c_pos[j], self.pt)
-            prev = ttnn.typecast(full, ttnn.bfloat16) if full.dtype != ttnn.bfloat16 else full
-            toks.append(self._argmax_dev(self._rm_logits(lg)))
+            ids = ttnn.concat([self.d_ids[w]] + toks, dim=-1)
+            lg, full = self._dj(j, w, full, ids, self.d_pm)
+            toks.append(self._argmax_dev(lg))
         return ttnn.concat(toks, dim=-1) if len(toks) > 1 else toks[0]
 
     def _d_capture(self, f):
@@ -457,11 +515,20 @@ class InklingSpecServing:
     def _draft(self, R_src, toks, p0, k, smp):
         """k drafts after the accepted rows toks (the tokens following verify rows 0 .. w - 1 of the last pass)."""
         w = len(toks)
+        if p0 != self._d_next:  # positions the drafter never saw (a host-sampled step): its states have a gap there
+            self.stats["draft_gaps"] = self.stats.get("draft_gaps", 0) + 1
+        self._d_next = p0 + w
+        if self._dlog is not None:  # (debug, tools/determinism_check.py DET_DLOG) the drafter's inputs and outputs
+            out = self._draft_impl(R_src, toks, p0, k, smp)
+            self._dlog.append((int(p0), [int(t) for t in toks], [int(d) for d in out[0]]))
+            return out
+        return self._draft_impl(R_src, toks, p0, k, smp)
+
+    def _draft_impl(self, R_src, toks, p0, k, smp):
+        w = len(toks)
         if smp.greedy and self.last_traced and (R_src, w) in self.tc:
             ttnn.copy_host_to_device_tensor(self._ids_host(toks), self.d_ids[w])
-            ttnn.copy_host_to_device_tensor(self._pos_host(p0, w), self.d_pos[w])
-            for j in range(1, self.k):
-                ttnn.copy_host_to_device_tensor(self._pos_host(p0 + w - 1 + j, 1), self.c_pos[j])
+            ttnn.copy_host_to_device_tensor(self._pos_host(p0, self.pw), self.d_pm)
             tid, ids = self.tc[(R_src, w)]
             ttnn.execute_trace(self.mesh, tid, cq_id=0, blocking=False)
             got = ttnn.to_torch(ttnn.get_device_tensors(ids)[0]).reshape(-1)[: self.k].tolist()
@@ -470,31 +537,29 @@ class InklingSpecServing:
             hrows = ttnn.slice(self._last_h, (0, 0, 0, 0), (1, 1, w, self._last_h.shape[-1]))
             return self._draft_eager(hrows, toks, p0, k, smp)
         ttnn.copy_host_to_device_tensor(self._ids_host(toks), self.d_ids[w])
-        ttnn.copy_host_to_device_tensor(self._pos_host(p0, w), self.d_pos[w])
+        ttnn.copy_host_to_device_tensor(self._pos_host(p0, self.pw), self.d_pm)
         tid, lg = self.t0[(R_src, w)]
         ttnn.execute_trace(self.mesh, tid, cq_id=0, blocking=False)
         drafts, qs = [], []
-        d = self._pick(lg, smp, qs, drafts)
-        drafts.append(d)
-        for j in range(1, k):
-            ttnn.copy_host_to_device_tensor(self._ids_host([d]), self.d_ids[1])
-            ttnn.copy_host_to_device_tensor(self._pos_host(p0 + w - 1 + j, 1), self.d_pos[1])
-            tid, lg = self.tj[j]
+        drafts.append(self._pick(lg, smp, qs, drafts))
+        for j in range(1, self.k):
+            ttnn.copy_host_to_device_tensor(self._ids_host(list(toks) + drafts), self.j_ids[(j, w)])
+            tid, lg = self.tj[(j, w)]
             ttnn.execute_trace(self.mesh, tid, cq_id=0, blocking=False)
-            d = self._pick(lg, smp, qs, drafts)
-            drafts.append(d)
-        return drafts, (None if smp.greedy else qs)
+            drafts.append(self._pick(lg, smp, qs, drafts))
+        return drafts[:k], (None if smp.greedy else qs[:k])
 
     # ------------------------------------------------------------------ warm-up / capture
     def _mtp_prompt_hook(self, ids, start=0, snap=None, mm=None):
-        """on_chunk for prefill_tokens: drafter depth 0 over the chunk's rows t (the target's normed hidden of t, the
-        token at t + 1), committed past the real rows; ids = every prompt token (the one after the prefilled part too),
-        start = the prefill's first position (the chunk offsets are relative to it); snap = the prefix-snapshot position.
-        """
+        """on_chunk for prefill_tokens: every drafter depth over the chunk. Depth 0's rows t: the target's normed hidden
+        of t, the token at t + 1; depth j >= 1's rows (positions c0 .., indices c0 - j ..): its carried row, then depth
+        j - 1's rows but the last (which it carries on), the same tokens (index t + j + 1 = position + 1). All committed
+        past the real rows. ids = every prompt token (the one after the prefilled part too), start = the prefill's first
+        position (the chunk offsets are relative to it); snap = the prefix-snapshot position."""
         from models.tt_transformers.tt.common import Mode
 
         mtp, model = self.mtp, self.model
-        dp = mtp.depths[0]
+        nl = len(model.layers)
 
         def hook(c0, n, Tp, x):
             c0 = start + c0
@@ -510,16 +575,43 @@ class InklingSpecServing:
                 if mm is not None:  # the drafter's input embedding of an image / audio position is its tower row
                     e = mm_rows.merge(e, mm, c0 + 1, n, Tp, self.mesh, int(model.args.dim))
                 e = mtp._gather(e)
-                x_in = ttnn.concat([mtp._norm(h, dp.hn), mtp._norm(e, dp.en)], dim=-1)
-                for t in (h, e):
-                    ttnn.deallocate(t)
-                xm = ttnn.linear(x_in, dp.w_in)
-                ttnn.deallocate(x_in)
-                out = dp.block.forward_prefill(xm, c0, self.pt_host, valid=(n if n < Tp else None))
-                for t in (xm, out):
-                    ttnn.deallocate(t)
+                hid = h
+                for j, dp in enumerate(mtp.depths):
+                    if j:  # depth j - 1's rows shifted down by one behind the carried row
+                        H = int(hid.shape[-1])
+                        cj = self.carry[j].st
+                        rows = ttnn.slice(hid, (0, 0, 0, 0), (1, 1, Tp - 1, H))
+                        nh = ttnn.concat([cj, rows], dim=2)
+                        ttnn.deallocate(rows)
+                        # the last real row (n - 1) as a one-hot matmul: one program per bucket (a slice at row n - 1
+                        # compiles one per prompt length, after the captures: a re-capture per request); exact in fp32
+                        sel = torch.zeros(1, 1, 1, Tp)
+                        sel[..., n - 1] = 1.0
+                        sel = ttnn.from_torch(
+                            sel, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=self.rep
+                        )
+                        last = ttnn.matmul(sel, hid, compute_kernel_config=self._ckc_exact, dtype=ttnn.bfloat16)
+                        ttnn.copy(last, cj)
+                        for t in (sel, last):
+                            ttnn.deallocate(t)
+                        ttnn.deallocate(hid)
+                        hid = nh
+                    x_in = ttnn.concat([mtp._norm(hid, dp.hn), mtp._norm(e, dp.en)], dim=-1)
+                    ttnn.deallocate(hid)
+                    xm = ttnn.linear(x_in, dp.w_in)
+                    ttnn.deallocate(x_in)
+                    out = dp.block.forward_prefill(xm, c0, self.pt_host, valid=(n if n < Tp else None))
+                    ttnn.deallocate(xm)
+                    if j + 1 < len(mtp.depths):
+                        hid = mtp._gather(out)
+                        if hid.dtype != ttnn.bfloat16:
+                            hid = ttnn.typecast(hid, ttnn.bfloat16)
+                    ttnn.deallocate(out)
+                ttnn.deallocate(e)
             if snap is not None and c0 + n == snap:
-                self._px_save(len(self._px_convs) - 1)
+                for j in range(len(mtp.depths)):
+                    self._px_save(nl + j)
+            self._d_next = c0 + n
 
         return hook
 
@@ -631,8 +723,8 @@ class InklingSpecServing:
             ttnn.copy_host_to_device_tensor(h, t)
 
     def _px_save(self, i, part=None):
-        """Block i's conv states -> its snapshot buffers (block i = target layer i; the last = drafter depth 0).
-        part: "attn" (k, v, attn convs), "mlp" (the MLP conv) or None (all four)."""
+        """Block i's conv states -> its snapshot buffers (block i = target layer i; then the drafter depths 0 .., each
+        depth >= 1 with its carried row). part: "attn" (k, v, attn convs), "mlp" (the MLP conv) or None (all)."""
         self._px_count = getattr(self, "_px_count", 0) + 1
         convs = self._px_convs[i]
         for c, buf in convs[:3] if part == "attn" else convs[3:] if part == "mlp" else convs:
@@ -667,6 +759,9 @@ class InklingSpecServing:
         self.model.reset_sequence_state()
         if self.mtp is not None:
             self.mtp.reset()
+            for c in self.carry.values():
+                ttnn.copy(c._zero, c.st)
+            self._d_next = 0
 
     def warm(self, prompt_len=None):
         """Every program a request can run, eagerly, before any capture: each prefill bucket (a warm-up prompt of
@@ -755,18 +850,20 @@ class InklingSpecServing:
                     self._dev(self._idx_host(0, R)),
                     self._dev(self._tau_host(0, R)) if self.long else None,
                 )
-        if self.mtp is not None and self.prev is None:
+        if self.mtp is not None and self.d_ids is None:  # the drafter traces' persistent inputs (before any capture)
             H = int(self.args.dim)
-            self.prev = ttnn.from_torch(
-                torch.zeros(1, 1, 1, H),
+            hb = lambda r: ttnn.from_torch(  # noqa: E731
+                torch.zeros(1, 1, r, H),
                 dtype=ttnn.bfloat16,
                 layout=ttnn.TILE_LAYOUT,
                 device=self.mesh,
                 mesh_mapper=self.rep,
             )
             self.d_ids = {w: self._dev(self._ids_host([0] * w)) for w in range(1, self.k + 2)}
-            self.d_pos = {w: self._dev(self._pos_host(0, w)) for w in range(1, self.k + 2)}
-            self.c_pos = {j: self._dev(self._pos_host(0, 1)) for j in range(1, self.k)}  # (before any capture)
+            self.d_pm = self._dev(self._pos_host(0, self.pw))  # positions p0 .. p0 + 2k - 1 (each depth slices its own)
+            # sampled drafts (one trace per depth): depth j's rows for depth j + 1, and depth j's ids (toks + drafts)
+            self.hb = {(j, w): hb(w + j) for j in range(0, self.k - 1) for w in range(1, self.k + 2)}
+            self.j_ids = {(j, w): self._dev(self._ids_host([0] * (w + j))) for j in range(1, self.k) for w in range(1, self.k + 2)}
         for R in range(1, self.k + 2):
             di, dp, dk, dt = self.bufs[R]
             ttnn.copy_host_to_device_tensor(self._idx_host(p, R), dk)
@@ -786,7 +883,8 @@ class InklingSpecServing:
                     for w in range(1, kk + 2):
                         self.t0[(kk + 1, w)] = self._d_capture(lambda kk=kk, w=w: self._d_depth0(kk + 1, w))
                 for j in range(1, self.k):
-                    self.tj[j] = self._d_capture(lambda j=j: self._d_depth(j))
+                    for w in range(1, self.k + 2):
+                        self.tj[(j, w)] = self._d_capture(lambda j=j, w=w: self._d_depth(j, w))
         self.captured = True
         self.guard.snapshot()
         self._prog_n = self._programs()
@@ -936,6 +1034,7 @@ class InklingSpecServing:
                 self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
                 self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
         self._px_count = 0
+        self._d_next = b0  # the drafter's states hold the restored prefix (the prompt hook advances it)
         if P - 1 > b0:
             self._prefill(list(prompt_ids), start=b0, snap=(snap if snap > b0 else None), mm=mm)
             if self._new_programs() and self.recaptures < int(os.environ.get("INKLING_MAX_RECAPTURES", "4")):
@@ -955,7 +1054,7 @@ class InklingSpecServing:
                 self._prefill(list(prompt_ids), snap=(snap or None), mm=mm)
         if self.paged:
             if snap:
-                want = 2 * len(self.model.layers) + (1 if self.mtp_prompt else 0)
+                want = 2 * len(self.model.layers) + (self.mtp.n_depth if self.mtp_prompt else 0)
                 if self._px_count != want:
                     raise RuntimeError(f"Inkling: prefix-state snapshot at {snap} took {self._px_count} of {want} copies")
                 self._ps_save(saves[0][1], snap)
