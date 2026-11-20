@@ -262,15 +262,30 @@ def main():
                     flush=True,
                 )
         det = int(os.environ.get("PF_DET", "0"))  # PF_DET=n: n more prefills of the prompt, last-row logits vs the first
+        verify_ref = None
+        if det and last is not None and os.environ.get("PF_DET_VERIFY") == "1":  # + the first verify pass (row P - 1)
+            verify_ref = eng._verify([int(ids[-1])], len(ids) - 1)[0].float().cpu().clone()
         if det and last is not None:
             ref, same = last.float().cpu().clone(), 0
             ref_h = list(getattr(eng.model, "layer_hashes", []))
+            mode = os.environ.get("PF_DET_PT")  # the repeats through a vLLM-style page table (ids 1.., shifted / permuted)
+            if mode:
+                n = eng.pt_host.numel()
+                row = torch.arange(n) + 1 if mode == "shift" else torch.randperm(n, generator=torch.Generator().manual_seed(0)) + 1
+                eng.enable_vllm_paging(n + 1, 8, eng.max_seq_len)
+                eng.set_page_row(row)
+                print(f"det repeats through page table {mode}: {row[:6].tolist()} ...", flush=True)
             for r in range(det):
                 eng._reset()
                 if HYB is not None:
                     HYB.reset_placement()
                 eng.model.layer_hashes = []
                 lr = eng._prefill(ids).float().cpu()
+                if verify_ref is not None:
+                    vr = eng._verify([int(ids[-1])], len(ids) - 1)[0].float().cpu()
+                    dv = (vr - verify_ref).abs().max().item()
+                    print(f"det repeat {r + 1}: first verify max |d| {dv:.4g}, argmax {int(vr[0].argmax())} vs "
+                          f"{int(verify_ref[0].argmax())}", flush=True)
                 if ref_h:  # INKLING_PF_LAYER_HASH=1: the first layer whose residual differs from the first prefill's
                     first = next(((a, b) for a, b in zip(ref_h, eng.model.layer_hashes) if a != b), None)
                     if first:

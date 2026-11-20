@@ -44,6 +44,18 @@ def main():
             prompts["ABCDEFGH"[i]] = [text[(off + j) % len(text)] for j in range(n)]
         eng.warm()
         eng.capture()
+        # DET_PT=shift|perm (with INKLING_KV_EXTRA_BLOCKS >= 9): the global layers' KV through a non-identity page
+        # table, as vLLM pages it (ids 1.., shifted by one block or a random permutation); output must not change
+        mode = os.environ.get("DET_PT")
+        if mode:
+            n = eng.pt_host.numel()
+            extra = int(os.environ.get("INKLING_KV_EXTRA_BLOCKS", "0"))
+            if extra < 9:
+                raise ValueError("DET_PT needs INKLING_KV_EXTRA_BLOCKS >= 9")
+            row = torch.arange(n) + 1 if mode == "shift" else torch.randperm(n, generator=torch.Generator().manual_seed(0)) + 1
+            eng.enable_vllm_paging(n + 1, 8, eng.max_seq_len)
+            eng.set_page_row(row)
+            print(f"page table {mode}: logical 0..{n - 1} -> {row[:6].tolist()} ...", flush=True)
         runs = {k: [] for k in prompts}
         for k in order:
             out = eng.generate(prompts[k], gen)
