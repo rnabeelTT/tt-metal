@@ -34,7 +34,7 @@ import ttnn
 from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.common import AllReduce, ckc, mm, num_devices, upload
-from models.autoports.tencent_hy4_flash.tt.vision_host import IMAGE_PAD, preprocess, prompt_positions  # noqa: F401
+from models.autoports.tencent_hy4_flash.tt.vision_host import IMAGE_PAD, VIDEO_PAD, preprocess, prompt_positions  # noqa: F401
 from models.autoports.tencent_hy4_flash.tt.weights import Hy4Weights
 
 D, HEADS, HD, HDP, FF, OUT = 1152, 16, 72, 96, 4304, 3072
@@ -303,15 +303,36 @@ class Hy4Vision:
         """images [(pixel_values, grid)] -> [features]."""
         return [self.forward(pv, g) for pv, g in images]
 
-    def prepare(self, ids, images) -> dict:
+    def encode_video(self, pixel_values, grid) -> torch.Tensor:
+        """One video: pixel_values [T * gh * gw, 768] (vision_host.video_preprocess), grid (T, gh, gw) -> features bf16
+        [T * (gh / 2) * (gw / 2 + 1), 3072]. As Tencent's vLLM PR 68296 tower: every frame is its own image (attention
+        within the frame, the position embedding repeated per frame, temporal / spatial patch 1: no pooling)."""
+        T, gh, gw = (int(v) for v in grid)
+        pv = np.asarray(pixel_values).reshape(T, gh * gw, -1)
+        return torch.cat([self.forward(pv[i], (1, gh, gw)) for i in range(T)])
+
+    def prepare(self, ids, images, videos=()) -> dict:
         """A prompt with its image-pad tokens expanded (vision_host.expand_image_tokens) and its images [(pixel_values,
-        grid)] in order -> Hy4Model.set_images kwargs (the engines' prefill(..., mm=))."""
+        grid)] in order -> Hy4Model.set_images kwargs (the engines' prefill(..., mm=)). videos [(pixel_values, grid
+        (T, gh, gw))]: the prompt's video-pad runs (vision_host.expand_video_tokens) in order."""
         ids = [int(t) for t in ids]
+        if videos:
+            return self._prepare_video(ids, images, videos)
         pos3, delta = prompt_positions(ids, [g for _, g in images])
         feats = torch.cat(self.encode(images))
         idx = torch.nonzero(torch.tensor(ids) == IMAGE_PAD).reshape(-1)
         assert idx.numel() == feats.shape[0], (idx.numel(), feats.shape)
         return {"pos3": pos3, "delta": delta, "embeds": feats, "idx": idx}
+
+    def _prepare_video(self, ids, images, videos) -> dict:
+        pos3, delta = prompt_positions(ids, [g for _, g in images], videos=[tuple(g) for _, g in videos])
+        feats = self.encode(images) + [self.encode_video(pv, g) for pv, g in videos]
+        t = torch.tensor(ids)
+        idx = torch.cat([torch.nonzero(t == IMAGE_PAD).reshape(-1), torch.nonzero(t == VIDEO_PAD).reshape(-1)])
+        feats = torch.cat(feats)
+        assert idx.numel() == feats.shape[0], (idx.numel(), feats.shape)
+        order = torch.argsort(idx)
+        return {"pos3": pos3, "delta": delta, "embeds": feats[order], "idx": idx[order]}
 
 
 def request_images(kwargs: dict, u: int):
@@ -319,6 +340,22 @@ def request_images(kwargs: dict, u: int):
     u's [(pixel_values float32 [gh * gw, 768], grid (1, gh, gw))], [] for a text request."""
     pvs = (kwargs.get("pixel_values") or [None] * (u + 1))
     grids = (kwargs.get("image_grid_thw") or [None] * (u + 1))
+    if u >= len(pvs) or pvs[u] is None:
+        return []
+    out = []
+    for pv, g in zip(pvs[u], grids[u]):
+        if pv is None:
+            continue
+        g = [int(v) for v in torch.as_tensor(g).reshape(-1).tolist()]
+        out.append((torch.as_tensor(pv).float().numpy(), tuple(g)))
+    return out
+
+
+def request_videos(kwargs: dict, u: int):
+    """The multimodal kwargs' pixel_values_videos / video_grid_thw (serving/sitecustomize.py's plugin shim: per batch
+    row a list per video, or None) -> row u's [(pixel_values float32 [T * gh * gw, 768], grid (T, gh, gw))]."""
+    pvs = (kwargs.get("pixel_values_videos") or [None] * (u + 1))
+    grids = (kwargs.get("video_grid_thw") or [None] * (u + 1))
     if u >= len(pvs) or pvs[u] is None:
         return []
     out = []

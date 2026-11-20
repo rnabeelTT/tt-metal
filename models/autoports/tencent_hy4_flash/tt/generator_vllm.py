@@ -194,14 +194,14 @@ class HYV4FlashForConditionalGeneration:
     def _images(self, tokens, plens, kwargs):
         """Per request: Hy4Model.set_images kwargs of its images (the ViT runs here), or None (text)."""
         N = int(tokens.shape[0])
-        if getattr(self, "vit", None) is None or not kwargs.get("pixel_values"):
+        if getattr(self, "vit", None) is None or not (kwargs.get("pixel_values") or kwargs.get("pixel_values_videos")):
             return [None] * N
-        from models.autoports.tencent_hy4_flash.tt.vision import request_images
+        from models.autoports.tencent_hy4_flash.tt.vision import request_images, request_videos
 
         out = []
         for u in range(N):
-            imgs = request_images(kwargs, u)
-            out.append(self.vit.prepare(tokens[u, : plens[u]].tolist(), imgs) if imgs else None)
+            imgs, vids = request_images(kwargs, u), request_videos(kwargs, u)  # videos: serving/sitecustomize.py shim
+            out.append(self.vit.prepare(tokens[u, : plens[u]].tolist(), imgs, vids) if imgs or vids else None)
         return out
 
     def _prefill_multi(self, tokens, plens, sp, rows, mms=None):

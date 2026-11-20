@@ -6,7 +6,8 @@ False: the Engram output is zero everywhere, as the device's --no-engram). Compa
 
     ~/m27-work/venv-hy4/bin/python models/autoports/tencent_hy4_flash/tools/vision_lm_ref.py --ref DIR/ref_512x512.pt
         --layers 4 [--plain-pos]   (--plain-pos: 1-D positions = slot indices, the sensitivity control)
--> DIR/lmref_<WxH>_L<N>[_plain].pt {"logits" fp16 [T, V], "ids"}.
+-> DIR/lmref_<WxH>_L<N>[_plain].pt {"logits" fp16 [T, V], "ids"}. A video reference (--ref DIR/vref_8f_640x480.pt)
+-> DIR/lmref_8f_640x480_L<N>[_plain].pt (its video pads take the per-frame features).
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ def main():
     ids = ref["input_ids"].reshape(1, -1)
     T = ids.shape[1]
     emb = tm.embed_tokens(ids)
-    mask = (ids == 120120).unsqueeze(-1)
+    mask = ((ids == 120120) | (ids == 120124)).unsqueeze(-1)  # image / video pads (tools/video_ref.py vref_*.pt)
     emb = emb.masked_scatter(mask, ref["feat"].to(emb.dtype))
     pos = torch.arange(T).view(1, 1, -1).expand(3, 1, -1) if args.plain_pos else ref["pos"].view(3, 1, T)
     ng = torch.zeros(1, T, cfg.engram_max_ngram_size, dtype=torch.long)
@@ -56,7 +57,7 @@ def main():
     with torch.no_grad():
         h = tm(inputs_embeds=emb, position_ids=pos, ngram_tokens=ng, engram_mask=em, use_cache=False).last_hidden_state
     lg = (h[0].float() @ lm_head.T).to(torch.float16)
-    tag = os.path.basename(args.ref)[4:-3]
+    tag = os.path.basename(args.ref).split("_", 1)[1][:-3]
     out = os.path.join(os.path.dirname(args.ref), f"lmref_{tag}_L{n}{'_plain' if args.plain_pos else ''}.pt")
     torch.save({"logits": lg, "ids": ids[0]}, out)
     print("saved", out, "in", f"{time.time() - t0:.0f} s")

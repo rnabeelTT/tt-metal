@@ -9,6 +9,9 @@ It also registers the `hy_v4` reasoning and tool parsers (this directory's `hy_v
 `hy_v4_tool_parser.py`, ported from vLLM PR 68296) as lazy vLLM parsers when `vllm.reasoning` / `vllm.tool_parsers`
 are imported, so `--reasoning-parser hy_v4 --tool-call-parser hy_v4` work in every process without plugin flags.
 
+It also lets the TT plugin's model runner pass video inputs to the model (`_patch_tt_runner`: the plugin gathers images
+only).
+
 With HYB_ENABLE=1 it also installs the hybrid-MoE overlay, as models/experimental/hybrid_moe/serve/sitecustomize.py
 does (only one sitecustomize module is ever loaded)."""
 
@@ -61,8 +64,48 @@ def _register_tool_parser(module) -> None:
     module.ToolParserManager.register_lazy_module("hy_v4", "hy_v4_tool_parser", "HYV4ToolParser")
 
 
+def _patch_tt_runner(module) -> None:
+    # Video inputs: the TT plugin's TTModelRunner._gather_multi_modal_inputs passes images only (pixel_values /
+    # image_grid_thw; any other modality raises "Only images are supported for now"). For a batch holding a video it
+    # also gathers pixel_values_videos / video_grid_thw (per request a list per video, None for a text request); every
+    # other batch goes through the plugin's own code, unchanged.
+    R = getattr(module, "TTModelRunner", None)
+    if R is None or getattr(R, "_hy4_video", False):
+        return
+    orig = R._gather_multi_modal_inputs
+
+    def gather(self, req_indices=None):
+        if req_indices is None:
+            req_indices = list(range(self.input_batch.num_reqs))
+        reqs = [self.requests[self.input_batch.req_ids[i]] for i in req_indices]
+        if not any(f.modality == "video" for r in reqs for f in (r.mm_features or ())):
+            return orig(self, req_indices)
+        keys = {"image": ("pixel_values", "image_grid_thw"), "video": ("pixel_values_videos", "video_grid_thw")}
+        out = {k: [] for ks in keys.values() for k in ks}
+        for r in reqs:
+            if not r.mm_features:
+                for v in out.values():
+                    v.append(None)
+                continue
+            rows = {k: [] for k in out}
+            for f in r.mm_features:
+                if f.modality not in keys:
+                    raise NotImplementedError(f"Hy4: {f.modality} inputs are not supported")
+                pk, gk = keys[f.modality]
+                item = f.data
+                rows[pk].append(None if item is None else item[pk].data)
+                rows[gk].append(item[gk].data if item is not None and gk in item else None)
+            for k, v in rows.items():
+                out[k].append(v)
+        return out
+
+    R._gather_multi_modal_inputs = gather
+    R._hy4_video = True
+
+
 # module -> callback run right after that module has executed (each at most once per process)
 _HOOKS = {
+    "vllm_tt_plugin.model_runner": _patch_tt_runner,
     "vllm.model_executor.models.registry": _register_arch,
     "transformers.models.auto.configuration_auto": _register_config,
     "vllm.reasoning": _register_reasoning_parser,
