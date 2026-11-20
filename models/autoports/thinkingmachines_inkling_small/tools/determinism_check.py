@@ -57,8 +57,12 @@ def main():
             eng.set_page_row(row)
             print(f"page table {mode}: logical 0..{n - 1} -> {row[:6].tolist()} ...", flush=True)
         runs = {k: [] for k in prompts}
+        dlog = {k: [] for k in prompts}
         for k in order:
+            eng._dlog = [] if os.environ.get("DET_DLOG") else None
             out = eng.generate(prompts[k], gen)
+            if eng._dlog is not None:
+                dlog[k].append(eng._dlog)
             runs[k].append(out)
             same = out == runs[k][0]
             print(f"run {k} (#{len(runs[k])}, {len(prompts[k])} prompt tokens): {len(out)} tokens, "
@@ -83,6 +87,8 @@ def main():
                     print(f"DET {k} vs {os.path.basename(cmp)}: {'identical' if same else 'DIFFERS'}", flush=True)
         if os.environ.get("DET_OUT"):
             json.dump(runs, open(os.environ["DET_OUT"], "w"))
+        if os.environ.get("DET_DLOG"):  # per prompt, per run: [(p0, accepted tokens, drafts)] of every draft call
+            json.dump(dlog, open(os.environ["DET_DLOG"], "w"))
         print("DET ALL IDENTICAL" if ok else "DET NOT DETERMINISTIC", flush=True)
     finally:
         os._exit(0)  # (close_mesh_device can hang after fetch runs; the container is removed by the caller)
