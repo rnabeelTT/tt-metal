@@ -1015,15 +1015,24 @@ class InklingSpecServing:
             b0 = int(start or 0)
             if snap and (snap % self.chunk or snap <= b0 or snap > P - 1 or (snap - b0) % self.chunk):
                 raise RuntimeError(f"Inkling: prefix-state save at {snap} is not a chunk end of this prefill ({b0}, {P})")
-            if restore is not None:
-                if int(restore[1]) != b0:
-                    raise RuntimeError(f"Inkling: restore at {restore[1]} for a prefill from {b0}")
-                if b0:
+            if restore is not None and int(restore[1]) != b0:
+                raise RuntimeError(f"Inkling: restore at {restore[1]} for a prefill from {b0}")
+            if b0:
+                rec = self._ps.get(int(restore[0])) if restore is not None else None
+                if rec is not None and rec["pos"] == b0:
                     self._ps_restore(restore[0], b0)
                     self.stats["prefix_hits"] = self.stats.get("prefix_hits", 0) + 1
                     self.stats["prefix_tokens"] = self.stats.get("prefix_tokens", 0) + b0
-            elif b0:
-                raise RuntimeError(f"Inkling: prefill from {b0} without a prefix-state restore")
+                else:
+                    # no snapshot of the recurrent state at b0 (a directive the engine never filled): the cached KV
+                    # alone cannot resume the prompt, so prefill it whole (exact; slower for this one request)
+                    have = None if restore is None else (None if rec is None else rec["pos"])
+                    logger.warning(
+                        f"Inkling: no prefix-state snapshot at {b0} (slot {None if restore is None else restore[0]} "
+                        f"holds {have}): prefilling the prompt of {P} tokens from 0"
+                    )
+                    self.stats["prefix_fallbacks"] = self.stats.get("prefix_fallbacks", 0) + 1
+                    b0 = 0
         else:
             px, self._px = self._px_match(prompt_ids, mmkey) if P > 1 else None, None  # (invalid until this ends)
             b0 = px["b"] if px is not None else 0
