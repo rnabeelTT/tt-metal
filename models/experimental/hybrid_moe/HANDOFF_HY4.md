@@ -9,6 +9,40 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## Prefix reuse (2026-11-20): multi-turn / repeated prefixes skip their prefill (tt/engine_batch.py)
+
+Engine-internal, vLLM's prefix caching stays off (the adapter sends the full prompt; `alloc(ids=...)` picks the slot).
+- A finished request's slot keeps its caches + fed tokens (`kept`); its lane is unloaded at finish (`_park`: indexer
+  group keys lane region -> slot; KV rows are already in the slot's cache). New prompt -> the free slot with the longest
+  reusable prefix (ties lowest), else LRU. `Hy4Model.rewind(r, ids)`: pos = r, indexer `rewind(r)` (device group keys
+  < r/4 kept, the rest zeroed, host mirror re-read), Engram history = ids[r-2:r]; then `prefill(ids[r:])`.
+- Exact mode (HY4_PC_EXACT=1, default): r is a fresh prefill's chunk boundary (2048, 2048 + chunk, ...) inside the kept
+  prefill's whole chunks (`_full`): every chunk then runs exactly as in a fresh prefill of the new prompt -> bit-identical
+  output, no new programs. Prefixes < 2048, decoded tokens and a prompt's last partial chunk are recomputed.
+- SWA ring (2592 rows/slot = chunk + window + 32): resume needs [r - 512, r) not overwritten -> r >= highest written
+  position (`Hy4Model._hiw`: prefill padding; decode + 96) - 2080. Divergence > ~2K tokens before the old end: no reuse.
+- Default OFF (HY4_PREFIX_CACHE=1 enables; with it off finish / alloc / prefill behave as before). HY4_PC_EXACT=0: 512-aligned resume (dense regime / decoded tokens too), device-noise-level
+  differences only (4 layers: greedy flips on near-ties, as a fresh prefill at another chunking does).
+- Gate `~/m27-work/hy4/pc_t.py` (4 layers, 4 slots): multi-turn via a batch lane, 3-turn chain, divergence, ring
+  overwritten -> no reuse, 9.6K prompt (8192 reused), packed interplay: reuse vs fresh max|dlogit| 0.0 over 32
+  teacher-forced steps, greedy identical, every case. Served A/B: `~/m27-work/hy4/queue_pc.sh` (serve/hy4_multiturn.py).
+- Two pre-existing bugs it exposed (HEAD: two fresh prefills of one prompt in different slots differed, first row up to
+  3.1 / decode 0.5-2 in the logits, 4 layers + warm + traces; full model up to 15), fixed regardless of the flag:
+  1. Prefill constants cached across requests (`_rows_const` tails / RoPE, `_IDX_DEV`, `_BAND`, `_IOTA`, `_BASE_T`,
+     `_ZEROS`, indexer `_gtab` / `_off_cache`) and the indexers' lazy device clones (`_open_pending`, `_tk_pending`,
+     `_gk_pending`) were allocated after a decode trace's capture and lived into its replays, which overwrite them
+     (`TT_METAL_TRACE_ALLOC_TRACKING=1` names them). `Hy4Model.prefill_caches_release()` after every prefill (both
+     engines): host views materialized, entries created since `prefill_caches_mark()` (warm-up, before its first
+     capture) freed.
+  2. Single-path (solo) decode traces are keyed (rows, regime, bucket), not by slot, but captured the active slot's
+     per-slot indexer tensors (group keys, token / group windows): a sequence decoding alone in another slot read and
+     wrote the capture slot's group keys. `Hy4BatchEngine._solo_in / _solo_out`: the solo slot's indexer state lives in
+     fixed buffers while solo (copied in / back; all single-path traces capture those).
+  After both: 4 layers, 8 slots, warm + traces, tracker on: every case 0.0 / identical (`pc_logs/pctrk6.log`); full
+  model (Engram, warm, traces, 8 x 12K, tracker on): 9/9 cases bit-identical, +0 programs per reuse prefill
+  (`pc_logs/pcfull5.log`). Engine prefill time fresh -> reused: 4861 tok 2.22 -> 0.54 s, 7042 3.01 -> 0.54 s, 9615
+  4.17 -> 0.80 s, 3440 1.67 -> 0.80 s.
+
 ## Round 3 (2026-11-19, evening): multi-user serving (up to 8 users), prefill
 
 Target (decided): up to 8 concurrent users (buckets 1/2/4/8), maximize throughput and TTFT; 16+ rows per pass hit the

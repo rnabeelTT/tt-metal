@@ -147,6 +147,7 @@ class Hy4Engine:
         if mm is not None:
             self.model.set_images(**mm)
         lg = self.model.prefill(ids)  # the dense-regime chunk first, then the model's chunk (tt/model.py prefill)
+        self.model.prefill_caches_release()  # (cached device constants must not outlive it into a decode replay)
         self.last_logits = lg
         self.dec.start(int(ids.numel()))
         self._smp = HostSampler(sampling)

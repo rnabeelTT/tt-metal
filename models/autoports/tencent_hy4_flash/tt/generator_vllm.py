@@ -218,7 +218,9 @@ class HYV4FlashForConditionalGeneration:
             old = self._row_slot.pop(row, None)  # the row's previous request is gone
             if old is not None:
                 eng.finish(old)
-            slot = eng.alloc(taken=slots)
+            # (text prompts: the slot whose kept sequence shares the longest prefix, tt/engine_batch.py prefix reuse)
+            text = mms is None or mms[u] is None
+            slot = eng.alloc(taken=slots, ids=tokens[u, : plens[u]].tolist() if text else None)
             self._row_slot[row] = slot
             slots.append(slot)
             reqs.append((slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))

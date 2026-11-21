@@ -184,6 +184,42 @@ class Hy4Indexer:
         self.tk_hist = torch.zeros(0, self.d, dtype=torch.bfloat16)  # the last token keys (staging init)
         self.tk_hist_base = 0
 
+    def drop_device_views(self):
+        """Materialize every slot's lazy host views (group keys, last token keys, the open group's keys: device clones of
+        prefill chunks) and drop the clones. Called after a prefill, before any decode pass: a buffer allocated after a
+        trace capture and alive at a replay is overwritten by it (tt/model.py prefill_caches_release)."""
+        for st in [self.__dict__] + list(self._slots.values()):
+            pend = st.get("_gk_pending")
+            if pend:
+                for g0, t, n in pend:
+                    if n > 0:
+                        st["_mirror"][g0 : g0 + n] = to_torch0(t).reshape(-1, self.d)[:n].to(torch.bfloat16)
+                st["_gk_pending"] = []
+                st["_mirror_stale"] = None
+            for a, b in (("_tk_pending", "_tk_hist"), ("_open_pending", "_open_keys")):
+                if st.get(a) is not None:
+                    st[b] = self._materialize(st[a])
+                    st[a] = None
+
+    def rewind(self, n: int):
+        """Prefix reuse (tt/engine_batch.py): keep this slot's first n tokens' group keys (n a multiple of 32 groups, every
+        group complete; decode lanes unloaded) and drop the rest, as a continued prefill from n expects: groups >= n / r
+        zeroed on the device (as reset(); the score op reads past the visible groups) and the host mirror re-read."""
+        G = n // self.r
+        assert n % (32 * self.r) == 0, n
+        full = to_torch0(self.gkeys).reshape(-1, self.d)[: self.gcap].to(torch.bfloat16).clone()
+        full[G:] = 0
+        t = upload(self.mesh, full.reshape(1, 1, self.gcap, self.d), ttnn.bfloat16)  # (reset()'s copy program)
+        ttnn.copy(t, self.gkeys)
+        ttnn.deallocate(t)
+        self._mirror = full
+        self._mirror_stale = None
+        self._gk_pending = []
+        self.n_tok, self.n_groups = n, G
+        self.open_keys = torch.zeros(0, self.d, dtype=torch.bfloat16)
+        self.tk_hist = torch.zeros(0, self.d, dtype=torch.bfloat16)
+        self.tk_hist_base = n
+
     # ------------------------------------------------------------------ host pooling (reference-exact)
     def _pool(self, tk: torch.Tensor, g0: int) -> torch.Tensor:
         """tk [G * 4, 128] bf16 token keys of groups g0.. -> roped bf16 group keys [G, 128]."""

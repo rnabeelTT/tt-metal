@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import time
 
+import numpy as np
 import torch
 from loguru import logger
 
@@ -49,22 +50,130 @@ class Hy4BatchEngine:
         self.solo = None  # the slot decoding on the single path (its lane released)
         self.solo_on = os.environ.get("HY4_BATCH_SOLO", "1") == "1"
         self.last_logits = {}
-        self.stats = {"steps": 0, "rows": 0, "t_step": 0.0, "t_prefill": 0.0, "prefills": 0, "prefill_tokens": 0}
+        self.stats = {"steps": 0, "rows": 0, "t_step": 0.0, "t_prefill": 0.0, "prefills": 0, "prefill_tokens": 0,
+                      "reused_tokens": 0}
+        # prefix reuse (HY4_PREFIX_CACHE, default 0): a finished sequence's slot keeps its caches and token history; a new
+        # prompt sharing a prefix with it continues from there (tt/model.py rewind) instead of a full prefill
+        self.pc_on = os.environ.get("HY4_PREFIX_CACHE", "0") == "1"
+        self.pc_min = int(os.environ.get("HY4_PC_MIN", "512"))
+        # HY4_PC_EXACT (default 1): reuse only positions the kept sequence's prefill computed in whole chunks at a fresh
+        # prefill's chunk boundaries (0, 2048, 2048 + chunk, ...), resuming at such a boundary: every chunk then runs
+        # exactly as in a fresh prefill of the new prompt (same rows, same programs): bit-identical output. 0: any
+        # 512-aligned prefix (dense regime too, decoded positions too): device-noise-level differences
+        self.pc_exact = os.environ.get("HY4_PC_EXACT", "1") == "1"
+        # the single path's indexer state in fixed buffers (_solo_in): its traces are keyed (rows, regime, bucket), not
+        # by slot, and capture the addresses of the active slot's group keys / staging windows (per-slot tensors): a
+        # sequence decoding solo in another slot than the capture's read and wrote the capture slot's group keys
+        import ttnn
+
+        self._sb = []
+        for layer in model.layers:
+            ix = layer.attn.indexer
+            if ix is not None:
+                z = lambda n: ttnn.zeros((1, 1, n, ix.d), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,  # noqa: E731
+                                         device=model.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                self._sb.append((ix, (z(ix.gcap), z(64), z(64))))
+        self.kept = {}  # slot -> {"toks": the finished sequence's fed tokens (positions 0 ..), "t": finish time, "img",
+        #                          "full": its positions < full were computed by whole prefill chunks (_full)}
 
     # ------------------------------------------------------------------ slots
-    def alloc(self, taken=()) -> int:
+    def alloc(self, taken=(), ids=None) -> int:
+        """A free slot: (ids given, prefix reuse on) the one whose kept sequence shares the longest reusable prefix with
+        ids (ties: the lowest), else the least recently finished (never used first)."""
         free = [s for s in range(self.S) if s not in self.seqs and s not in taken]
         if not free:
             raise RuntimeError(f"Hy4: all {self.S} slots busy")
-        return free[0]
+        if not self.pc_on:
+            return free[0]
+        if ids is not None:
+            ids = [int(t) for t in ids]
+            r, s = max((self._reuse(s, ids), -s) for s in free)
+            if r > 0:
+                return -s
+        return min(free, key=lambda s: (self.kept.get(s, {}).get("t", 0.0), s))
 
     def finish(self, slot: int):
         q = self.seqs.pop(int(slot), None)
         if self.solo == int(slot):
             self.solo = None
+            self._solo_out(int(slot))
         elif q is not None:
-            self.dec.drop(q["lane"])
+            if self.pc_on:
+                self._park(q["lane"])
+            else:
+                self.dec.drop(q["lane"])
+        if q is not None and self.pc_on:
+            self.kept[int(slot)] = {"toks": q["toks"], "t": time.time(), "img": bool(q.get("img")),
+                                    "full": int(q.get("full", 0))}
         self.last_logits.pop(int(slot), None)
+
+    # ------------------------------------------------------------------ prefix reuse
+    def _park(self, lane):
+        """A finished sequence's lane freed with its indexers' group keys written back to its slot (decode in a lane
+        writes them only to the lane's region; the KV rows go to the slot's cache directly)."""
+        d = self.dec
+        ln = d.lanes[lane]
+        m = self.model
+        m.set_slot(ln["slot"])
+        _, _, Ms = d._onehots(lane)
+        for layer in m.layers:
+            if layer.attn.indexer is not None:
+                layer.attn.indexer.lane_unload(d.L, lane, Ms)
+        d.lanes[lane] = None
+
+    def _big(self) -> int:
+        """The prefill chunk past the dense regime (tt/model.py prefill)."""
+        return min(int(os.environ.get("HY4_PREFILL_CHUNK", self.model.chunk)), self.model.chunk)
+
+    def _full(self, n) -> int:
+        """Positions < this of an n-token prompt are computed by whole chunks of a fresh prefill (boundaries 2048,
+        2048 + chunk, ...; the last, partial chunk is padded to a bucket and differs with the prompt length)."""
+        dense = int(self.cfg.idx_candidate_topk)
+        if n < dense or (n == dense and os.environ.get("HY4_PF_TRACE", "0") == "1"):  # (a traced first chunk)
+            return 0
+        return dense + ((n - dense) // self._big()) * self._big()
+
+    def _reuse(self, slot, ids) -> int:
+        """Positions of `ids` (list) the free slot's kept sequence can serve: r <= the common prefix d, r < len(ids) (the
+        last row runs for its logits). HY4_PC_EXACT=1: r a fresh prefill's chunk boundary <= the kept prefill's whole
+        chunks (bit-identical). Else aligned for the continued prefill (r < 2048, the dense regime: a multiple of
+        HY4_PC_ALIGN_DENSE, default 512 >= the SWA window, so the chunk takes the flash SWA path; else of
+        HY4_PC_ALIGN, default 512: the group-key slab writes of a chunk at group offset r / 4 then take the slab sizes
+        warm() compiles), the SWA ring
+        still holding positions [r - window, r), r >= HY4_PC_MIN. 0: no reuse."""
+        k = self.kept.get(int(slot))
+        m = self.model
+        if (not self.pc_on or k is None or k["img"] or int(slot) in self.seqs
+                or (m.engram is not None and not hasattr(m.engram, "hist"))):
+            return 0
+        toks = k["toks"]
+        lim = min(len(toks), len(ids) - 1)
+        if lim < self.pc_min:
+            return 0
+        a = np.asarray(toks[:lim], dtype=np.int64)
+        b = np.asarray(ids[:lim], dtype=np.int64)
+        neq = np.flatnonzero(a != b)
+        dpre = int(neq[0]) if neq.size else lim
+        dense = int(self.cfg.idx_candidate_topk)
+        if self.pc_exact:  # a chunk boundary of a fresh prefill, inside the kept prefill's whole chunks
+            c = min(dpre, int(k.get("full", 0)))
+            r = dense + ((c - dense) // self._big()) * self._big() if c >= dense else 0
+        elif dpre >= dense:
+            A = int(os.environ.get("HY4_PC_ALIGN", "512"))
+            r = (dpre // A) * A
+            if r < dense:
+                r = dense
+        else:
+            A = int(os.environ.get("HY4_PC_ALIGN_DENSE", "512"))
+            r = (dpre // A) * A
+        if r <= 0 or r % 128 or r < max(self.pc_min, int(self.cfg.window)):
+            return 0
+        swa = next((l.attn for l in m.layers if l.attn.kind == "swa"), None)
+        if swa is not None:  # ring rows hold the last swa.rows positions written (prefill padding, decode lookahead)
+            hiw = max(getattr(m, "_hiw", {}).get(int(slot), 0), len(toks) + 96 + self.k)
+            if r - int(self.cfg.window) < hiw - swa.rows:
+                return 0
+        return r
 
     @property
     def live(self):
@@ -83,21 +192,30 @@ class Hy4BatchEngine:
         if n + 64 > self.model.max_ctx:
             raise ValueError(f"Hy4: prompt of {n} tokens exceeds the slot context {self.model.max_ctx - 64}")
         m = self.model
+        idl = ids.tolist()
+        r = self._reuse(slot, idl) if mm is None else 0
         m.set_slot(slot)
-        m.reset()
+        if r:
+            m.rewind(r, idl)  # the slot's kept sequence serves positions < r
+        else:
+            m.reset()
+        self.kept.pop(slot, None)
         if mm is not None:
             m.set_images(**mm)
-        lg = m.prefill(ids)
-        lane = self.dec.add(slot, n, ids.tolist())
+        lg = m.prefill(ids[r:])
+        m.prefill_caches_release()  # (before any decode replay: tt/model.py)
+        lane = self.dec.add(slot, n, idl)
         smp = HostSampler(sampling)
         tok = smp(lg)
-        self.seqs[slot] = {"lane": lane, "tok": tok, "pos": n, "smp": smp, "adopt": False, "toks": ids.tolist()}
+        self.seqs[slot] = {"lane": lane, "tok": tok, "pos": n, "smp": smp, "adopt": False, "toks": idl,
+                           "img": mm is not None, "full": self._full(n)}
         self.last_logits[slot] = lg
         dt = time.time() - t0
         self.stats["t_prefill"] += dt
         self.stats["prefills"] += 1
-        self.stats["prefill_tokens"] += n
-        logger.info(f"Hy4 prefill {n} tokens into slot {slot} (lane {lane}) in {dt:.2f} s; live {self.live}")
+        self.stats["prefill_tokens"] += n - r
+        self.stats["reused_tokens"] += r
+        logger.info(f"Hy4 prefill {n} tokens ({r} reused) into slot {slot} (lane {lane}) in {dt:.2f} s; live {self.live}")
         return tok
 
     def prefill_many(self, reqs) -> list:
@@ -106,6 +224,18 @@ class Hy4BatchEngine:
         prefill each."""
         m = self.model
         idl = [torch.as_tensor(ids, dtype=torch.long).reshape(-1) for _, ids, _ in reqs]
+        if self.pc_on and len(reqs) > 1:  # prompts continuing a kept sequence: their own (continued) prefill
+            for slot, _, _ in reqs:
+                self.finish(slot)
+            hit = [self._reuse(slot, t.tolist()) > 0 for (slot, _, _), t in zip(reqs, idl)]
+            if any(hit):
+                out = [None] * len(reqs)
+                rest = [i for i, h in enumerate(hit) if not h]
+                for i, tok in zip(rest, self.prefill_many([reqs[i] for i in rest]) if rest else []):
+                    out[i] = tok
+                for i in [i for i, h in enumerate(hit) if h]:
+                    out[i] = self.prefill(reqs[i][0], idl[i], reqs[i][2])
+                return out
         plan = m.pack_plan([int(t.numel()) for t in idl])
         if plan is None or not all(m.engram_keep_all(t) for t in idl):
             return [self.prefill(slot, ids, sp) for (slot, _, sp), ids in zip(reqs, idl)]
@@ -114,7 +244,10 @@ class Hy4BatchEngine:
             self.finish(slot)
         if self.solo is not None:
             self._exit_solo()
+        for slot, _, _ in reqs:
+            self.kept.pop(slot, None)
         lgs = m.forward_packed([(slot, ids) for (slot, _, _), ids in zip(reqs, idl)], plan)
+        m.prefill_caches_release()
         out = []
         for (slot, _, sp), ids, lg in zip(reqs, idl, lgs):
             lane = self.dec.add(slot, int(ids.numel()), ids.tolist())
@@ -141,9 +274,39 @@ class Hy4BatchEngine:
         d.set_history(q["toks"])
         q["lane"] = None
         self.solo = slot
+        self._solo_in(slot)
+
+    _SOLO_ATTRS = ("gkeys", "tk_stage", "g_stage")
+
+    def _solo_in(self, slot):
+        """The slot's indexer state (group keys, token / group windows) -> the fixed solo buffers, which the indexers then
+        use as the slot's (the single-path traces read and write them)."""
+        import ttnn
+
+        self.model.set_slot(slot)
+        for ix, bufs in self._sb:
+            orig = tuple(getattr(ix, a) for a in self._SOLO_ATTRS)
+            for src, dst in zip(orig, bufs):
+                ttnn.copy(src, dst)
+            ix._solo_orig = orig
+            for a, b in zip(self._SOLO_ATTRS, bufs):
+                setattr(ix, a, b)
+
+    def _solo_out(self, slot):
+        """The solo buffers -> the slot's own tensors (restored)."""
+        import ttnn
+
+        self.model.set_slot(slot)
+        for ix, bufs in self._sb:
+            orig = ix.__dict__.pop("_solo_orig")
+            for src, dst in zip(bufs, orig):
+                ttnn.copy(src, dst)
+            for a, t in zip(self._SOLO_ATTRS, orig):
+                setattr(ix, a, t)
 
     def _exit_solo(self):
         slot, self.solo = self.solo, None
+        self._solo_out(slot)
         q = self.seqs[slot]
         d = self.dec
         q["lane"] = d.add(slot, q["pos"], q["toks"], stage=(d.ob, d.ogb))  # its current single-path windows
@@ -267,6 +430,7 @@ class Hy4BatchEngine:
         g = torch.Generator().manual_seed(0)
         rnd = lambda n: torch.randint(1000, 100000, (n,), generator=g).tolist()  # noqa: E731
         m = self.model
+        m._pf_hold = True  # (tt/model.py prefill_caches_release: kept until prefill_caches_mark below)
         if os.environ.get("HY4_PF_BUCKETS", "1") == "1":
             for b in m.PF_BUCKETS:
                 if b <= self.chunk and b < m.max_ctx:
@@ -281,6 +445,27 @@ class Hy4BatchEngine:
                     if b <= self.chunk and L + 64 < m.max_ctx:
                         self.prefill(0, rnd(L))
                         m.warm_head_blocks(b)
+        # continued prefills from a reused prefix in the dense regime (r = 512 / 1024 / 1536: a chunk to 2048 through the
+        # sparse layers' listed path and the group-key slab writes at that offset): every bucket
+        if self.pc_on and not self.pc_exact:
+            A = int(os.environ.get("HY4_PC_ALIGN_DENSE", "512"))
+            dense = int(self.cfg.idx_candidate_topk)
+            for r0 in range(max(A, self.pc_min), dense, A):
+                for b in m.PF_BUCKETS:
+                    T = min(b - 1, dense - r0)
+                    if next(x for x in m.PF_BUCKETS if x >= T) != b or r0 + b + 64 > m.max_ctx:
+                        continue
+                    base = rnd(r0 + 1)
+                    self.prefill(0, base)
+                    self.prefill(0, base[:r0] + rnd(T))
+                    m.warm_head_blocks(b)
+            # past the dense regime: a full chunk at group offset 768 (slabs of 256 groups; the dense ones above compile
+            # the 128-group slabs, smaller chunks write one slab of their size)
+            r0, T = dense + 1024, self.chunk - 1
+            if int(os.environ.get("HY4_PC_ALIGN", "512")) <= 1024 and r0 + T + 64 < m.max_ctx:
+                base = rnd(r0 + 1)
+                self.prefill(0, base)
+                self.prefill(0, base[:r0] + rnd(T))
         # packed prefills: every (B, Tb) plan up to the slot count (their batched attention / segment slices)
         for B in (2, 4, 8, 16):
             for Tb in m.PF_BUCKETS:
@@ -317,6 +502,7 @@ class Hy4BatchEngine:
         self.prefill(0, rnd(int(prompt_len or 64)))
         for R in range(2, self.S + 1):
             self.step({s: (None, None, False) for s in range(R)})
+        m.prefill_caches_mark()  # (the warm-up prefills above ran before any capture: their cached constants stay)
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
         for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
@@ -338,6 +524,7 @@ class Hy4BatchEngine:
             m.set_slot(s)
             m.reset()
         m.set_slot(0)
+        self.kept.clear()
         logger.info(f"warm: traces captured; {m.dram_report()}")
         self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}
         logger.info(f"Hy4 batch engine warm-up {time.time() - t0:.1f} s ({self.S} slots, widths {widths}, "

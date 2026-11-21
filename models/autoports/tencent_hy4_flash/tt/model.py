@@ -391,12 +391,75 @@ class Hy4Model:
 
     def reset(self):
         self.pos = 0
+        self.__dict__.setdefault("_hiw", {})[self.slot] = 0
         POSMAPS.pop(self.slot, None)  # image prompt state of the slot's previous sequence
         self._img = None
         for layer in self.layers:
             layer.reset()
         if self.engram is not None:
             self.engram.reset()
+
+    def _pf_caches(self):
+        """(dict, eligible(key)) of the prefill-only device constants cached across calls."""
+        from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
+
+        keep0 = os.environ.get("HY4_PF_TRACE", "0") == "1"  # p0 = 0 entries: inputs of the captured first-chunk traces
+        out = [(Hy4Attention._ROWS_DEV, lambda k: True),
+               (Hy4Attention._IDX_DEV, lambda k: not (keep0 and k[2] == 0)),
+               (Hy4Attention._BAND, lambda k: True),
+               (Hy4Indexer._IOTA, lambda k: k[1] > 32),  # (32-row ones: decode, read by captured traces)
+               (Hy4Indexer._BASE_T, lambda k: True),  # (a slot's first selecting chunk after warm-up made its base)
+               (Hy4Attention._ZEROS, lambda k: k[1][-2] > 32)]
+        for layer in self.layers:
+            ix = layer.attn.indexer
+            if ix is not None:
+                out.append((ix.__dict__.setdefault("_gtab", {}), lambda k: not (keep0 and k[0] == 0)))
+                out.append((ix._off_cache, lambda k: not isinstance(k, tuple)))  # (tuples: lane region offsets)
+        return out
+
+    def prefill_caches_mark(self):
+        """Before the first trace capture (warm-up): the cached prefill constants existing now stay;
+        prefill_caches_release() frees the ones created later. (Warm-up sets _pf_hold until then.)"""
+        self._pf_hold = False
+        self._pf_mark = {id(c): dict(c) for c, _ in self._pf_caches()}  # (by value: an entry evicted and re-created
+        # under the same key after a capture is not the marked one)
+
+    def prefill_caches_release(self):
+        """Free the prefill-only device constants cached since prefill_caches_mark() (index-list tails / position lists,
+        row RoPE tables, SWA band masks, score iotas, group RoPE tables, slab offsets). A device buffer allocated after a
+        decode trace's capture and kept to a later prefill is overwritten by that trace's replays (trace allocation
+        tracker: the `_rows_const("tail")` lists alive at replay; full model: two fresh prefills of one prompt differed
+        by 2.5 in the logits). Call after every prefill, before any decode pass."""
+        for layer in self.layers:  # the indexers' lazy host views hold device clones of the chunks' keys
+            if layer.attn.indexer is not None:
+                layer.attn.indexer.drop_device_views()
+        if getattr(self, "_pf_hold", False):  # warm-up before its first capture: keep them (marked then)
+            return
+        mark = getattr(self, "_pf_mark", {})
+        for c, ok in self._pf_caches():
+            keep = mark.get(id(c), {})
+            for k in [k for k in c if ok(k) and keep.get(k) is not c[k]]:
+                v = c.pop(k)
+                for t_ in (v if isinstance(v, tuple) else (v,)):
+                    ttnn.deallocate(t_)
+
+    def rewind(self, n: int, ids):
+        """Prefix reuse (tt/engine_batch.py): continue the active slot's previous sequence from position n (its tokens
+        ids[:n]; n a multiple of 128) instead of reset(): the KV / group keys of positions < n stay, the indexers and the
+        Engram history are set as a prefill of ids[:n] leaves them. (The caller checks the SWA ring still holds the
+        window before n and that the slot's sequence had no images.)"""
+        self.pos = int(n)
+        POSMAPS.pop(self.slot, None)
+        self._img = None
+        for layer in self.layers:
+            if layer.attn.indexer is not None:
+                layer.attn.indexer.rewind(n)
+        eng = self.engram
+        if eng is not None:
+            keep = int(getattr(eng, "keep", 2))
+            tl = np.asarray([int(t) for t in ids[max(0, n - keep) : n]], dtype=np.int64)
+            eng.hist = {li: tl.copy() for li in eng.hist}
+            eng.pos = {li: int(n) for li in eng.pos}
 
     def set_images(self, pos3, delta: int, embeds: torch.Tensor, idx: torch.Tensor):
         """The active slot's next prompt holds images (after reset(), before prefill): rope positions pos3 [3, L] /
@@ -537,6 +600,7 @@ class Hy4Model:
                 if layer.attn.indexer is not None:
                     layer.attn.indexer._traced_pf = False
         self.pos = T
+        self.__dict__.setdefault("_hiw", {})[self.slot] = Tb
         for layer in self.layers:
             if layer.attn.indexer is not None:
                 layer.attn.indexer.after_traced_prefill(T, Tb)
@@ -597,6 +661,8 @@ class Hy4Model:
         for t_ in list(eng.values()) + [c for cs in cos_sin.values() for c in cs]:
             ttnn.deallocate(t_)
         self.pos = p0 + T
+        hiw = self.__dict__.setdefault("_hiw", {})  # prefix reuse: the highest position this slot's caches were written
+        hiw[self.slot] = max(hiw.get(self.slot, 0), p0 + Tp)
         if split:
             out = self._head_split(X, T, Tp, logits_rows, mem)
             ttnn.deallocate(X)
@@ -648,6 +714,7 @@ class Hy4Model:
                 for li in eng_rows:
                     eng_rows[li][b * Tb : b * Tb + T] = self.engram.rows(li, ids, 0)
             self.pos = T  # (parked with the slot by the next set_slot)
+            self._hiw[slot] = Tb
             segs.append((slot, T))
         segs += [(None, 0)] * (B - len(segs))
         tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1))
