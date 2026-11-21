@@ -32,11 +32,19 @@ for f in sorted(glob.glob(os.path.join(root, "hybrid", "*.py"))):
 
 
 def chat(messages, max_tokens):
-    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "min_tokens": max_tokens,
-            "temperature": 0, "stream": True, "stream_options": {"include_usage": True},
-            "chat_template_kwargs": {"reasoning_effort": "none"}}
-    req = urllib.request.Request(f"{url}/chat/completions", json.dumps(body).encode(),
-                                 {"Content-Type": "application/json"})
+    body = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "min_tokens": max_tokens,
+        "temperature": 0,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "chat_template_kwargs": {"reasoning_effort": "none"},
+    }
+    req = urllib.request.Request(
+        f"{url}/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"}
+    )
     t0, ttft, text, usage = time.time(), None, "", None
     with urllib.request.urlopen(req, timeout=1800) as r:
         for line in r:
@@ -55,7 +63,9 @@ def chat(messages, max_tokens):
 
 
 # size the first prompt: ~4 characters per token of source
-messages = [{"role": "user", "content": "Summarise what this code does, file by file, in detail.\n\n" + src[: first * 4]}]
+messages = [
+    {"role": "user", "content": "Summarise what this code does, file by file, in detail.\n\n" + src[: first * 4]}
+]
 ok = True
 for t in range(turns):
     # probe the prompt length with a 1-token request (also warms the prefix cache), then decode across the next boundary
@@ -72,7 +82,10 @@ for t in range(turns):
     n = u["completion_tokens"]
     crossed = p + n > nxt
     ok &= crossed
-    print(f"turn {t + 1}: prompt {p} tokens, TTFT {ttft:.2f} s, {n} tokens -> position {p + n} "
-          f"({'crossed' if crossed else 'DID NOT cross'} {nxt})", flush=True)
+    print(
+        f"turn {t + 1}: prompt {p} tokens, TTFT {ttft:.2f} s, {n} tokens -> position {p + n} "
+        f"({'crossed' if crossed else 'DID NOT cross'} {nxt})",
+        flush=True,
+    )
     messages += [{"role": "assistant", "content": text}, {"role": "user", "content": "Go on with the next file."}]
 print("ALL PASS" if ok else "FAIL")

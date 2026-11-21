@@ -172,7 +172,10 @@ class InklingSpecServing:
         self._d_next = None
         self._dlog = None
         self._ckc_exact = ttnn.init_device_compute_kernel_config(
-            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
+            mesh.arch(),
+            math_fidelity=ttnn.MathFidelity.HiFi4,
+            math_approx_mode=False,
+            fp32_dest_acc_en=True,
             packer_l1_acc=False,
         )
         # INKLING_SUFFIX (default 0): prompt-lookup ("suffix") drafts, M2.7's hybrid/suffix_draft.py. The continuation
@@ -685,7 +688,8 @@ class InklingSpecServing:
 
     def _check_backed(self, pos, n):
         """Positions [pos, pos + n) about to be written: a write past vLLM's allocation below its context lands in a
-        scratch block, and the KV it holds is lost (vLLM's lookahead covers the engine's lead: counted, never expected)."""
+        scratch block, and the KV it holds is lost (vLLM's lookahead covers the engine's lead: counted, never expected).
+        """
         if not self.paged:
             return
         last = min(pos + n, self._context) - 1
@@ -863,7 +867,9 @@ class InklingSpecServing:
             self.d_pm = self._dev(self._pos_host(0, self.pw))  # positions p0 .. p0 + 2k - 1 (each depth slices its own)
             # sampled drafts (one trace per depth): depth j's rows for depth j + 1, and depth j's ids (toks + drafts)
             self.hb = {(j, w): hb(w + j) for j in range(0, self.k - 1) for w in range(1, self.k + 2)}
-            self.j_ids = {(j, w): self._dev(self._ids_host([0] * (w + j))) for j in range(1, self.k) for w in range(1, self.k + 2)}
+            self.j_ids = {
+                (j, w): self._dev(self._ids_host([0] * (w + j))) for j in range(1, self.k) for w in range(1, self.k + 2)
+            }
         for R in range(1, self.k + 2):
             di, dp, dk, dt = self.bufs[R]
             ttnn.copy_host_to_device_tensor(self._idx_host(p, R), dk)
@@ -981,7 +987,9 @@ class InklingSpecServing:
         self._arm()
         try:
             hyb = _hyb()
-            if hyb is not None and hyb.enabled:  # the expert placement as at startup: output independent of earlier requests
+            if (
+                hyb is not None and hyb.enabled
+            ):  # the expert placement as at startup: output independent of earlier requests
                 hyb.reset_placement()
             return self._prefill_request(prompt_ids, sampling, mm, start, page_row, restore, saves)
         finally:
@@ -1014,7 +1022,9 @@ class InklingSpecServing:
             snap = saves[0][0] if saves else 0
             b0 = int(start or 0)
             if snap and (snap % self.chunk or snap <= b0 or snap > P - 1 or (snap - b0) % self.chunk):
-                raise RuntimeError(f"Inkling: prefix-state save at {snap} is not a chunk end of this prefill ({b0}, {P})")
+                raise RuntimeError(
+                    f"Inkling: prefix-state save at {snap} is not a chunk end of this prefill ({b0}, {P})"
+                )
             if restore is not None and int(restore[1]) != b0:
                 raise RuntimeError(f"Inkling: restore at {restore[1]} for a prefill from {b0}")
             if b0:
@@ -1065,7 +1075,9 @@ class InklingSpecServing:
             if snap:
                 want = 2 * len(self.model.layers) + (self.mtp.n_depth if self.mtp_prompt else 0)
                 if self._px_count != want:
-                    raise RuntimeError(f"Inkling: prefix-state snapshot at {snap} took {self._px_count} of {want} copies")
+                    raise RuntimeError(
+                        f"Inkling: prefix-state snapshot at {snap} took {self._px_count} of {want} copies"
+                    )
                 self._ps_save(saves[0][1], snap)
         elif snap and snap > b0:
             self._px = {
