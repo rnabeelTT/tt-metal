@@ -20,7 +20,7 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, num_devices, wfid,
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, boundary_rows_out, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, num_devices, wfid,
                                                            stream_enabled, upload)
 
 class _Args:
@@ -30,6 +30,16 @@ class _Args:
 _FUSED_ARGS = _Args()
 GATHER_MAX = int(os.environ.get("HY4_MOE_GATHER_MAX", "1"))  # more rows: the chunk-masked path (fixed op count)
 PREFILL_CHUNK = int(os.environ.get("HY4_MOE_CHUNK", "32"))
+
+
+def _lshard_env() -> str:
+    """HY4_MOE_LSHARD (latent-down column shard + all_gather; "1": the shard copy replaces the full-width one, -~6 MB/die
+    per layer of DRAM; "build": both, for A/B): default on, except with the DFly2 drafter (HY4_SPEC_K > 0)."""
+    return os.environ.get("HY4_MOE_LSHARD", "0" if int(os.environ.get("HY4_SPEC_K", "0") or 0) > 0 else "1")
+
+
+def _lshard_topology():
+    return ttnn.Topology.Ring if os.environ.get("HY4_LSHARD_TOPO", "linear") == "ring" else ttnn.Topology.Linear
 
 
 def _dt(name, default):
@@ -101,7 +111,7 @@ class Hy4DenseMLP:
         ttnn.deallocate(g)
         ttnn.deallocate(u)
         if dec:
-            part = self.dec["d"](h, mem)
+            part = self.dec["d"](h, mem, rows_out=boundary_rows_out(self.mesh, R))
         else:
             part = mm(h, self.w2, wfid(self.ckc, self.w2), mem)
         ttnn.deallocate(h)
@@ -210,11 +220,24 @@ class Hy4MoE:
             # HY4_MOE_DEC_DTYPE: the decode copies' dtype (default: the small weights' dtype; bfp8 is a quality tradeoff)
             dd = _dt("HY4_MOE_DEC_DTYPE", os.environ.get("HY4_MOE_SMALL_DTYPE", "bf16"))
             self.dec = {
-                "in": StreamLinear(mesh, [torch.cat([wd_t, sg[:, i * Sl : (i + 1) * Sl], su[:, i * Sl : (i + 1) * Sl]], 1)
-                                          for i in range(tp)], dd, cache=cache(f"dec_in.{dd}")),
                 "out": StreamLinear(mesh, [torch.cat([wu_t, sdn[i * Sl : (i + 1) * Sl, :]], 0) for i in range(tp)],
                                     dd, cache=cache(f"dec_out.{dd}")),
             }
+            # HY4_MOE_LSHARD=1: no full-width copy (its ~14 MB/die/layer of DRAM: 8 x 12K served prefills OOMed with
+            # both copies); rows the fused kernels do not take (T > rows_max) go through the interleaved-weight path
+            if not (_lshard_env() == "1" and L % (tp * TILE) == 0):
+                self.dec["in"] = StreamLinear(
+                    mesh, [torch.cat([wd_t, sg[:, i * Sl : (i + 1) * Sl], su[:, i * Sl : (i + 1) * Sl]], 1)
+                           for i in range(tp)], dd, cache=cache(f"dec_in.{dd}"))
+            # HY4_MOE_LSHARD (1 / build: the copy only): the latent down projection column-sharded over the dies
+            # ([xl_d | shared gate_d | shared up_d], xl_d = latent columns [d L / tp, (d + 1) L / tp)), its rows
+            # all-gathered for the fused experts: each die streams a quarter of W_down (exact: whole columns)
+            if _lshard_env() in ("1", "build") and L % (tp * TILE) == 0:
+                Lq = L // tp
+                self.dec["in_s"] = StreamLinear(
+                    mesh, [torch.cat([wd_t[:, i * Lq : (i + 1) * Lq], sg[:, i * Sl : (i + 1) * Sl],
+                                      su[:, i * Sl : (i + 1) * Sl]], 1) for i in range(tp)],
+                    dd, cache=cache(f"dec_in_s.{dd}"))
         # decode: the M2.7 / Qwen fused MoE kernels (route + gate|up + down in 3 programs), with Hy4's SwiGLU clamps
         # (MOE_SWIGLU_LIMIT, moe_decode/kernels SWIGLU_LIMIT), the router run by this port on the full-width hidden
         self.fused = None
@@ -476,12 +499,19 @@ class Hy4MoE:
         """Decode / verify rows (T <= 32 real rows of x [1, 1, 32, 3072]): the fused kernels when available."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
-        if self.dec is not None and int(x.shape[-2]) == 32:
+        if (self.dec is not None and int(x.shape[-2]) == 32
+                and ("in" in self.dec or (self.fused is not None and T <= getattr(self, "rows_max", 1)
+                                          and _lshard_env() == "1"))):
             # streamed linears: [latent down | shared gate | shared up] and [latent up ; shared down]; the experts by
             # the fused kernels (one row) or the per-row gather (verify rows)
             L, Sl = self.L, self.Sl
             fusedT = self.fused is not None and T <= getattr(self, "rows_max", 1)
-            if dl_split():
+            if fusedT and "in_s" in self.dec and _lshard_env() == "1":
+                Lq = L // self.N
+                xq, g, u = self.dec["in_s"](x, mem, splits=[(0, Lq, T), (Lq, Lq + Sl), (Lq + Sl, Lq + 2 * Sl)])
+                xl = ttnn.all_gather(xq, dim=3, cluster_axis=1, topology=_lshard_topology(), memory_config=mem)
+                ttnn.deallocate(xq)
+            elif dl_split():
                 # the parts written straight by the linear (the fused experts' rows: only the real rows)
                 xl, g, u = self.dec["in"](x, mem, splits=[(0, L, T if fusedT else None), (L, L + Sl),
                                                           (L + Sl, L + 2 * Sl)])
@@ -514,7 +544,7 @@ class Hy4MoE:
                 rT = ttnn.multiply(partT, self.scale, memory_config=mem)  # the fused router normalizes to 1
                 if os.environ.get("HY4_MOE_XSPLIT", "1") == "1" and T <= 16:
                     # the out linear reads [routed | h] as two K parts (its rows 0..T-1 only): no pad / concat
-                    part = self.dec["out"]((rT, h), mem)
+                    part = self.dec["out"]((rT, h), mem, rows_out=boundary_rows_out(self.mesh, T))
                     ttnn.deallocate(rT)
                     ttnn.deallocate(h)
                     return self._dec_tail(part, T, mem)
@@ -533,7 +563,7 @@ class Hy4MoE:
             cat = ttnn.concat([routed, h], dim=-1, memory_config=mem)
             ttnn.deallocate(routed)
             ttnn.deallocate(h)
-            part = self.dec["out"](cat, mem)
+            part = self.dec["out"](cat, mem, rows_out=boundary_rows_out(self.mesh, T))
             ttnn.deallocate(cat)
             return self._dec_tail(part, T, mem)
         if self.fused is None or T > rows_max:

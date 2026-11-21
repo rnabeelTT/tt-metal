@@ -248,22 +248,49 @@ class StreamLinear:
         if op is None:
             op = StreamLinear._OPS[key] = DecodeLinear(mesh, K, N, dtype, readers=readers, fidelity=fidelity)
         self.op, self.K, self.N = op, K, N
+        self.readers, self.dtype, self.fidelity, self.mesh = readers, dtype, fidelity, mesh
         self.out_dtype = out_dtype or ttnn.bfloat16
         cname = f"{cache}.stream{readers}" if cache else None
         self.w = op.weight([p.reshape(K, N).to(torch.bfloat16) for p in parts], cache_file_name=cname)
 
-    def __call__(self, x, mem=None, splits=None, heads=None):
-        """splits [(c0, c1[, rows]), ...]: the output as column parts (one tensor each, rows default 32; HY4_DL_SPLIT)."""
+    def __call__(self, x, mem=None, splits=None, heads=None, rows_out=32):
+        """splits [(c0, c1[, rows]), ...]: the output as column parts (one tensor each, rows default 32; HY4_DL_SPLIT).
+        rows_out: the output's rows when the pass reads its real rows only (e.g. the real rows for a fabric boundary,
+        which then needs no slice; rows past them undefined)."""
         R = DECODE_ROWS[0]
+        op = self._op(heads)
         if splits is not None:
             splits = [(s[0], s[1], s[2] if len(s) > 2 else None) for s in splits]
         if R <= 16 and os.environ.get("HY4_STREAM_REAL_ROWS", "1") == "1":
             # read only the pass's real rows of the activation (64 B per tile per row instead of the whole 2 KB tile into
             # every reader core: the compute waited ~28 us for it); the output keeps 32 rows, padded rows zeroed
-            return self.op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=32,
-                           splits=splits, heads=heads)
-        return self.op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, splits=splits,
-                       heads=heads)
+            return op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=max(rows_out, R),
+                      splits=splits, heads=heads)
+        return op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, splits=splits,
+                  heads=heads)
+
+    def _op(self, heads):
+        """HY4_DL_READERS (A/B; default: the build's readers): reader cores per bank. The per-bank weight copy does not
+        depend on it (each core streams whole columns: exact)."""
+        r = int(os.environ.get("HY4_DL_READERS", "0"))
+        if not r or r == self.readers or heads is not None:
+            return self.op
+        from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
+
+        key = (id(self.mesh), self.K, self.N, self.dtype, self.fidelity, r)
+        op = StreamLinear._OPS.get(key)
+        if op is None:
+            op = StreamLinear._OPS[key] = DecodeLinear(self.mesh, self.K, self.N, self.dtype, readers=r,
+                                                       fidelity=self.fidelity)
+        return op
+
+
+def boundary_rows_out(mesh, R) -> int:
+    """HY4_BND_ROWS (default 1): a partial sum headed for the fabric boundary is written with the pass's R real rows
+    only (the boundary then takes it without a slice program; same values). Else 32."""
+    if R is not None and os.environ.get("HY4_BND_ROWS", "1") == "1" and Boundary.enabled(mesh, R):
+        return int(R)
+    return 32
 
 
 def norm_shard() -> bool:

@@ -50,3 +50,30 @@ def slab_write(src, dst, offs, n_slabs: int, slab_rows: int = 32):
     cbs = [_cb(crs, 0, S * pageb), _cb(crs, 1, offb)]
     ttnn.generic_op([src, offs, dst], ttnn.ProgramDescriptor(kernels=[kern], semaphores=[], cbs=cbs))
     return dst
+
+
+def kv_rows_write(a, b, dst, offs, n_rows: int, zero_bytes: int):
+    """dst rows offs[k] (k < n_rows) = row k of [a | b | zero_bytes zeros]: a, b bf16 TILE tensors of one tile row (L1:
+    the kernel reads 32-byte face rows), dst row-major bf16 of 64 (a + b tiles) + zero_bytes bytes per row. One program
+    for concat + to_layout + slab_write (HY4_KVROW_FUSED; the same bytes)."""
+    assert a.layout == ttnn.TILE_LAYOUT and b.layout == ttnn.TILE_LAYOUT and dst.layout == ttnn.ROW_MAJOR_LAYOUT
+    A, B = int(a.shape[-1]) // 32, int(b.shape[-1]) // 32
+    rowb = int(dst.shape[-1]) * dst.element_size()
+    assert rowb == 64 * (A + B) + zero_bytes and zero_bytes % 4 == 0
+    offb = -(-(int(offs.shape[-1]) * 4) // 32) * 32
+    grid = dst.device().compute_with_storage_grid_size()
+    nc = min(n_rows, grid.x * grid.y)
+    cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
+    crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
+    acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
+    ct = [A, B, zero_bytes, rowb, offb, 0, 1, n_rows, nc] + acc(a) + acc(b) + acc(dst) + acc(offs)
+    rt = ttnn.RuntimeArgs()
+    for k, c in enumerate(cores):
+        rt[c.x][c.y] = [a.buffer_address(), b.buffer_address(), dst.buffer_address(), offs.buffer_address(), k]
+    kern = ttnn.KernelDescriptor(kernel_source=str(KDIR / "kv_rows.cpp"), core_ranges=crs, compile_time_args=ct,
+                                 runtime_args=rt,
+                                 config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                          noc=ttnn.NOC.NOC_0))
+    cbs = [_cb(crs, 0, -(-rowb // 32) * 32), _cb(crs, 1, offb)]
+    ttnn.generic_op([a, b, offs, dst], ttnn.ProgramDescriptor(kernels=[kern], semaphores=[], cbs=cbs))
+    return dst

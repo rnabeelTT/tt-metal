@@ -123,17 +123,32 @@ class FusedMoEDecode:
         cache = args.__dict__.setdefault("_qwen35_fused_moe_decode", {})
         key = (H, Il, E, k, dtype, down_dtype, router, self.shared, ep_experts, gate_first)
         if key not in cache:
-            ep = dict(ep_experts=ep_experts)
-            cache[key] = (
-                ExpertGateUp(mesh_device, H, Il, E, k, dtype, router=router, shared=self.shared, gate_first=gate_first, **ep),
-                ExpertDown(mesh_device, H, Il, E, k, down_dtype, shared=self.shared, **ep),
-                MoEDecodeBuffers(mesh_device, H, Il, k),
-            )
+            cache[key] = (None, None, MoEDecodeBuffers(mesh_device, H, Il, k))
             if ep_experts:
                 cache[key + ("ep_offset",)] = ep_offsets(mesh_device, ep_experts)
-        self.gate_up, self.down_op, self.buf = cache[key]
+        self.buf = cache[key][2]
         self.ep_offset = cache.get(key + ("ep_offset",))
         self._cache, self._key, self._mesh = cache, key, mesh_device
+        self.gate_up, self.down_op = self._one_row_ops()
+
+    def _one_row_ops(self):
+        """(ExpertGateUp, ExpertDown) of one row, per reader counts: QWEN35_MOE_GU_READERS (cores per gate|up column
+        group, default 4) and QWEN35_MOE_DN1_READERS (cores per bank, default ExpertDown's); read per call (a decode
+        A/B can switch them; the programs are rebuilt, the buffers shared). Exact: the cores split slots / columns."""
+        import os
+
+        gr = int(os.environ.get("QWEN35_MOE_GU_READERS", "4"))
+        dr = int(os.environ.get("QWEN35_MOE_DN1_READERS", "0")) or None
+        key = self._key + ("one", gr, dr)
+        if key not in self._cache:
+            H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
+            ep = dict(ep_experts=ep_experts)
+            self._cache[key] = (
+                ExpertGateUp(self._mesh, H, Il, E, k, dtype, readers=gr, router=router, shared=shared,
+                             gate_first=gate_first, **ep),
+                ExpertDown(self._mesh, H, Il, E, k, down_dtype, readers=dr, shared=shared, **ep),
+            )
+        return self._cache[key]
 
     def rows_ops(self, rows):
         """(RouteRows, ExpertGateUpRows, ExpertDownRows, RowsBuffers) for `rows` decode rows, one set per model; build
@@ -201,6 +216,7 @@ class FusedMoEDecode:
             logits = self._logits(x)
         b = self.buf
         sug, sdn = self._shared_tensors(up_gate, down)
+        self.gate_up, self.down_op = self._one_row_ops()
         self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset)
         ttnn.deallocate(logits)
         self.down_op(b.act, b.route, down, sdn, b.out)

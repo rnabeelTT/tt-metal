@@ -144,27 +144,39 @@ class HCFusedOp:
         out_mem = L1 if _os.environ.get("HY4_HCF_OUT_L1", "0") == "1" and TR == 1 else ttnn.DRAM_MEMORY_CONFIG
         inp = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
                                              in_mem or out_mem) if pre else None
-        w = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, 32]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
-                                           out_mem) if pre else None
+        half = half_mode(TR)
+        # HY4_HCF_QF (half decode kernels): the PRE also writes the next POST's 8 selection tiles (Q_s hi / lo, one per
+        # core 0..7) as pages 1..8 of w; a POST given such a w reads them instead of rebuilding them (exact)
+        qf_out = int(pre and bool(half) and _os.environ.get("HY4_HCF_QF", "1") == "1")
+        qf_in = int(post and bool(half) and int(wp.shape[-1]) == 9 * TILE)
+        w = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, 32 * (9 if qf_out else 1)]), ttnn.float32,
+                                           ttnn.TILE_LAYOUT, self.mesh, out_mem) if pre else None
         o_t = o if post else X
         wp_t = wp if post else self.mm
         fn_t = hc.fz_fn if pre else self.mm
         fl_t = hc.fz_fnlo if pre else self.mm
         cv_t = hc.fz_cv if pre else self.mm
         bf, f32 = (ttnn.bfloat16, 2048), (ttnn.float32, 4096)
-        half = half_mode(TR)
-        cbl = [(0, bf, db * NT), (1, bf, db * J), (2, f32, db), (3, f32, NT), (4, f32, 10), (5, f32, 4), (6, f32, 4),
+        early = int(bool(half) and _os.environ.get("HY4_HCF_EARLY", "1") == "1")
+        # HY4_HCF_COMB (with EARLY): one partial tile per core (mix | X' X'^T shifted by HR columns), half the slot sums
+        comb = int(early and pre and int(hc.fz_cv.shape[-2]) >= 6 * TILE and _os.environ.get("HY4_HCF_COMB", "1") == "1")
+        ncv = 6 if comb else 4
+        cbl = [(0, bf, db * NT), (1, bf, db * J), (2, f32, db), (3, f32, NT), (4, f32, 10), (5, f32, ncv), (6, f32, 4),
                (7, bf, NT), (8, f32, 1), (9, f32, 2), (10, f32, 2 * NC), (11, f32, 1), (12, f32, 1), (13, f32, 4),
                (14, f32, 1), (16, bf, J), (17, f32, db), (18, f32, 1), (19, f32, 1), (20, f32, 1), (21, f32, 1),
                (22, bf, NT), (23, f32, 4), (24, f32, 4)]
         if half:
             cbl += [(25, bf, NT), (26, f32, 1)]
+        if qf_out:
+            cbl += [(27, f32, 1)]
         cbs = [_cb(crs, i, dt, tb, n, half=0 if i in HALF_FULL else half) for i, (dt, tb), n in cbl]
-        hdef = [("HR", str(half))] if half else []
+        hdef = [("HR", str(half)), ("QF_IN", str(qf_in)), ("QF_OUT", str(qf_out)),
+                ("POST_FLAT", _os.environ.get("HY4_HCF_FLAT", "1")),
+                ("EARLY", str(early)), ("COMB", str(comb))] if half else []
         sfx = "_h" if half else ""
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         fnlo = int(pre and _os.environ.get("HY4_HCF_FNLO", "0") == "1")
-        rd_ct = [J, self.HT, int(post), int(pre), 0, 1, 2, 3, 4, 5, 10, 4, 17, 22, fnlo, TR, G]
+        rd_ct = [J, self.HT, int(post), int(pre), 0, 1, 2, 3, 4, 5, 10, ncv, 17, 22, fnlo, TR, G]
         rd_ct += acc(X) + acc(o_t) + acc(wp_t) + acc(fn_t) + acc(self.mm) + acc(cv_t) + acc(fl_t)
         rd_rt = [[X.buffer_address(), o_t.buffer_address(), wp_t.buffer_address(), fn_t.buffer_address(),
                   self.mm.buffer_address(), cv_t.buffer_address(), k % NC, fl_t.buffer_address(), k // NC]
@@ -203,7 +215,7 @@ class HCFusedOp:
                                   config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0),
                                   defines=hdef),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / f"hc_compute{sfx}.cpp"), core_ranges=crs,
-                                  compile_time_args=cp_ct, runtime_args=rt([[k // NC] for k in range(G * NC)]),
+                                  compile_time_args=cp_ct, runtime_args=rt([[k // NC, k % NC] for k in range(G * NC)]),
                                   config=cfg,
                                   defines=([("DST_FULL", "1")] if full else []) + hdef),
         ]
@@ -231,10 +243,12 @@ def fused_consts(op, hcobj, fn, base, scale):
         sc[:M] = scale[0]
         a[:M] = 1.0
     bs[:M] = base.float().reshape(-1)
-    cv = torch.stack([sc.expand(TILE, TILE), bs.expand(TILE, TILE), a.expand(TILE, TILE), torch.eye(TILE)])
+    # + the identity shifted by 8 / 16 columns (the half kernels' combined partial tile, HY4_HCF_COMB)
+    cv = torch.stack([sc.expand(TILE, TILE), bs.expand(TILE, TILE), a.expand(TILE, TILE), torch.eye(TILE),
+                      torch.eye(TILE).roll(8, dims=1).triu(8), torch.eye(TILE).roll(16, dims=1).triu(16)])
     # fn = hi + lo: hi exactly representable at the FPU's tf32 operand width (mantissa cut to 10 bits), lo the rest in
     # bf16 (~2^-19 of fn): the partial mix X' @ hi + X' @ lo is then ~fp32 instead of tf32
     hi = (fnT.contiguous().view(torch.int32) & ~0x1FFF).view(torch.float32)
     hcobj.fz_fn = op.upload(hi.reshape(1, 1, hc * H, TILE))
     hcobj.fz_fnlo = op.upload((fnT - hi).reshape(1, 1, hc * H, TILE), ttnn.bfloat16)
-    hcobj.fz_cv = op.upload(cv.reshape(1, 1, 4 * TILE, TILE))
+    hcobj.fz_cv = op.upload(cv.reshape(1, 1, cv.shape[0] * TILE, TILE))

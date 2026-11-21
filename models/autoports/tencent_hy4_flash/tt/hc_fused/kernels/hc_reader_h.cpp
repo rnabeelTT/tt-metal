@@ -17,6 +17,15 @@
 
 #include "api/dataflow/dataflow_api.h"
 
+#ifndef QF_IN
+#define QF_IN 0
+#endif
+#ifndef COMB
+#define COMB 0
+#endif
+#ifndef EARLY
+#define EARLY 0  // decode: the row tile's inputs (X, o, the post selections) first, the constants after
+#endif
 #ifndef HR
 #define HR 16  // rows of the partial tiles (16: faces 0 / 1 whole; 8: their rows 0..7)
 #endif
@@ -71,6 +80,22 @@ void kernel_main() {
     const uint32_t g = get_arg_val<uint32_t>(8);
 
     // constants (once)
+    auto read_consts = [&]() {
+#if EARLY
+    if constexpr (PRE) {  // fn first (the partial mix needs it first), pushed on its own
+        const auto s_fn = TensorAccessor(fn_args, fn_addr, F32);
+        cb_reserve_back(cb_fn, 4 * J);
+        uint32_t l1 = get_write_ptr(cb_fn);
+        for (uint32_t s = 0; s < 4; ++s) {
+            for (uint32_t jj = 0; jj < J; ++jj) {
+                noc_async_read(s_fn.get_noc_addr(s * HT + c * J + jj), l1, F32);
+                l1 += F32;
+            }
+        }
+        noc_async_read_barrier();
+        cb_push_back(cb_fn, 4 * J);
+    }
+#endif
     const auto s_mm = TensorAccessor(mm_args, mm_addr, F32);
     cb_reserve_back(cb_mm, NMM);
     uint32_t l1 = get_write_ptr(cb_mm);
@@ -81,6 +106,7 @@ void kernel_main() {
     cb_reserve_back(cb_one, 1);
     read_rows<4>(s_mm.get_noc_addr(0), get_write_ptr(cb_one));
     if constexpr (PRE) {
+#if !EARLY
         const auto s_fn = TensorAccessor(fn_args, fn_addr, F32);
         cb_reserve_back(cb_fn, 4 * J);
         l1 = get_write_ptr(cb_fn);
@@ -90,6 +116,7 @@ void kernel_main() {
                 l1 += F32;
             }
         }
+#endif
         if constexpr (FNLO) {
             const auto s_fl = TensorAccessor(fl_args, get_arg_val<uint32_t>(7), BF);
             cb_reserve_back(cb_fnlo, 4 * J);
@@ -113,12 +140,19 @@ void kernel_main() {
     cb_push_back(cb_mm, NMM);
     cb_push_back(cb_one, 1);
     if constexpr (PRE) {
+#if !EARLY
         cb_push_back(cb_fn, 4 * J);
+#endif
         if constexpr (FNLO) {
             cb_push_back(cb_fnlo, 4 * J);
         }
         cb_push_back(cb_cv, NCV);
     }
+    };
+#if !EARLY
+    read_consts();
+#endif
+    uint32_t l1;
 
     // per row tile
     const auto s_x = TensorAccessor(x_args, x_addr, BF);
@@ -133,7 +167,7 @@ void kernel_main() {
                 l1 += BFH;
             }
         }
-        if constexpr (PRE && !POST) {  // X as full tiles: the in1 of X X^T
+        if constexpr (PRE && !POST && !COMB) {  // X as full tiles: the in1 of X X^T (COMB: the writer shifts them)
             cb_reserve_back(cb_xf, 4 * J);
             l1 = get_write_ptr(cb_xf);
             for (uint32_t s = 0; s < 4; ++s) {
@@ -150,20 +184,39 @@ void kernel_main() {
                 read_rows<2>(s_o.get_noc_addr(r * HT + c * J + jj), l1);
                 l1 += BFH;
             }
+#if QF_IN
+            // the post selections Q_s hi (pages 1..4) / lo (5..8) of the previous PRE's weight tensor (one row tile)
+            constexpr uint32_t cb_q = 6, cb_ql = 23;
+            cb_reserve_back(cb_q, 4);
+            cb_reserve_back(cb_ql, 4);
+            for (uint32_t i = 0; i < 4; ++i) {
+                read_rows<4>(s_wp.get_noc_addr(1 + i), get_write_ptr(cb_q) + i * F32H);
+                read_rows<4>(s_wp.get_noc_addr(5 + i), get_write_ptr(cb_ql) + i * F32H);
+            }
+#else
             cb_reserve_back(cb_wp, 1);
             read_rows<4>(s_wp.get_noc_addr(r), get_write_ptr(cb_wp));
             cb_reserve_back(cb_wpc, 1);  // the same tile for FP32 copies (an unpack-to-dest CB)
             read_rows<4>(s_wp.get_noc_addr(r), get_write_ptr(cb_wpc));
+#endif
         }
         noc_async_read_barrier();
         cb_push_back(cb_x, 4 * J);
-        if constexpr (PRE && !POST) {
+        if constexpr (PRE && !POST && !COMB) {
             cb_push_back(cb_xf, 4 * J);
         }
         if constexpr (POST) {
             cb_push_back(cb_o, J);
+#if QF_IN
+            cb_push_back(6, 4);
+            cb_push_back(23, 4);
+#else
             cb_push_back(cb_wp, 1);
             cb_push_back(cb_wpc, 1);
+#endif
         }
     }
+#if EARLY
+    read_consts();
+#endif
 }

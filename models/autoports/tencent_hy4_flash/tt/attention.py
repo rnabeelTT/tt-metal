@@ -32,6 +32,7 @@ import ttnn
 from models.autoports.tencent_hy4_flash.tt.common import (
     AllReduce,
     Boundary,
+    boundary_rows_out,
     RMSNorm,
     StreamLinear,
     TILE,
@@ -189,6 +190,16 @@ class Hy4Attention:
             from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
 
             self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx, slots=self.slots)
+
+    _SDPA_CKC = {}
+
+    def _sdpa_ckc(self):
+        """sparse_sdpa's compute config, HY4_SDPA_FID read per call (default HiFi4; lower: a quality tradeoff)."""
+        f = os.environ.get("HY4_SDPA_FID", "HiFi4")
+        c = Hy4Attention._SDPA_CKC.get(f)
+        if c is None:
+            c = Hy4Attention._SDPA_CKC[f] = ckc(self.mesh, getattr(ttnn.MathFidelity, f), fp32=True)
+        return c
 
     def _ukv_streams(self, wuk, wuvT):
         """HY4_UKV_STREAM: W_uk / W_uv as per-head streamed linears (qwen36 DecodeLinear heads=): die d's heads' weights
@@ -371,8 +382,8 @@ class Hy4Attention:
         q_rope = self.rope(q_rope, cos, sin, mem)
         return q_lat, q_rope, q_resid
 
-    def _kv_row(self, x, cos, sin, mem, kv=None):
-        """-> the cache rows of these tokens [1,1,Tp,608] TILE: [norm(c) | rope(k_rope) | 0]."""
+    def _kv_row(self, x, cos, sin, mem, kv=None, parts_only=False):
+        """-> the cache rows of these tokens [1,1,Tp,608] TILE: [norm(c) | rope(k_rope) | 0] (parts_only: (c, k_rope))."""
         Tp = int(x.shape[-2])
         if kv is None:
             kv = mm(x, self.wkva, wfid(self.ckc, self.wkva), mem)  # [1,1,Tp,576]
@@ -383,6 +394,8 @@ class Hy4Attention:
             for t_, r_ in ((c_raw, c), (kr_raw, kr)):
                 if t_ is not r_:
                     ttnn.deallocate(t_)
+            if parts_only:
+                return c, kr
         else:
             c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
             kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
@@ -407,7 +420,7 @@ class Hy4Attention:
             glue = AttnGlue.get(self.mesh)
             q_rm = glue.qprep(q_lat, q_rope, self._qs32, self.Hp, int(R))
             o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                             k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)
+                                             k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())
             o2 = glue.otile(o, self.Hd, int(R), mem)
             ttnn.deallocate(o)
             return self._attend_out(x, o2, mem, dec, R)
@@ -425,7 +438,7 @@ class Hy4Attention:
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # sparse_sdpa: DRAM
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)  # [1,Hp,Tp,512] RM
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())  # [1,Hp,Tp,512] RM
         ttnn.deallocate(q_rm)
         o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
         ttnn.deallocate(o)
@@ -451,11 +464,15 @@ class Hy4Attention:
             g = self.dec["g"](x, mem)
         else:
             g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)
-        gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        if dec and os.environ.get("HY4_GATE_FUSE", "1") == "1":
+            # the sigmoid as the multiply's input activation (one program instead of two)
+            gated = ttnn.multiply(ov, g, input_tensor_b_activations=[ttnn.UnaryOpType.SIGMOID], memory_config=mem)
+        else:
+            gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
         if dec:
-            part = self.dec["o"](gated, mem)
+            part = self.dec["o"](gated, mem, rows_out=boundary_rows_out(self.mesh, R))
         else:
             part = mm(gated, self.wo, wfid(self.ckc, self.wo), mem)
         ttnn.deallocate(gated)
@@ -523,7 +540,7 @@ class Hy4Attention:
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())
         ttnn.deallocate(q_rm)
         if not shared:
             ttnn.deallocate(idx)
@@ -585,7 +602,7 @@ class Hy4Attention:
         o = ttnn.transformer.scaled_dot_product_attention(
             qb, kb, kb, is_causal=True, scale=self.scale,
             sliding_window_size=self.cfg.window + int(os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0")) if self.kind == "swa" else None,
-            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self._sdpa_ckc(), memory_config=mem)
         ttnn.deallocate(qb)
         ttnn.deallocate(k)
         o2 = ttnn.slice(o, (0, 0, 0, 0), (B, Hd, Tb, self.kvl), memory_config=mem)
@@ -675,7 +692,7 @@ class Hy4Attention:
         q_rm = ttnn.to_layout(qcat, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(qcat)
         o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                         k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)  # [1, H, Tq, 512] RM
+                                         k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())  # [1, H, Tq, 512] RM
         ttnn.deallocate(q_rm)
         ttnn.deallocate(idx)
         ot = ttnn.to_layout(o, ttnn.TILE_LAYOUT, memory_config=mem)
@@ -762,7 +779,7 @@ class Hy4Attention:
         o = ttnn.transformer.scaled_dot_product_attention(
             q, k, k, attn_mask=mask, is_causal=False, scale=self.scale, attention_sink=self.sink_sdpa,
             attn_mask_block_map=bmap if os.environ.get("HY4_PF_FLASH_BMAP", "1") == "1" else None,
-            program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+            program_config=pc, compute_kernel_config=self._sdpa_ckc(), memory_config=mem)
         ttnn.deallocate(q)
         ttnn.deallocate(k)
         o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
@@ -792,7 +809,7 @@ class Hy4Attention:
         o = ttnn.transformer.scaled_dot_product_attention(
             q, k, v, is_causal=True, scale=self.scale,
             sliding_window_size=self.cfg.window + int(os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0")) if self.kind == "swa" else None,
-            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self.ckc_sdpa, memory_config=mem)
+            attention_sink=self.sink_sdpa, program_config=pc, compute_kernel_config=self._sdpa_ckc(), memory_config=mem)
         ttnn.deallocate(q)
         ttnn.deallocate(k)
         o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
@@ -898,6 +915,19 @@ class Hy4Attention:
         dec = self.dec is not None and int(x.shape[-2]) == 32
         parts = self._xa(x, mem) if dec else [None, None]
         q_lat, q_rope, q_resid = self._q(x, cos, sin, mem, qa=parts[0])
+        fused_rows = (not getattr(si, "L", 0) and solo_rows(si) and isinstance(parts[1], tuple)
+                      and os.environ.get("HY4_KVROW_FUSED", "1") == "1"
+                      and mem.buffer_type == ttnn.BufferType.L1)
+        if fused_rows:
+            # [norm(c) | rope(k_rope) | 0] rows straight from the tiles to their cache rows (one program instead of
+            # concat + to_layout + slab_write; the same bytes)
+            from models.autoports.tencent_hy4_flash.tt.slab_write import kv_rows_write
+
+            c, kr = self._kv_row(x, cos, sin, mem, kv=parts[1], parts_only=True)
+            kv_rows_write(c, kr, self.cache, si.row_offs[self.kind], int(si.R), SINK_COLS * 2)
+            ttnn.deallocate(c)
+            ttnn.deallocate(kr)
+            return self._step_tail(x, si, q_lat, q_rope, q_resid, parts, dec, mem)
         row = self._kv_row(x, cos, sin, mem, kv=parts[1])
         if getattr(si, "L", 0):
             return self._step_lanes(x, si, row, q_lat, q_rope, q_resid, parts, dec, mem)
