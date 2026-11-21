@@ -706,6 +706,18 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
   80 host turns per pass (2 per hybrid layer), which shrink only with fewer hand-offs or more host work overlapped with
   chip work. How long the chips idle inside the host turns is not measured directly (a device profile would). Log:
   ~/inkling-work/jobs/decode_stats_20261121.log.
+- **2026-11-21, session 11: served crash in a multi-turn agent session (fixed).** An opencode session (each turn resends
+  the history) killed the engine: `prefix-state slot 2 holds None, restore asked 14336`. The plugin's prefix_state
+  planned a prompt-end save on a decode row of the 14105-token turn as its answer passed 14336 (a multi-token MTP step
+  leaves num_tokens ahead of the scheduled rows, so that row passed the decode-row test); the engine only snapshots in
+  prefill, so the slot stayed empty, and the next turn (14435 tokens) restored it. Fixes: plugin inkling-mm d53d9b3
+  (saves only for rows starting inside the prompt, at positions within it; unit test), engine fc803880adf (a restore
+  with no snapshot at its position logs a warning and prefills the prompt from 0: exact, one slower request, instead
+  of killing the engine for everyone). Checked on the device: serve/prefix_turns.py (every answer crosses a 2048
+  boundary; 6 turns, follow-ups 0.36-0.42 s), prefix_multi ALL PASS, and a test-only plugin that plants an orphan save
+  every turn: the fallback fired (TTFT 8.7 s for that turn) and the server stayed up. The trigger needs a decode row
+  of a particular shape (opencode hit it, 20 crossings of prefix_turns did not), so prefix_turns alone does not
+  reproduce the old crash.
 - **2026-11-21, session 11: host RAM.** The kernel-held memory kept growing (~0.5 GB per device run) to ~110 GB, leaving
   118 GB available against the profile's 134 GB. Neither a tenstorrent driver reload (`modprobe -r tenstorrent`) nor
   dropping caches freed it; it is not page cache, tmpfs, ZFS or a cgroup. A reboot did: 228 GB available afterwards, and
