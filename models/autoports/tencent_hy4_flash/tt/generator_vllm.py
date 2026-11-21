@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 
 import torch
 from loguru import logger
@@ -71,10 +72,15 @@ def _resample(smp, sampling):
 
 
 try:  # image inputs (HY4_VISION=1, default): the multimodal processor (serving/hy4_mm.py)
-    import hy4_mm as _hy4_mm
-except ImportError:
-    from models.autoports.tencent_hy4_flash.serving import hy4_mm as _hy4_mm
-_VISION = _hy4_mm.enabled()
+    try:
+        import hy4_mm as _hy4_mm
+    except ImportError:
+        from models.autoports.tencent_hy4_flash.serving import hy4_mm as _hy4_mm
+except ImportError as _e:  # dev env without vllm (engine smokes): no multimodal processor, text only
+    if not (_e.name or "").startswith("vllm"):
+        raise
+    _hy4_mm = None
+_VISION = _hy4_mm is not None and _hy4_mm.enabled()
 
 
 class HYV4FlashForConditionalGeneration:
@@ -104,8 +110,6 @@ class HYV4FlashForConditionalGeneration:
         B = int(max_batch_size)
         if int(tt_data_parallel) != 1 or not 1 <= B <= 8:
             raise ValueError(f"{cls.__name__} serves 1..8 users on one (1,4) mesh (--max-num-seqs <= 8, data parallel 1)")
-        if B > 1 and SPEC_K > 0:
-            raise ValueError("HY4_SPEC_K (speculative decoding) serves one user: use --max-num-seqs 1")
         max_seq_len = int(max_seq_len or 131072)
         # multi-user: every slot holds max_model_len tokens; the DRAM left after warm-up must fit a prefill chunk's
         # MoE buffers (8 x 12K: 0.9 GiB free, a 12K prompt with 7 live users ok; 8 x 16K: out of memory, 2026-11-19)
@@ -130,7 +134,8 @@ class HYV4FlashForConditionalGeneration:
         cache_dir = os.environ.get("HY4_TENSOR_CACHE", os.path.expanduser("~/.cache/hybrid-moe/hy4_tt"))
         model = Hy4Model(mesh_device, cfg, max_ctx=max_seq_len + 64, chunk=int(os.environ.get("HY4_PREFILL_CHUNK", "2048")),
                          engram=engram, cache_dir=cache_dir, slots=B)
-        engine = Hy4BatchEngine(model) if B > 1 else Hy4Engine(model, SPEC_K)
+        # B > 1 with HY4_SPEC_K > 0: speculative decoding while one request decodes alone (tt/engine_batch.py solo)
+        engine = Hy4BatchEngine(model, k=SPEC_K) if B > 1 else Hy4Engine(model, SPEC_K)
         logger.info(f"{cls.__name__}: max_model_len={max_seq_len} users={B} layers={len(model.layers)} spec k={SPEC_K}")
         self = cls(model, engine, mesh_device, max_seq_len)
         if _VISION:  # the vision tower (tt/vision.py: tensor parallel, ~0.22 GB per die in bf16)
@@ -217,6 +222,10 @@ class HYV4FlashForConditionalGeneration:
             self._row_slot[row] = slot
             slots.append(slot)
             reqs.append((slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
+            if os.environ.get("HY4_LOG_PROMPT", "0") == "1":  # (debug: what the engine is given)
+                ids = reqs[-1][1]
+                logger.info(f"Hy4 prompt row {row} slot {slot}: {len(ids)} tok, hash {hash(tuple(ids)) & 0xFFFFFFFF:08x}, "
+                            f"head {ids[:12]}, tail {ids[-16:]}, sampling {reqs[-1][2]}")
         if mms is not None and any(m is not None for m in mms):  # image prompts one by one, the text ones packed
             txt = [i for i, m in enumerate(mms) if m is None]
             out = [None] * len(reqs)
@@ -264,7 +273,7 @@ class HYV4FlashForConditionalGeneration:
             for i in live:
                 logits[i, 0, :] = res[self._row_slot[i]][:V]
             return logits
-        out = torch.full((tokens.numel(), 1), -1, dtype=torch.int32)
+        out = torch.full((tokens.numel(), SPEC_K + 1 if SPEC_K > 0 else 1), -1, dtype=torch.int32)
         if not live:
             return out
         auth = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
@@ -276,12 +285,31 @@ class HYV4FlashForConditionalGeneration:
             reqs[slot] = (int(tokens[i]), int(pos[i]), auth)
         res = eng.step(reqs)
         for i in live:
-            out[i, 0] = int(res[self._row_slot[i]][0])
+            ids = res[self._row_slot[i]]
+            out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
         if self._decode_steps % 1024 == 0:
             logger.info(f"Hy4 batch engine stats: {eng.stats}")
         return out
 
     def decode_forward(self, *args, **kwargs):
+        """(timed: the median time inside the model per decode step vs between steps, i.e. vLLM's own share, logged
+        every 512 steps)"""
+        t0 = time.perf_counter()
+        last = getattr(self, "_t_ret", None)
+        out = self._decode_forward(*args, **kwargs)
+        t1 = time.perf_counter()
+        self._t_ret = t1
+        tl = self.__dict__.setdefault("_t_log", [])
+        if last is not None and t0 - last < 1.0:  # back-to-back steps (not after an idle gap / a prefill)
+            tl.append((t1 - t0, t0 - last))
+        if len(tl) >= 512:
+            med = [sorted(x[i] for x in tl)[len(tl) // 2] * 1e3 for i in (0, 1)]
+            logger.info(f"Hy4 decode steps (median of {len(tl)}): {med[0]:.2f} ms in the model, {med[1]:.2f} ms between "
+                        f"steps (vLLM)")
+            tl.clear()
+        return out
+
+    def _decode_forward(self, *args, **kwargs):
         tokens = torch.as_tensor(kwargs.get("tokens", args[0] if args else None)).reshape(-1)
         pos = torch.as_tensor(kwargs.get("start_pos", args[1] if len(args) > 1 else None)).reshape(-1)
         sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)

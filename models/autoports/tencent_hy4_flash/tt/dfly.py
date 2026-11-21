@@ -41,12 +41,16 @@ class _DraftMLP:
         dt = _dt("HY4_DFLY_DTYPE", "bfp8")
         bf = lambda t: t.to(torch.bfloat16)  # noqa: E731
         I = int(sd["gate_proj.weight"].shape[0])
-        self.w1 = upload(mesh, bf(sd["gate_proj.weight"]).T.reshape(1, 1, hidden, I), dt, mapper=("shard", -1))
-        self.w3 = upload(mesh, bf(sd["up_proj.weight"]).T.reshape(1, 1, hidden, I), dt, mapper=("shard", -1))
-        self.w2 = upload(mesh, bf(sd["down_proj.weight"]).T.reshape(1, 1, I, hidden), dt, mapper=("shard", -2))
         self.ar = AllReduce(mesh)
         self.ckc = ckc(mesh)
         self.dec = None
+        self.w1 = self.w2 = self.w3 = None
+        if not stream_enabled(mesh) or os.environ.get("HY4_DFLY_PLAIN_COPIES", "0") == "1":
+            # (with streaming, the draft block is always 32 rows: the streamed copies only; the plain ones were ~0.11 GiB
+            # per die of unused DRAM)
+            self.w1 = upload(mesh, bf(sd["gate_proj.weight"]).T.reshape(1, 1, hidden, I), dt, mapper=("shard", -1))
+            self.w3 = upload(mesh, bf(sd["up_proj.weight"]).T.reshape(1, 1, hidden, I), dt, mapper=("shard", -1))
+            self.w2 = upload(mesh, bf(sd["down_proj.weight"]).T.reshape(1, 1, I, hidden), dt, mapper=("shard", -2))
         if stream_enabled(mesh):  # decode-only streamed copies: [gate_d | up_d], down_d
             N = num_devices(mesh)
             Il = I // N
@@ -115,14 +119,19 @@ class Hy4DFly:
             ))
         self.enorm = RMSNorm(mesh, w["mtp_fusion.enorm.weight"], cfg.rms_eps)
         self.hnorm = RMSNorm(mesh, w["mtp_fusion.hnorm.weight"], cfg.rms_eps)
-        self.eh = upload(mesh, bf(w["mtp_fusion.eh_proj.weight"]).T.reshape(1, 1, 2 * H, H), sdt)
+        plain = not stream_enabled(mesh) or os.environ.get("HY4_DFLY_PLAIN_COPIES", "0") == "1"
+        # (streaming: eh_proj / the hidden correction run from their streamed copies only; the replicated plain copies
+        # were ~0.2 GiB per die of unused DRAM)
+        self.eh = upload(mesh, bf(w["mtp_fusion.eh_proj.weight"]).T.reshape(1, 1, 2 * H, H), sdt) if plain else None
         self.fgate = upload(mesh, bf(w["mtp_fusion.gate"]).reshape(1, 1, 1, H))
         self.final_norm = RMSNorm(mesh, w["final_norm.weight"], cfg.rms_eps)
         self.hc_hnorm = RMSNorm(mesh, w["hidden_correction.hidden_norm.weight"], cfg.rms_eps)
         self.hc_enorm = RMSNorm(mesh, w["hidden_correction.embed_norm.weight"], cfg.rms_eps)
-        self.hc_g = upload(mesh, bf(w["hidden_correction.gate_proj.weight"]).T.reshape(1, 1, 2 * H, -1), sdt)
-        self.hc_u = upload(mesh, bf(w["hidden_correction.up_proj.weight"]).T.reshape(1, 1, 2 * H, -1), sdt)
-        self.hc_d = upload(mesh, bf(w["hidden_correction.down_proj.weight"]).T.reshape(1, 1, -1, H), sdt)
+        self.hc_g = self.hc_u = self.hc_d = None
+        if plain:
+            self.hc_g = upload(mesh, bf(w["hidden_correction.gate_proj.weight"]).T.reshape(1, 1, 2 * H, -1), sdt)
+            self.hc_u = upload(mesh, bf(w["hidden_correction.up_proj.weight"]).T.reshape(1, 1, 2 * H, -1), sdt)
+            self.hc_d = upload(mesh, bf(w["hidden_correction.down_proj.weight"]).T.reshape(1, 1, -1, H), sdt)
         self.ckc = ckc(mesh)
         self.ag = AllGather(mesh)
         self.N = num_devices(mesh)

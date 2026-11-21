@@ -57,6 +57,7 @@ class StepInputs:
     gsin: object = None
     vis: object = None
     base_f: object = None  # [1, 1, 32, 1] fp32: the active slot's sparse cache base (added to the selected rows)
+    row_offs: dict = field(default_factory=dict)  # HY4_SOLO_ROWS: per row, its KV cache row (sparse / swa)
     sparse: bool = False
     bucket: int = 0
 
@@ -125,6 +126,8 @@ class Hy4Decoder:
         si.gsin = self._dev(z(1, 1, 32, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.vis = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
         si.base_f = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
+        for k in ("sparse", "swa"):
+            si.row_offs[k] = self._dev(z(1, 1, 1, R, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         return si
 
     def _alloc_outputs(self):
@@ -204,6 +207,11 @@ class Hy4Decoder:
         one = lambda v: _rm(torch.tensor([v], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)  # noqa: E731
         bs, bw = self._bases()  # the active slot's cache regions
         h["off_sparse"] = [one(bs + nb), one(bs + nb + 32)]
+        # HY4_SOLO_ROWS: each real row's KV row straight to the cache (rows R.. are not written)
+        pr = pos.numpy().astype(np.int64)
+        h["roffs_sparse"] = _rm(torch.from_numpy((bs + pr).astype(np.int32)).reshape(1, 1, 1, ROWS), ttnn.uint32)
+        h["roffs_swa"] = _rm(torch.from_numpy((bw + (pr % self.ring if self.ring else 0)).astype(np.int32))
+                             .reshape(1, 1, 1, ROWS), ttnn.uint32)
         h["off_swa"] = [one(bw + nb % self.ring), one(bw + (nb + 32) % self.ring)] if self.ring else [one(0), one(0)]
         h["base_f"] = _tile(torch.full((1, 1, ROWS, 1), float(bs)), ttnn.float32)
         h["off_grp"] = [one(gb), one(gb + 32)]
@@ -218,7 +226,9 @@ class Hy4Decoder:
         swa = np.full((ROWS, self.K_swa), SENTINEL, dtype=np.uint32)
         tail = np.full((ROWS, self.K_dense - self.n_sel), SENTINEL, dtype=np.uint32)
         dense[:, 0], swa[:, 0], tail[:, 0] = self.sink_sparse, self.sink_swa, self.sink_sparse
-        for s in range(ROWS):
+        # HY4_PAD_SINK=1: the padding rows (R..31) attend the sink only (sparse_sdpa skips their all-sentinel chunks)
+        # instead of copies of the last row's lists; the real rows' values are unchanged
+        for s in range(R if os.environ.get("HY4_PAD_SINK", "1") == "1" else ROWS):
             p = int(pos[s])
             n = min(p + 1, self.K_dense - 1)
             dense[s, 1 : 1 + n] = bs + np.arange(p + 1 - n, p + 1)
@@ -265,6 +275,9 @@ class Hy4Decoder:
         for li, t in si.engram.items():
             if f"eng_{li}" in h:
                 c(h[f"eng_{li}"], t)
+        if "roffs_sparse" in h:
+            for k in ("sparse", "swa"):
+                c(h[f"roffs_{k}"], si.row_offs[k])
 
     # ------------------------------------------------------------------ trace safety
     def _programs(self):

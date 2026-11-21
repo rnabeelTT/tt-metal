@@ -13,6 +13,8 @@ cos_rep = repeat_interleave(cos[:32], 2). On the device the rotate_half is an ex
 
 from __future__ import annotations
 
+import os
+
 import torch
 import ttnn
 
@@ -102,6 +104,11 @@ class DeviceRope:
     def __call__(self, x, cos, sin, mem=None):
         """x bf16 [b, h, n, 64]; cos / sin fp32 or bf16 [1, 1, n, 64] (broadcast over b, h). -> bf16."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        if self.dim == 64 and os.environ.get("HY4_ROPE_FUSED", "1") == "1":
+            from models.autoports.tencent_hy4_flash.tt.rope_fused import RopeFusedOp
+
+            if RopeFusedOp.supports(x, cos, sin):  # one program instead of 6, same values (tt/rope_fused)
+                return RopeFusedOp.get(self.mesh)(x, cos, sin, mem)
         xf = ttnn.typecast(x, ttnn.float32, memory_config=mem)
         rh = ttnn.matmul(xf, self.P, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         y = ttnn.add(ttnn.multiply(xf, cos, memory_config=mem), ttnn.multiply(rh, sin, memory_config=mem),

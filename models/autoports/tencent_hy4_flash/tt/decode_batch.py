@@ -23,10 +23,25 @@ import ttnn
 from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.attention import K_CHUNK, SENTINEL
-from models.autoports.tencent_hy4_flash.tt.decode import ROWS, Hy4Decoder, _rm, _tile
+from models.autoports.tencent_hy4_flash.tt.decode import ROWS, Hy4Decoder, Hy4SpecDecoder, _rm, _tile
 from models.autoports.tencent_hy4_flash.tt.rope import POSMAPS, cos_sin, rpos_rows
 
 SENT_F = float(2**32)
+# KV rows written straight to each slot's cache (one slab_write of 1-row slabs at per-row offsets) instead of the
+# lanes' 64-row staging windows (block-diagonal one-hot matmuls [64 L, 64 L] x [64 L, 608] per layer, ~105 us at L = 8)
+LANE_ROWS = os.environ.get("HY4_LANE_ROWS", "1") == "1"
+# Indexer pooling of only the groups a pass can change: per lane gw0 .. the last row's group (<= 8 for one row a lane),
+# gathered by a per-pass one-hot Esel [r n, 64 L] (n = max(32, 8 L) pooled rows) instead of every lane's 16 window
+# groups (constant Ecat [r 32 L, 64 L], n = 32 L). Same values for every visible group (recomputed from the same rows).
+LANE_POOL = os.environ.get("HY4_LANE_POOL", "1") == "1"
+
+
+def pool_rows(L):
+    """(pooled rows n, rows per lane M) of the batched indexer pooling."""
+    if LANE_POOL:
+        n = max(32, 8 * L)
+        return n, n // L
+    return 32 * L, 32
 
 
 @dataclass
@@ -43,6 +58,9 @@ class BatchInputs:
     Ag: object = None
     Pg: object = None
     lane_offs: dict = field(default_factory=dict)
+    row_offs: dict = field(default_factory=dict)  # LANE_ROWS: per row, its KV cache row (padding rows: trash)
+    lane_rows: bool = False
+    Esel: object = None
     gcos: object = None
     gsin: object = None
     idx_swa: object = None
@@ -81,12 +99,18 @@ class Hy4BatchDecoder(Hy4Decoder):
         si.A = self._dev(z(1, 1, 64 * L, 64 * L), ttnn.bfloat16, ttnn.TILE_LAYOUT)
         si.P = self._dev(z(1, 1, 64 * L, R), ttnn.bfloat16, ttnn.TILE_LAYOUT)
         si.Ag = self._dev(z(1, 1, 64 * L, 64 * L), ttnn.bfloat16, ttnn.TILE_LAYOUT)
-        si.Pg = self._dev(z(1, 1, 64 * L, 32 * L), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+        npool, _ = pool_rows(L)
+        si.Pg = self._dev(z(1, 1, 64 * L, npool), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+        if LANE_POOL:
+            si.Esel = self._dev(z(1, 1, cfg.idx_ratio * npool, 64 * L), ttnn.bfloat16, ttnn.TILE_LAYOUT)
         n = -(-2 * L // 8) * 8
         for k in ("sparse", "swa", "grp"):
             si.lane_offs[k] = self._dev(z(1, 1, 1, n, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
-        si.gcos = self._dev(z(1, 1, 32 * L, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
-        si.gsin = self._dev(z(1, 1, 32 * L, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        si.lane_rows = LANE_ROWS
+        for k in ("sparse", "swa"):
+            si.row_offs[k] = self._dev(z(1, 1, 1, R, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        si.gcos = self._dev(z(1, 1, npool, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        si.gsin = self._dev(z(1, 1, npool, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.idx_swa = self._dev(z(1, 1, R, self.K_swa, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         for name in ("lo", "hi", "delta", "nmask"):
             setattr(si, name, self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT))
@@ -107,22 +131,37 @@ class Hy4BatchDecoder(Hy4Decoder):
         return self._M[lane]
 
     # ------------------------------------------------------------------ lanes
-    def add(self, slot: int, pos: int, tokens) -> int:
-        """Sequence in `slot` (prefilled to `pos` tokens; `tokens` its ids so far) -> a lane (returned)."""
+    def add(self, slot: int, pos: int, tokens, stage=None) -> int:
+        """Sequence in `slot` (prefilled to `pos` tokens; `tokens` its ids so far) -> a lane (returned).
+        stage=(ob, ogb): the sequence decoded on the single path since; its staging windows (bases ob / ogb) are the
+        device state (the host prefill state lacks the decoded tokens' keys: re-initializing from it zeroed their token
+        keys and restored stale group keys over the decoded groups)."""
         lane = self.lanes.index(None)
         m = self.model
         m.set_slot(slot)
-        nb = (pos // 32) * 32
-        gb = ((nb // self.cfg.idx_ratio) // 32) * 32
+        if stage is None:
+            nb = (pos // 32) * 32
+            gb = ((nb // self.cfg.idx_ratio) // 32) * 32
+        else:
+            nb, gb = stage
         Mk, Mp, _ = self._onehots(lane)
         for layer in m.layers:
-            layer.attn.init_stage(nb)
-            layer.attn.lane_load(self.L, lane, Mk, Mp)
+            if not LANE_ROWS:  # (LANE_ROWS: the KV rows go straight to the cache; no attention window in a lane)
+                if stage is None:
+                    layer.attn.init_stage(nb)
+                layer.attn.lane_load(self.L, lane, Mk, Mp)
             if layer.attn.indexer is not None:
-                layer.attn.indexer.init_stage(nb, gb)
+                if stage is None:
+                    layer.attn.indexer.init_stage(nb, gb)
                 layer.attn.indexer.lane_load(self.L, lane, Mk, Mp)
         eng = m.engram
-        es = (dict(eng.hist), dict(eng.pos)) if eng is not None and hasattr(eng, "hist") else None
+        es = None
+        if eng is not None and hasattr(eng, "hist"):
+            # the n-gram history of `tokens` (a single-path verify pass may have fed rejected rows past pos)
+            keep = int(getattr(eng, "keep", 2))
+            tl = [int(t) for t in tokens]
+            es = ({li: np.asarray(tl[max(0, pos - keep) : pos], dtype=np.int64) for li in eng.hist},
+                  {li: int(pos) for li in eng.pos})
         self.lanes[lane] = {"slot": slot, "pos": pos, "ob": nb, "ogb": gb, "tokens": [int(t) for t in tokens],
                             "eng": es, "base": {"sparse": self.a0.base, "swa": self.s0.base if self.s0 else 0}}
         return lane
@@ -134,7 +173,10 @@ class Hy4BatchDecoder(Hy4Decoder):
         m.set_slot(ln["slot"])
         _, _, Ms = self._onehots(lane)
         for layer in m.layers:
-            layer.attn.lane_unload(self.L, lane, Ms)
+            if LANE_ROWS:  # the single path's window from the cache (every row of the lane's passes is written there)
+                layer.attn.init_stage(ln["ob"])
+            else:
+                layer.attn.lane_unload(self.L, lane, Ms)
             if layer.attn.indexer is not None:
                 layer.attn.indexer.lane_unload(self.L, lane, Ms)
         m.pos = ln["pos"]
@@ -169,10 +211,12 @@ class Hy4BatchDecoder(Hy4Decoder):
         A = np.zeros((nL, nL), dtype=np.float32)
         P = np.zeros((nL, R0), dtype=np.float32)
         Ag = np.zeros((nL, nL), dtype=np.float32)
-        Pg = np.zeros((nL, 32 * L), dtype=np.float32)
+        npool, M = pool_rows(L)
+        Pg = np.zeros((nL, npool), dtype=np.float32)
+        Esel = np.zeros((r * npool, nL), dtype=np.float32) if LANE_POOL else None
         no = -(-2 * L // 8) * 8
         offs = {k: np.zeros(no, dtype=np.int32) for k in ("sparse", "swa", "grp")}
-        gpos = np.zeros(32 * L, dtype=np.int64)
+        gpos = np.zeros(npool, dtype=np.int64)
         i64 = np.arange(64)
         active = {l for l, _ in order}
         idle = [l for l in range(L) if l not in active]
@@ -207,17 +251,31 @@ class Hy4BatchDecoder(Hy4Decoder):
             P[64 * l + i64[mP], s + q[mP] - p0] = 1
             A[64 * l + i64[mA], 64 * l + q[mA] - ob] = 1
             g = gb + i64
-            mPg = (g >= gw0) & (g < gw0 + 16)
+            if LANE_POOL:  # the groups gw0 .. of the lane's last row (pooled row M l + i: group gw0 + i)
+                ng = (p0 + max(n, 1) - 1) // r - gw0 + 1
+                assert ng <= M, f"lane {l}: {ng} groups to pool > {M}"
+                mPg = (g >= gw0) & (g < gw0 + ng)
+                Pg[64 * l + i64[mPg], M * l + g[mPg] - gw0] = 1
+                for j in range(r):  # slot j of pooled row (l, i) = token row r (gw0 + i) + j of the lane's window
+                    Esel[j * npool + M * l + np.arange(ng), 64 * l + r * (gw0 + np.arange(ng)) + j - nb] = 1
+                gpos[M * l : M * l + ng] = r * (gw0 + np.arange(ng))
+            else:
+                mPg = (g >= gw0) & (g < gw0 + 16)
+                Pg[64 * l + i64[mPg], 32 * l + g[mPg] - gw0] = 1
+                gpos[32 * l : 32 * l + 16] = np.arange(nb, nb + 64, r)
             mAg = ~mPg & (g >= ogb) & (g < ogb + 64)
-            Pg[64 * l + i64[mPg], 32 * l + g[mPg] - gw0] = 1
             Ag[64 * l + i64[mAg], 64 * l + g[mAg] - ogb] = 1
             offs["sparse"][2 * l : 2 * l + 2] = [bs + nb, bs + nb + 32]
             offs["swa"][2 * l : 2 * l + 2] = [bw + nb % ring, bw + (nb + 32) % ring] if ring else [0, 0]
             offs["grp"][2 * l : 2 * l + 2] = [l * gcap + gb, l * gcap + gb + 32]
-            gpos[32 * l : 32 * l + 16] = np.arange(nb, nb + 64, r)
             ln["nb"], ln["gb"] = nb, gb
             s += n
         pos[R:] = pos[R - 1] if R else 0
+        t_s, t_w = self.a0.trash_row, (self.s0.trash_row if self.s0 else 0)
+        h["roffs_sparse"] = _rm(torch.from_numpy(np.where(np.arange(R0) < R, row_bs + pos, t_s).astype(np.int32))
+                                .reshape(1, 1, 1, R0), ttnn.uint32)
+        h["roffs_swa"] = _rm(torch.from_numpy(np.where(np.arange(R0) < R, row_bw + (pos % ring if ring else 0), t_w)
+                                              .astype(np.int32)).reshape(1, 1, 1, R0), ttnn.uint32)
         pos_t = torch.from_numpy(pos)
         if POSMAPS:  # image prompts: every row's rope planes through its sequence's map
             rl = row_l[np.minimum(np.arange(R0), max(R - 1, 0))]
@@ -232,11 +290,13 @@ class Hy4BatchDecoder(Hy4Decoder):
             h[f"offs_{k}"] = _rm(torch.from_numpy(v).reshape(1, 1, 1, -1), ttnn.uint32)
         gpos_t = torch.from_numpy(gpos)
         if POSMAPS:
-            gpos_t = rpos_rows(gpos_t, [self.lanes[i // 32]["slot"] if self.lanes[i // 32] else -1
+            gpos_t = rpos_rows(gpos_t, [self.lanes[i // M]["slot"] if self.lanes[i // M] else -1  # (M rows a lane)
                                         for i in range(gpos_t.numel())])
         gc, gs = cos_sin(gpos_t, cfg.rope_theta["sparse"], cfg.qk_rope)
-        h["gcos"] = _tile(gc.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
-        h["gsin"] = _tile(gs.float().reshape(1, 1, 32 * L, -1), ttnn.float32)
+        h["gcos"] = _tile(gc.float().reshape(1, 1, npool, -1), ttnn.float32)
+        h["gsin"] = _tile(gs.float().reshape(1, 1, npool, -1), ttnn.float32)
+        if LANE_POOL:
+            h["Esel"] = _tile(torch.from_numpy(Esel).to(torch.bfloat16).reshape(1, 1, *Esel.shape), ttnn.bfloat16)
         # per-row lists (rows >= R: padding, the sink only)
         K_swa, K_dense, n_sel = self.K_swa, self.K_dense, self.n_sel
         W, topk = cfg.window, cfg.idx_candidate_topk
@@ -353,13 +413,17 @@ class Hy4BatchDecoder(Hy4Decoder):
             c(h[name], getattr(si, name))
         for k in ("sparse", "swa", "grp"):
             c(h[f"offs_{k}"], si.lane_offs[k])
+        for k in ("sparse", "swa"):
+            c(h[f"roffs_{k}"], si.row_offs[k])
+        if si.Esel is not None:
+            c(h["Esel"], si.Esel)
         for li, t in si.engram.items():
             c(h[f"eng_{li}"], t)
 
     # ------------------------------------------------------------------ a pass
     def run_batch(self, rows: dict) -> dict:
         """rows: {lane: [token ids]} (each lane continues its sequence) -> {lane: logits fp32 [n, V]}."""
-        tm = os.environ.get("HY4_TIME_BATCH") == "1"
+        tm = os.environ.get("HY4_TIME_BATCH", "0") in ("1", "2")  # 2: no device sync (copy = host enqueue time only)
         t0 = time.perf_counter()
         pre, self._pre = getattr(self, "_pre", None), None
         if pre is not None and pre[0] == self._snap(rows):  # prebuilt during the last pass: add the token inputs
@@ -374,7 +438,7 @@ class Hy4BatchDecoder(Hy4Decoder):
             h, R, width, order = self._host_b(rows)
         t1 = time.perf_counter()
         self._copy_b(h)
-        if tm:
+        if tm and os.environ.get("HY4_TIME_BATCH") == "1":
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
         si = self.bsi
@@ -400,7 +464,9 @@ class Hy4BatchDecoder(Hy4Decoder):
             else:
                 ttnn.execute_trace(self.mesh, self.btraces[key], cq_id=0, blocking=False)
                 self._advance(order)
-                if os.environ.get("HY4_PREBUILD", "0") == "1":  # exact, but no gain measured (device-bound): off
+                # exact (batch gate 0.8650 / 0.2229 unchanged); 8 users 45.80 -> 44.64 ms per step (no Engram), 4: 39.60 ->
+                # 38.46, 2: 35.94 -> 35.03 (2026-11-20)
+                if os.environ.get("HY4_PREBUILD", "1") == "1":
                     self._prebuild(order)  # the next pass's position inputs while the device runs this one
                 out = self.model.read_logits(self.bout[key], R)
                 advanced = True
@@ -441,7 +507,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         self._sel = sel_now
 
     def _has_traces(self):
-        return bool(self.traces) or bool(getattr(self, "btraces", None))
+        return super()._has_traces() or bool(getattr(self, "btraces", None))
 
     def release(self):
         super().release()
@@ -452,8 +518,71 @@ class Hy4BatchDecoder(Hy4Decoder):
             self.btraces, self.bout = {}, {}
 
 
+class Hy4BatchSpecDecoder(Hy4BatchDecoder, Hy4SpecDecoder):
+    """Hy4BatchDecoder whose single path (a sequence alone: tt/engine_batch.py solo) also drafts (DFly2) and verifies
+    k + 1 rows (Hy4SpecDecoder.run / draft)."""
+
+    def __init__(self, model, lanes: int = 8, trace: bool = True, k: int = 4):
+        super().__init__(model, lanes=lanes, trace=trace)
+        if int(k) != self.k:
+            self.set_k(int(k))
+
+
 def _eng_batched(eng, eli, order, lanes, h):
-    """All lanes' Engram rows of a layer in ONE table gather + dequant + RMSNorm (instead of one EngramRows.rows call
+    """All lanes' Engram rows of every layer: the n-grams once (every layer sees the same tokens), then per layer one
+    table gather + dequant + RMSNorm over all lanes (instead of one EngramRows.rows call per lane and layer).
+    Row-wise math, so bit-identical to the per-lane calls; per-lane history / position updated exactly as
+    EngramRows.rows does. Only for EngramRows-like objects with every active lane holding its own state (ln["eng"] set,
+    as add() does); otherwise returns False and the caller takes the per-lane path."""
+    store = getattr(eng, "store", None)
+    if store is None or not hasattr(eng, "norm_w") or not hasattr(store, "hashers") or not order or not eli:
+        return False
+    if any(lanes[l]["eng"] is None for l, _ in order):
+        return False
+    from models.experimental.hybrid_moe.engram_store import FP32_EPS, dequant
+
+    keep = eng.keep
+    st = {l: (dict(lanes[l]["eng"][0]), dict(lanes[l]["eng"][1])) for l, _ in order}
+    hs0 = store.hashers[eli[0]]
+    ngs, idss = [], []
+    for l, ids in order:
+        hist, pos = st[l]
+        p0 = lanes[l]["pos"]
+        a = np.asarray(ids, dtype=np.int64).reshape(-1)
+        for li in eli:
+            if p0 == 0:
+                hist[li], pos[li] = np.zeros(0, np.int64), 0
+            if p0 != pos[li]:
+                raise ValueError(f"engram rows: layer {li} expected position {pos[li]}, got {p0} (call reset())")
+        h0 = hist[eli[0]]
+        if any(not np.array_equal(hist[li], h0) for li in eli[1:]):  # (never: every layer is fed the same tokens)
+            return _eng_batched_layers(eng, eli, order, lanes, h)
+        ngs.append(hs0.ngram_tokens(a, p0, h0 if p0 else None))
+        idss.append(a)
+    ng = np.concatenate(ngs)
+    T = ng.shape[0]
+    for li in eli:  # (the n-grams depend on the tokens only; hashing / offsets are per layer)
+        hs = store.hashers[li]
+        rows = hs.rows(ng).reshape(-1)
+        q8 = torch.from_numpy(store.q[li][rows])
+        sc = torch.from_numpy(store.s[li][rows].astype(np.uint16)).view(torch.bfloat16)[:, None]
+        # (per layer: one [T x 16, 96] block stays under torch's intra-op threading threshold; a stacked 4-layer block
+        # spun up the thread pool: 0.3 -> 3.5 ms on a loaded host)
+        xf = dequant(q8, sc).view(T, hs.moduli.shape[0], -1).float()
+        y = (xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + FP32_EPS) * eng.norm_w[li].float()).to(torch.bfloat16)
+        h[f"eng_{li}"][0, 0, :T] = y.flatten(1)
+    for (l, _), a in zip(order, idss):
+        hist, pos = st[l]
+        for li in eli:
+            hist[li] = np.concatenate([hist[li], a])[-keep:]
+            pos[li] = lanes[l]["pos"] + len(a)
+    for l, _ in order:
+        lanes[l]["eng"] = st[l]
+    return True
+
+
+def _eng_batched_layers(eng, eli, order, lanes, h):
+    """(Per layer: the previous _eng_batched.) All lanes' Engram rows of a layer in ONE table gather + dequant + RMSNorm (instead of one EngramRows.rows call
     per lane and layer). Row-wise math, so bit-identical to the per-lane calls; per-lane history / position updated
     exactly as EngramRows.rows does. Only for EngramRows-like objects with every active lane holding its own state
     (ln["eng"] set, as add() does); otherwise returns False and the caller takes the per-lane path."""

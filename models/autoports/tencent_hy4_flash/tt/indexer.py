@@ -660,14 +660,15 @@ class Hy4Indexer:
         ttnn.deallocate(kr2)
         return out
 
-    def _pool_fused(self, K, mem, gcos, gsin, Ecat=None, bias=None, n=32):
+    def _pool_fused(self, K, mem, gcos, gsin, Ecat=None, bias=None, n=32, keep_k=False):
         """_pool_device in ~14 ops instead of ~35: the r slots stacked on dim 1 ([1, r, n, .]), one value + gate
         matmul, the softmax over the r slots as dim-1 reductions. (Ecat / bias / n: the batched lanes' block forms.)"""
         d, r = self.d, self.r
         Ecat = self.Ecat if Ecat is None else Ecat
         bias = self.dvg_bias if bias is None else bias
         S = ttnn.matmul(Ecat, K, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
-        ttnn.deallocate(K)
+        if not keep_k:
+            ttnn.deallocate(K)
         vg = ttnn.matmul(S, self.dWvgT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(S)
         vg = ttnn.add(ttnn.reshape(vg, (1, r, n, 2 * d)), bias, memory_config=mem)
@@ -720,6 +721,15 @@ class Hy4Indexer:
                      "Ecat": upload(self.mesh, E.reshape(1, 1, r * 32 * L, 64 * L), ttnn.float32),
                      "bias": upload(self.mesh, bias.reshape(1, r, 32 * L, 2 * d), ttnn.float32)}
         return lt[L]
+
+    def _lane_bias(self, n):
+        """The pooling's gate biases (ape) for n pooled rows [1, r, n, 2d] fp32 (created eagerly on first use)."""
+        c = self.__dict__.setdefault("_bias_n", {})
+        if n not in c:
+            bias = torch.zeros(self.r, n, 2 * self.d)
+            bias[:, :, self.d:] = self.ape[:, None, :]
+            c[n] = upload(self.mesh, bias.reshape(1, self.r, n, 2 * self.d), ttnn.float32)
+        return c[n]
 
     def _iota_lane(self, L, n):
         """Group index per column over the lanes' key tensor, repeated over 32 rows: [1, 1, 32, n] fp32 (cached per
@@ -792,8 +802,13 @@ class Hy4Indexer:
         ttnn.deallocate(b)
         ttnn.copy(new, T["tk"])
         ttnn.deallocate(new)
-        K = ttnn.typecast(T["tk"], ttnn.float32, memory_config=mem)
-        gk = self._pool_fused(K, mem, si.gcos, si.gsin, Ecat=T["Ecat"], bias=T["bias"], n=32 * L)
+        if getattr(si, "Esel", None) is not None:  # only the groups this pass can change (decode_batch.LANE_POOL)
+            # bf16 one-hot x bf16 window, fp32 out: the exact token keys (as the fp32 Ecat x typecast window)
+            n = int(si.gcos.shape[-2])
+            gk = self._pool_fused(T["tk"], mem, si.gcos, si.gsin, Ecat=si.Esel, bias=self._lane_bias(n), n=n, keep_k=True)
+        else:
+            K = ttnn.typecast(T["tk"], ttnn.float32, memory_config=mem)
+            gk = self._pool_fused(K, mem, si.gcos, si.gsin, Ecat=T["Ecat"], bias=T["bias"], n=32 * L)
         a = ttnn.matmul(si.Ag, T["g"], compute_kernel_config=self.ckc, memory_config=mem)
         b = ttnn.matmul(si.Pg, gk, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(gk)

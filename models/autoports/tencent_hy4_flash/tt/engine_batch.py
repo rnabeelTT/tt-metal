@@ -28,13 +28,19 @@ from models.autoports.tencent_hy4_flash.tt.engine import HostSampler
 class Hy4BatchEngine:
     multi = True
 
-    def __init__(self, model, trace: bool = True):
-        from models.autoports.tencent_hy4_flash.tt.decode_batch import Hy4BatchDecoder
+    def __init__(self, model, trace: bool = True, k: int = 0):
+        from models.autoports.tencent_hy4_flash.tt.decode_batch import Hy4BatchDecoder, Hy4BatchSpecDecoder
 
         self.model, self.cfg = model, model.cfg
         self.S = int(model.slots)
         lanes = next(b for b in (2, 4, 8, 16, 32) if b >= self.S)
-        self.dec = Hy4BatchDecoder(model, lanes=lanes, trace=trace)
+        # k > 0: DFly2 speculative decoding while one sequence decodes alone (the solo single path)
+        self.k = int(k) if os.environ.get("HY4_BATCH_SOLO", "1") == "1" else 0
+        if self.k > 0:
+            self.dec = Hy4BatchSpecDecoder(model, lanes=lanes, trace=trace, k=self.k)
+            self.k = self.dec.k
+        else:
+            self.dec = Hy4BatchDecoder(model, lanes=lanes, trace=trace)
         self.trace = bool(trace)
         self.V = int(self.cfg.vocab)
         self.eos = {int(self.cfg.eos)}
@@ -139,7 +145,9 @@ class Hy4BatchEngine:
     def _exit_solo(self):
         slot, self.solo = self.solo, None
         q = self.seqs[slot]
-        q["lane"] = self.dec.add(slot, q["pos"], q["toks"])
+        d = self.dec
+        q["lane"] = d.add(slot, q["pos"], q["toks"], stage=(d.ob, d.ogb))  # its current single-path windows
+        q["n"] = None
 
     def _pass(self, rows: dict) -> dict:
         """rows {slot: [ids]} -> {slot: logits [n, V]} (solo: the single path)."""
@@ -156,8 +164,10 @@ class Hy4BatchEngine:
                 self._exit_solo()
             lo = self.dec.run_batch({self.seqs[s]["lane"]: ids for s, ids in rows.items()})
             out = {s: lo[self.seqs[s]["lane"]] for s in rows}
+        solo = self.solo is not None
         for s, ids in rows.items():
             self.seqs[s]["toks"] += [int(t) for t in ids]
+            self.seqs[s]["n"] = 0 if solo else None  # spec: the drafter continues from a solo 1-row pass's row 0
         self.stats["t_step"] += time.time() - t0
         self.stats["steps"] += 1
         self.stats["rows"] += len(rows)
@@ -170,7 +180,8 @@ class Hy4BatchEngine:
             raise RuntimeError(f"Hy4 slot {slot}: step at pos {pos}, engine at {q['pos']}")
 
     def step(self, reqs: dict) -> dict:
-        """reqs {slot: (tok, pos, host_authoritative)} -> {slot: [next token]} (one batched pass)."""
+        """reqs {slot: (tok, pos, host_authoritative)} -> {slot: [next token(s)]} (one batched pass; a sequence alone
+        on the solo path with k > 0: one verify pass, 1 .. k + 1 tokens)."""
         rows = {}
         for slot, (tok, pos, auth) in reqs.items():
             q = self.seqs[slot]
@@ -180,6 +191,10 @@ class Hy4BatchEngine:
                 q["tok"] = int(tok)
             self._check_pos(slot, q, None)
             rows[slot] = [q["tok"]]
+        if self.k > 0 and len(rows) == 1 and self.solo is not None and self.solo in rows:
+            q = self.seqs[self.solo]
+            if q.get("n") is not None and q["pos"] + self.k + 1 + 64 <= self.model.max_ctx:
+                return {self.solo: self._spec_step(self.solo)}
         out = self._pass(rows)
         res = {}
         for slot, lg in out.items():
@@ -188,6 +203,45 @@ class Hy4BatchEngine:
             q["tok"], q["pos"] = nxt, q["pos"] + 1
             res[slot] = [nxt]
         return res
+
+    def _spec_step(self, slot) -> list:
+        """One verify pass of the solo sequence: rows [tok, d_1 .. d_k] (DFly2 drafts on its last solo pass); greedy:
+        the matching prefix + the target's next token; sampled: exact speculative sampling (tt/engine.py)."""
+        t0 = time.time()
+        q, d, smp = self.seqs[slot], self.dec, self.seqs[slot]["smp"]
+        drafts = d.draft(q["tok"], q["pos"], q["n"])[: self.k]
+        rows = [q["tok"]] + drafts
+        lgs = d.run(rows, logits_rows="all", p0=q["pos"])  # [k + 1, V]
+        if smp.greedy:
+            picks = lgs.argmax(-1).tolist()
+            acc = 0
+            while acc < len(drafts) and picks[acc] == drafts[acc]:
+                acc += 1
+            emit = drafts[:acc] + [int(picks[acc])]
+        else:
+            acc, emit = 0, []
+            while acc < len(drafts):
+                p = smp.probs(lgs[acc])
+                dd = drafts[acc]
+                if smp.uniform() < float(p[dd]):
+                    acc += 1
+                    continue
+                p[dd] = 0.0
+                emit = drafts[:acc] + [smp.draw(p / p.sum())]
+                break
+            if not emit:
+                emit = drafts + [smp.draw(smp.probs(lgs[len(drafts)]))]
+        q["toks"] += rows[: len(emit)]  # the accepted rows' tokens (fed at pos .. pos + acc)
+        q["n"] = acc
+        q["pos"] += len(emit)
+        q["tok"] = emit[-1]
+        self.last_logits[slot] = lgs[acc]
+        self.stats["t_step"] += time.time() - t0
+        self.stats["steps"] += 1
+        self.stats["rows"] += 1
+        self.stats["spec_emitted"] = self.stats.get("spec_emitted", 0) + len(emit)
+        self.stats["spec_passes"] = self.stats.get("spec_passes", 0) + 1
+        return emit
 
     def step_logits(self, reqs: dict) -> dict:
         """Host-sampled step: reqs {slot: (tok, pos)} (each continues its sequence) -> {slot: next-token logits}."""
@@ -257,6 +311,7 @@ class Hy4BatchEngine:
             dec.min_bucket = b
             self.step(solo[0])
         dec.min_bucket = 0
+        self._warm_spec(solo)
         dec.min_width = 0
         # dense-only passes (no row selects: no scoring) at every batch size: slot 0 short again
         self.prefill(0, rnd(int(prompt_len or 64)))
@@ -264,6 +319,8 @@ class Hy4BatchEngine:
             self.step({s: (None, None, False) for s in range(R)})
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
+        for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
+            self._warm_spec(solo)
         steps = int(os.environ.get("HY4_WARM_STEPS", "3"))
         for R in range(1, self.S + 1):
             for _ in range(steps):
@@ -285,6 +342,21 @@ class Hy4BatchEngine:
         self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}
         logger.info(f"Hy4 batch engine warm-up {time.time() - t0:.1f} s ({self.S} slots, widths {widths}, "
                     f"{len(dec.btraces)} batched traces, {len(dec.traces)} single)")
+
+    def _warm_spec(self, solo):
+        """k > 0: the solo path's verify passes (k + 1 rows) and drafts, both regimes (slot 0 selects, slot 1 dense)
+        and every larger score bucket (slot 0): per bucket a 1-row pass (re-entering solo), then two verify passes."""
+        if not (self.k and solo):
+            return
+        dec = self.dec
+        for b in [0] + list(dec.buckets[1:]):
+            dec.min_bucket = b
+            for r in (solo[:2] if b == 0 else solo[:1]):
+                if self.solo in r:  # leave and re-enter solo: the first pass is a 1-row pass
+                    self.step(solo[1] if len(solo) > 1 and r is solo[0] else solo[0])
+                for _ in range(3):
+                    self.step(r)
+        dec.min_bucket = 0
 
     def capture(self):
         """Batched traces are captured on first use per (rows, width) by tt/decode_batch.Hy4BatchDecoder."""

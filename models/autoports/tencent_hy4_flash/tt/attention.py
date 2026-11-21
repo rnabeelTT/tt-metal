@@ -55,6 +55,12 @@ def _dt(name, default):
     return {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}[os.environ.get(name, default)]
 
 
+def solo_rows(si) -> bool:
+    """HY4_SOLO_ROWS=1 (with HY4_LANE_ROWS): a single-path pass writes its KV rows straight to their cache rows."""
+    return (bool(getattr(si, "row_offs", None)) and getattr(si, "R", None) is not None
+            and os.environ.get("HY4_SOLO_ROWS", "1") == "1" and os.environ.get("HY4_LANE_ROWS", "1") == "1")
+
+
 class Hy4Attention:
     def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None, slots: int = 1):
         """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity per sequence (sparse layers);
@@ -98,6 +104,17 @@ class Hy4Attention:
         self.wuk = upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt, mapper=("shard", 1))
         self.wuvT = upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), udt, mapper=("shard", 1))
         self.ckc_ukv = self.ckc_lofi if udt != ttnn.bfloat16 else self.ckc  # bfp8: HiFi2
+        # decode rows (one tile row): explicit reuse configs, one core per (head, whole N), K blocks of 2 tiles
+        # (HY4_UKV_CFG=1, default; exact): 16 heads W_uk 39.0 -> 18.8 us, W_uv 27.9 -> 21.1 us (2026-11-20 bench)
+        self.ukv_pc = {}
+        g = mesh.compute_with_storage_grid_size()
+        for name, kd, nd in (("uk", self.nope, self.kvl), ("uv", self.kvl, self.vd)):  # (N: the dies, below)
+            kt, nt = kd // TILE, nd // TILE
+            ibw = int(os.environ.get(f"HY4_UKV_IBW_{name.upper()}", "2"))
+            sw = int(os.environ.get(f"HY4_UKV_SW_{name.upper()}", "0")) or next(s for s in (4, 2, 1) if nt % s == 0)
+            self.ukv_pc[name] = ttnn.MatmulMultiCoreReuseProgramConfig(
+                compute_with_storage_grid_size=g, in0_block_w=ibw, out_subblock_h=1, out_subblock_w=sw,
+                per_core_M=1, per_core_N=nt)
         # output gate (column parallel), o_proj (row parallel), post_proj_norm
         self.wg = upload(mesh, bf(sd["linear_gate.weight"]).T.reshape(1, 1, cfg.hidden, H * self.vd), wdt, mapper=("shard", -1))
         self.wo = upload(mesh, bf(sd["o_proj.weight"]).T.reshape(1, 1, H * self.vd, cfg.hidden), wdt, mapper=("shard", -2))
@@ -292,7 +309,8 @@ class Hy4Attention:
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
         ttnn.deallocate(q)
-        q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1,Hd,Tp,512]
+        pc = {"program_config": self.ukv_pc["uk"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1" else {}
+        q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,512]
         ttnn.deallocate(q_nope)
         q_rope = self.rope(q_rope, cos, sin, mem)
         return q_lat, q_rope, q_resid
@@ -334,7 +352,8 @@ class Hy4Attention:
         ttnn.deallocate(o)
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
-        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1,Hd,Tp,256]
+        pc = {"program_config": self.ukv_pc["uv"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1" else {}
+        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
             ov = ttnn.experimental.view(ov, (1, 1, Tp, self.Hd * self.vd))  # (the same page identity as in _q)
@@ -794,6 +813,17 @@ class Hy4Attention:
         row = self._kv_row(x, cos, sin, mem, kv=parts[1])
         if getattr(si, "L", 0):
             return self._step_lanes(x, si, row, q_lat, q_rope, q_resid, parts, dec, mem)
+        if solo_rows(si):
+            # the real rows straight to their cache rows (2 programs instead of the window's 7); the window is then
+            # stale: nothing reads it while the batched lanes write rows too (HY4_LANE_ROWS), and a lane leaving
+            # solo reloads its window from the cache
+            from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+            row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(row)
+            slab_write(row_rm, self.cache, si.row_offs[self.kind], int(si.R), slab_rows=1)
+            ttnn.deallocate(row_rm)
+            return self._step_tail(x, si, q_lat, q_rope, q_resid, parts, dec, mem)
         a = ttnn.matmul(si.A, self.stage, compute_kernel_config=self.ckc, memory_config=mem)
         b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(row)
@@ -808,6 +838,9 @@ class Hy4Attention:
             ttnn.experimental.deepseek_prefill.update_padded_kv_cache(
                 self.cache, st_rm, si.slot, offs[j], 0, 1, 0, input_row_offset=32 * j, input_rows=32)
         ttnn.deallocate(st_rm)
+        return self._step_tail(x, si, q_lat, q_rope, q_resid, parts, dec, mem)
+
+    def _step_tail(self, x, si, q_lat, q_rope, q_resid, parts, dec, mem):
         if self.kind == "swa":
             idx = si.idx_swa
         elif self.indexer is not None:
@@ -855,18 +888,24 @@ class Hy4Attention:
         written to its slot's cache region by one slab_write (idle lanes: the trash rows); index lists per row."""
         from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
 
-        stL = self.lane_stage(si.L)
-        a = ttnn.matmul(si.A, stL, compute_kernel_config=self.ckc, memory_config=mem)
-        b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
-        ttnn.deallocate(row)
-        new = ttnn.add(a, b, memory_config=mem)
-        ttnn.deallocate(a)
-        ttnn.deallocate(b)
-        ttnn.copy(new, stL)
-        ttnn.deallocate(new)
-        st_rm = ttnn.to_layout(stL, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        slab_write(st_rm, self.cache, si.lane_offs[self.kind], 2 * si.L)
-        ttnn.deallocate(st_rm)
+        if getattr(si, "lane_rows", False):  # each row straight to its cache row (padding rows: the trash rows)
+            row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(row)
+            slab_write(row_rm, self.cache, si.row_offs[self.kind], int(row_rm.shape[-2]), slab_rows=1)
+            ttnn.deallocate(row_rm)
+        else:
+            stL = self.lane_stage(si.L)
+            a = ttnn.matmul(si.A, stL, compute_kernel_config=self.ckc, memory_config=mem)
+            b = ttnn.matmul(si.P, row, compute_kernel_config=self.ckc, memory_config=mem)
+            ttnn.deallocate(row)
+            new = ttnn.add(a, b, memory_config=mem)
+            ttnn.deallocate(a)
+            ttnn.deallocate(b)
+            ttnn.copy(new, stL)
+            ttnn.deallocate(new)
+            st_rm = ttnn.to_layout(stL, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            slab_write(st_rm, self.cache, si.lane_offs[self.kind], 2 * si.L)
+            ttnn.deallocate(st_rm)
         if self.kind == "swa":
             idx = si.idx_swa
         else:
