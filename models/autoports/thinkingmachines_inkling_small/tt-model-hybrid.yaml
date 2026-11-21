@@ -57,7 +57,7 @@ source:
 
 runtime:
   vllm: {version: "0.26.0"}
-  plugin: {path: /home/raahem/vllm-tt-plugin-inkling}   # inkling-mm (6897caf, on 23b0736): mm_items for generic image / audio inputs
+  plugin: {path: /home/raahem/vllm-tt-plugin-inkling}   # inkling-mm (d53d9b3, on 23b0736): mm_items for image / audio inputs, prefix-state snapshots inside the prompt only
   extra_models_dir: models/autoports/thinkingmachines_inkling_small/vllm_bundle
   overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2",
               "numpy==1.26.4"]   # numba (vLLM) needs numpy <= 2.4
