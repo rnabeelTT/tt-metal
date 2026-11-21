@@ -13,7 +13,7 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 2. TT port | done for text: decode, 8-row verify and chunked prefill all match the fixtures per layer (prefill PCC = decode; 1000-token prefill ≈ 4 s warm). |
 | 3. hybrid integration | done. **Shipped profile: early_gu4dn8** (routed experts bfp4; layers 2-17 gate/up bfp4 + down bfp8), 175 static device slots + 16 LRU fetch slots per layer, int4 host library for the rest. Teacher-forced 0.8726 / 0.9506 / 0.1998 with the shipped prefill config, at parity with M2.7 (0.848 / 0.933 / 0.196). (The all-bfp8 C=106 profile of the first sessions is superseded: see the 2026-11-15 plan.) |
 | 4. spec decode | done and served: native MTP, k=2 drafts per verify pass in vLLM (`INKLING_SPEC_K`; verify, commits and drafter traced; greedy byte-identical to plain decode, exact speculative sampling with penalties). k=3 loses (host-expert cost per verify row). DSpark does not beat MTP (CPU reference). Prompt-lookup (suffix) drafts: see the 2026-11-17 session-6 entry. |
-| 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
+| 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = the per-layer host round trip as much as chip time (session 11 split below); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
 | 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-20 session 10: the prefill attention fix, vLLM prefix caching with prefix-state slots, the drafter over every position, image / audio inputs): short chat TTFT 0.44 s, 60.5 / 58.7 tok/s greedy / sampled; new prompts prefill ~1,460-1,610 tok/s from 15K to 126K (125.9K in 86 s), decode after them 54-67 tok/s; resent prompt 1.1-1.8 s, next chat turn 1.9-2.0 s, two users' interleaved next turns 1.2 / 0.4 s (vLLM's prefix cache, 16 cached prompts); GSM8K-200 96.5%, IFEval-200 87.0 / 89.5; multimodal suite passes through the server. |
 
 **Open items (2026-11-21, end of session 11).** The published package is the deliverable; these are what is left.
@@ -698,6 +698,14 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
     13.22 / 13.23 (b), 13.26 / 13.18 (a); 126K: 104.37 s baseline and both. No gain from either, so neither is committed
     (patch kept at ~/inkling-work/patches/pf_hook_overlap_split_timing.diff). An earlier 19.1 s for (b) was a host
     short on RAM. What remains would need fewer ops in the layer itself (e.g. one program for depth 1's attention).
+- **2026-11-21, session 11: where a served verify pass goes** (HYB_LOG_EVERY=200 on the published package, card_bench
+  short x2, 1,000 passes, k=2): 29.4 ms per pass + 3.9 ms drafting, 2.0-2.4 tokens per step. Host view per pass: blocked
+  reading the chips' router logits / activations (t_read) 14.9; rest of host step 1 (routing, crafted rows, prefetch
+  prediction) 5.4; step 2 waiting for the CPU experts 4.2 (compute 6.9, ~19 experts per pass, hit 0.98) + partial
+  upload 2.6; outside the callbacks 2.3. So fusing device programs only reaches the ~15 ms half; the other half is the
+  80 host turns per pass (2 per hybrid layer), which shrink only with fewer hand-offs or more host work overlapped with
+  chip work. How long the chips idle inside the host turns is not measured directly (a device profile would). Log:
+  ~/inkling-work/jobs/decode_stats_20261121.log.
 - **2026-11-21, session 11: host RAM.** The kernel-held memory kept growing (~0.5 GB per device run) to ~110 GB, leaving
   118 GB available against the profile's 134 GB. Neither a tenstorrent driver reload (`modprobe -r tenstorrent`) nor
   dropping caches freed it; it is not page cache, tmpfs, ZFS or a cgroup. A reboot did: 228 GB available afterwards, and
