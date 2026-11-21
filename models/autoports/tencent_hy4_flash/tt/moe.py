@@ -20,7 +20,7 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, boundary_rows_out, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, num_devices, wfid,
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, boundary_rows_out, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, pair_enabled, stream_pair, num_devices, wfid,
                                                            stream_enabled, upload)
 
 class _Args:
@@ -302,7 +302,7 @@ class Hy4MoE:
         ttnn.deallocate(b)
         return lg
 
-    def router_row(self, x, T=None):
+    def router_row(self, x, T=None, ab=None):
         """[keys | s] FP32 [1, 1, rows, 2E]: s = sigmoid(x W_r) (fp32 logits, as the reference), keys = s + bias (the
         selection score); the routing kernels (router "keys") take the top-k of the keys and normalize s. T: return
         rows 0..T-1 only (HY4_ROUTER_POST=1, decode rows: one fused program after the router linear)."""
@@ -311,7 +311,9 @@ class Hy4MoE:
                 and getattr(self, "dec_router", None) is not None and int(x.shape[-2]) == 32):
             from models.autoports.tencent_hy4_flash.tt.router_post import RouterPostOp
 
-            if dl_split():
+            if ab is not None:  # the router linear already ran (paired with dec_in_s: HY4_PAIR)
+                a, b = ab
+            elif dl_split():
                 a, b = self.dec_router(x, L1, splits=[(0, self.E), (self.E, 2 * self.E)])
             else:
                 y = self.dec_router(x, L1)
@@ -506,9 +508,19 @@ class Hy4MoE:
             # the fused kernels (one row) or the per-row gather (verify rows)
             L, Sl = self.L, self.Sl
             fusedT = self.fused is not None and T <= getattr(self, "rows_max", 1)
+            ab = None
             if fusedT and "in_s" in self.dec and _lshard_env() == "1":
                 Lq = L // self.N
-                xq, g, u = self.dec["in_s"](x, mem, splits=[(0, Lq, T), (Lq, Lq + Sl), (Lq + Sl, Lq + 2 * Sl)])
+                in_kw = dict(x=x, mem=mem, splits=[(0, Lq, T), (Lq, Lq + Sl), (Lq + Sl, Lq + 2 * Sl)])
+                if (pair_enabled() and getattr(self, "dec_router", None) is not None and dl_split()
+                        and os.environ.get("HY4_ROUTER_POST", "1") == "1"):
+                    # HY4_PAIR: dec_in_s + the router linear as one program (the router's [keys | s] halves kept for
+                    # router_row; same values)
+                    (xq, g, u), ab = stream_pair(self.dec["in_s"], in_kw, self.dec_router,
+                                                 dict(x=x, mem=ttnn.L1_MEMORY_CONFIG,
+                                                      splits=[(0, self.E), (self.E, 2 * self.E)]))
+                else:
+                    xq, g, u = self.dec["in_s"](**in_kw)
                 xl = ttnn.all_gather(xq, dim=3, cluster_axis=1, topology=_lshard_topology(), memory_config=mem)
                 ttnn.deallocate(xq)
             elif dl_split():
@@ -525,7 +537,7 @@ class Hy4MoE:
             ttnn.deallocate(g)
             ttnn.deallocate(u)
             if fusedT:
-                row = self.router_row(x, T)  # [keys | s] (streamed router): rows 0..T-1 are the tokens'
+                row = self.router_row(x, T, ab=ab)  # [keys | s] (streamed router): rows 0..T-1 are the tokens'
                 if int(row.shape[-2]) == T:
                     rowT = row
                 else:

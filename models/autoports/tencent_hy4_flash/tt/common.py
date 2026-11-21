@@ -220,6 +220,22 @@ def stream_enabled(mesh) -> bool:
     return os.environ.get("HY4_STREAM", "1") == "1" and num_devices(mesh) > 1
 
 
+def _xy(crs):
+    return {(c.x, c.y) for c in ttnn.corerange_to_cores(crs, row_wise=True)}
+
+
+PF_PENDING = {}  # id(StreamLinear) -> DecodeLinear: the weight columns an earlier program prefetched (HY4_PF)
+
+
+def pf_enabled() -> bool:
+    """HY4_PF=1 (default 0): the fused HC prefetches the next streamed linears' weights (the attention's xa, the MoE's
+    dec_in_s (+ router with HY4_PAIR)) into their reader cores' L1 while it runs (cross-op weight prefetch; same values).
+    Measured a net loss (hy4-perf round 5): the HC is latency bound and slows more under the prefetch's DRAM / NOC load
+    (31 -> 52 us) than the prefetched linear gains (29 -> 19 us: x read + compute bound). Kept for a host that tolerates
+    the load."""
+    return os.environ.get("HY4_PF", "0") == "1"
+
+
 class StreamLinear:
     """A decode linear [1, 1, 32, K] x [K, N] on a decode-only copy of the weight streamed per DRAM bank (qwen36
     decode_linear: 6 reader cores per bank, column-major packets; ~2-3x the interleaved matmul at one tile row, LM head
@@ -253,21 +269,52 @@ class StreamLinear:
         cname = f"{cache}.stream{readers}" if cache else None
         self.w = op.weight([p.reshape(K, N).to(torch.bfloat16) for p in parts], cache_file_name=cname)
 
-    def __call__(self, x, mem=None, splits=None, heads=None, rows_out=32):
-        """splits [(c0, c1[, rows]), ...]: the output as column parts (one tensor each, rows default 32; HY4_DL_SPLIT).
-        rows_out: the output's rows when the pass reads its real rows only (e.g. the real rows for a fabric boundary,
-        which then needs no slice; rows past them undefined)."""
+    def prefetch_parts(self, cb_index, op):
+        """(kernels, cbs) for an earlier program (HY4_PF, e.g. the fused HC) to prefetch this linear's weight columns
+        (as many per core as its CB holds: all of them on a pf_plan placement) into the reader cores' L1 of `op` (a
+        placement off the host's cores); this linear's next program on that op then skips reading them."""
+        PF_PENDING[id(self)] = op
+        return op.prefetch_parts(self.w, cb_index)
+
+    def parts(self, x, mem=None, splits=None, heads=None, rows_out=32, op=None):
+        """(kernels, cbs, io, out) of this linear's program (op: a placement; default the prefetched one when an earlier
+        program prefetched this linear (PF_PENDING), else the plain one)."""
         R = DECODE_ROWS[0]
-        op = self._op(heads)
+        pend = PF_PENDING.pop(id(self), None) if heads is None else None
+        op = op or pend or self._op(heads)
+        pf = pend is op
         if splits is not None:
             splits = [(s[0], s[1], s[2] if len(s) > 2 else None) for s in splits]
         if R <= 16 and os.environ.get("HY4_STREAM_REAL_ROWS", "1") == "1":
             # read only the pass's real rows of the activation (64 B per tile per row instead of the whole 2 KB tile into
             # every reader core: the compute waited ~28 us for it); the output keeps 32 rows, padded rows zeroed
-            return op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=max(rows_out, R),
-                      splits=splits, heads=heads)
-        return op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, splits=splits,
-                  heads=heads)
+            return op._parts(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype,
+                             out_rows=max(rows_out, R), splits=splits, heads=heads, pf=pf)
+        return op._parts(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, splits=splits,
+                         heads=heads, pf=pf)
+
+    def __call__(self, x, mem=None, splits=None, heads=None, rows_out=32):
+        """splits [(c0, c1[, rows]), ...]: the output as column parts (one tensor each, rows default 32; HY4_DL_SPLIT).
+        rows_out: the output's rows when the pass reads its real rows only (e.g. the real rows for a fabric boundary,
+        which then needs no slice; rows past them undefined)."""
+        kernels, cbs, io, out = self.parts(x, mem, splits, heads, rows_out)
+        _pf_ran(kernels)
+        ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        return out
+
+    def alt_op(self, avoid, readers=None):
+        """This linear's DecodeLinear with `readers` cores per bank (default the build's) placed off the cores `avoid`
+        ((x, y) set): prefetched / paired placements (pf_plan). Same weight copy (the per-bank layout does not depend on
+        the placement: exact)."""
+        from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
+
+        readers = readers or self.readers
+        key = (id(self.mesh), self.K, self.N, self.dtype, self.fidelity, readers, tuple(sorted(avoid)))
+        op = StreamLinear._OPS.get(key)
+        if op is None:
+            op = StreamLinear._OPS[key] = DecodeLinear(self.mesh, self.K, self.N, self.dtype, readers=readers,
+                                                       fidelity=self.fidelity, exclude=tuple(sorted(avoid)))
+        return op
 
     def _op(self, heads):
         """HY4_DL_READERS (A/B; default: the build's readers): reader cores per bank. The per-bank weight copy does not
@@ -283,6 +330,76 @@ class StreamLinear:
             op = StreamLinear._OPS[key] = DecodeLinear(self.mesh, self.K, self.N, self.dtype, readers=r,
                                                        fidelity=self.fidelity)
         return op
+
+
+HC_CORES = {(x, y) for x in range(8) for y in range(2)}  # the fused HC's / sublayer norms' cores (kept off: HY4_PF)
+_PLANS = {}
+
+
+def _pf_ran(kernels):
+    """A streamed-linear program ran: prefetches into its cores' L1 (its CB range) are gone."""
+    if PF_PENDING:
+        used = set()
+        for k in kernels:
+            used |= _xy(k.core_ranges)
+        for key, op in list(PF_PENDING.items()):
+            if _xy(op.cores) & used:
+                del PF_PENDING[key]
+
+
+def pf_plan(sls):
+    """[(StreamLinear, DecodeLinear)]: placements for prefetched (HY4_PF) / paired (stream_pair) linears, each off the
+    HC's cores and the others', the widest first: one column per core where the grid has room (a prefetched linear is
+    compute / activation bound: more cores, less time), else fewer readers (the build's, or fewer when a bank's
+    neighbourhood runs out of cores)."""
+    key = tuple(id(s) for s in sls)
+    if key not in _PLANS:
+        g = sls[0].mesh.compute_with_storage_grid_size()
+        free = g.x * g.y - len(HC_CORES)
+        avoid, plan = set(HC_CORES), {}
+        order = sorted(range(len(sls)), key=lambda i: -sls[i].op.C)
+        for oi, i in enumerate(order):
+            sl = sls[i]
+            C = sl.op.C
+            rest = sum(min(sls[j].op.C, 4) for j in order[oi + 1:])  # room for the later ones (>= 4 readers a bank)
+            op = None
+            for r in sorted({min(C, r) for r in (C, -(-C // 2), -(-C // 3), sl.readers, -(-C // 4), -(-C // 5))},
+                            reverse=True):
+                if (r + rest) * sl.op.banks > free - len(avoid) + len(HC_CORES):
+                    continue
+                try:  # place_along_rows asserts when a bank's neighbourhood has no room left
+                    op = sl.alt_op(avoid, readers=r)
+                    break
+                except AssertionError:
+                    continue
+            assert op is not None, f"pf_plan: no placement for a [{sl.K}, {sl.N}] linear"
+            avoid |= {(c.x, c.y) for c, _, _, _ in op.assign}
+            plan[i] = (sl, op)
+        _PLANS[key] = [plan[i] for i in range(len(sls))]
+    return _PLANS[key]
+
+
+def stream_pair(a, a_kw, b, b_kw):
+    """Two streamed linears (e.g. of the same input) as ONE program on disjoint core groups (HY4_PAIR; pf_plan
+    placements): one dispatch and fixed cost instead of two, both weights streaming (or, prefetched, computing) at once.
+    a_kw / b_kw: their __call__ kwargs (x, mem, splits, rows_out). -> (out_a, out_b); same values as two calls."""
+    (_, op_a), (_, op_b) = pf_plan([a, b])
+    ka, ca, ia, oa = a.parts(op=op_a, **a_kw)
+    kb, cb, ib, ob = b.parts(op=op_b, **b_kw)
+    _pf_ran(ka + kb)
+    io = list(ia)
+    for t in ib:
+        if not any(t is u for u in io):
+            io.append(t)
+    ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=ka + kb, semaphores=[], cbs=ca + cb))
+    return oa, ob
+
+
+def pair_enabled() -> bool:
+    """HY4_PAIR (default 1): same-input streamed linear pairs as one program (the MoE's dec_in_s + router linear; with
+    HY4_PAIR_G (default 1) the attention's xa + output gate g): one dispatch, both weights streaming at once (exact;
+    round 5: 1u 21.13 -> 20.90, 8u 36.37 -> 35.82 ms engine)."""
+    return os.environ.get("HY4_PAIR", "1") == "1"
 
 
 def boundary_rows_out(mesh, R) -> int:

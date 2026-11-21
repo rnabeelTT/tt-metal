@@ -7,6 +7,10 @@
 // flight (the moe_decode gate|up reader's scheme).
 //
 // runtime args: [w_addr, bank, col0 (column within the bank), ncols, vc]
+//
+// PF (cross-op prefetch, ops.py DecodeLinear.prefetch_parts): runtime args 5, 6 = [pf, pf_addr]: an earlier program
+// already read this core's first pf columns (pf <= num_buffers) to pf_addr; when that is this CB's base (cb_w is the
+// program's first CB), they are pushed as they are and the stream starts at column pf.
 
 #include <stdint.h>
 
@@ -36,15 +40,26 @@ void kernel_main() {
     noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
     constexpr uint32_t extra_in_flight = num_buffers - 2;
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
-    cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
-    uint32_t l1 = get_write_ptr(cb_w);
-    const uint32_t cb_base = l1;
+    const uint32_t cb_base = get_write_ptr(cb_w);
     const uint32_t cb_end = cb_base + num_buffers * col_bytes;
+    uint32_t c_first = 0;
+#ifdef PF
+    {
+        const uint32_t pf = get_arg_val<uint32_t>(5);
+        if (pf != 0 && get_arg_val<uint32_t>(6) == cb_base) {
+            c_first = pf < ncols ? pf : ncols;
+            cb_reserve_back(cb_w, kt * c_first);
+            cb_push_back(cb_w, kt * c_first);
+        }
+    }
+#endif
+    cb_reserve_back(cb_w, kt * (extra_in_flight + 1));
+    uint32_t l1 = cb_base + (c_first % num_buffers) * col_bytes;
     uint32_t free_blocks = num_buffers;
     uint32_t trid = 1;
     uint32_t trid_to_wait = 1;
-    uint32_t src = col0 * col_bytes;
-    for (uint32_t c = 0; c < ncols; ++c) {
+    uint32_t src = (col0 + c_first) * col_bytes;
+    for (uint32_t c = c_first; c < ncols; ++c) {
         noc_async_read_set_trid(trid);
         for (uint32_t p = 0; p < pages; ++p) {
             noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1, trid);

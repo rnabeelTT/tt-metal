@@ -26,6 +26,7 @@ import ttnn
 KDIR = Path(__file__).parent / "kernels"
 TILE = 32
 SEM, SEM_READY = 0, 1
+PF_CB = 31  # the guard CB of a streamed linear's prefetch (HY4_PF) on its reader cores
 
 
 def _bits(v):
@@ -119,7 +120,7 @@ class HCFusedOp:
         return ttnn.from_torch(t.contiguous(), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh,
                                memory_config=ttnn.DRAM_MEMORY_CONFIG, **self.rep)
 
-    def __call__(self, X, o=None, wp=None, hc=None, in_mem=None):
+    def __call__(self, X, o=None, wp=None, hc=None, in_mem=None, pf=None):
         """X [1, 4, T, H] bf16 (T: 32, or a multiple of 32 rows); o [1, 1, T, H] bf16 + wp [1, 1, T, 32] fp32 (POST,
         else None); hc: the next HyperConnection, with its fused constants (PRE, else None). -> (X', in, w): X' (X itself
         when no POST), in [1, 1, T, H] / w [1, 1, T, 32] (None when no PRE). in_mem: in's memory config (e.g. the next
@@ -221,6 +222,16 @@ class HCFusedOp:
         ]
         sems = [ttnn.SemaphoreDescriptor(id=i, core_type=ttnn.CoreType.WORKER, core_ranges=crs, initial_value=0)
                 for i in (SEM, SEM_READY)]
+        if pf and G == 1:  # HY4_PF: the next streamed linears' weight prefetch on their (idle) reader cores
+            from models.autoports.tencent_hy4_flash.tt.common import PF_PENDING, _xy
+
+            PF_PENDING.clear()
+            mine = _xy(crs)
+            for sl, op in pf:  # [(StreamLinear, its DecodeLinear placement)] (common.pf_plan: off these cores)
+                assert not (_xy(op.cores) & mine), "prefetch placement on the HC's cores"
+                ks, cs = sl.prefetch_parts(PF_CB, op)
+                kernels += ks
+                cbs += cs
         io = [X, o_t, wp_t, fn_t, fl_t, self.mm, cv_t] + ([xn] if post else []) + ([inp, w] if pre else [])
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs))
         return xn, inp, w

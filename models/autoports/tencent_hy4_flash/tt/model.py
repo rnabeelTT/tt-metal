@@ -207,14 +207,28 @@ class Hy4Layer:
         parts = _os.environ.get("HY4_L1_PARTS", "hc,attn,moe,norm").split(",")
         m = lambda k: mem if k in parts else ttnn.DRAM_MEMORY_CONFIG  # noqa: E731
 
-        from models.autoports.tencent_hy4_flash.tt.common import norm_shard
+        from models.autoports.tencent_hy4_flash.tt.common import norm_shard, pf_enabled
 
         ns = norm_shard()  # HY4_NORM_SHARD: HC in -> norm -> streamed linears stay width-sharded (no conversions)
+        # HY4_PF: the HC prefetches the sublayer's first streamed linear (its norm runs on the HC's cores)
+        pf_on = pf_enabled() and ns and int(X.shape[-2]) == 32
+        attn_dec = getattr(self.attn, "dec", None) or {}
+        mlp_dec = getattr(self.mlp, "dec", None) or {}
+        pf_a = pf_f = None
+        if pf_on:
+            from models.autoports.tencent_hy4_flash.tt.common import pair_enabled, pf_plan
 
-        def run(X, pend, hc, norm=None):
+            if attn_dec.get("xa") is not None:
+                pf_a = pf_plan([attn_dec["xa"]])
+            if mlp_dec.get("in_s") is not None:
+                router = getattr(self.mlp, "dec_router", None)
+                # HY4_PAIR: dec_in_s and the router linear run as one program (moe.forward_decode): both prefetched
+                pf_f = pf_plan([mlp_dec["in_s"], router] if pair_enabled() and router is not None else [mlp_dec["in_s"]])
+
+        def run(X, pend, hc, norm=None, pf=None):
             o, wp = pend if pend is not None else (None, None)
             in_mem = norm.dec_mem if ns and norm is not None and norm.dec is not None else None
-            Xn, inp, w = hcf(X, o, wp, hc, in_mem=in_mem)
+            Xn, inp, w = hcf(X, o, wp, hc, in_mem=in_mem, pf=pf)
             if pend is not None:
                 ttnn.deallocate(X)
                 ttnn.deallocate(o)
@@ -228,10 +242,10 @@ class Hy4Layer:
             X2 = self.engram.forward(X, si.engram[self.li], m("engram"))
             ttnn.deallocate(X)
             X = X2
-        X, a_in, w_a = run(X, pend, self.attn_hc, self.in_norm)
+        X, a_in, w_a = run(X, pend, self.attn_hc, self.in_norm, pf=pf_a)
         a = self.attn.step(self.in_norm(a_in, m("norm"), shard_out=ns), si, m("attn"))
         ttnn.deallocate(a_in)
-        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc, self.post_norm)
+        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc, self.post_norm, pf=pf_f)
         f_n = self.post_norm(f_in, m("norm"), shard_out=ns)
         ttnn.deallocate(f_in)
         f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"), R=R)

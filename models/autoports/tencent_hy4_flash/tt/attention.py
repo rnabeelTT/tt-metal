@@ -30,6 +30,8 @@ import torch
 import ttnn
 
 from models.autoports.tencent_hy4_flash.tt.common import (
+    pair_enabled,
+    stream_pair,
     AllReduce,
     Boundary,
     boundary_rows_out,
@@ -272,7 +274,12 @@ class Hy4Attention:
             # the parts written straight by the linear; kv_a as (c, k_rope) for _kv_row
             q, kvl = self.xa_cols[0][1], self.kvl
             cols = [self.xa_cols[0], (q, q + kvl), (q + kvl, self.xa_cols[1][1])] + self.xa_cols[2:]
-            outs = self.dec["xa"](x, mem, splits=cols)
+            if pair_enabled() and os.environ.get("HY4_PAIR_G", "1") == "1" and self.dec.get("g") is not None:
+                # HY4_PAIR: the output gate's linear (same input x) in the same program; kept for _attend_out
+                outs, self._g_early = stream_pair(self.dec["xa"], dict(x=x, mem=mem, splits=cols), self.dec["g"],
+                                                  dict(x=x, mem=mem))
+            else:
+                outs = self.dec["xa"](x, mem, splits=cols)
             return [outs[0], (outs[1], outs[2])] + outs[3:]
         y = self.dec["xa"](x, mem)
         outs = [ttnn.slice(y, (0, 0, 0, a), (1, 1, 32, b), memory_config=mem) for a, b in self.xa_cols]
@@ -460,7 +467,10 @@ class Hy4Attention:
             ov = ttnn.experimental.view(ov, (1, 1, Tp, self.Hd * self.vd))  # (the same page identity as in _q)
         else:
             ov = ttnn.reshape(ttnn.permute(ov, (0, 2, 1, 3), memory_config=mem), (1, 1, Tp, self.Hd * self.vd))
-        if dec:
+        g = self.__dict__.pop("_g_early", None) if dec else None  # paired with xa (HY4_PAIR)
+        if g is not None:
+            pass
+        elif dec:
             g = self.dec["g"](x, mem)
         else:
             g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)

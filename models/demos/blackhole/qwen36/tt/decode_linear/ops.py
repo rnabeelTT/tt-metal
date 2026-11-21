@@ -86,7 +86,7 @@ class DecodeLinear:
 
     # ---- op ------------------------------------------------------------------------------------------------------------
     def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16, out_rows=None, splits=None,
-               heads=None):
+               heads=None, pf=False):
         """flat = (noc_xy, sem_id): x is a flat BF16 vector on that core, ready once program semaphore sem_id is set.
         out_dtype: bfloat16 (default) or float32 (the FP32 DST packed unrounded, e.g. logits).
         splits: [(c0, c1, rows_k), ...] (tile-aligned column ranges covering [0, n) in order, at most 5): the output as
@@ -126,6 +126,8 @@ class DecodeLinear:
             format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=dt, page_size=page)])
         cbs = [fmt(cb_x, ttnn.bfloat16, 2048, self.kt), fmt(cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
                fmt(cb_out, out_dtype, out_page, 2)]
+        if pf:  # the weight CB first: at the CB base, where prefetch_parts' kernel left the first columns
+            cbs = [cbs[1], cbs[0], cbs[2]]
         rd_ct = [cb_w, self.kt, self.tile_bytes, self.page_bytes, self.buffers]
         wr_ct = [cb_x, cb_out, self.kt, rows, self.n_tiles]
         wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args() + ttnn.TensorAccessorArgs(out).get_compile_time_args()
@@ -142,7 +144,8 @@ class DecodeLinear:
         cp_rt = ttnn.RuntimeArgs()
         rd_args, wr_args = {}, {}
         for c, b, c0, nc in self.assign:
-            rd_args[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3]
+            rd_args[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3] + (
+                [self.pf_cols(nc), self.pf_addr()] if pf else [])
             wr_args[(c.x, c.y)] = ([x.buffer_address(), out.buffer_address(), b * self.C + c0, nc] + ext
                                    + ([xb.buffer_address()] if xb is not None else []))
             cp_rt[c.x][c.y] = [nc]
@@ -172,6 +175,7 @@ class DecodeLinear:
                        ("CB_XF", str(cb_xf))]
         dm = ttnn.DataMovementConfigDescriptor
         kernels = []
+        rd_def = [("PF", "1")] if pf else []
         # readers of a bank sharing its row with another bank's: on the next row, NOC1 (place_banks_offrow)
         for cores, rnoc, wnoc in ((self.noc0_cores, ttnn.NOC.NOC_0, ttnn.NOC.NOC_1),
                                   (self.noc1_cores, ttnn.NOC.NOC_1, ttnn.NOC.NOC_0)):
@@ -179,7 +183,7 @@ class DecodeLinear:
                 continue
             kernels += [
                 ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_reader.cpp"), core_ranges=cores,
-                                      compile_time_args=rd_ct, runtime_args=rt_for(rd_args, cores),
+                                      compile_time_args=rd_ct, runtime_args=rt_for(rd_args, cores), defines=rd_def,
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
                 ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_writer.cpp"), core_ranges=cores,
                                       compile_time_args=wr_ct, runtime_args=rt_for(wr_args, cores), defines=defines,
@@ -197,14 +201,50 @@ class DecodeLinear:
         return kernels, cbs, xs + [w, out], out
 
     def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16, out_rows=None,
-                 splits=None, heads=None):
+                 splits=None, heads=None, pf=False):
         """x: [.., rows, K] BF16 TILE (rows <= 16, or 32: whole tiles, every row defined); w: weight();
-        -> [1, 1, rows, N] BF16 TILE (splits: the list of column parts, see _parts)."""
+        -> [1, 1, rows, N] BF16 TILE (splits: the list of column parts, see _parts). pf: the previous program ran
+        prefetch_parts(w) (its first columns are in L1 already)."""
         assert 1 <= rows <= 16 or rows == 32
         kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype, out_rows=out_rows,
-                                            splits=splits, heads=heads)
+                                            splits=splits, heads=heads, pf=pf)
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return out
+
+    # ---- cross-op prefetch ----------------------------------------------------------------------------------------
+    def pf_cols(self, nc):
+        """Columns of a core's nc an earlier program prefetches: as many as the weight CB holds."""
+        return min(nc, self.buffers)
+
+    def pf_addr(self):
+        """The CB base on the reader cores (where the first CB of a program lands)."""
+        if not hasattr(self, "_pf_addr"):
+            self._pf_addr = int(ttnn.device.get_allocator_base_address(self.mesh_device, ttnn.BufferType.L1))
+        return self._pf_addr
+
+    def prefetch_parts(self, w, cb_index):
+        """(kernels, cbs) to add to an earlier program that leaves this linear's reader cores idle: each core reads its
+        first pf_cols columns into L1 at the CB base (a guard CB `cb_index` there keeps L1 buffers off the range); the
+        linear then runs with pf=True. Nothing between the two programs may use those cores' CB range."""
+        ct = [self.kt, self.tile_bytes, self.page_bytes, cb_index]
+        args = {(c.x, c.y): [w.buffer_address(), b, c0, self.pf_cols(nc), (b + c0) & 0x3, self.pf_addr()]
+                for c, b, c0, nc in self.assign}
+        dm = ttnn.DataMovementConfigDescriptor
+        kernels = []
+        for cores, noc in ((self.noc0_cores, ttnn.NOC.NOC_0), (self.noc1_cores, ttnn.NOC.NOC_1)):
+            if cores is None:
+                continue
+            rt = ttnn.RuntimeArgs()
+            for c in ttnn.corerange_to_cores(cores, row_wise=True):
+                rt[c.x][c.y] = args[(c.x, c.y)]
+            kernels.append(ttnn.KernelDescriptor(kernel_source=str(KERNEL_DIR / "dl_prefetch.cpp"), core_ranges=cores,
+                                                 compile_time_args=ct, runtime_args=rt,
+                                                 config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=noc)))
+        guard = ttnn.CBDescriptor(
+            total_size=self.tile_bytes * self.buffers * self.kt, core_ranges=self.cores,
+            format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=cb_index, data_format=self.weight_dtype,
+                                                        page_size=self.tile_bytes)])
+        return kernels, [guard]
 
     def consumer(self, w, out_memory_config=ttnn.L1_MEMORY_CONFIG):
         """This projection of one row as the consumer of a fabric boundary (FabricBoundary(..., consumer=)): its weight
