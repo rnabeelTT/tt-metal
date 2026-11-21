@@ -34,10 +34,55 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
 6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
 7. Not yet tested: sustained multi-hour load, several concurrent clients (single-sequence engine: requests queue).
+   Batching is scoped under **Batching (multi-user serving): scope** below.
 8. Session 9: the engine repeats exactly for the same request sequence (determinism_check across processes). Through
    the full vLLM server two fresh servers agree on 118 / 200 GSM8K answers (the first 74 identical): a server-level
    source remains (likely extra decode steps of async scheduling moving the expert placement history; the drafter's
    stale prompt KV, the other suspect, is fixed: item 3). A request can depend on earlier ones (HYB_RESET_PER_REQUEST=1, ~16-18% speed).
+
+**Batching (multi-user serving): scope (2026-11-21, not started).** Today the engine serves one sequence
+(`max_num_seqs: 1`); other requests queue. Estimate: hard, roughly 5-8 engineer-weeks for B = 2-4 decode users with
+MTP, most of it in the engine and the hybrid kernels; the vLLM side is mostly done. Expected gain: aggregate throughput,
+not per-user speed (each user gets slower).
+
+- *What blocks B > 1 today (hard gates):* `tt/generator_vllm.py` refuses `max_batch_size != 1` (~:180) and builds the
+  model with `max_batch_size=1` (~:201); the host-sampled decode asserts one live row (~:351, and M2.7's `_mtp_decode`
+  non-multi path); prefill loops the rows but drives the one engine, so the second user overwrites the first's state.
+- *Per-sequence state to give a user dimension (`tt/inkling_serve.py` unless noted):* the continuation scalars (`_tok`,
+  `_pos`, `_drafts`, `_pending`, `_smp`, `_last_h`, `last_logits`); the single page-table row `self.pt` `[1, blocks]`
+  and `set_page_row` (`attention.py` reads row 0 for every row); the short-conv states (`sconv.py`, `[1, 1, K-1, C]`,
+  4-6 per layer) and the `tt/sconv_kernels` commit programs (one state each); the sliding-window rings (`attention.py`,
+  one fixed ring per sliding layer, not paged); the drafter carries `self.carry[j]` and the drafter's own conv / ring
+  state; the prefix-state restore target (`_ps_restore` copies into the one live state; the plugin's prefix_state is
+  already per request); every trace (verify widths 1..k+1, drafter `(width, accepted)` keys) would become per
+  `(users, rows)` bucket. The global KV is already paged through vLLM's blocks, so its storage is shareable.
+- *Prior art to reuse:* the M2.7 base has real B > 1 (`create_model(max_batch_size=B)`, decode buckets, a per-slot DRAM
+  budget of ~36.5 MB per extra decode slot) and multi-user MTP (`minimaxai_minimax_m2_7/tt/mtp_multi.py`: B users x R
+  rows user-major, per-row positions and page tables, capped at B <= 4 at TP = 4 by its GDN kernel). Inkling has no
+  GDN; its recurrent state is short convs + sliding rings, so the per-user buffers and the sconv kernels are new work.
+  The plugin's lane mode (`lane_scheduler.py`) is data-parallel lanes, not needed for single-mesh batching.
+- *Hybrid overlay (the main cost risk):* a pass's rows would be users x (k + 1) (B = 4 at k = 2: 12 rows). Needed:
+  fused MoE kernels for more rows (`HYB_ROWS` = 3 today, `QWEN35_MOE_FUSED_ROWS_MAX`), socket pages per row (H2D FIFO
+  depth 4 pages in L1, already tight), crafted rows / partial uploads per row, `HYB_DECODE_ROWS` (8 today) >= rows.
+  The 80 host turns per pass (2 per hybrid layer, ~half of a pass: session-11 split) are paid once per pass whatever
+  the row count, which is where batching wins; CPU-expert misses grow with the distinct experts across all rows
+  (measured for one user: 80 / 138 / 186 / 228 host experts per pass at 1..4 rows before the fetch; ~19 per pass now
+  at 3 rows, DDR-bandwidth-bound at ~36 of ~46 GB/s), so per-pass host time grows roughly linearly with users.
+  Attention takes up to 8 rows per program (`attention.py` asserts R x 4 q-heads-per-kv-head <= 32: 32 / 8 heads,
+  8 / 2 per die), so 12 rows need two calls or a reshaped kernel.
+- *Device memory:* ~0.72 GiB free per die after warm-up at 128K, and k = 3's extra traces already ran it out (0.46
+  GiB). One user's 128K of global KV is ~0.5 GB per die (7 layers x 2 KV heads per die x 128 x bfp8), so users must
+  share one KV pool (e.g. 4 x 32K, not 4 x 128K), plus per-user rings, conv states and traces per bucket: budget it
+  before writing kernels (a lower-context profile, like p300x2-32k, has more room).
+- *Scheduling:* the plugin does not mix prefill and decode in one step, so a new user's prefill stalls every decoding
+  user (a 126K prompt is ~86 s). Interleaving prefill chunks with decode steps is its own piece of work.
+- *Placement / determinism:* expert placement and the fetch cache are global; with several users a request's output
+  depends on the others' (already true across sequential requests; HYB_RESET_PER_REQUEST cannot apply per user).
+- *Suggested order:* (1) DRAM budget for B = 2 at 32K; (2) engine state with a user dimension at k = 0 (no drafter),
+  eager, checked against two sequential single-user runs; (3) hybrid rows > 3 and sockets; (4) traces per bucket;
+  (5) MTP per user (port mtp_multi's layout); (6) prefill / decode interleaving; (7) quality gate per user and a
+  multi-client load test. A cheaper stopgap with no throughput gain: time-slice sequences by swapping state through
+  the prefix-state snapshots (~200 MB host RAM each), which gives fairness, not speed.
 
 **Plan to completion (2026-11-15, second session; supersedes the old next-steps list).** The goal is a published
 `tt-model` package served by vLLM, with the best context / TTFT / tok/s at M2.7-parity quality.
