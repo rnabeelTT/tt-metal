@@ -195,12 +195,19 @@ class RMSNorm:
                                ttnn.ROW_MAJOR_LAYOUT)
             self.dec = True
 
-    def __call__(self, x, mem=None):
+    def __call__(self, x, mem=None, shard_out=False):
+        """shard_out: return the decode rows' output width-sharded (self.dec_mem; consumers that read it by page, e.g.
+        the streamed linears) instead of converting it back to interleaved. An input already in self.dec_mem (e.g. the
+        fused HC's in_mem=) skips the conversion program."""
         if self.dec is not None and int(x.shape[-2]) == TILE and int(x.shape[-1]) == self.W and x.dtype == ttnn.bfloat16:
-            xs = ttnn.to_memory_config(x, self.dec_mem)
+            pre = x.memory_config() == self.dec_mem
+            xs = x if pre else ttnn.to_memory_config(x, self.dec_mem)
             y = ttnn.rms_norm(xs, epsilon=self.eps, weight=self.w_rm, program_config=self.dec_pc,
                               compute_kernel_config=self.ckc, memory_config=self.dec_mem)
-            ttnn.deallocate(xs)
+            if not pre:
+                ttnn.deallocate(xs)
+            if shard_out:
+                return y
             out = ttnn.sharded_to_interleaved(y, mem or ttnn.L1_MEMORY_CONFIG)
             ttnn.deallocate(y)
             return out
@@ -245,13 +252,29 @@ class StreamLinear:
         cname = f"{cache}.stream{readers}" if cache else None
         self.w = op.weight([p.reshape(K, N).to(torch.bfloat16) for p in parts], cache_file_name=cname)
 
-    def __call__(self, x, mem=None):
+    def __call__(self, x, mem=None, splits=None, heads=None):
+        """splits [(c0, c1[, rows]), ...]: the output as column parts (one tensor each, rows default 32; HY4_DL_SPLIT)."""
         R = DECODE_ROWS[0]
+        if splits is not None:
+            splits = [(s[0], s[1], s[2] if len(s) > 2 else None) for s in splits]
         if R <= 16 and os.environ.get("HY4_STREAM_REAL_ROWS", "1") == "1":
             # read only the pass's real rows of the activation (64 B per tile per row instead of the whole 2 KB tile into
             # every reader core: the compute waited ~28 us for it); the output keeps 32 rows, padded rows zeroed
-            return self.op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=32)
-        return self.op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype)
+            return self.op(x, self.w, R, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, out_rows=32,
+                           splits=splits, heads=heads)
+        return self.op(x, self.w, 32, mem or ttnn.L1_MEMORY_CONFIG, out_dtype=self.out_dtype, splits=splits,
+                       heads=heads)
+
+
+def norm_shard() -> bool:
+    """HY4_NORM_SHARD=1: decode sublayer norms take their input width-sharded from the fused HC and hand their output
+    sharded to the streamed linears (no to_memory_config / sharded_to_interleaved programs)."""
+    return os.environ.get("HY4_NORM_SHARD", "1") == "1"
+
+
+def dl_split() -> bool:
+    """HY4_DL_SPLIT=1: fused decode linears write their column parts as separate tensors (no slice programs)."""
+    return os.environ.get("HY4_DL_SPLIT", "1") == "1"
 
 
 DECODE_ROWS = [32]  # the real rows (0 .. R-1) of the decode pass in flight (set by Hy4Model.step / the drafter)

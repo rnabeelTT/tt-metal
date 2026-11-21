@@ -223,6 +223,7 @@ void kernel_main() {
         // every core's partials summed on the FPU: DST += slot * 1 (the slots enter at tf32, the accumulation is FP32;
         // the SFPU copy + add chain took ~15 us)
         cb_wait_front(cb_slots, 2 * NC);
+        DeviceZoneScopedN("HC_FIN");
         cb_reserve_back(cb_s1, 1);
         cb_reserve_back(cb_sdc, 1);
         cb_reserve_back(cb_m, 1);

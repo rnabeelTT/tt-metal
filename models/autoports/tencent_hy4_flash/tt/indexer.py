@@ -379,6 +379,10 @@ class Hy4Indexer:
                                                         memory_config=mem)[0]
             ttnn.deallocate(q)
             q = q2
+        elif Tp == 32 and self.d % 32 == 0 and os.environ.get("HY4_IDX_VIEW", "1") == "1":
+            # one tile row: [1, 1, 32, nh * d] and [1, nh, 32, d] share their tile pages (head h, tile c -> page
+            # (d / 32) h + c): a zero-copy view instead of reshape + permute
+            q = ttnn.experimental.view(q, (1, self.nh, Tp, self.d))
         else:
             q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
         qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)

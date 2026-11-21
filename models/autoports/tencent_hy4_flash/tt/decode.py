@@ -169,17 +169,58 @@ class Hy4Decoder:
         self.tokens = [int(t) for t in tokens]
 
     # ------------------------------------------------------------------ host side of a step
+    def _pos_key(self, p0: int, R: int):
+        """What the position-only host inputs of a pass depend on (HY4_HOST_PREFETCH: a prefetched set is used only if
+        its key matches)."""
+        return (p0, R, self.ob, self.ogb, self._bases(), self.ring, self.min_bucket,
+                os.environ.get("HY4_PAD_SINK", "1"))
+
+    def prefetch(self, R: int = 1):
+        """HY4_HOST_PREFETCH=1: build the next pass's position-only host inputs (rows R at self.pos) while the device runs
+        this one (the engine calls it after launching a replay; ~1 ms of host work per token off the critical path)."""
+        if os.environ.get("HY4_HOST_PREFETCH", "1") != "1" or self.pos is None:
+            self._pre = None
+            return
+        try:
+            self._pre = (self._pos_key(self.pos, R), self._pos_part(self.pos, R))
+        except Exception:  # noqa: BLE001  (e.g. past the largest bucket: the real pass raises it)
+            self._pre = None
+
     def _host_inputs(self, ids: list[int], p0: int):
         cfg, R = self.cfg, len(ids)
+        pre, self._pre = getattr(self, "_pre", None), None
+        if pre is not None and pre[0] == self._pos_key(p0, R):
+            h, sparse, bucket, nb, gb = pre[1]
+        else:
+            h, sparse, bucket, nb, gb = self._pos_part(p0, R)
+        h = dict(h)
+        tok = torch.zeros(1, ROWS, dtype=torch.int32)
+        tok[0, :R] = torch.tensor(ids, dtype=torch.int32)
+        h["tok"] = _rm(tok, ttnn.uint32)
+        del self.tokens[p0:]  # a pass may start before the end of the last one (rejected verify rows)
+        self.tokens += [int(t) for t in ids]
+        eng = self.model.engram
+        for li in self.model.engram_li():
+            if eng is not None and hasattr(eng, "pos") and eng.pos.get(li) != p0:
+                keep = getattr(eng, "keep", 2)
+                eng.hist[li] = np.array(self.tokens[max(0, p0 - keep) : p0], dtype=np.int64)
+                eng.pos[li] = p0
+            rows = self.model.engram.rows(li, torch.tensor(ids), p0)
+            e = torch.zeros(1, 1, ROWS, rows.shape[-1], dtype=torch.bfloat16)
+            e[0, 0, :R] = rows
+            h[f"eng_{li}"] = _tile(e, ttnn.bfloat16)
+        self.ob, self.ogb = nb, gb
+        return h, sparse, bucket
+
+    def _pos_part(self, p0: int, R: int):
+        """The host inputs that depend on the rows' positions only (not their tokens); no state change."""
+        cfg = self.cfg
         r = cfg.idx_ratio
         nb = (p0 // 32) * 32
         assert p0 + R <= nb + 64, "rows must fit the 64-row staging window"
         gw0 = nb // r
         gb = (gw0 // 32) * 32
         h = {}
-        tok = torch.zeros(1, ROWS, dtype=torch.int32)
-        tok[0, :R] = torch.tensor(ids, dtype=torch.int32)
-        h["tok"] = _rm(tok, ttnn.uint32)
         pos = torch.full((ROWS,), p0 + R - 1, dtype=torch.long)
         pos[:R] = torch.arange(p0, p0 + R)
         for k in ("sparse", "swa"):
@@ -245,20 +286,7 @@ class Hy4Decoder:
             bucket = next((b for b in self.buckets if b >= need), None)
             if bucket is None:
                 raise RuntimeError(f"context {p0 + R} past the largest indexer bucket")
-        del self.tokens[p0:]  # a pass may start before the end of the last one (rejected verify rows)
-        self.tokens += [int(t) for t in ids]
-        eng = self.model.engram
-        for li in self.model.engram_li():
-            if eng is not None and hasattr(eng, "pos") and eng.pos.get(li) != p0:
-                keep = getattr(eng, "keep", 2)
-                eng.hist[li] = np.array(self.tokens[max(0, p0 - keep) : p0], dtype=np.int64)
-                eng.pos[li] = p0
-            rows = self.model.engram.rows(li, torch.tensor(ids), p0)
-            e = torch.zeros(1, 1, ROWS, rows.shape[-1], dtype=torch.bfloat16)
-            e[0, 0, :R] = rows
-            h[f"eng_{li}"] = _tile(e, ttnn.bfloat16)
-        self.ob, self.ogb = nb, gb
-        return h, sparse, bucket
+        return h, sparse, bucket, nb, gb
 
     def _copy_inputs(self, h):
         si, c = self.si, ttnn.copy_host_to_device_tensor
@@ -334,6 +362,8 @@ class Hy4Decoder:
                 if os.environ.get("HY4_TIME_STEPS") == "1":
                     ttnn.synchronize_device(self.mesh)
                 t3 = _t.perf_counter()
+                self.pos = p0 + R
+                self.prefetch(R)  # the next pass's position-only inputs, while the device runs (HY4_HOST_PREFETCH)
                 out = self.model.read_logits(self.out[key], R)
                 t4 = _t.perf_counter()
                 self.timing = (t1 - t0, t2 - t1, t3 - t2, t4 - t3)

@@ -32,9 +32,32 @@ def _bits(v):
     return struct.unpack("<I", struct.pack("<f", float(v)))[0]
 
 
-def _cb(cores, index, dtype, tile_bytes, tiles):
+def _cb(cores, index, dtype, tile_bytes, tiles, half=0):
+    """half: HR x 32 partial tiles (HR = 16 or 8 rows; the HY4_HCF_HALF decode kernels)."""
+    if half:
+        page = tile_bytes * half // 32
+        fmt = ttnn.CBFormatDescriptor(buffer_index=index, data_format=dtype, page_size=page,
+                                      tile=ttnn.TileDescriptor(half, 32))
+        return ttnn.CBDescriptor(total_size=page * tiles, core_ranges=cores, format_descriptors=[fmt])
     fmt = ttnn.CBFormatDescriptor(buffer_index=index, data_format=dtype, page_size=tile_bytes)
     return ttnn.CBDescriptor(total_size=tile_bytes * tiles, core_ranges=cores, format_descriptors=[fmt])
+
+
+HALF_FULL = (3, 4, 22, 25)  # the half kernels' full-tile CBs (fn, the matmul constants, fn_lo, X' as full tiles)
+
+
+def half_mode(TR):
+    """HY4_HCF_HALF=1: decode passes (one row tile) of at most 16 real rows run the half-tile kernels (kernels/*_h.cpp):
+    rows 0..15 only (half the FPU work), rows 16..31 of X' / in / w written as zeros."""
+    if TR != 1 or _os.environ.get("HY4_HCF_HALF", "1") != "1":
+        return 0
+    from models.autoports.tencent_hy4_flash.tt.common import DECODE_ROWS
+
+    hr = int(_os.environ.get("HY4_HCF_HALF_ROWS", "8"))  # 16, or 8 (passes of <= 8 rows)
+    for r in (8, 16):
+        if r >= hr and DECODE_ROWS[0] <= r:
+            return r
+    return 0
 
 
 class HCFusedOp:
@@ -96,10 +119,11 @@ class HCFusedOp:
         return ttnn.from_torch(t.contiguous(), dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh,
                                memory_config=ttnn.DRAM_MEMORY_CONFIG, **self.rep)
 
-    def __call__(self, X, o=None, wp=None, hc=None):
+    def __call__(self, X, o=None, wp=None, hc=None, in_mem=None):
         """X [1, 4, T, H] bf16 (T: 32, or a multiple of 32 rows); o [1, 1, T, H] bf16 + wp [1, 1, T, 32] fp32 (POST,
         else None); hc: the next HyperConnection, with its fused constants (PRE, else None). -> (X', in, w): X' (X itself
-        when no POST), in [1, 1, T, H] / w [1, 1, T, 32] (None when no PRE)."""
+        when no POST), in [1, 1, T, H] / w [1, 1, T, 32] (None when no PRE). in_mem: in's memory config (e.g. the next
+        RMSNorm's width-sharded decode config: no conversion program before the norm)."""
         post, pre = o is not None, hc is not None
         J, NC, H = self.J, self.NC, self.H
         NT = 4 * J
@@ -119,7 +143,7 @@ class HCFusedOp:
                                             ttnn.DRAM_MEMORY_CONFIG) if post else X
         out_mem = L1 if _os.environ.get("HY4_HCF_OUT_L1", "0") == "1" and TR == 1 else ttnn.DRAM_MEMORY_CONFIG
         inp = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
-                                             out_mem) if pre else None
+                                             in_mem or out_mem) if pre else None
         w = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, 32]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                            out_mem) if pre else None
         o_t = o if post else X
@@ -128,11 +152,16 @@ class HCFusedOp:
         fl_t = hc.fz_fnlo if pre else self.mm
         cv_t = hc.fz_cv if pre else self.mm
         bf, f32 = (ttnn.bfloat16, 2048), (ttnn.float32, 4096)
-        cbs = [_cb(crs, i, dt, tb, n) for i, (dt, tb), n in [
-            (0, bf, db * NT), (1, bf, db * J), (2, f32, db), (3, f32, NT), (4, f32, 10), (5, f32, 4), (6, f32, 4),
-            (7, bf, NT), (8, f32, 1), (9, f32, 2), (10, f32, 2 * NC), (11, f32, 1), (12, f32, 1), (13, f32, 4),
-            (14, f32, 1), (16, bf, J), (17, f32, db), (18, f32, 1), (19, f32, 1), (20, f32, 1), (21, f32, 1),
-            (22, bf, NT), (23, f32, 4), (24, f32, 4)]]
+        half = half_mode(TR)
+        cbl = [(0, bf, db * NT), (1, bf, db * J), (2, f32, db), (3, f32, NT), (4, f32, 10), (5, f32, 4), (6, f32, 4),
+               (7, bf, NT), (8, f32, 1), (9, f32, 2), (10, f32, 2 * NC), (11, f32, 1), (12, f32, 1), (13, f32, 4),
+               (14, f32, 1), (16, bf, J), (17, f32, db), (18, f32, 1), (19, f32, 1), (20, f32, 1), (21, f32, 1),
+               (22, bf, NT), (23, f32, 4), (24, f32, 4)]
+        if half:
+            cbl += [(25, bf, NT), (26, f32, 1)]
+        cbs = [_cb(crs, i, dt, tb, n, half=0 if i in HALF_FULL else half) for i, (dt, tb), n in cbl]
+        hdef = [("HR", str(half))] if half else []
+        sfx = "_h" if half else ""
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         fnlo = int(pre and _os.environ.get("HY4_HCF_FNLO", "0") == "1")
         rd_ct = [J, self.HT, int(post), int(pre), 0, 1, 2, 3, 4, 5, 10, 4, 17, 22, fnlo, TR, G]
@@ -165,16 +194,18 @@ class HCFusedOp:
 
         dm = ttnn.DataMovementConfigDescriptor
         kernels = [
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "hc_reader.cpp"), core_ranges=crs,
+            ttnn.KernelDescriptor(kernel_source=str(KDIR / f"hc_reader{sfx}.cpp"), core_ranges=crs,
                                   compile_time_args=rd_ct, runtime_args=rt(rd_rt),
-                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1)),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "hc_writer.cpp"), core_ranges=crs,
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1),
+                                  defines=hdef),
+            ttnn.KernelDescriptor(kernel_source=str(KDIR / f"hc_writer{sfx}.cpp"), core_ranges=crs,
                                   compile_time_args=wr_ct, runtime_args=rt(wr_rt),
-                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0)),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "hc_compute.cpp"), core_ranges=crs,
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0),
+                                  defines=hdef),
+            ttnn.KernelDescriptor(kernel_source=str(KDIR / f"hc_compute{sfx}.cpp"), core_ranges=crs,
                                   compile_time_args=cp_ct, runtime_args=rt([[k // NC] for k in range(G * NC)]),
                                   config=cfg,
-                                  defines=[("DST_FULL", "1")] if full else []),
+                                  defines=([("DST_FULL", "1")] if full else []) + hdef),
         ]
         sems = [ttnn.SemaphoreDescriptor(id=i, core_type=ttnn.CoreType.WORKER, core_ranges=crs, initial_value=0)
                 for i in (SEM, SEM_READY)]

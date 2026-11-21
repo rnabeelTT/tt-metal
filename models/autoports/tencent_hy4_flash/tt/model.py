@@ -207,9 +207,14 @@ class Hy4Layer:
         parts = _os.environ.get("HY4_L1_PARTS", "hc,attn,moe,norm").split(",")
         m = lambda k: mem if k in parts else ttnn.DRAM_MEMORY_CONFIG  # noqa: E731
 
-        def run(X, pend, hc):
+        from models.autoports.tencent_hy4_flash.tt.common import norm_shard
+
+        ns = norm_shard()  # HY4_NORM_SHARD: HC in -> norm -> streamed linears stay width-sharded (no conversions)
+
+        def run(X, pend, hc, norm=None):
             o, wp = pend if pend is not None else (None, None)
-            Xn, inp, w = hcf(X, o, wp, hc)
+            in_mem = norm.dec_mem if ns and norm is not None and norm.dec is not None else None
+            Xn, inp, w = hcf(X, o, wp, hc, in_mem=in_mem)
             if pend is not None:
                 ttnn.deallocate(X)
                 ttnn.deallocate(o)
@@ -223,11 +228,11 @@ class Hy4Layer:
             X2 = self.engram.forward(X, si.engram[self.li], m("engram"))
             ttnn.deallocate(X)
             X = X2
-        X, a_in, w_a = run(X, pend, self.attn_hc)
-        a = self.attn.step(self.in_norm(a_in, m("norm")), si, m("attn"))
+        X, a_in, w_a = run(X, pend, self.attn_hc, self.in_norm)
+        a = self.attn.step(self.in_norm(a_in, m("norm"), shard_out=ns), si, m("attn"))
         ttnn.deallocate(a_in)
-        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc)
-        f_n = self.post_norm(f_in, m("norm"))
+        X, f_in, w_f = run(X, (a, w_a), self.ffn_hc, self.post_norm)
+        f_n = self.post_norm(f_in, m("norm"), shard_out=ns)
         ttnn.deallocate(f_in)
         f = self.mlp.forward_decode(f_n, R, m("moe")) if isinstance(self.mlp, Hy4MoE) else self.mlp.forward(f_n, m("moe"), R=R)
         ttnn.deallocate(f_n)

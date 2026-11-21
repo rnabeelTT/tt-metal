@@ -20,7 +20,7 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, mm, num_devices, wfid,
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, num_devices, wfid,
                                                            stream_enabled, upload)
 
 class _Args:
@@ -87,10 +87,13 @@ class Hy4DenseMLP:
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         dec = self.dec is not None and int(x.shape[-2]) == 32
         if dec:
-            gu = self.dec["gu"](x, mem)
-            g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, 32, self.Il), memory_config=mem)
-            u = ttnn.slice(gu, (0, 0, 0, self.Il), (1, 1, 32, 2 * self.Il), memory_config=mem)
-            ttnn.deallocate(gu)
+            if dl_split():
+                g, u = self.dec["gu"](x, mem, splits=[(0, self.Il), (self.Il, 2 * self.Il)])
+            else:
+                gu = self.dec["gu"](x, mem)
+                g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, 32, self.Il), memory_config=mem)
+                u = ttnn.slice(gu, (0, 0, 0, self.Il), (1, 1, 32, 2 * self.Il), memory_config=mem)
+                ttnn.deallocate(gu)
         else:
             g = mm(x, self.w1, wfid(self.ckc, self.w1), mem)
             u = mm(x, self.w3, wfid(self.ckc, self.w3), mem)
@@ -201,11 +204,16 @@ class Hy4MoE:
             w_lo = (wr32 - w_hi.float()).to(torch.bfloat16)
             self.dec_router = StreamLinear(mesh, [torch.cat([w_hi, w_lo], 1)] * tp, ttnn.bfloat16,
                                            cache=cache("router_hilo.bf16"), out_dtype=ttnn.float32)
+            # the selection bias replicated over a tile's rows (tt/router_post, HY4_ROUTER_POST)
+            self.bias_rows = upload(mesh, self._bias_host.reshape(1, 1, 1, self.E).expand(1, 1, TILE, self.E)
+                                    .contiguous(), ttnn.float32)
+            # HY4_MOE_DEC_DTYPE: the decode copies' dtype (default: the small weights' dtype; bfp8 is a quality tradeoff)
+            dd = _dt("HY4_MOE_DEC_DTYPE", os.environ.get("HY4_MOE_SMALL_DTYPE", "bf16"))
             self.dec = {
                 "in": StreamLinear(mesh, [torch.cat([wd_t, sg[:, i * Sl : (i + 1) * Sl], su[:, i * Sl : (i + 1) * Sl]], 1)
-                                          for i in range(tp)], sm_dt, cache=cache(f"dec_in.{sm_dt}")),
+                                          for i in range(tp)], dd, cache=cache(f"dec_in.{dd}")),
                 "out": StreamLinear(mesh, [torch.cat([wu_t, sdn[i * Sl : (i + 1) * Sl, :]], 0) for i in range(tp)],
-                                    sm_dt, cache=cache(f"dec_out.{sm_dt}")),
+                                    dd, cache=cache(f"dec_out.{dd}")),
             }
         # decode: the M2.7 / Qwen fused MoE kernels (route + gate|up + down in 3 programs), with Hy4's SwiGLU clamps
         # (MOE_SWIGLU_LIMIT, moe_decode/kernels SWIGLU_LIMIT), the router run by this port on the full-width hidden
@@ -259,19 +267,38 @@ class Hy4MoE:
     def router_logits_dec(self, x):
         """Decode rows: fp32 router logits [1, 1, 32, E] from the streamed hi / lo bf16 router."""
         L1 = ttnn.L1_MEMORY_CONFIG
-        y = self.dec_router(x, L1)
-        a = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, self.E), memory_config=L1)
-        b = ttnn.slice(y, (0, 0, 0, self.E), (1, 1, 32, 2 * self.E), memory_config=L1)
-        ttnn.deallocate(y)
+        if dl_split():
+            a, b = self.dec_router(x, L1, splits=[(0, self.E), (self.E, 2 * self.E)])
+        else:
+            y = self.dec_router(x, L1)
+            a = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, self.E), memory_config=L1)
+            b = ttnn.slice(y, (0, 0, 0, self.E), (1, 1, 32, 2 * self.E), memory_config=L1)
+            ttnn.deallocate(y)
         lg = ttnn.add(a, b, memory_config=L1)
         ttnn.deallocate(a)
         ttnn.deallocate(b)
         return lg
 
-    def router_row(self, x):
+    def router_row(self, x, T=None):
         """[keys | s] FP32 [1, 1, rows, 2E]: s = sigmoid(x W_r) (fp32 logits, as the reference), keys = s + bias (the
-        selection score); the routing kernels (router "keys") take the top-k of the keys and normalize s."""
+        selection score); the routing kernels (router "keys") take the top-k of the keys and normalize s. T: return
+        rows 0..T-1 only (HY4_ROUTER_POST=1, decode rows: one fused program after the router linear)."""
         L1 = ttnn.L1_MEMORY_CONFIG
+        if (T is not None and os.environ.get("HY4_ROUTER_POST", "1") == "1"
+                and getattr(self, "dec_router", None) is not None and int(x.shape[-2]) == 32):
+            from models.autoports.tencent_hy4_flash.tt.router_post import RouterPostOp
+
+            if dl_split():
+                a, b = self.dec_router(x, L1, splits=[(0, self.E), (self.E, 2 * self.E)])
+            else:
+                y = self.dec_router(x, L1)
+                a = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, self.E), memory_config=L1)
+                b = ttnn.slice(y, (0, 0, 0, self.E), (1, 1, 32, 2 * self.E), memory_config=L1)
+                ttnn.deallocate(y)
+            row = RouterPostOp.get(self.mesh)(a, b, self.bias_rows, T, L1)
+            ttnn.deallocate(a)
+            ttnn.deallocate(b)
+            return row
         if getattr(self, "dec_router", None) is not None and int(x.shape[-2]) == 32:
             logits = self.router_logits_dec(x)
         else:
@@ -433,6 +460,18 @@ class Hy4MoE:
         ttnn.deallocate(xf)
         return lg
 
+    def _dec_tail(self, part, T, mem):
+        """The decode MoE's per-die partial -> all-reduce + norm (the fabric boundary for its row counts)."""
+        if Boundary.enabled(self.mesh, T):
+            if getattr(self, "bnd", None) is None:
+                self.bnd = Boundary(self.mesh, self.cfg.hidden, self.cfg.rms_eps)
+            out = self.bnd(part, T, self.norm, "mlp")
+            ttnn.deallocate(part)
+            return out
+        full = self.ar(part, mem)
+        ttnn.deallocate(part)
+        return self.norm(full, mem)
+
     def forward_decode(self, x, T: int, mem=None):
         """Decode / verify rows (T <= 32 real rows of x [1, 1, 32, 3072]): the fused kernels when available."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
@@ -440,27 +479,45 @@ class Hy4MoE:
         if self.dec is not None and int(x.shape[-2]) == 32:
             # streamed linears: [latent down | shared gate | shared up] and [latent up ; shared down]; the experts by
             # the fused kernels (one row) or the per-row gather (verify rows)
-            y = self.dec["in"](x, mem)
             L, Sl = self.L, self.Sl
-            xl = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, L), memory_config=mem)
-            g = ttnn.slice(y, (0, 0, 0, L), (1, 1, 32, L + Sl), memory_config=mem)
-            u = ttnn.slice(y, (0, 0, 0, L + Sl), (1, 1, 32, L + 2 * Sl), memory_config=mem)
-            ttnn.deallocate(y)
+            fusedT = self.fused is not None and T <= getattr(self, "rows_max", 1)
+            if dl_split():
+                # the parts written straight by the linear (the fused experts' rows: only the real rows)
+                xl, g, u = self.dec["in"](x, mem, splits=[(0, L, T if fusedT else None), (L, L + Sl),
+                                                          (L + Sl, L + 2 * Sl)])
+            else:
+                y = self.dec["in"](x, mem)
+                xl = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, L), memory_config=mem)
+                g = ttnn.slice(y, (0, 0, 0, L), (1, 1, 32, L + Sl), memory_config=mem)
+                u = ttnn.slice(y, (0, 0, 0, L + Sl), (1, 1, 32, L + 2 * Sl), memory_config=mem)
+                ttnn.deallocate(y)
             h = ttnn.multiply(u, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
             ttnn.deallocate(g)
             ttnn.deallocate(u)
-            if self.fused is not None and T <= getattr(self, "rows_max", 1):
-                row = self.router_row(x)  # [keys | s] of the 32 rows (streamed router): rows 0..T-1 are the tokens'
-                rowT = ttnn.slice(row, (0, 0, 0, 0), (1, 1, T, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
-                ttnn.deallocate(row)
-                xT = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, T, L), memory_config=mem)
-                ttnn.deallocate(xl)
+            if fusedT:
+                row = self.router_row(x, T)  # [keys | s] (streamed router): rows 0..T-1 are the tokens'
+                if int(row.shape[-2]) == T:
+                    rowT = row
+                else:
+                    rowT = ttnn.slice(row, (0, 0, 0, 0), (1, 1, T, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
+                    ttnn.deallocate(row)
+                if int(xl.shape[-2]) == T:
+                    xT = xl
+                else:
+                    xT = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, T, L), memory_config=mem)
+                    ttnn.deallocate(xl)
                 if T == 1:
                     partT = self.fused(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, 1, L] (model-wide: keep)
                 else:
                     partT = self.fused.rows(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, T, L] (model-wide)
                 ttnn.deallocate(xT)
                 rT = ttnn.multiply(partT, self.scale, memory_config=mem)  # the fused router normalizes to 1
+                if os.environ.get("HY4_MOE_XSPLIT", "1") == "1" and T <= 16:
+                    # the out linear reads [routed | h] as two K parts (its rows 0..T-1 only): no pad / concat
+                    part = self.dec["out"]((rT, h), mem)
+                    ttnn.deallocate(rT)
+                    ttnn.deallocate(h)
+                    return self._dec_tail(part, T, mem)
                 routed = ttnn.pad(rT, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
                 ttnn.deallocate(rT)
             else:
@@ -478,15 +535,7 @@ class Hy4MoE:
             ttnn.deallocate(h)
             part = self.dec["out"](cat, mem)
             ttnn.deallocate(cat)
-            if Boundary.enabled(self.mesh, T):
-                if getattr(self, "bnd", None) is None:
-                    self.bnd = Boundary(self.mesh, self.cfg.hidden, self.cfg.rms_eps)
-                out = self.bnd(part, T, self.norm, "mlp")
-                ttnn.deallocate(part)
-                return out
-            full = self.ar(part, mem)
-            ttnn.deallocate(part)
-            return self.norm(full, mem)
+            return self._dec_tail(part, T, mem)
         if self.fused is None or T > rows_max:
             # trace-safe rows path: per-row gather (the chunk-masked prefill path writes from the host: ttnn.zeros)
             scores, ids = self.route(x, mem)

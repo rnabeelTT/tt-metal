@@ -36,6 +36,7 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     StreamLinear,
     TILE,
     ckc,
+    dl_split,
     mm,
     num_devices,
     stream_enabled,
@@ -59,6 +60,12 @@ def solo_rows(si) -> bool:
     """HY4_SOLO_ROWS=1 (with HY4_LANE_ROWS): a single-path pass writes its KV rows straight to their cache rows."""
     return (bool(getattr(si, "row_offs", None)) and getattr(si, "R", None) is not None
             and os.environ.get("HY4_SOLO_ROWS", "1") == "1" and os.environ.get("HY4_LANE_ROWS", "1") == "1")
+
+
+def ukv_stream_env() -> str:
+    """HY4_UKV_STREAM (per-head streamed W_uk / W_uv decode copies, ~0.25 GB per die of DRAM): default on, except with
+    the DFly2 drafter (HY4_SPEC_K > 0), whose layers' DRAM left the 2K prefill chunk without a large enough block."""
+    return os.environ.get("HY4_UKV_STREAM", "0" if int(os.environ.get("HY4_SPEC_K", "0") or 0) > 0 else "1")
 
 
 class Hy4Attention:
@@ -155,6 +162,9 @@ class Hy4Attention:
         self.dec = None
         if stream_enabled(mesh):  # (the DFly2 drafter's layers too: q_a | kv_a, gate, q_b, o_proj)
             self._decode_linears(sd, wdt, layer_idx, share is not None)
+            self.dec_ukv = None
+            if ukv_stream_env() in ("1", "build") and udt == ttnn.bfloat16:
+                self._ukv_streams(wuk, wuvT)
         if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
             self.cache, self.rows = share.cache, share.rows
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
@@ -180,6 +190,36 @@ class Hy4Attention:
 
             self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx, slots=self.slots)
 
+    def _ukv_streams(self, wuk, wuvT):
+        """HY4_UKV_STREAM: W_uk / W_uv as per-head streamed linears (qwen36 DecodeLinear heads=): die d's heads' weights
+        side by side [K, Hd N_h] (bf16, HiFi4, FP32 DST like the batched matmuls), each reader core's columns inside
+        one head, which reads that head's activation tiles. HY4_UKV_STREAM=build: the copies only (A/B)."""
+        from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
+
+        Hd, N = self.Hd, self.N
+        self.dec_ukv = {}
+        for name, w in (("uk", wuk), ("uv", wuvT)):  # w [H, K, N_h]
+            K, Nh = int(w.shape[1]), int(w.shape[2])
+            parts = [torch.cat([w[d * Hd + h] for h in range(Hd)], dim=1) for d in range(N)]
+            nh = Nh // TILE
+            readers = None
+            for r in (8, 6, 4, 2, 1):
+                op = DecodeLinear(self.mesh, K, Hd * Nh, ttnn.bfloat16, readers=r, fidelity=ttnn.MathFidelity.HiFi4)
+                if all(nc == 0 or (b * op.C + c0) // nh == (b * op.C + c0 + nc - 1) // nh for _, b, c0, nc in op.assign):
+                    readers = r
+                    break
+            assert readers is not None
+            self.dec_ukv[name] = StreamLinear(self.mesh, parts, ttnn.bfloat16, fidelity=ttnn.MathFidelity.HiFi4,
+                                              readers=readers)
+
+    def _ukv(self, name, x, xs, mem):
+        """Per-head streamed W_uk / W_uv: x [1, Hd, 32, xs * 32] (head h's activation: its first K columns)."""
+        return self.dec_ukv[name](x, mem, heads=(self.Hd, xs))
+
+    def ukv_on(self, Tp):
+        return (Tp == TILE and getattr(self, "dec_ukv", None) is not None
+                and ukv_stream_env() == "1")
+
     def _decode_linears(self, sd, wdt, li, drafter):
         """Decode-only streamed copies (tt/common.StreamLinear): x -> [q_a | kv_a | (indexer token key | head weights)]
         in one bf16 linear, the output gate, q_b and o_proj (per-die shards, wdt)."""
@@ -202,7 +242,10 @@ class Hy4Attention:
         wg, wqb, wo = T_("linear_gate.weight"), T_("q_b_proj.weight"), T_("o_proj.weight")
         w = Hd * 256
         self.dec = {
-            "xa": StreamLinear(self.mesh, [xa] * N, ttnn.bfloat16, cache=cache("xa.bf16")),
+            # HY4_XA_DTYPE (default bf16; bfp8 halves the stream: not exact, a quality tradeoff)
+            "xa": StreamLinear(self.mesh, [xa] * N, _dt("HY4_XA_DTYPE", "bf16"),
+                               cache=cache("xa.bf16" if _dt("HY4_XA_DTYPE", "bf16") == ttnn.bfloat16
+                                           else f"xa.{_dt('HY4_XA_DTYPE', 'bf16')}")),
             "g": StreamLinear(self.mesh, [wg[:, i * w : (i + 1) * w] for i in range(N)], wdt, cache=cache(f"g.{wdt}")),
             "qb": StreamLinear(self.mesh, [wqb[:, i * w : (i + 1) * w] for i in range(N)], wdt,
                                cache=cache(f"qb.{wdt}")),
@@ -214,6 +257,12 @@ class Hy4Attention:
 
     def _xa(self, x, mem):
         """Decode: the fused x-projections -> [q_a, kv_a, (token key, head weights)] column slices."""
+        if dl_split():
+            # the parts written straight by the linear; kv_a as (c, k_rope) for _kv_row
+            q, kvl = self.xa_cols[0][1], self.kvl
+            cols = [self.xa_cols[0], (q, q + kvl), (q + kvl, self.xa_cols[1][1])] + self.xa_cols[2:]
+            outs = self.dec["xa"](x, mem, splits=cols)
+            return [outs[0], (outs[1], outs[2])] + outs[3:]
         y = self.dec["xa"](x, mem)
         outs = [ttnn.slice(y, (0, 0, 0, a), (1, 1, 32, b), memory_config=mem) for a, b in self.xa_cols]
         ttnn.deallocate(y)
@@ -306,6 +355,13 @@ class Hy4Attention:
             q = q2
         else:
             q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.Hd, 256)), (0, 2, 1, 3), memory_config=mem)  # [1,Hd,Tp,256]
+        if dec and self.ukv_on(Tp):
+            # W_uk streamed per head, straight from the q view (its first 192 columns per head): no q_nope slice
+            q_lat = self._ukv("uk", q, int(q.shape[-1]) // TILE, mem)
+            q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
+            ttnn.deallocate(q)
+            q_rope = self.rope(q_rope, cos, sin, mem)
+            return q_lat, q_rope, q_resid
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
         ttnn.deallocate(q)
@@ -320,10 +376,18 @@ class Hy4Attention:
         Tp = int(x.shape[-2])
         if kv is None:
             kv = mm(x, self.wkva, wfid(self.ckc, self.wkva), mem)  # [1,1,Tp,576]
-        c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
-        kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
-                       cos, sin, mem)
-        ttnn.deallocate(kv)
+        if isinstance(kv, tuple):  # (c, k_rope) parts of the decode linear (HY4_DL_SPLIT)
+            c_raw, kr_raw = kv
+            c = self.kv_norm(c_raw, mem)
+            kr = self.rope(kr_raw, cos, sin, mem)
+            for t_, r_ in ((c_raw, c), (kr_raw, kr)):
+                if t_ is not r_:
+                    ttnn.deallocate(t_)
+        else:
+            c = self.kv_norm(ttnn.slice(kv, (0, 0, 0, 0), (1, 1, Tp, self.kvl), memory_config=mem), mem)
+            kr = self.rope(ttnn.slice(kv, (0, 0, 0, self.kvl), (1, 1, Tp, self.cfg.latent_width), memory_config=mem),
+                           cos, sin, mem)
+            ttnn.deallocate(kv)
         row = ttnn.concat([c, kr, self._zeros((1, 1, Tp, SINK_COLS))], dim=-1, memory_config=mem)
         ttnn.deallocate(c)
         ttnn.deallocate(kr)
@@ -332,6 +396,21 @@ class Hy4Attention:
     def _attend(self, x, q_lat, q_rope, idx, mem, dec=False, R=None):
         """sparse_sdpa over idx [1,1,Tp,K] uint32, then V-up, output gate, o_proj, all-reduce, post norm."""
         Tp = int(x.shape[-2])
+        if (dec and R is not None and R <= 16 and Tp == TILE and os.environ.get("HY4_ATTN_GLUE", "1") == "1"
+                and os.environ.get("HY4_QSINK_CACHE", "1") == "1"
+                and q_lat.memory_config().buffer_type == ttnn.BufferType.L1
+                and q_rope.memory_config().buffer_type == ttnn.BufferType.L1):
+            # data-movement programs (tt/attn_glue): the real rows into the persistent row-major query, and the real rows
+            # of the output back to tiles (3 + 2 programs -> 2)
+            from models.autoports.tencent_hy4_flash.tt.attn_glue import AttnGlue
+
+            glue = AttnGlue.get(self.mesh)
+            q_rm = glue.qprep(q_lat, q_rope, self._qs32, self.Hp, int(R))
+            o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
+                                             k_chunk_size=K_CHUNK, compute_kernel_config=self.ckc_sdpa)
+            o2 = glue.otile(o, self.Hd, int(R), mem)
+            ttnn.deallocate(o)
+            return self._attend_out(x, o2, mem, dec, R)
         if dec and os.environ.get("HY4_QSINK_CACHE", "1") == "1":
             qs = self._qs32
             qcat = ttnn.concat([q_lat, q_rope, qs], dim=-1, memory_config=mem)  # [1,Hd,Tp,608]
@@ -352,8 +431,17 @@ class Hy4Attention:
         ttnn.deallocate(o)
         o = ttnn.to_layout(o2, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o2)
-        pc = {"program_config": self.ukv_pc["uv"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1" else {}
-        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,256]
+        return self._attend_out(x, o, mem, dec, R)
+
+    def _attend_out(self, x, o, mem, dec, R):
+        """o [1, Hd, Tp, 512] TILE (the attention's latent output) -> V-up, output gate, o_proj, all-reduce, post norm."""
+        Tp = int(x.shape[-2])
+        if dec and self.ukv_on(Tp):
+            ov = self._ukv("uv", o, int(o.shape[-1]) // TILE, mem)  # [1,Hd,Tp,256]
+        else:
+            pc = ({"program_config": self.ukv_pc["uv"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1"
+                  else {})
+            ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
             ov = ttnn.experimental.view(ov, (1, 1, Tp, self.Hd * self.vd))  # (the same page identity as in _q)

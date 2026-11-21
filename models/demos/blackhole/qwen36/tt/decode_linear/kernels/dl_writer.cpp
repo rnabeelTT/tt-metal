@@ -55,8 +55,23 @@ void kernel_main() {
     }
 #else
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
+#ifdef X_SPLIT
+    // the activation as two K parts (ops.py x=(xa, xb)): tiles [0, X_KT1) of xa, then xb's
+    constexpr auto xb_args = TensorAccessorArgs<XB_CTA_OFFSET>();
+    const auto s_xb = TensorAccessor(xb_args, get_arg_val<uint32_t>(X_B_ARG), 2048);
+#endif
+#ifdef X_HEADS
+    // per-head projection (ops.py heads=): this core's columns are head h's; its activation tiles [h X_XS, + kt)
+    const uint32_t x0 = (out_col0 / X_NH) * X_XS;
+#endif
     for (uint32_t k = 0; k < kt; ++k) {
+#ifdef X_SPLIT
+        const uint64_t src = k < X_KT1 ? s_x.get_noc_addr(k) : s_xb.get_noc_addr(k - X_KT1);
+#elif defined(X_HEADS)
+        const uint64_t src = s_x.get_noc_addr(x0 + k);
+#else
         const uint64_t src = s_x.get_noc_addr(k);
+#endif
         if constexpr (rows == 32) {  // whole tiles: every output row defined (ports that carry 32-row padded passes)
             noc_async_read(src, xl1 + k * 2048, 2048);
         } else {
@@ -72,6 +87,34 @@ void kernel_main() {
 #define OUT_PAGE_BYTES 2048
 #endif
     const auto s_o = TensorAccessor(o_args, out_addr, OUT_PAGE_BYTES);
+#ifdef OUT_SPLIT
+    // the output as up to 5 column parts (ops.py splits=): part k starts at column tile OBk (unused parts: 1 << 20)
+    constexpr auto o1_args = TensorAccessorArgs<o_args.next_compile_time_args_offset()>();
+    constexpr auto o2_args = TensorAccessorArgs<o1_args.next_compile_time_args_offset()>();
+    constexpr auto o3_args = TensorAccessorArgs<o2_args.next_compile_time_args_offset()>();
+    constexpr auto o4_args = TensorAccessorArgs<o3_args.next_compile_time_args_offset()>();
+    const auto s_o1 = TensorAccessor(o1_args, get_arg_val<uint32_t>(4), OUT_PAGE_BYTES);
+    const auto s_o2 = TensorAccessor(o2_args, get_arg_val<uint32_t>(5), OUT_PAGE_BYTES);
+    const auto s_o3 = TensorAccessor(o3_args, get_arg_val<uint32_t>(6), OUT_PAGE_BYTES);
+    const auto s_o4 = TensorAccessor(o4_args, get_arg_val<uint32_t>(7), OUT_PAGE_BYTES);
+    auto dst_addr = [&](uint32_t p) -> uint64_t {
+        if (p >= OB4) {
+            return s_o4.get_noc_addr(p - OB4);
+        }
+        if (p >= OB3) {
+            return s_o3.get_noc_addr(p - OB3);
+        }
+        if (p >= OB2) {
+            return s_o2.get_noc_addr(p - OB2);
+        }
+        if (p >= OB1) {
+            return s_o1.get_noc_addr(p - OB1);
+        }
+        return s_o.get_noc_addr(p);
+    };
+#else
+    auto dst_addr = [&](uint32_t p) -> uint64_t { return s_o.get_noc_addr(p); };
+#endif
 #ifdef ZERO_PAD
     // only rows 0 .. rows-1 of the activation were read (the rest of cb_x is stale L1): zero output rows >= rows before
     // the write, so padded rows stay defined (consumers that mix rows: one-hot staging matmuls, X X^T)
@@ -99,7 +142,7 @@ void kernel_main() {
         }
 #endif
         if (out_col0 + i < n_tiles) {
-            noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i), OUT_PAGE_BYTES);
+            noc_async_write(get_read_ptr(cb_out), dst_addr(out_col0 + i), OUT_PAGE_BYTES);
             noc_async_writes_flushed();
         }
         cb_pop_front(cb_out, 1);

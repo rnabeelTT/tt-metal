@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "api/debug/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t xn_addr = get_arg_val<uint32_t>(0);
@@ -45,6 +46,7 @@ void kernel_main() {
     const auto s_in = TensorAccessor(in_args, in_addr, BF);
     for (uint32_t r = g; r < TR; r += G) {
         if constexpr (PRE) {
+            DeviceZoneScopedN("HCW_XCH");
             const uint32_t sem = get_semaphore(SEM);
             const uint32_t ready = get_semaphore(SEM_READY);
             // this core's slots free (the compute popped the previous row tile's) before the others may write them

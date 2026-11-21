@@ -85,11 +85,40 @@ class DecodeLinear:
                               cache_file_name=cache_file_name)
 
     # ---- op ------------------------------------------------------------------------------------------------------------
-    def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16, out_rows=None):
+    def _parts(self, x, w, rows, out_memory_config, flat=None, out_dtype=ttnn.bfloat16, out_rows=None, splits=None,
+               heads=None):
         """flat = (noc_xy, sem_id): x is a flat BF16 vector on that core, ready once program semaphore sem_id is set.
-        out_dtype: bfloat16 (default) or float32 (the FP32 DST packed unrounded, e.g. logits)."""
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, out_rows or rows, self.n]), out_dtype, ttnn.TILE_LAYOUT,
-                                             self.mesh_device, out_memory_config)
+        out_dtype: bfloat16 (default) or float32 (the FP32 DST packed unrounded, e.g. logits).
+        splits: [(c0, c1, rows_k), ...] (tile-aligned column ranges covering [0, n) in order, at most 5): the output as
+        that many tensors [1, 1, rows_k, c1 - c0] (each output tile page written straight to its part: no slices)."""
+        xb = None
+        if isinstance(x, (tuple, list)):  # the activation as two K parts [xa | xb] (no concat): tile-aligned split
+            x, xb = x
+            assert int(x.shape[-1]) % TILE == 0 and int(x.shape[-1]) + int(xb.shape[-1]) == self.kt * TILE
+        if heads is not None:
+            # per-head (batched) projection: N = Hn heads x NH column tiles, head h's columns read the activation tiles
+            # [h XS, h XS + kt) of x [1, Hn, 32, *] (XS: x's tiles per head row); out [1, Hn, rows, N / Hn]
+            Hn, XS = heads
+            NH = self.n_tiles // Hn
+            assert NH * Hn == self.n_tiles and XS >= self.kt and splits is None and xb is None
+            for c, b, c0, nc in self.assign:
+                if nc:
+                    assert (b * self.C + c0) // NH == (b * self.C + c0 + nc - 1) // NH, "a core's columns span 2 heads"
+        outs = None
+        if splits is not None:
+            assert 1 <= len(splits) <= 5 and splits[0][0] == 0 and -(-splits[-1][1] // TILE) == self.n_tiles
+            assert all(a % TILE == 0 for a, _, _ in splits) and all(splits[i][1] == splits[i + 1][0]
+                                                                     for i in range(len(splits) - 1))
+            outs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rk or out_rows or rows, b - a]), out_dtype,
+                                                   ttnn.TILE_LAYOUT, self.mesh_device, out_memory_config)
+                    for a, b, rk in splits]
+            out = outs[0]
+        elif heads is not None:
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, heads[0], out_rows or rows, self.n // heads[0]]),
+                                                 out_dtype, ttnn.TILE_LAYOUT, self.mesh_device, out_memory_config)
+        else:
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, out_rows or rows, self.n]), out_dtype,
+                                                 ttnn.TILE_LAYOUT, self.mesh_device, out_memory_config)
         out_page = 4096 if out_dtype == ttnn.float32 else 2048
         cb_x, cb_w, cb_out = 0, 1, 16
         fmt = lambda i, dt, page, pages: ttnn.CBDescriptor(
@@ -100,12 +129,22 @@ class DecodeLinear:
         rd_ct = [cb_w, self.kt, self.tile_bytes, self.page_bytes, self.buffers]
         wr_ct = [cb_x, cb_out, self.kt, rows, self.n_tiles]
         wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args() + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        ext = []
+        if outs is not None:  # parts 1..4 (unused: part 0 again, never addressed)
+            more = outs[1:] + [outs[0]] * (5 - len(outs))
+            for t in more:
+                wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+            ext = [t.buffer_address() for t in more]
+        xb_cta = len(wr_ct)
+        if xb is not None:
+            wr_ct += ttnn.TensorAccessorArgs(xb).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_out, self.kt]
         cp_rt = ttnn.RuntimeArgs()
         rd_args, wr_args = {}, {}
         for c, b, c0, nc in self.assign:
             rd_args[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3]
-            wr_args[(c.x, c.y)] = [x.buffer_address(), out.buffer_address(), b * self.C + c0, nc]
+            wr_args[(c.x, c.y)] = ([x.buffer_address(), out.buffer_address(), b * self.C + c0, nc] + ext
+                                   + ([xb.buffer_address()] if xb is not None else []))
             cp_rt[c.x][c.y] = [nc]
 
         def rt_for(args, cores):
@@ -116,6 +155,15 @@ class DecodeLinear:
         defines = [("OUT_PAGE_BYTES", str(out_page))] if out_page != 2048 else []
         if out_rows is not None and out_rows > rows:  # rows read < the output's rows: zero the padded rows
             defines.append(("ZERO_PAD", "1"))
+        if heads is not None:
+            defines += [("X_HEADS", "1"), ("X_NH", str(self.n_tiles // heads[0])), ("X_XS", str(heads[1]))]
+        if xb is not None:
+            defines += [("X_SPLIT", "1"), ("X_KT1", str(int(x.shape[-1]) // TILE)), ("X_B_ARG", str(4 + len(ext))),
+                        ("XB_CTA_OFFSET", str(xb_cta))]
+        if outs is not None:
+            bounds = [a // TILE for a, _, _ in splits[1:]] + [1 << 20] * (5 - len(splits))
+            defines.append(("OUT_SPLIT", "1"))
+            defines += [(f"OB{i + 1}", str(v)) for i, v in enumerate(bounds)]
         if flat is not None:
             (fx, fy), sem = flat
             cb_xf = 2
@@ -143,13 +191,18 @@ class DecodeLinear:
                                   config=ttnn.ComputeConfigDescriptor(math_fidelity=self.fidelity, fp32_dest_acc_en=True,
                                                                       math_approx_mode=False)),
         ]
-        return kernels, cbs, [x, w, out], out
+        xs = [x] + ([xb] if xb is not None else [])
+        if outs is not None:
+            return kernels, cbs, xs + [w] + outs, outs
+        return kernels, cbs, xs + [w, out], out
 
-    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16, out_rows=None):
+    def __call__(self, x, w, rows, out_memory_config=ttnn.L1_MEMORY_CONFIG, out_dtype=ttnn.bfloat16, out_rows=None,
+                 splits=None, heads=None):
         """x: [.., rows, K] BF16 TILE (rows <= 16, or 32: whole tiles, every row defined); w: weight();
-        -> [1, 1, rows, N] BF16 TILE."""
+        -> [1, 1, rows, N] BF16 TILE (splits: the list of column parts, see _parts)."""
         assert 1 <= rows <= 16 or rows == 32
-        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype, out_rows=out_rows)
+        kernels, cbs, io, out = self._parts(x, w, rows, out_memory_config, out_dtype=out_dtype, out_rows=out_rows,
+                                            splits=splits, heads=heads)
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return out
 
