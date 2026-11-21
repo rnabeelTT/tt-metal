@@ -16,18 +16,20 @@ follows is `ADD_A_MODEL.md` + `HANDOFF.md`.
 | 5. optimisation | done for this round. Decode: fused kernels, host<->device sockets, PCIe fetch of missed experts, traced verify / commits / drafter, device-untilized logits. Prefill: device streaming of missed experts, CPU/stream split, layer-major groups, pipelined hybrid layers, 1536 / 2048-token chunks, engine prefix cache. Bottlenecks now: decode = host int4 experts (DDR bandwidth); prefill = host dispatch (~206 ttnn ops per layer-chunk) + staging memcpy on the 8-core host. |
 | 6. vLLM serving, package, multimodal | **published and served** `raahemnabeel/inkling-small-hybrid-qb2` (tt-model, profile p300x2-128k; package of 2026-11-20 session 10: the prefill attention fix, vLLM prefix caching with prefix-state slots, the drafter over every position, image / audio inputs): short chat TTFT 0.44 s, 60.5 / 58.7 tok/s greedy / sampled; new prompts prefill ~1,460-1,610 tok/s from 15K to 126K (125.9K in 86 s), decode after them 54-67 tok/s; resent prompt 1.1-1.8 s, next chat turn 1.9-2.0 s, two users' interleaved next turns 1.2 / 0.4 s (vLLM's prefix cache, 16 cached prompts); GSM8K-200 96.5%, IFEval-200 87.0 / 89.5; multimodal suite passes through the server. |
 
-**Open items (2026-11-19, end of session 9).** The published package is the deliverable; these are what is left.
+**Open items (2026-11-21, end of session 11).** The published package is the deliverable; these are what is left.
 1. Prefill of new long prompts: ~1,410-1,570 tok/s through the server (session 9; session 7 ~1,300-1,380) vs M2.7's
    ~2,300. Bound by the staging copies (~3.9 GB per 2048-token chunk through the command queue): faster dispatch only
    moves the wait (session-9 entry). Levers left: zero-copy pinned writes (item 6), or more CPU experts with a CPU
    library as exact as the streamed bfp4 / bfp8 copies (int4 fails the gate; a bfp kernel costs 1.5-1.8x per expert).
-   Speed is bimodal per process (~10%); measure with prefill_bench PF_SWEEP.
+   Speed is bimodal per process (~10%); measure with prefill_bench PF_SWEEP. The drafter's prompt pass (session 10)
+   costs ~38 ms per chunk (0.5-2.6%); overlapping it with the CPU experts and a split input projection gave nothing
+   (session 11).
 2. Multimodal: shipped (host-side towers; session 8 commits f46b4c271f5..69c81ae7745).
 3. Done (session 9): vLLM's prefix cache + the plugin's prefix-state slots, as the Qwen / M2.7 ports; 16 cached prompts,
    interleaved users each resume from their own. Done (session 10): every drafter depth runs over every position
    (prompt and accepted rows), so drafts no longer depend on where vLLM puts the KV blocks (Log 2026-11-20).
-4. Speculative decode: k=2 MTP. Wider passes lose on host-expert cost per verify row; suffix drafts at k=2 give
-   nothing (session 6). A suffix win needs wider verify widths used only on long copy matches (traces for widths up to
+4. Speculative decode: k=2 MTP. Wider passes lose on host-expert cost per verify row (k=3 re-measured in session 11
+   with the full drafter: 55.3 vs 57.7 tok/s, and out of DRAM at 128K); suffix drafts at k=2 give nothing (session 6). A suffix win needs wider verify widths used only on long copy matches (traces for widths up to
    ~8, HYB_ROWS / socket FIFOs and trace region sized for them, DRAM is ~0.7 GiB free at 128K).
 5. close_mesh_device hangs at exit after fetch runs (dev tools exit early; tt-model stop / restart is clean).
 6. Zero-copy pinned writes lose ~85% of writes (hybrid/pin/test_zerocopy.py); copy path used everywhere.
@@ -683,3 +685,22 @@ row width (1..8) AND the drafter at every width/depth BEFORE any trace capture, 
   - **Host RAM:** ~105 GB of host RAM is held by the kernel outside any process (beside the 16 GB of 1G hugepages);
     free RAM fell from 137 to 134 GB over the session's ~15 device runs, under the profile's 134 GB check. Served with
     HYB_RAM_CHECK=warn until the machine is rebooted; at 1 GB free the background supervisor was reaped.
+- **2026-11-20/21, session 11: k = 3, the drafter's prompt-pass cost, host RAM.**
+  - **k = 3: not adopted.** 2.24 tokens/step (k = 2: 1.99), but verify 34.1 + draft 6.4 ms (30.2 + 4.3), so 55.3 vs
+    57.7 tok/s served; and DRAM runs out on a 4.5K-token prompt (0.46 GiB free after the captures), so it does not fit
+    the 128K profile.
+  - **Prefill cost of depth 1's prompt pass:** ~38 ms per 2048-token chunk (+0.5% at 14.9K, +2.6% at 126K vs the
+    pre-fix package). Device-synced split (INKLING_HOOK_TIMING, not committed): inputs ~1, depth 0 ~9, depth-1 shift
+    ~0.6, depth-1 input projection ~1, depth-1 layer ~11 ms; the rest is host dispatch at the end of each 8-chunk group.
+    Tried, A/B after a reboot (prefill_bench, PF_MTP_PROMPT=1, 2048 x 8, every arm twice at 16K): (a) depth j's input
+    projection as two matmuls instead of a [Tp, 2H] concat + linear; (b) the prompt pass of each chunk dispatched inside
+    the last pipelined layer, while the next chunk's CPU experts run. 16K: 13.16 / 13.20 s baseline, 13.18 / 13.27 both,
+    13.22 / 13.23 (b), 13.26 / 13.18 (a); 126K: 104.37 s baseline and both. No gain from either, so neither is committed
+    (patch kept at ~/inkling-work/patches/pf_hook_overlap_split_timing.diff). An earlier 19.1 s for (b) was a host
+    short on RAM. What remains would need fewer ops in the layer itself (e.g. one program for depth 1's attention).
+- **2026-11-21, session 11: host RAM.** The kernel-held memory kept growing (~0.5 GB per device run) to ~110 GB, leaving
+  118 GB available against the profile's 134 GB. Neither a tenstorrent driver reload (`modprobe -r tenstorrent`) nor
+  dropping caches freed it; it is not page cache, tmpfs, ZFS or a cgroup. A reboot did: 228 GB available afterwards, and
+  the published bundle serves again with its own launch command (HYB_RAM_CHECK=error). On a long-lived host, check
+  `free -g` before serving and reboot when available RAM nears 134 GB; HYB_RAM_CHECK=warn is a stopgap only, since at
+  ~1 GB free the OOM killer starts taking background processes.
