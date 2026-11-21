@@ -60,7 +60,8 @@ group windows are rows 64 l .. of L-lane staging tensors, updated in one pass by
 each slot's cache with one slab_write per cache (idle lanes -> trash rows). Sparse layers: one indexer score over the
 lanes' group keys masked per row to its lane's visible groups (skipped when every row is < 2048 tokens: dense lists).
 Traces per (rows, score width). One live request decodes on the single path (lane written back: no lane overhead);
-it rejoins the batch on the next multi-request step or prefill. Spec decoding: only with --max-num-seqs 1.
+it rejoins the batch on the next multi-request step or prefill. Spec decoding (DFly2, SPEC=4 default at any NSEQS): the
+solo request speculates (verify passes of k + 1 rows); 2+ live requests decode plain in the batch.
 
 | decode, no Engram, 12K slots (tools/serve_batch_smoke.py) | 1 user | 2 | 4 | 8 |
 |---|---|---|---|---|
@@ -79,7 +80,7 @@ Second run (every fix above, benchmark after "engram tables in RAM", 933 s after
 28.1 / 44.8 / 82.1 / 142.6 tok/s aggregate (17.8 per user at 8); TTFT median 0.27 / 0.47 / 0.94 / 1.85 s; chat checks
 decode 28.5 tok/s, TTFT 0.24 s; 8.8K-token prompt TTFT 12.84 -> 3.95 s; zero trace releases over the session.
 
-Serving: `NSEQS=8 CTX=12288 serve/serve_hy4.sh` (SPEC forced 0 above 1 user; the script mounts
+Serving: `NSEQS=8 CTX=12288 serve/serve_hy4.sh` (SPEC=4 by default: drafts while one request decodes alone; the script mounts
 moe_sorted_dispatch.cpp over the image's, which predates it). Budget: users x max_model_len <= 98304
 (HY4_SLOT_TOKENS_MAX): 8 x 16K runs out of DRAM on a long prefill after warm-up (0.32 GiB free), 8 x 12K leaves
 0.91 GiB (a 12K prompt with 7 live users: TTFT 4.6 s, then 61 ms steps). serve/hy4_conc.py: N concurrent streams.

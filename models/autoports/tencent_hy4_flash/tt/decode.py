@@ -493,10 +493,11 @@ class Hy4SpecDecoder(Hy4Decoder):
         for l in self.model.layers:
             if l.li in sel:
                 l.attn.indexer.sel = sel[l.li]
-        if self.trace and sparse not in self.__dict__.setdefault("_pre_n", set()):
+        if sparse not in self.__dict__.setdefault("_pre_n", set()):
             # the drafter slices row n (the last accepted row) of the target's last hidden rows and selections, and a
-            # slice bakes its offset into its program: compile every row's slice now (one trace release, here at the
-            # first draft of the regime, typically in warm-up), not one per new accepted count while serving
+            # slice bakes its offset into its program: compile every row's slice at the regime's first draft, eager or
+            # traced (the batched engine's eager warm-up drafts both regimes before any capture; its traced warm-up
+            # only the dense one: a traced-only compile released every trace at the first long served request)
             self._pre_n.add(sparse)
             H = int(self.model.last_hn.shape[-1])
             for m in range(self.W):

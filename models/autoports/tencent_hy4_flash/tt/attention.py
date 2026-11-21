@@ -66,9 +66,9 @@ def solo_rows(si) -> bool:
 
 
 def ukv_stream_env() -> str:
-    """HY4_UKV_STREAM (per-head streamed W_uk / W_uv decode copies, ~0.25 GB per die of DRAM): default on, except with
-    the DFly2 drafter (HY4_SPEC_K > 0), whose layers' DRAM left the 2K prefill chunk without a large enough block."""
-    return os.environ.get("HY4_UKV_STREAM", "0" if int(os.environ.get("HY4_SPEC_K", "0") or 0) > 0 else "1")
+    """HY4_UKV_STREAM (per-head streamed W_uk / W_uv decode copies, ~0.25 GB per die of DRAM): default on, with the
+    DFly2 drafter too (8 x 12K slots + drafter + traces: 0.50 GiB per die free, 8 near-full prompts served, 2026-11-21)."""
+    return os.environ.get("HY4_UKV_STREAM", "1")
 
 
 class Hy4Attention:
@@ -98,21 +98,26 @@ class Hy4Attention:
         wdt = _dt("HY4_ATTN_DTYPE", "bfp8")
         sdt = _dt("HY4_ATTN_SMALL_DTYPE", "bf16")
         bf = lambda t: t.to(torch.bfloat16)  # noqa: E731
+        # the DFly2 drafter's layers run 32-row draft blocks only, from the streamed copies (_decode_linears, below): no
+        # plain q_a / kv_a / q_b / gate / o_proj (nor W_uk / W_uv with the UKV streams), ~0.14 GiB per die over its 5 layers
+        plain = share is None or not stream_enabled(mesh) or os.environ.get("HY4_DFLY_PLAIN_COPIES", "0") == "1"
+        up = lambda *a, **k: upload(mesh, *a, **k) if plain else None  # noqa: E731
 
         # q: q_a (replicated) -> q_a_layernorm -> q_b (column parallel by heads)
-        self.wqa = upload(mesh, bf(sd["q_a_proj.weight"]).T.reshape(1, 1, cfg.hidden, cfg.q_lora), sdt)
+        self.wqa = up(bf(sd["q_a_proj.weight"]).T.reshape(1, 1, cfg.hidden, cfg.q_lora), sdt)
         self.q_norm = RMSNorm(mesh, sd["q_a_layernorm.weight"], cfg.rms_eps)
-        self.wqb = upload(mesh, bf(sd["q_b_proj.weight"]).T.reshape(1, 1, cfg.q_lora, H * 256), wdt, mapper=("shard", -1))
+        self.wqb = up(bf(sd["q_b_proj.weight"]).T.reshape(1, 1, cfg.q_lora, H * 256), wdt, mapper=("shard", -1))
         # kv: kv_a (replicated) -> [c (512) | k_rope (64)]
-        self.wkva = upload(mesh, bf(sd["kv_a_proj_with_mqa.weight"]).T.reshape(1, 1, cfg.hidden, cfg.latent_width), sdt)
+        self.wkva = up(bf(sd["kv_a_proj_with_mqa.weight"]).T.reshape(1, 1, cfg.hidden, cfg.latent_width), sdt)
         self.kv_norm = RMSNorm(mesh, sd["kv_a_layernorm.weight"], cfg.rms_eps)
         # absorbed kv_b: W_uk [H, 192, 512], W_uv^T [H, 512, 256] (sharded by heads)
         kvb = bf(sd["kv_b_proj.weight"]).reshape(H, self.nope + self.vd, self.kvl)
         wuk = kvb[:, : self.nope, :].contiguous()  # [H, 192, 512]
         wuvT = kvb[:, self.nope :, :].transpose(1, 2).contiguous()  # [H, 512, 256]
         udt = _dt("HY4_ATTN_UKV_DTYPE", "bf16")  # the absorbed per-head W_uk / W_uv (batched matmuls over the heads)
-        self.wuk = upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt, mapper=("shard", 1))
-        self.wuvT = upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), udt, mapper=("shard", 1))
+        uplain = plain or ukv_stream_env() not in ("1", "build") or udt != ttnn.bfloat16
+        self.wuk = upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt, mapper=("shard", 1)) if uplain else None
+        self.wuvT = upload(mesh, wuvT.reshape(1, H, self.kvl, self.vd), udt, mapper=("shard", 1)) if uplain else None
         self.ckc_ukv = self.ckc_lofi if udt != ttnn.bfloat16 else self.ckc  # bfp8: HiFi2
         # decode rows (one tile row): explicit reuse configs, one core per (head, whole N), K blocks of 2 tiles
         # (HY4_UKV_CFG=1, default; exact): 16 heads W_uk 39.0 -> 18.8 us, W_uv 27.9 -> 21.1 us (2026-11-20 bench)
@@ -126,8 +131,8 @@ class Hy4Attention:
                 compute_with_storage_grid_size=g, in0_block_w=ibw, out_subblock_h=1, out_subblock_w=sw,
                 per_core_M=1, per_core_N=nt)
         # output gate (column parallel), o_proj (row parallel), post_proj_norm
-        self.wg = upload(mesh, bf(sd["linear_gate.weight"]).T.reshape(1, 1, cfg.hidden, H * self.vd), wdt, mapper=("shard", -1))
-        self.wo = upload(mesh, bf(sd["o_proj.weight"]).T.reshape(1, 1, H * self.vd, cfg.hidden), wdt, mapper=("shard", -2))
+        self.wg = up(bf(sd["linear_gate.weight"]).T.reshape(1, 1, cfg.hidden, H * self.vd), wdt, mapper=("shard", -1))
+        self.wo = up(bf(sd["o_proj.weight"]).T.reshape(1, 1, H * self.vd, cfg.hidden), wdt, mapper=("shard", -2))
         self.post_norm = RMSNorm(mesh, sd["post_proj_norm.weight"], cfg.rms_eps)
         # sinks: q's sink columns per (local, padded) head: [s_hi, s_lo, 0, ...]
         s = sd["learnable_sink_param"].float().reshape(H)

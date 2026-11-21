@@ -1,11 +1,11 @@
 #!/bin/bash
 # Serve tencent/Hy4-flash (dev) on the QB2: the tt-model image with this checkout's models/ mounted over the image's.
-# usage: serve/serve_hy4.sh ; logs -> serve/server_hy4.log. env: CTX (default 32768), SPEC (drafts per verify pass, 0 =
-# plain decode, default 4; NSEQS > 1: default 0, k > 0 drafts while one request decodes alone), NSEQS (concurrent users, default 1; 2..8 -> the batched engine,
-# CTX <= 98304 / NSEQS), PORT (8000), IMG (default the local hy4-flash-qb2 image).
+# usage: serve/serve_hy4.sh ; logs -> serve/server_hy4.log. env: CTX (default 32768), SPEC (DFly2 drafts per verify
+# pass, default 4, 0 = plain decode; NSEQS > 1: drafts while one request decodes alone, 2+ live requests decode plain in
+# the batch), NSEQS (concurrent users, default 1; 2..8 -> the batched engine, CTX <= 98304 / NSEQS), PORT (8000), IMG
+# (default the local hy4-flash-qb2 image).
 CTX=${CTX:-32768}
 NSEQS=${NSEQS:-1}
-[ "$NSEQS" -gt 1 ] && SPEC=${SPEC:-0}
 K=ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/device/kernels/moe_sorted_dispatch.cpp
 IMG=${IMG:-tt-model/hy4-flash-qb2:1e7f2ff5eaab}
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)

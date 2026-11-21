@@ -34,8 +34,8 @@ PREFILL_CHUNK = int(os.environ.get("HY4_MOE_CHUNK", "32"))
 
 def _lshard_env() -> str:
     """HY4_MOE_LSHARD (latent-down column shard + all_gather; "1": the shard copy replaces the full-width one, -~6 MB/die
-    per layer of DRAM; "build": both, for A/B): default on, except with the DFly2 drafter (HY4_SPEC_K > 0)."""
-    return os.environ.get("HY4_MOE_LSHARD", "0" if int(os.environ.get("HY4_SPEC_K", "0") or 0) > 0 else "1")
+    per layer of DRAM; "build": both, for A/B): default on (with the DFly2 drafter too)."""
+    return os.environ.get("HY4_MOE_LSHARD", "1")
 
 
 def _lshard_topology():
