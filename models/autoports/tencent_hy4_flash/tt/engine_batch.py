@@ -52,9 +52,9 @@ class Hy4BatchEngine:
         self.last_logits = {}
         self.stats = {"steps": 0, "rows": 0, "t_step": 0.0, "t_prefill": 0.0, "prefills": 0, "prefill_tokens": 0,
                       "reused_tokens": 0}
-        # prefix reuse (HY4_PREFIX_CACHE, default 0): a finished sequence's slot keeps its caches and token history; a new
+        # prefix reuse (HY4_PREFIX_CACHE, default 1): a finished sequence's slot keeps its caches and token history; a new
         # prompt sharing a prefix with it continues from there (tt/model.py rewind) instead of a full prefill
-        self.pc_on = os.environ.get("HY4_PREFIX_CACHE", "0") == "1"
+        self.pc_on = os.environ.get("HY4_PREFIX_CACHE", "1") == "1"
         self.pc_min = int(os.environ.get("HY4_PC_MIN", "512"))
         # HY4_PC_EXACT (default 1): reuse only positions the kept sequence's prefill computed in whole chunks at a fresh
         # prefill's chunk boundaries (0, 2048, 2048 + chunk, ...), resuming at such a boundary: every chunk then runs
