@@ -197,7 +197,7 @@ card:
     served through a hybrid-MoE overlay: the experts do not fit in the 4 dies' DRAM, so each layer's 175 most-used
     experts stay on the device (bfp4, with bfp8 down projections in the 16 most sensitive layers), 16 more device
     slots per layer hold recently missed experts that decode copies over PCIe, and the rest are computed on the host
-    CPU from int4 copies (decode) or streamed to the device over PCIe (prefill, the fewest-token ones on the CPU). About 95% of routed expert picks hit the device. Decoding is
+    CPU from int4 copies (decode) or streamed to the device over PCIe (prefill, the fewest-token ones on the CPU). About 98% of routed expert picks hit the device in decode (short chats; ~88% in a 126K-token prefill, where most misses are streamed). Decoding is
     speculative with the checkpoint's native MTP head (2 drafts per verify pass, exact: the output is the target
     model's own choice). Images and audio are encoded on the host by the checkpoint's own towers (a 4-layer patch
     encoder over 40 x 40 pixel patches, a dMel audio embedding) and enter the prompt as embeddings.
@@ -209,7 +209,7 @@ card:
     - About 135 GB of free host RAM (the experts outside the 175 static device slots: int4 copies for the CPU, ~49 GB,
       and pinned device-format copies for prefill streaming and the decode fetch, ~66 GB; plus the server);
       the server checks this at startup (`HYB_RAM_CHECK=warn` to start anyway)
-    - About 790 GB of disk: the BF16 checkpoint (~550 GB), ~49 GB of int4 expert copies, ~66 GB of device-format
+    - About 790 GB of disk: the BF16 checkpoint (~530 GB), ~49 GB of int4 expert copies, ~66 GB of device-format
       copies for prefill streaming and the decode fetch and ~110 GB of device images the first boot writes to the
       weight cache
   quickstart: |
@@ -258,7 +258,9 @@ card:
     4x the staging slots (prompts up to 32K tokens). Greedy output repeats exactly for the same sequence of requests (e.g. an eval on a
     freshly started server); a request's output can depend slightly on the requests before it, because the experts
     those fetched onto the device change where some of its experts run (HYB_RESET_PER_REQUEST=1 removes that at
-    ~16-18% speed).
+    ~16-18% speed). Re-checked 2026-11-21 on this package: short chat TTFT 0.42 s, 61.1 tok/s; multi-turn
+    conversations through the prefix cache (`serve/prefix_turns.py`, every answer crossing a 2048-token boundary:
+    follow-up TTFT 0.40-0.44 s), `serve/prefix_multi.py` and the image / audio suite (`serve/inkling_mm.py`) pass.
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
     - A new long prompt prefills at ~1,460-1,610 tok/s from ~15K tokens on (a 126K-token prompt takes ~86 s); shorter
@@ -267,7 +269,7 @@ card:
     - `tool_choice: "required"` returns the calls as a JSON list in the message content (vLLM's inkling tool parser
       does not convert it); `tool_choice: "auto"` returns proper tool_calls.
     - Up to 8 images and 4 audio clips per prompt; no video. The model names short non-speech sounds (under ~2 s)
-      unreliably (in tests a canary was heard as crickets, a piano as a trumpet); speech is transcribed exactly.
+      unreliably (in tests a birdsong was heard as a cricket, a piano as a harp); speech is transcribed exactly.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
     - Outputs are close to but not identical to the BF16 reference (int4 host experts, bfp4 / bfp8 device experts).
     - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
