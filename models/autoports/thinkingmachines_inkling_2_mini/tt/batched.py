@@ -30,6 +30,8 @@ SDPA_K_CHUNK = 256
 # I2M_GLUE_L1 (default 1): the decode step's activations live in L1 (interleaved): the glue ops (norms, mixes, gates,
 # residual adds) inherit their input's memory config, so the chain stays out of DRAM
 GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
+# I2M_BCONV_KERNEL (default 1): the static short convs' decode step as one program (tt/bconv.py)
+BCONV_KERNEL = __import__("os").environ.get("I2M_BCONV_KERNEL", "1") == "1"
 L1 = ttnn.L1_MEMORY_CONFIG
 
 
@@ -54,9 +56,16 @@ class BatchedConv:
         self.w_cur = up((taps[:, K - 1].float() + 1.0).reshape(1, 1, 1, -1))  # the current tap + the residual
         z = torch.zeros(1, 1, B, taps.shape[0])
         self.s = [up(z) for _ in range(K - 1)]  # s[0] = x_{t-3}, s[1] = x_{t-2}, s[2] = x_{t-1}
+        self.kernel = None
+        if BCONV_KERNEL:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.bconv import BConvKernel
+
+            self.kernel = BConvKernel(mesh, taps, mapper, c_local)
 
     def step(self, x):
         """x [1, 1, B, C] tile (any float) -> y [1, 1, B, C] bf16 tile; states advance by one token (in place)."""
+        if self.kernel is not None:
+            return self.kernel.step(x, self.s)
         xf = _f32(x)
         y = ttnn.multiply(xf, self.w_cur)
         for j in range(K - 1):
