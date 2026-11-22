@@ -60,7 +60,7 @@ def main():
         return m.logits_host(lg, 1)[0]
 
     def prefill(ids, slot, rw, b0=0, snap=None):
-        pg.set_row(slot, rw)
+        pg.set_row(slot, rw, pg.mb)
         m.reset()
         if b0:
             store.restore(snap[0], slot, b0)
@@ -93,7 +93,7 @@ def main():
     for i in range(4):
         pos = PB + i
         for s, rw in ((1, rowB_ref), (2, rowB_px)):
-            pg.set_row(s, rw)
+            pg.set_row(s, rw, pg.mb)
         pg.sync(B)
         dec.set_inputs(torch.tensor([0, tok, tok, 0]), torch.tensor([-1, pos, pos, -1]))
         out = dec.step()

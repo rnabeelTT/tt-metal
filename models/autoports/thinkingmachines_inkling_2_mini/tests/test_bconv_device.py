@@ -15,7 +15,7 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1))
     worst = 0.0
     for C in (2304, 1024):
-        for B in (1, 4, 32):
+        for B in (1, 4, 16, 32):
             taps = torch.randn(C, 4) * 0.5
             res = {}
             for mode in ("0", "1"):

@@ -451,14 +451,16 @@ class BatchedDecoder:
                 qi, ki, vi = (L.gates[n](h, mm) for n, mm in zip(("attn", "k", "v"), messages[:3]))
             else:
                 qi = ki = vi = h
-            qn = _bf(ops.rms(qi, L.in_norm))
-            kn = qn if ki is qi else _bf(ops.rms(ki, L.in_norm))
-            vn = qn if vi is qi else _bf(ops.rms(vi, L.in_norm))
+            bf = ttnn.bfloat16
+            qn = ops.rms(qi, L.in_norm, bf)
+            kn = qn if ki is qi else ops.rms(ki, L.in_norm, bf)
+            vn = qn if vi is qi else ops.rms(vi, L.in_norm, bf)
         else:
             qi, ki, vi = ins if len(ins) == 3 else ins * 3
             if messages is not None:
                 qi, ki, vi = (L.gates[n](hh, mm) for n, hh, mm in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
-            qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
+            bf = ttnn.bfloat16
+            qn, kn, vn = ops.rms(qi, L.q_norm, bf), ops.rms(ki, L.k_norm, bf), ops.rms(vi, L.v_norm, bf)
         att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl)
         att = ba.attn.step(att)
         blk = None
@@ -473,7 +475,7 @@ class BatchedDecoder:
         mi = self._mix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1)[0]
         if messages is not None:
             mi = L.gates["mlp"](mi, messages[3])
-        mo = ba.mlp.step(L.moe.forward(_bf(ops.rms(mi, L.mlp_norm))))
+        mo = ba.mlp.step(L.moe.forward(ops.rms(mi, L.mlp_norm, ttnn.bfloat16)))
         out = _bf(ttnn.add(resid, _f32(mo)))
         return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
 

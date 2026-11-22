@@ -18,6 +18,8 @@ import torch
 import ttnn
 
 KDIR = Path(__file__).parent / "kernels"
+# I2M_BCONV_ROWS: <= 16 live rows -> the conv's SFPU work on those rows only (bconv_compute.cpp BCONV_ROWS)
+ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "0") == "1"
 TILE = 32
 
 
@@ -94,7 +96,9 @@ class BConvKernel:
             dm("bconv_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "bconv_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=[cb_x, cb_s, cb_w, cb_y, cb_o0, cb_o1, cb_o2],
-                                  runtime_args=_rt(self.cores, [[self.per]] * len(self.cores)), config=cfg),
+                                  runtime_args=_rt(self.cores, [[self.per]] * len(self.cores)), config=cfg,
+                                  defines=[("BCONV_ROWS", str(int(x.shape[-2])))] if ROWS and int(x.shape[-2]) <= 16
+                                  else []),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_bconv", self.C, len(self.cores), str(x.dtype), int(x.shape[-2]), repr(x.memory_config()),

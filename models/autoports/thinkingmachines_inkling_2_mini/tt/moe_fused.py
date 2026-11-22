@@ -28,6 +28,8 @@ from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
 ROW1 = os.environ.get("I2M_MOE_ROW1", "0") == "1"
+# I2M_MOE_DUPROW (default 1): one decode row duplicated into its tiles' padding row in place (tt/duprow.py), not concat
+DUPROW = os.environ.get("I2M_MOE_DUPROW", "0") == "1"
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
 SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
 # I2M_MOE_SUBS1 (one die): "768,384" -> two sub-shards (m = 6 and 3 column tiles per bank: both supported) instead of 3
@@ -115,7 +117,13 @@ class FusedExperts:
         # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5);
         # I2M_MOE_ROW1=1: the rows kernels at one row instead (no concat / slice / clone)
         if M == 1 and not ROW1:
-            xr, m = ttnn.concat([x, x], dim=2), 2
+            if DUPROW:  # row 1 of x's tiles (padding) <- row 0, in place: the 2-row path reads both
+                if getattr(_SHARED, "duprow", None) is None:
+                    from .duprow import DupRow
+                    _SHARED.duprow = DupRow(self.mesh, self.H)
+                xr, m = _SHARED.duprow(x), 2
+            else:
+                xr, m = ttnn.concat([x, x], dim=2), 2
         else:
             xr, m = x, M
         from models.demos.blackhole.qwen36.tt.moe_decode.union import act_buffer

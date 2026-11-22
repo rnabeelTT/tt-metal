@@ -153,6 +153,9 @@ def proj(w: "AttnWeights", which: str, x, dtype=None):
                                      decode_out_memory_config=DRAM, out_dtype=dtype)
 
 
+_TRUST_ALL = __import__("os").environ.get("I2M_PAGES_TRUST_ALL", "0") == "1"  # (debug: the pre-fix behaviour)
+
+
 class GlobalPages:
     """Block tables of the global-attention layers, shared by every global application (one logical block maps to the
     same block id in each global layer's pool).
@@ -193,13 +196,15 @@ class GlobalPages:
         for b in range(self.B):
             self.free(b)
 
-    def set_row(self, b: int, row) -> bool:
-        """Slot b now serves the request whose vLLM block table row is `row`. Returns True if the row changed."""
+    def set_row(self, b: int, row, n_valid: int) -> bool:
+        """Slot b now serves the request whose vLLM block table row is `row`, of which the first n_valid entries are
+        its blocks (vLLM does not clear a reused row past a request's allocation: the stale entries can name blocks
+        vLLM has since given to another request, or to this one). Returns True if the row changed."""
         if not self.paged or row is None:
             return False
         r = torch.as_tensor(row).reshape(-1).to(torch.int32)
         m = self._scratch_row()
-        k = min(self.mb, int(r.numel()))
+        k = min(self.mb, int(r.numel()), int(n_valid) if not _TRUST_ALL else self.mb)
         m[:k] = torch.where(r[:k] > 0, r[:k], m[:k])
         return self._put(b, m)
 

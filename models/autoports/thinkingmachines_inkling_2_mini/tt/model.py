@@ -45,6 +45,8 @@ ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q
 GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"  # the whole message gate in one program (tt/gate.py)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
+# I2M_RMS_CAST (default 1): a one-row norm's input / output dtype casts inside its reshards (2 ops fewer per norm)
+RMS_CAST = os.environ.get("I2M_RMS_CAST", "0") == "1"
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 # packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
@@ -105,9 +107,37 @@ class Ops:
         return ttnn.from_torch(t.contiguous(), dtype=dtype, layout=layout, device=self.mesh, memory_config=DRAM,
                                mesh_mapper=self.rep)
 
-    def rms(self, x, w=None):
+    def rms(self, x, w=None, out_dtype=None):
         """fp32 RMS norm over the last dim (transformers Inkling2RMSNorm / UnweightedRMSNorm), w [1,1,1,H] fp32.
-        I2M_OPS=fused (default): one ttnn.rms_norm; ref: the explicit fp32 ops."""
+        I2M_OPS=fused (default): one ttnn.rms_norm; ref: the explicit fp32 ops. out_dtype: the result cast to it (one
+        tile row: inside the reshard back, RMS_CAST; otherwise a typecast)."""
+        if FUSED_OPS and RMS_SHARD and len(x.shape) == 4 and int(x.shape[0]) * int(x.shape[1]) == 1 \
+                and int(x.shape[2]) <= 32 and int(x.shape[3]) % 256 == 0 and RMS_CAST:
+            mc, pc = self._rms_cfg(int(x.shape[3]))
+            xs = ttnn.to_memory_config(x, mc, dtype=ttnn.float32) if x.dtype != ttnn.float32 else \
+                ttnn.to_memory_config(x, mc)
+            y = ttnn.rms_norm(xs, epsilon=self.eps, weight=w, program_config=pc, memory_config=mc,
+                              compute_kernel_config=self.ckc)
+            if out_dtype is not None and out_dtype != ttnn.float32:
+                return ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG, dtype=out_dtype)
+            return ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG)
+        y = self._rms(x, w)
+        return ttnn.typecast(y, out_dtype) if out_dtype is not None and y.dtype != out_dtype else y
+
+    def _rms_cfg(self, H):
+        if H not in self.rms_cfg:
+            mc = ttnn.create_sharded_memory_config(shape=(32, H // 8), core_grid=ttnn.CoreGrid(x=8, y=1),
+                                                   strategy=ttnn.ShardStrategy.WIDTH,
+                                                   orientation=ttnn.ShardOrientation.ROW_MAJOR,
+                                                   use_height_and_width_as_shard_shape=True)
+            bw = H // 8 // 32
+            pc = ttnn.LayerNormShardedMultiCoreProgramConfig(
+                compute_with_storage_grid_size=ttnn.CoreCoord(8, 1),
+                subblock_w=max(d for d in range(1, 5) if bw % d == 0), block_h=1, block_w=bw, inplace=False)
+            self.rms_cfg[H] = (mc, pc)
+        return self.rms_cfg[H]
+
+    def _rms(self, x, w=None):
         x = _f32(x)
         if FUSED_OPS and RMS_SHARD and len(x.shape) == 4 and int(x.shape[0]) * int(x.shape[1]) == 1 \
                 and int(x.shape[2]) <= 32 and int(x.shape[3]) % 256 == 0:

@@ -18,6 +18,7 @@ import ttnn
 from .bconv import KDIR, _cb, _range_set, _rt
 
 F32, BF = 4096, 2048
+ROWS = __import__("os").environ.get("I2M_GATE_ROWS", "1") == "1"  # SFPU passes on the live rows only (<= 16 rows)
 
 
 def _bits(x: float) -> int:
@@ -79,7 +80,7 @@ class GateKernel:
             dm("gate_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(self.cores, cp_rt), config=cfg,
-                                  defines=[("GATE_ROWS", str(int(h.shape[-2])))]),
+                                  defines=[("GATE_ROWS", str(int(h.shape[-2])))] + ([] if ROWS else [("GATE_FULL", "1")])),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(6)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)

@@ -15,6 +15,61 @@
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
 
+// BCONV_ROWS (<= 16 live rows, the decode): the SFPU multiply / adds on those rows only (VectorMode::R, 2 ceil(B / 4)
+// iterations per face); the padding rows of y are don't-care (the states are rotated as whole tiles)
+#ifndef BCONV_ROWS
+#define BCONV_ROWS 32
+#endif
+constexpr bool CROWS = BCONV_ROWS <= 16;
+constexpr int CIT = 2 * ((BCONV_ROWS + 3) / 4);
+
+#ifdef TRISC_MATH
+namespace ckernel::sfpu {
+template <int OP, int ITERATIONS>
+inline void calculate_bconv_bin(const uint32_t a, const uint32_t b, const uint32_t o) {
+    constexpr uint32_t tile = 32;
+    for (int d = 0; d < ITERATIONS; d++) {
+        sfpi::vFloat x = sfpi::dst_reg[a * tile];
+        sfpi::vFloat y = sfpi::dst_reg[b * tile];
+        if constexpr (OP == 0) {
+            sfpi::dst_reg[o * tile] = x + y;
+        } else {
+            sfpi::dst_reg[o * tile] = x * y;
+        }
+        sfpi::dst_reg++;
+    }
+}
+}  // namespace ckernel::sfpu
+#endif
+
+namespace {
+ALWI void drain() {
+#ifdef TRISC_MATH
+    if constexpr (CROWS) {
+        TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
+    }
+#endif
+}
+ALWI void c_mul(uint32_t a, uint32_t b, uint32_t o) {
+    if constexpr (CROWS) {
+        MATH((SFPU_BINARY_INIT(unused)));
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_bconv_bin, (2, CIT), a, b, o, VectorMode::R)));
+    } else {
+        mul_binary_tile_init();
+        mul_binary_tile(a, b, o);
+    }
+}
+ALWI void c_add(uint32_t a, uint32_t b, uint32_t o) {
+    if constexpr (CROWS) {
+        MATH((SFPU_BINARY_INIT(unused)));
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_bconv_bin, (0, CIT), a, b, o, VectorMode::R)));
+    } else {
+        add_binary_tile_init();
+        add_binary_tile(a, b, o);
+    }
+}
+}  // namespace
+
 void kernel_main() {
     constexpr uint32_t cb_x = get_compile_time_arg_val(0);
     constexpr uint32_t cb_s = get_compile_time_arg_val(1);
@@ -38,22 +93,21 @@ void kernel_main() {
         reconfig_data_format_srca(cb_w);
         copy_init(cb_w);
         copy_tile(cb_w, 3, 1);
-        mul_binary_tile_init();
-        mul_binary_tile(0, 1, 4);
+        c_mul(0, 1, 4);
         // y += s_j * w_j
         for (uint32_t j = 0; j < 3; ++j) {
+            drain();
             reconfig_data_format_srca(cb_s);
             copy_init(cb_s);
             copy_tile(cb_s, j, 1);
             reconfig_data_format_srca(cb_w);
             copy_init(cb_w);
             copy_tile(cb_w, j, 2);
-            mul_binary_tile_init();
-            mul_binary_tile(1, 2, 1);
-            add_binary_tile_init();
-            add_binary_tile(4, 1, 4);
+            c_mul(1, 2, 1);
+            c_add(4, 1, 4);
         }
         // the rotated states (exact FP32 copies through DST)
+        drain();
         reconfig_data_format_srca(cb_s);
         copy_init(cb_s);
         copy_tile(cb_s, 1, 1);

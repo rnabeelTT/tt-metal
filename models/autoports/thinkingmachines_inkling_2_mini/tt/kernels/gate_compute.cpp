@@ -71,7 +71,11 @@ inline void calculate_gate_add(const uint32_t a, const uint32_t b, const uint32_
 #endif
 namespace {
 // <= 16 live rows (decode): every SFPU pass on those rows only (VectorMode::R, 2 ceil(T / 4) iterations per face)
+#ifdef GATE_FULL
+constexpr bool GROWS = false;  // (I2M_GATE_ROWS=0: every SFPU pass on all rows, the root adds excepted)
+#else
 constexpr bool GROWS = GATE_ROWS <= 16;
+#endif
 constexpr int GIT = 2 * ((GATE_ROWS + 3) / 4);
 constexpr uint32_t IN0_MASK = 0xFFFFE000u;
 ALWI void split_x(uint32_t x, uint32_t hi, uint32_t lo) {

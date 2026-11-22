@@ -274,8 +274,8 @@ class Inkling2ForCausalLM:
         reqs = []
         for u in range(N):
             slot = self._slot_for(rows[u])
-            if pt is not None:
-                self.m.pages.set_row(slot, pt[u])
+            if pt is not None:  # (its prompt's blocks only: see GlobalPages.set_row)
+                self.m.pages.set_row(slot, pt[u], (plens[u] + 63) // 64)
             d = directives[u] or {}
             reqs.append(dict(u=u, slot=slot, ids=torch.as_tensor(tokens[u, : plens[u]]).to(torch.long), P=plens[u],
                              b0=starts[u], restore=d.get("restore"),
@@ -377,8 +377,8 @@ class Inkling2ForCausalLM:
         for r in live:
             s = self.row2slot[r]
             tok_s[s], pos_s[s] = tok[r], pos[r]
-            if pt is not None and self.m.pages.paged:
-                self.m.pages.set_row(s, pt[r])
+            if pt is not None and self.m.pages.paged:  # (the blocks up to the one written this step)
+                self.m.pages.set_row(s, pt[r], int(pos[r]) // 64 + 1)
         self.m.pages.sync(W)
         d = self.trs[W] if (self.trs and self._captured) else self.decs[W]
         t0 = time.perf_counter()

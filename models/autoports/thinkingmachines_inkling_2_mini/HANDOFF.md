@@ -154,6 +154,53 @@ Gaps: prefill ~1,100 tok/s on 4 dies and prefills run one request at a time (TTF
 single-user decode is bound by the per-layer glue (TP4 B=1 device 35 ms of which ~25 ms replicated glue, 96
 all-reduces at 39 us, the replicated LM head).
 
+## Prefix caching (vLLM prefix cache + state snapshots)
+
+vLLM pages the GLOBAL layers' KV: `tt/attention.GlobalPages` holds one block table shared by the 8 global applications;
+in vLLM mode a slot's row is its request's block table (prefix-cache hits share blocks), unallocated entries and every
+row of a free slot point at scratch blocks past vLLM's pool (padded prefill rows and idle decode rows never write into
+a block vLLM may have given to another request). The rest of a sequence's state at a cached position q is not in any
+KV block: the four short-conv states of all 48 applications and the sliding layers' last window (W / 64 = 16 blocks of
+each ring). `tt/prefix.PrefixStore` keeps them in device snapshot pools (the plugin's prefix_state slots; 168 MB per
+snapshot on one die, divided by the TP degree; 4 slots on one die, 16 on 2 / 4); save and restore are one block-copy
+program each (`tt/blkcopy.py`). The conv state at a snapshot inside a prefill chunk comes out of the conv kernels
+(snap_row); the window blocks are copied after that chunk (a ring holds window + chunk + block). Policy: one snapshot per
+prompt at its last 64-token boundary before the last token, prompts >= 512 tokens (I2M_PREFIX_MIN).
+
+Checks: resuming at a chunk boundary is bit-exact vs the whole prefill (tests/test_packed_device.py); the packed conv
+kernels' states and snapshot rows are exact (tests/test_pfseg_device.py). Served (p300x2, tools/prefix_serve.py): a 4.4K
+prompt cold TTFT 4.4 s, the same prompt again 0.54 s, the next chat turn 0.53 s, a new question on the same document
+0.53 s, 4 users on one shared document 1.17 s each.
+
+## Packed prefill (several requests per chunk)
+
+`prefill_forward` packs up to 8 requests (I2M_PREFILL_LANES) into each 1024-row chunk (64-row aligned segments; a long
+prompt continues in the next chunk next to others). Row-wise work runs on all rows at once (the MoE reads each expert
+once per chunk however many sequences it holds); per sequence: the conv states (one "lane" per segment), the KV writes
+and the SDPA rows. Every packed program depends on the chunk size only, never on the segment layout: programs first
+compiled after the decode trace capture can be overwritten by the replays (the widths hang). So: the segmented prefill
+conv kernel (`sconv_kernels/pfseg_reader.cpp`: per-segment state in / commit / snapshot rows), DynShortConv lags by
+block copy, ONE paged KV fill per chunk (a per-64-row-block page table) and ONE SDPA per chunk (per-item page rows),
+the last-row gather through row-major pages. Packed vs alone: identical first-token logits (KL 0 / 6e-9).
+
+Prefill is device-bound (tools/bench_prefill.py, op_prof PREFILL): a 1024-row chunk on 4 dies is ~900 ms of device
+time (sparse-matmul experts 30 %, attention 14 %, glue the rest); 128 rows ~290 ms (expert reads dominate, hence the
+packing).
+
+## Decode, this round (traced step, ms; tests/test_batched_device.py)
+
+| change | TP4 B=1 | TP4 B=4 | TP2 B=1 | TP1 B=1 |
+|---|---|---|---|---|
+| start of the round (served TPOT) | ~32 | 35.0 | ~34 | 41.1 |
+| LM head split over the vocab (2 / 4 dies; per-die top-k, global-max shift, host merge) | ~30.5 | | | |
+| block mix logits once per block (MixPlan; bit-identical), row-limited mix SFPU, async all-reduce | 26.9 | 32.1 | 29.8 | 37.2 |
+| gate kernel SFPU on the live rows only (bit-identical) | 26.0 | 31.2 | | |
+
+Decode quality (TP4, 8 x 736 teacher-forced): 0.9711 / 0.9970 / 0.0151 (noise band; the all-reduce change moved it
+from 0.9677 / 0.9954 / 0.0212, the eval's noise). Tried and dropped: one fused-MoE call for 17..32 rows (works, pcc
+0.9998, but slower than two 16-row calls: the MoE is bandwidth-bound at these widths, and TP4's 288-column expert slices
+are stored padded to 384); the MoE rows kernels at one row (still route the sigb router wrongly).
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from
@@ -170,6 +217,7 @@ default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, 
 
 ## Next
 
-1. TP2 / TP4 validation of the fused MoE + batched decode; then per-profile step times at B = 1 .. 32.
-2. Fused glue kernels for single-user latency; DSpark speculative decoding (CPU reference + acceptance first).
-3. p150 memory plan at bfp8 experts; device sampling; profiles, card, package, publish.
+1. Decode glue: a persistent width-sharded layout for the one-row activations (the norms' reshards and casts are ~1/3
+   of the remaining glue), then fused mix + norm / gate rounds; the one-row MoE without the duplicated row.
+2. Prefill MoE: fewer weight re-reads per 32-row group (larger groups at long chunks); prefill attention prep.
+3. DSpark speculative decoding (acceptance 1.2 per pass measured: low priority).
