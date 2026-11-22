@@ -16,7 +16,7 @@ import urllib.request
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 CONC = int(sys.argv[2]) if len(sys.argv) > 2 else 4
 URL = f"http://localhost:{PORT}/v1/chat/completions"
-MODEL = "inkling-2-mini"
+MODEL = __import__("os").environ.get("MODEL", "inkling-2-mini")
 
 
 def chat(messages, max_tokens=128, effort="none", tools=None, timeout=600):

@@ -69,6 +69,9 @@ serve:
     I2M_KV_DT: bf16            # fp32-vs-bf16 reference noise floor; bfp8 KV costs measurable KL
     I2M_PREFILL_CHUNK: "1024"  # prefill rows per chunk (the sliding-window rings hold the window + one chunk)
     I2M_PREFILL_PAD: "256"     # a prompt's last chunk padded to a multiple of 256: 4 prefill programs to warm up
+    # the dequantized bfp8 expert / attention images (built from the checkpoint on the first boot, ~3.5 min on 2 dies; tt-model's
+    # persistent weight cache: later boots load them in about a minute)
+    I2M_WCACHE: /weight-cache/wcache_inkling2_mini
 
 serve_profiles:
   - name: p300x2
