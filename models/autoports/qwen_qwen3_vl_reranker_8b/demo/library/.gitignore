@@ -1,0 +1,3 @@
+# Demo videos (>500 KB, over the repo size limit) are not committed; they ship in the package from the
+# working tree. Source: the tt-hous/embeddinggemma-2 demo library (sha256 per file in manifest.json).
+videos/*.mp4

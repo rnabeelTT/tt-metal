@@ -1,0 +1,296 @@
+{
+ "version": 1,
+ "queries": [
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a photo of a labrador retriever dog",
+   "expect": [
+    "img-dog-labrador"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a pizza on a wooden board next to a pizza cutter",
+   "expect": [
+    "img-pizza"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "the Eiffel Tower in Paris",
+   "expect": [
+    "img-eiffel-tower",
+    "txt-fr-eiffel-tower"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a red double-decker bus",
+   "expect": [
+    "img-london-bus"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "green northern lights in the night sky",
+   "expect": [
+    "img-aurora"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a swimmer wearing a swim cap and goggles",
+   "expect": [
+    "img-swimming"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "an old hand-drawn map of the whole world",
+   "expect": [
+    "img-world-map"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a passenger jet airplane taking off",
+   "expect": [
+    "img-airplane"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "fireworks exploding in the night sky",
+   "expect": [
+    "vid-fireworks"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a rocket launching into the sky",
+   "expect": [
+    "vid-rocket-launch"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "a cat playing with a lizard",
+   "expect": [
+    "vid-cat-lizard"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "text",
+   "query": "meat sizzling in a frying pan",
+   "expect": [
+    "vid-cooking-frying"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "image",
+   "query": "queries/q-img-dog.jpg",
+   "expect": [
+    "img-dog-labrador"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "image",
+   "query": "queries/q-img-cat.jpg",
+   "expect": [
+    "img-cats-sofa"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "image",
+   "query": "queries/q-img-eiffel.jpg",
+   "expect": [
+    "img-eiffel-tower",
+    "txt-fr-eiffel-tower"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "image",
+   "query": "queries/q-img-pizza.jpg",
+   "expect": [
+    "img-pizza"
+   ]
+  },
+  {
+   "tab": "media",
+   "query_kind": "image",
+   "query": "queries/q-img-taj.jpg",
+   "expect": [
+    "img-taj-mahal",
+    "txt-hi-taj-mahal"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "sort address ranges and merge the overlapping ones",
+   "expect": [
+    "code-cpp-merge-allocated-ranges"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "move an element up a binary heap",
+   "expect": [
+    "code-rs-binary-heap-sift-up"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "heap sort that returns a vector in ascending order",
+   "expect": [
+    "code-rs-binary-heap-into-sorted-vec"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "download a tarball, check its md5 checksum and extract it",
+   "expect": [
+    "code-py-download-sfpi"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "turn a nested dictionary into one with attribute access",
+   "expect": [
+    "code-py-make-dot-access-dict"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "how many days ago did the workflow last succeed",
+   "expect": [
+    "code-js-time-since-last-success"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "SQL table that stores individual sweep test results and their status",
+   "expect": [
+    "code-sql-sweep-test"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "free a memory block and coalesce it with free neighbours",
+   "expect": [
+    "code-cpp-freelist-deallocate"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "bounded channel where send blocks when the buffer is full",
+   "expect": [
+    "code-rs-sync-channel"
+   ]
+  },
+  {
+   "tab": "code",
+   "query_kind": "text",
+   "query": "compare two tensors by the maximum error in units of least precision",
+   "expect": [
+    "code-py-comp-ulp"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "Why was the Great Wall of China built?",
+   "expect": [
+    "txt-zh-great-wall"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "the highest volcano in Japan",
+   "expect": [
+    "txt-ja-mount-fuji"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "¿Quién mandó construir el Taj Mahal y por qué?",
+   "expect": [
+    "txt-hi-taj-mahal"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "Wie hoch ist der Eiffelturm in Paris?",
+   "expect": [
+    "txt-fr-eiffel-tower"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "le lac d'eau douce le plus profond du monde, en Sibérie",
+   "expect": [
+    "txt-ru-baikal"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "韓国の伝統的な発酵食品",
+   "expect": [
+    "txt-ko-kimchi"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "the mathematician at the House of Wisdom in Baghdad whose book gave us the word algebra",
+   "expect": [
+    "txt-ar-al-khwarizmi"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "Самая полноводная река Южной Америки",
+   "expect": [
+    "txt-es-amazon-river"
+   ]
+  },
+  {
+   "tab": "multilingual",
+   "query_kind": "text",
+   "query": "日本的高速铁路",
+   "expect": [
+    "txt-ja-shinkansen"
+   ]
+  }
+ ]
+}

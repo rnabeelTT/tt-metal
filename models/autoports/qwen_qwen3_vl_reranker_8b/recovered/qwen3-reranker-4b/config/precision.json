@@ -1,0 +1,75 @@
+{
+  "selected": "p1_mlp_lofi",
+  "policies": {
+    "p0_bfp8_hifi2": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi2",
+      "mlp_fidelity": "hifi2",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p1_mlp_lofi": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi2",
+      "mlp_fidelity": "lofi",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p2_all_lofi": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "lofi",
+      "mlp_fidelity": "lofi",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p3_mlp_bfp4_lofi": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp4",
+      "attn_fidelity": "hifi2",
+      "mlp_fidelity": "lofi",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p4_hifi4": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi4",
+      "mlp_fidelity": "hifi4",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p5_attn_bf16": {
+      "attn_weights": "bf16",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi4",
+      "mlp_fidelity": "hifi2",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p6_sdpa_hifi2": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi2",
+      "mlp_fidelity": "hifi2",
+      "sdpa_fidelity": "hifi2"
+    },
+    "p7_bf16_hifi4": {
+      "attn_weights": "bf16",
+      "mlp_weights": "bf16",
+      "attn_fidelity": "hifi4",
+      "mlp_fidelity": "hifi4",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p8_attn_bf16_mlp_bfp8": {
+      "attn_weights": "bf16",
+      "mlp_weights": "bfp8",
+      "attn_fidelity": "hifi4",
+      "mlp_fidelity": "hifi2",
+      "sdpa_fidelity": "hifi4"
+    },
+    "p9_mlp_bf16_hifi2": {
+      "attn_weights": "bfp8",
+      "mlp_weights": "bf16",
+      "attn_fidelity": "hifi2",
+      "mlp_fidelity": "hifi2",
+      "sdpa_fidelity": "hifi4"
+    }
+  }
+}

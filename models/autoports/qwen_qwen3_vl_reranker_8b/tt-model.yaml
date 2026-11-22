@@ -1,0 +1,224 @@
+schema: "5.1"
+repo: raahemnabeel/qwen3-vl-reranker-8b
+name: qwen3-vl-reranker-8b
+weights:
+  repo: Qwen/Qwen3-VL-Reranker-8B
+  revision: b212dc8c91a8164aef1ea2de9c1a867611e75c04
+kind: tt-dit-server
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal
+  code:
+    - models/autoports/qwen_qwen3_vl_reranker_8b
+    - models/common
+    - models/ttt_compat
+    - models/tt_transformers/__init__.py
+    - models/tt_dit/utils
+    - tt_py_test_utils_common
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  app: models.autoports.qwen_qwen3_vl_reranker_8b.server.app:app
+  mesh_shape_env: QWEN3VL_RERANKER_MESH_SHAPE
+  packages:
+    - transformers==5.12.1
+    - tokenizers==0.22.2
+    - qwen-vl-utils==0.0.14
+    - av==18.1.0
+    - torchvision==0.26.0
+    - safetensors==0.8.0
+    - huggingface-hub==1.16.1
+    - numpy==1.26.4
+    - loguru==0.6.0
+    - pyyaml
+    - pandas==2.3.3
+    - networkx==3.1
+    - graphviz==0.21
+    - fastapi==0.136.3
+    - uvicorn==0.52.4
+    - pydantic==2.13.5
+    - pillow==12.3.0
+    - gradio==6.30.0
+
+serve:
+  hardware: p150
+  mesh_device: P150
+  env:
+    HF_REVISION: b212dc8c91a8164aef1ea2de9c1a867611e75c04
+    TT_CACHE_PATH: /weight-cache
+    HF_HUB_OFFLINE: "1"
+    TT_MESH_GRAPH_DESC_PATH: /opt/tt-metal/tt_metal/fabric/mesh_graph_descriptors/p150_mesh_graph_descriptor.textproto
+
+serve_profiles:
+  - name: p150
+    description: One Blackhole chip (a p150, or one chip of a p300). The baseline.
+    hardware: p150
+    mesh_device: P150
+  - name: p300
+    description: Both chips of one p300; one model copy per chip (data parallel), about twice the p150 throughput.
+    hardware: p300
+    mesh_device: P300
+  - name: p300x2
+    description: QuietBox 2 (two p300 boards, four chips); one model copy per chip, about four times the p150 throughput.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x2
+    description: Two p150 boards; one model copy per chip.
+    hardware: p150x2
+    mesh_device: P150x2
+  - name: p150x4
+    description: Four p150 boards; one model copy per chip.
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: demo
+    description: The p150 server plus a Gradio demo at /demo (search a bundled openly licensed library of images, multilingual texts, code and videos, or rerank your own candidates).
+    hardware: p150
+    mesh_device: P150
+    env:
+      QWEN3VL_RERANKER_DEMO: "1"
+      GRADIO_TEMP_DIR: /tmp/gradio
+      GRADIO_ANALYTICS_ENABLED: "False"
+  - name: p300x2-demo
+    description: The QuietBox 2 server (four chips) plus the Gradio demo at /demo.
+    hardware: p300x2
+    mesh_device: P300x2
+    env:
+      QWEN3VL_RERANKER_DEMO: "1"
+      GRADIO_TEMP_DIR: /tmp/gradio
+      GRADIO_ANALYTICS_ENABLED: "False"
+default_profile: p150
+
+verify:
+  - "import os, stat; bad = [os.path.join(d, n) for d, ds, fs in os.walk('/opt/tt-metal/models') for n in ds + fs if not os.stat(os.path.join(d, n)).st_mode & stat.S_IROTH or (n in ds and not os.stat(os.path.join(d, n)).st_mode & stat.S_IXOTH)]; assert not bad, bad[:5]"
+  - "import models.autoports.qwen_qwen3_vl_reranker_8b.tt.engine as e; assert e.MAX_TOKENS == 32768, e.MAX_TOKENS"
+  - "import json, models.autoports.qwen_qwen3_vl_reranker_8b.tt.text_model as t; p = t.Precision.load(); assert p.tag == 'p1_mlp_lofi', p.tag; assert t.BLOCKING_PATH.is_file()"
+  - "import models.autoports.qwen_qwen3_vl_reranker_8b.tt.vision.model, models.autoports.qwen_qwen3_vl_reranker_8b.tt.proc_engine"
+  - "import transformers, torch, qwen_vl_utils, av, torchvision; assert transformers.__version__ == '5.12.1', transformers.__version__"
+  - "from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel, Qwen3VLTextRotaryEmbedding"
+  - "import gradio, json, models.autoports.qwen_qwen3_vl_reranker_8b.demo.mount, models.autoports.qwen_qwen3_vl_reranker_8b.demo.library as L; assert gradio.__version__ == '6.30.0', gradio.__version__"
+
+card:
+  attribution: >
+    Derived from Qwen/Qwen3-VL-Reranker-8B by the Qwen team, weights unmodified. The TTNN port is
+    models/autoports/qwen_qwen3_vl_reranker_8b; its vision tower is the Blackhole qwen36 ViT from the
+    Ornith-1.5 bundle.
+  description: >
+    Qwen3-VL-Reranker-8B, a multimodal reranker: it scores how well a document answers a query, where either side
+    can be text, images, screenshots, video or a mix. It is the 36-layer Qwen3-VL text tower and the 27-layer ViT with
+    DeepStack, reading logit("yes") - logit("no") at the end of the official reranker prompt, served as a
+    Cohere / Jina / vLLM-style /v1/rerank API. Every chip holds a full copy of the model, so more chips means more
+    documents per second.
+  intended_use: >
+    Second-stage reranking in retrieval and RAG pipelines: reorder the top candidates from an embedding search
+    (for example Qwen3-VL-Embedding) over text, document pages, images and video, in 30+ languages. Not a generative
+    model.
+  prerequisites: |
+    - 1 GB hugepages mounted at `/dev/hugepages-1G`
+    - About 20 GB of free disk for the checkpoint and its converted weights
+  quickstart: |
+    ### Rerank text and images
+    ```bash
+    IMG=$(base64 -w0 photo.jpg)
+    curl -s localhost:20000/v1/rerank -H 'content-type: application/json' -d "{
+      \"query\": \"A woman playing with her dog on a beach at sunset.\",
+      \"documents\": [\"A woman and her golden retriever on a beach at sunset.\", {\"image\": \"$IMG\"},
+                      \"The stock market fell sharply on Tuesday.\"],
+      \"instruction\": \"Retrieve images or text relevant to the user's query.\", \"top_n\": 2}"
+    ```
+    Pick more chips with `--profile p300` (2 chips) or `--profile p300x2` (QuietBox 2, 4 chips).
+
+    ### Demo
+    ```bash
+    tt-model serve raahemnabeel/qwen3-vl-reranker-8b --profile demo        # or p300x2-demo
+    ```
+    Open `http://<host>:20000/demo/`. Every query is scored live on the chip(s): search a bundled library of 61
+    images, 42 texts in many languages, 29 code snippets and 10 short videos (openly licensed, see
+    `code/models/autoports/qwen_qwen3_vl_reranker_8b/demo/library/LICENSES.md`), with a text or image query, or rerank
+    your own candidates.
+  usage: |
+    `POST /v1/rerank` takes the Cohere / Jina / vLLM rerank shape.
+
+    | field | meaning | default |
+    | --- | --- | --- |
+    | `query` | a string, or `{text?, image?, video?}` | required |
+    | `documents` | 1 to 1000 strings or `{text?, image?, video?}` objects | required |
+    | `instruction` | the task instruction (`<Instruct>`) | "Given a search query, retrieve relevant candidates that answer the query." |
+    | `top_n` | return only the best n | all |
+    | `return_documents` | echo each document back | false |
+    | `raw_scores` | add the raw `score` (logit yes - logit no) next to `relevance_score` | false |
+
+    - `image`: base64 bytes or a `data:image/...;base64,` URL (any PIL format), or a list of up to 16.
+    - `video`: `{"data": "<base64 mp4/webm/...>", "fps": 1}` (sampled like the official reranker: `fps` frames per
+      second, at most 64 frames, the official 7680-token pixel budget) or `{"frames": ["<base64 image>", ...]}`.
+    - URLs are refused unless the server sets `QWEN3VL_RERANKER_ALLOW_URLS=1`.
+
+    The response is `{"results": [{"index", "relevance_score", "score"?, "document"?}], "usage": {"total_tokens"}}`,
+    sorted by relevance, which is `sigmoid(score)`. `POST /v1/score` takes the vLLM score shape (`text_1`, `text_2`, 1:N
+    or N:N). `GET /health` reports every chip and its counters, and returns 503 until the model is warm or while a chip
+    is down. `GET /v1/models` lists the model. Errors use the OpenAI error shape; a pair over 32,768 tokens gets 400
+    `context_length_exceeded`.
+  performance: |
+    | eval | metric | this package | HF reference | size |
+    | --- | --- | ---: | ---: | --- |
+    | Fixed pair set: 340 pairs in 41 query groups (English, multilingual, code, images, text + image, video, 2K-10K-token documents) | Pearson r of the score | 0.9991 | 1 (HF fp32) | 340 pairs |
+    | | mean / max abs. score difference (logits) | 0.107 / 0.39 | 0 | |
+    | | same top-1 document per group | 41/41 | | |
+    | | same order for pairs HF separates by >= 0.5 | 100.0% | | 949 pairs |
+    | MTEB reranking, English (SciDocsRR + AskUbuntuDupQuestions subset) | NDCG@10 | 94.89 | 95.01 | 60 groups, 600 pairs |
+    | MIRACL reranking, de / ja / ar subset | NDCG@10 | 97.84 | 97.85 | 45 groups, 450 pairs |
+    | ViDoRe v3 (HR + computer science), document page images | NDCG@5 | 97.89 | 96.97 | 40 groups, 320 pairs |
+    | MMEB-v2 MSCOCO text-to-image | Hit@1 | 100.00 | 100.00 | 40 groups, 320 pairs |
+    | MMEB-v2 MSCOCO image-to-text | Hit@1 | 100.00 | 100.00 | 40 groups, 320 pairs |
+    | 64 s 720p video (7,399 tokens), query "cars and buses driving along a city road" | score | -0.637 | -0.672 | 1 pair |
+    | 64 s 720p video (7,396 tokens), query "a recipe for chocolate cake" | score | -7.125 | -7.023 | 1 pair |
+
+    | one document, warm, p150 | pair tokens | latency (ms) |
+    | --- | ---: | ---: |
+    | text 128 | 129 | 49 |
+    | text 512 | 509 | 61 |
+    | text 2048 | 2,019 | 209 |
+    | text 8192 | 8,069 | 924 |
+    | image 640px | 291 | 107 |
+    | image page 1.8K tok | 1,805 | 640 |
+    | video 8 frames | 615 | 246 |
+
+    | profile | request | clients | pairs/s | tokens/s | p50 (ms) | p99 (ms) |
+    | --- | --- | ---: | ---: | ---: | ---: | ---: |
+    | p150 | 20 texts (~520 tokens per pair) | 1 | 16.8 | 8,711 | 1,191 | 1,504 |
+    | p150 | 20 texts (~520 tokens per pair) | 4 | 18.1 | 9,344 | 4,437 | 4,798 |
+    | p150 | 20 photos (~355 tokens per pair) | 1 | 8.1 | 2,864 | 2,481 | 2,622 |
+    | p150 | 20 photos (~355 tokens per pair) | 4 | 8.3 | 2,934 | 9,626 | 9,878 |
+    | p150 | 8 document pages (~1,860 tokens per pair) | 1 | 2.0 | 3,627 | 4,176 | 4,227 |
+    | p150 | 8 document pages (~1,860 tokens per pair) | 4 | 2.0 | 3,693 | 16,226 | 16,664 |
+    | p300 | 20 texts (~520 tokens per pair) | 1 | 22.0 | 11,311 | 877 | 1,193 |
+    | p300 | 20 texts (~520 tokens per pair) | 4 | 30.0 | 15,680 | 2,650 | 3,138 |
+    | p300 | 20 photos (~355 tokens per pair) | 1 | 13.0 | 4,638 | 1,518 | 1,629 |
+    | p300 | 20 photos (~355 tokens per pair) | 4 | 16.2 | 5,759 | 4,898 | 5,307 |
+    | p300 | 8 document pages (~1,860 tokens per pair) | 1 | 3.4 | 6,294 | 2,345 | 2,498 |
+    | p300 | 8 document pages (~1,860 tokens per pair) | 4 | 4.0 | 7,373 | 8,056 | 8,421 |
+    | p300x2 | 20 texts (~520 tokens per pair) | 1 | 34.8 | 17,925 | 565 | 731 |
+    | p300x2 | 20 texts (~520 tokens per pair) | 4 | 62.4 | 32,571 | 1,277 | 1,928 |
+    | p300x2 | 20 photos (~355 tokens per pair) | 1 | 24.6 | 8,797 | 809 | 986 |
+    | p300x2 | 20 photos (~355 tokens per pair) | 4 | 30.7 | 10,929 | 2,533 | 3,947 |
+    | p300x2 | 8 document pages (~1,860 tokens per pair) | 1 | 5.7 | 10,572 | 1,390 | 1,574 |
+    | p300x2 | 8 document pages (~1,860 tokens per pair) | 4 | 7.1 | 13,127 | 4,412 | 6,438 |
+
+    Accuracy: the HF reference is the transformers implementation on CPU with the official reranker's prompt and preprocessing, on exactly the same inputs (fp32 for the fixed pair set, bf16 elsewhere). The benchmark rows are fixed subsets with short candidate lists, scored with NDCG on exponential gain: they show parity with HF, not leaderboard numbers. The MMEB subsets (1 positive + 7 random candidates) are saturated and only a sanity check. Speed: a real server in the packaged container; closed-loop clients sent /v1/rerank requests for 60 s per row, with 0 errors. p150 rows ran on one chip of a p300c board (11x10 grid, the p150 code path). Single-document latency is end to end: HTTP, preprocessing and the device.
+  limitations: |
+    - Bring-up build, not a Tenstorrent release.
+    - Scores come from bf16 activations and bfp8 weights: on average within 0.11 logits of HF fp32 (max 0.39), so candidates scored within about 0.25 of each other can swap places.
+    - A pair is at most 32,768 tokens. Text is truncated to 10,240 tokens, like the official reranker. A pair whose images or video alone exceed that budget is rejected; the official code would silently drop all of its text.
+    - Video files are sampled like the official reranker, and also capped at its 7,680-token pixel budget (the official code caps frame lists only), so HD clips are downscaled.
+    - Pairs with images or video are scored one at a time; pure-text pairs are batched.
+    - One model copy per chip: more chips add throughput, not single-request speed. A chip that fails is reported by /health and skipped; restart the server to bring it back.
+    - Validated on the four chips of a QuietBox 2 (p300c), as profiles p150, p300 and p300x2. p150, p150x2 and p150x4 boards run the same per-chip code but were not measured; the autotuned matmul blocking targets the 11x10 grid, and a larger grid falls back to default blocking.
+    - First boot converts the weights and compiles kernels (about 5 minutes on one chip); later boots take under a minute.
+  licensing: >
+    Weights under the upstream Apache-2.0 licence (Qwen/Qwen3-VL-Reranker-8B). The TTNN port, the vendored qwen36
+    vision tower and the server in `code/` are Apache-2.0 (tt-metal).
+  license:
+    id: apache-2.0
+  pipeline_tag: text-ranking
+  base_model: [Qwen/Qwen3-VL-Reranker-8B]

@@ -1,0 +1,7 @@
+text 128               tokens=   129 warm p50=   49.4 ms min=   49.3 ms
+text 512               tokens=   509 warm p50=   60.9 ms min=   60.5 ms
+text 2048              tokens=  2019 warm p50=  209.4 ms min=  193.3 ms
+text 8192              tokens=  8069 warm p50=  923.5 ms min=  920.2 ms
+image 640px            tokens=   291 warm p50=  107.3 ms min=  107.0 ms
+image page 1.8K tok    tokens=  1805 warm p50=  640.1 ms min=  631.5 ms
+video 8 frames         tokens=   615 warm p50=  245.6 ms min=  245.2 ms

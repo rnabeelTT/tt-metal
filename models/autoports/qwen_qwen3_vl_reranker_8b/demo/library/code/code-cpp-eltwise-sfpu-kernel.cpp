@@ -1,0 +1,34 @@
+void kernel_main() {
+    uint32_t num_tiles = get_arg_val<uint32_t>(0);
+
+    constexpr auto cb_input = tt::CBIndex::c_0;
+    constexpr auto cb_output = tt::CBIndex::c_2;
+
+    DataflowBuffer dfb_in(cb_input);
+    DataflowBuffer dfb_out(cb_output);
+
+    compute_kernel_hw_startup(cb_input, cb_output);
+    copy_init(cb_input);
+    for (uint32_t i = 0; i < num_tiles; ++i) {
+        tile_regs_acquire();
+
+        dfb_in.wait_front(1);
+        dfb_out.reserve_back(1);
+
+        copy_tile(cb_input, 0, 0);
+
+#ifdef SFPU_OP_CHAIN_0
+        SFPU_OP_CHAIN_0
+#endif
+
+        tile_regs_commit();
+        tile_regs_wait();
+
+        pack_tile(0, cb_output);
+
+        dfb_in.pop_front(1);
+        dfb_out.push_back(1);
+
+        tile_regs_release();
+    }
+}
