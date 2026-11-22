@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import time
@@ -26,6 +27,8 @@ def stream_chat(port, messages, max_tokens, temp, effort, tools=None):
     body = {"model": "hy4-flash", "messages": messages, "max_tokens": max_tokens, "temperature": temp,
             "stream": True, "stream_options": {"include_usage": True},
             "chat_template_kwargs": {"reasoning_effort": effort}}
+    if os.environ.get("HY4_CLIENT_TOP_P"):  # (bench: nucleus sampling requests)
+        body["top_p"] = float(os.environ["HY4_CLIENT_TOP_P"])
     if tools:
         body["tools"] = tools
     req = urllib.request.Request(f"http://localhost:{port}/v1/chat/completions", data=json.dumps(body).encode(),

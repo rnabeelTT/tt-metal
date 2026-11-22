@@ -449,6 +449,7 @@ class Hy4BatchDecoder(Hy4Decoder):
                 med = [sorted(x[i] for x in self._tm[-64:])[32] * 1e3 for i in range(3)]
                 logger.info(f"batched pass R={hd['R']}: host {med[0]:.2f} ms, copy {med[1]:.2f} ms, device+read {med[2]:.2f} ms; "
                             f"prebuilt passes so far {getattr(self, 'n_prebuilt', 0)}")
+        self.last_out = (out, [l for l, _ in hd["order"]])  # (engine_batch: one sampling pass over all rows)
         res, s = {}, 0
         for l, ids in hd["order"]:
             n = len(ids)

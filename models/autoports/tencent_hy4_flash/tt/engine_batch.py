@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from loguru import logger
 
-from models.autoports.tencent_hy4_flash.tt.engine import HostSampler
+from models.autoports.tencent_hy4_flash.tt.engine import HostSampler, sample_rows
 
 # HY4_RUNAHEAD=1 (default): after a batched step samples its tokens, the next batched pass (those tokens, the same
 # slots) is launched before step() returns, so the device runs while vLLM processes the step and calls the next one;
@@ -450,14 +450,34 @@ class Hy4BatchEngine:
             self.stats["ra_taken"] = self.stats.get("ra_taken", 0) + len(acc)
         else:
             out = self._pass(rows)
+        picks = self._sample_batch(out)
         res = {}
         for slot, lg in out.items():
             q = self.seqs[slot]
-            nxt = q["smp"](lg[0])
+            nxt = picks[slot] if picks is not None else q["smp"](lg[0])
             q["tok"], q["pos"] = nxt, q["pos"] + 1
             res[slot] = [nxt]
         self._launch_ra(sorted(res))
         return res
+
+    def _sample_batch(self, out):
+        """HY4_BATCH_SAMPLE=1 (default): a batched pass's next tokens by tt/engine.sample_rows over the pass's logits rows
+        (identical tokens to row-by-row sampling), or None (solo pass, rows not one per slot of the last collected pass).
+        out {slot: logits [1, V]}: each row must be the collected pass's own row (same storage), checked."""
+        lo = getattr(self.dec, "last_out", None)
+        if lo is None or self.solo is not None or os.environ.get("HY4_BATCH_SAMPLE", "1") != "1":
+            return None
+        full, lanes = lo
+        if len(lanes) != len(out) or int(full.shape[0]) != len(lanes):
+            return None
+        at = {l: i for i, l in enumerate(lanes)}
+        slots = sorted(out, key=lambda s: at.get(self.seqs[s]["lane"], -1))
+        idx = [at.get(self.seqs[s]["lane"]) for s in slots]
+        if idx != list(range(len(lanes))):
+            return None
+        if any(out[s].reshape(-1)[0].data_ptr() != full[i].reshape(-1)[0].data_ptr() for s, i in zip(slots, idx)):
+            return None
+        return dict(zip(slots, sample_rows(full, [self.seqs[s]["smp"] for s in slots])))
 
     def _spec_step(self, slot) -> list:
         """One verify pass of the solo sequence: rows [tok, d_1 .. d_k] (DFly2 drafts on its last solo pass); greedy:

@@ -45,12 +45,41 @@ class HostSampler:
             kth = torch.topk(x, self.k).values[-1]
             x = torch.where(x < kth, torch.full_like(x, float("-inf")), x)
         if self.p < 1.0:
-            sx, si = torch.sort(x, descending=True)
-            cp = sx.softmax(-1).cumsum(-1)
-            drop = cp - sx.softmax(-1) > self.p
-            sx[drop] = float("-inf")
-            x = torch.full_like(x, float("-inf")).scatter(0, si, sx)
+            x = self._top_p(x)
         return x.softmax(-1)
+
+    def _top_p(self, x: torch.Tensor) -> torch.Tensor:
+        """x with -inf outside the nucleus (the highest-probability entries whose preceding cumulative probability is
+        <= p). HY4_TOPP_FAST=1 (default): the nucleus from the top HY4_TOPP_K (1024) entries when their mass exceeds p
+        (every later entry then has a preceding mass > p, i.e. is dropped), else the full sort; same set up to float
+        rounding of the softmax denominator (full sort of 120K entries: ~6.7 ms per row; top-1024: ~0.3 ms)."""
+        n = x.numel()
+        K = min(n, int(os.environ.get("HY4_TOPP_K", "1024")))
+        if os.environ.get("HY4_TOPP_FAST", "1") == "1" and K < n:
+            v, si = torch.topk(x, K)  # sorted, descending
+            m = v[0]
+            z = (x - m).exp_().sum()
+            pk = (v - m).exp_() / z
+            cp = pk.cumsum(-1)
+            ex = cp - pk  # mass before each entry
+            # the cut must sit clear of float rounding (the full sort's softmax sums in another order): within 1e-4 of
+            # p at the last kept / first dropped entry -> the full sort decides
+            if float(cp[-1]) > self.p + 1e-4:
+                keep = ex <= self.p
+                j = int(keep.sum())
+                if abs(float(ex[j - 1]) - self.p) < 1e-4 or (j < K and abs(float(ex[j]) - self.p) < 1e-4):
+                    keep = None
+            else:
+                keep = None
+            if keep is not None:
+                out = torch.full_like(x, float("-inf"))
+                out[si[keep]] = v[keep]
+                return out
+        sx, si = torch.sort(x, descending=True)
+        cp = sx.softmax(-1).cumsum(-1)
+        drop = cp - sx.softmax(-1) > self.p
+        sx[drop] = float("-inf")
+        return torch.full_like(x, float("-inf")).scatter(0, si, sx)
 
     def draw(self, p: torch.Tensor) -> int:
         if _FAST_DRAW:
@@ -81,14 +110,45 @@ class HostSampler:
             kth = torch.topk(x, self.k).values[-1]
             x = torch.where(x < kth, torch.full_like(x, float("-inf")), x)
         if self.p < 1.0:
-            sx, si = torch.sort(x, descending=True)
-            cp = sx.softmax(-1).cumsum(-1)
-            drop = cp - sx.softmax(-1) > self.p
-            sx[drop] = float("-inf")
-            x = torch.full_like(x, float("-inf")).scatter(0, si, sx)
+            x = self._top_p(x)
         if _FAST_DRAW:
             return self._icdf((x - x.max()).exp_(), inplace=False)
         return int(torch.multinomial(x.softmax(-1), 1, generator=self.gen))
+
+
+def sample_rows(X: torch.Tensor, smps: list) -> list:
+    """One next token per row of X [R, V] (row i by smps[i], a HostSampler): the same tokens as [smps[i](X[i])], with
+    one argmax over all rows for the greedy ones and, for sampled rows sharing a temperature (no top-k / top-p), one
+    exp + cumsum over their rows (row-wise math: per row the same values) and each row's own uniform draw (only with
+    intra-op threads: single-threaded the stacked pass is slower than row by row). 8 rows, 8 threads: greedy 0.60 ->
+    0.11 ms, temp 0.9 0.95 -> 0.44 ms; identical tokens."""
+    out = [None] * len(smps)
+    if any(m.greedy for m in smps):
+        am = X.argmax(-1).tolist()
+        for i, m in enumerate(smps):
+            if m.greedy:
+                out[i] = int(am[i])
+    groups = {}
+    for i, m in enumerate(smps):
+        if m.greedy:
+            continue
+        if _FAST_DRAW and type(m) is HostSampler and m.k <= 0 and m.p >= 1.0 and torch.get_num_threads() > 1:
+            groups.setdefault(m.t, []).append(i)
+        else:
+            out[i] = m(X[i])
+    for t, ii in groups.items():
+        Y = (X if len(ii) == X.shape[0] else X[ii]).float() / t
+        W = (Y - Y.max(-1, keepdim=True).values).exp_()
+        C = W.cumsum(-1)
+        n = C.shape[-1] - 1
+        for r, i in enumerate(ii):
+            m, c, w = smps[i], C[r], W[r]
+            u = float(torch.rand(1, generator=m.gen, dtype=torch.float64)) * float(c[-1])
+            j = min(int(torch.searchsorted(c, torch.tensor([u], dtype=c.dtype), right=True)), n)
+            while j > 0 and float(w[j]) == 0.0:
+                j -= 1
+            out[i] = j
+    return out
 
 
 class Hy4Engine:
