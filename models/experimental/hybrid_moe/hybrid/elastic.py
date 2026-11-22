@@ -185,6 +185,9 @@ class Elastic:
             logger.info(f"HYB_ELASTIC_CHECK: layer 0 K blocks 0..{n_old} identical after the pool grew")
         self.k = k_target
         self.switches += 1
+        # while any layer is demoted the generator's 4096-token prefill segments also need enough free DRAM in total
+        # (generator._prefill_single, QWEN35_PREFILL_TIGHT_DEMOTED_MB)
+        gen.prefill_demoted = self.k > 0
         t5 = time.perf_counter()
         self.srv.warm_after_switch()
         t6 = time.perf_counter()

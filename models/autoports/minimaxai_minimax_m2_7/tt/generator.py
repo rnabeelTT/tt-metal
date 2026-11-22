@@ -758,16 +758,26 @@ class Qwen35MoeGenerator(ReadinessGenerator):
             # segments (half the transient; logits identical, runs/m27/pf_tight; ~20% slower) in groups twice as long
             # (the same tokens per group). The default was 65536 until a 49K pool after two 85K cycles OOMed (largest
             # block 29.7 MB, package card run 2026-11-14).
+            # prefill_demoted (set by an elastic switch, hybrid/elastic.py, while any layer is demoted): the 4096-token
+            # segments also need QWEN35_PREFILL_TIGHT_DEMOTED_MB (default 140 MB per bank) free in total. A segment's
+            # MoE takes two ~35 MB buffers plus ~45 MB of other prefill state, and the largest-block test alone passed
+            # and then OOMed with 131-138 MB free (11 / 7 layers demoted, largest block 94 / 72 MB, 2026-11-16); with
+            # 4 layers demoted (45K prompts, ~143 MB free) 4096-token segments have always fit.
             tight = int(os.environ.get("QWEN35_PREFILL_TIGHT_FROM", "1") or 0)
             if tight and segment > 2048 and int(getattr(self, "kv_tokens", 0) or 0) > tight:
                 need = int(os.environ.get("QWEN35_PREFILL_TIGHT_MB", "72")) << 20
-                free = int(
-                    ttnn.get_memory_view(self.mesh_device, ttnn.BufferType.DRAM).largest_contiguous_bytes_free_per_bank
+                mv = ttnn.get_memory_view(self.mesh_device, ttnn.BufferType.DRAM)
+                free, total = int(mv.largest_contiguous_bytes_free_per_bank), int(mv.total_bytes_free_per_bank)
+                need_total = (
+                    int(os.environ.get("QWEN35_PREFILL_TIGHT_DEMOTED_MB", "140")) << 20
+                    if getattr(self, "prefill_demoted", False)
+                    else 0
                 )
-                if free < need:
+                if free < need or total < need_total:
                     logger.info(
-                        f"prefill: largest free DRAM block {free >> 20} MB per bank < {need >> 20} MB (KV pool "
-                        f"{self.kv_tokens} tokens): 2048-token segments"
+                        f"prefill: largest free DRAM block {free >> 20} MB per bank (needs {need >> 20}), "
+                        f"{total >> 20} MB free (needs {need_total >> 20}; KV pool {self.kv_tokens} tokens): "
+                        "2048-token segments"
                     )
                     G = G * (segment // 2048)
                     segment = 2048

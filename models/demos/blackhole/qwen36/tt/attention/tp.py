@@ -417,7 +417,9 @@ class TPAttention:
         ttnn.deallocate(qkv)
         rows = getattr(self, "rows_pos_rows", None)
         masks = self.rows_pos_masks
-        one = rows is None and masks is not None and _KVROWS
+        # the masks carry every row's position, so the one-program write needs no per-row index tensors (rows_pos_rows
+        # serves the per-row calls below only)
+        one = masks is not None and _KVROWS
         if one:  # every row's K / V in one program (attn_decode/kvrows.py): the same cache bytes, ~5 vs ~21 us
             from models.demos.blackhole.qwen36.tt.attn_decode.kvrows import kv_rows_update
 
@@ -457,7 +459,8 @@ class TPAttention:
         ttnn.deallocate(q)
         y = post(attn_out, ones[B], B)  # [1, B, NH * HD]: the head concat (x 1)
         ttnn.deallocate(attn_out)
-        wo_partial = self._wo_proj(y, self.tw["wo"])
+        # partial="fabric": a fabric boundary all-reduces it, reading an L1 BF16 partial in place
+        wo_partial = self._wo_proj(y, self.tw["wo"], l1_bf16=partial == "fabric")
         ttnn.deallocate(y)
         wo_partial = ttnn.reshape(wo_partial, (1, 1, B, wo_partial.shape[-1]))
         if partial:
@@ -759,9 +762,10 @@ class TPAttention:
             self.args.dim,
         )
 
-    def _wo_proj(self, x, weight):
+    def _wo_proj(self, x, weight, l1_bf16=False):
         """Row-parallel output projection: DRAM-sharded decode/prefill matmul (K=attn_out_dim_tp),
-        matching the in-proj. Falls back to plain interleaved when no sharded memcfg."""
+        matching the in-proj. Falls back to plain interleaved when no sharded memcfg.
+        l1_bf16: the 1D decode matmul writes an L1 BF16 partial (a fabric boundary reads it in place)."""
         # out_proj_1d_decode (optional) decouples the out-projection from the in-projection layout choice
         _out1d = getattr(self.args, "out_proj_1d_decode", None)
         if _out1d is None:
@@ -773,8 +777,8 @@ class TPAttention:
                 weight,
                 self.args.attn_wo_decode_1d_progcfg,
                 self.compute_cfg,
-                out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                dtype=getattr(self.args, "out_proj_decode_dtype", None),
+                out_memory_config=ttnn.L1_MEMORY_CONFIG if l1_bf16 else ttnn.DRAM_MEMORY_CONFIG,
+                dtype=ttnn.bfloat16 if l1_bf16 else getattr(self.args, "out_proj_decode_dtype", None),
             )
         if not self._wo_sharded:
             if x.shape[-2] > tpc.TILE_SIZE:

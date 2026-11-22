@@ -8,7 +8,8 @@ only the official weights. Two directories, each built once and kept (the packag
                      needs the cluster, so it runs in a subprocess that exits before the server opens the device)
 
 for every expert outside each layer's top HYB_BUILD_STATIC of the plan's build `order` (HYB_PLAN, a compact plan with
-`order` and `freq`), in the layers HYB_BUILD_LAYERS. Both builders resume per layer / expert and write atomically, so
+`order` and `freq`), in the layers HYB_BUILD_LAYERS. With HYB_BFP4_ROUND's gptq methods, a calibration capture
+(bfp4_calib.py, HYB_BFP4_CAL) is built first: the device copies and the port's expert conversion round with it. Both builders resume per layer / expert and write atomically, so
 an interrupted first boot continues where it stopped. A `.complete` marker records what was built (checkpoint
 revision, plan hash, static count, layers); a marker that does not match the current settings is an error: delete
 the directory to rebuild. Runs in the first process only (the vLLM API server, before the EngineCore starts), like
@@ -70,6 +71,35 @@ def _run(what, cmd, env):
     _log(f"first boot: {what} built in {(time.time() - t0) / 60:.1f} min")
 
 
+def _calibrate(snap, here, spec):
+    """HYB_BFP4_ROUND's gptq methods round with a calibration capture (bfp4_calib.py, CPU): build it in HYB_BFP4_CAL
+    first, for the device copies here and the port's conversion in the EngineCore."""
+    if not os.environ.get("HYB_BFP4_ROUND"):
+        return
+    import bfp4_round
+
+    if not bfp4_round.uses_cal():
+        return
+    out = hfpath.resolve(os.environ.get("HYB_BFP4_CAL", ""))
+    if not out:
+        raise ValueError(f"HYB_BFP4_ROUND={os.environ['HYB_BFP4_ROUND']} uses gptq methods: set HYB_BFP4_CAL")
+    with open(os.path.join(here, "plans", "bfp4_cal_tokens.npy"), "rb") as f:
+        want = {"checkpoint": spec["checkpoint"], "tokens": hashlib.sha256(f.read()).hexdigest()[:16]}
+    if _done(out, want, "bfp4 calibration capture"):
+        return
+    os.makedirs(out, exist_ok=True)
+    for tmp in glob.glob(os.path.join(out, "*.tmp")):
+        os.remove(tmp)
+    threads = str(os.cpu_count() or 8)
+    _run(
+        "bfp4 calibration capture",
+        [sys.executable, os.path.join(here, "bfp4_calib.py"), snap, out],
+        dict(os.environ, REF_THREADS=threads),
+    )
+    with open(os.path.join(out, MARKER), "w") as f:
+        json.dump(want, f)
+
+
 def ensure():
     if not os.environ.get("HYB_BUILD_LAYERS") or os.environ.get("_HYB_EXPERTS_READY") == "1":
         return
@@ -85,6 +115,7 @@ def ensure():
     layers = ",".join(str(v) for v in spec["layers"])
     cold = f"{plan}:{spec['static']}"
     env = dict(os.environ, HYB_LIB_KEYS=spec["keys"], THREADS=str(os.cpu_count() or 8))
+    _calibrate(snap, here, spec)
     builds = [
         (
             "int4 host expert library",
@@ -122,11 +153,16 @@ def ensure():
     for what, out, cmd, extra, spec in builds:
         if not out:  # no HYB_DEV_EXPERTS: a profile without the PCIe fetch / prefill streaming
             continue
-        if _done(out, spec, what):
+        want = spec
+        if out == dev and os.environ.get("HYB_BFP4_ROUND"):  # the device copies also depend on the bfp4 rounding
+            import bfp4_round
+
+            want = dict(spec, bfp4_round={str(L): bfp4_round.tag(L) for L in spec["layers"]})
+        if _done(out, want, what):
             continue
         os.makedirs(out, exist_ok=True)
         for tmp in glob.glob(os.path.join(out, "*.tmp*")):  # a write cut off by an earlier interrupted boot
             os.remove(tmp)
         _run(what, [sys.executable, *cmd], dict(env, **extra))
         with open(os.path.join(out, MARKER), "w") as f:
-            json.dump(spec, f)
+            json.dump(want, f)

@@ -15,6 +15,11 @@ drafter's paged cache (`end_prefill`). The traces are captured per request after
 next one: eager device work after trace replays hung the next replay (2026-11-06). Every persistent buffer (drafter,
 verify inputs) exists before the first capture: a buffer allocated after a capture can reuse a trace's intermediates.
 
+Prompt-lookup drafts (suffix_draft.py, DFLASH_SUFFIX, default 1): the continuation of the longest earlier occurrence of
+the context's last tokens replaces the drafter's block when the request's head-to-head tally favours it for that match
+length (the drafter still runs every pass). Fixed-text A/B on 13 workloads (2026-11-17): code edits +6..+35% tokens
+per pass, document quotes +16%, chat and code explanations unchanged (within +-1.5%).
+
 The drafter sees the last DFLASH_WINDOW (default 1024) context tokens: its acceptance falls with its context
 (window_oracle.py on an 8K prompt: 2.03 tokens per pass at 1024, 1.47 at 4096, 1.10 with the whole context). When the
 window is full, the drafter cache is refilled from host copies of the last window's features and the traces re-captured.
@@ -50,12 +55,19 @@ import ttnn
 from dflash_tt import DFlashDrafterPaged, argmax_max, cands_body, read_argmax, read_cands, read_logits
 from hybrid import hfpath
 from hybrid.patch import HYB, _port
+from suffix_draft import Chooser, SuffixIndex
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 WARMUP_PROMPT = "Write a haiku about the sea."
 # DFLASH_SAMPLED_DRAFTS=0: sampled requests keep the drafter's argmax drafts (point-mass proposals)
 _SAMPLED_DRAFTS = os.environ.get("DFLASH_SAMPLED_DRAFTS", "1") == "1"
 _SAMPLE_DEBUG = int(os.environ.get("DFLASH_SAMPLE_DEBUG", "0") or 0)  # log the first N sampled passes
+# DFLASH_BENCH_FOREIGN=<json of token-id lists> (measurement only, the multi-user cost study): every verify row after the
+# first carries a token drawn at random from these texts instead of a draft, so the rows route like independent users'
+# tokens (acceptance ~0; the verify pass's cost is what is measured). DFLASH_BENCH_KEEP=n keeps the first n drafts;
+# DFLASH_BENCH_CONTIG=1 takes the foreign rows as one text's consecutive tokens (a second user's verify block)
+_FOREIGN = os.environ.get("DFLASH_BENCH_FOREIGN", "")
+_SUFFIX = os.environ.get("DFLASH_SUFFIX", "1") == "1"  # prompt-lookup drafts (suffix_draft.py) besides the drafter's
 LP_DIR = os.environ.get("DFLASH_LP_DIR")  # forced runs: per-token verify log-probs saved here (quality A/B)
 
 
@@ -78,6 +90,38 @@ def load_drafter(mesh, rows):
     )
 
 
+# DFLASH_FB (default 1): the verify pass's layer boundaries on the fabric boundary (Verify._body_fabric); 0 = the
+# reduce-scatter + add + all-gather + RMSNorm path
+_FB = os.environ.get("DFLASH_FB", "1") == "1"
+
+
+def _fabric(model, rows):
+    """The model-wide FabricBoundary of the verify pass (its receive buffers and semaphores, and the norms' weights as
+    flat pages), built once, before any trace capture."""
+    fb = model.__dict__.get("_dflash_fb")
+    if fb is None:
+        from models.demos.blackhole.qwen36.tt.fabric_boundary.ops import FabricBoundary
+
+        args = model.args
+        fb = FabricBoundary(
+            model.mesh_device,
+            int(args.dim),
+            float(args.norm_eps),
+            ring_topology=args.ccl_topology() == ttnn.Topology.Ring,
+            max_rows=rows,
+            lazy_sites=True,  # the receive buffers' L1 only while a verify trace lives: a long prefill needs it
+        )
+        fb.gammas = {
+            "attn": [fb.gamma(layer.attention_norm.norm.weight) for layer in model.layers],
+            "ffn": [fb.gamma(layer.ffn_norm.norm.weight) for layer in model.layers],
+            "final": fb.gamma(model.norm.norm.weight),
+        }
+        model._dflash_fb = fb
+    if rows > fb.max_rows:
+        raise ValueError(f"verify width {rows} > the fabric boundary's {fb.max_rows} rows")
+    return fb
+
+
 class Verify:
     """The target's R-row verify pass with persistent inputs."""
 
@@ -97,6 +141,8 @@ class Verify:
         self.tok, self.pos, self.rot, self.pt = dev(tok), dev(pos), dev(rot), dev(pt)
         self.masks = dev(self.rows.rows_pos_masks_host([-1] * self.BW, self.BW))
         self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
+        self.fb = _fabric(m, self.BW) if _FB else None
+        self._legacy_warm = False
 
     def stage(self, tokens, positions, page_table_row):
         row = torch.as_tensor(page_table_row).reshape(-1).to(torch.int32)
@@ -117,15 +163,23 @@ class Verify:
         ttnn.copy_host_to_device_tensor(masks, self.masks)
 
     def body(self):
+        if self.fb is not None:
+            return self._body_fabric()
+        return self._body_legacy()
+
+    def _body_legacy(self):
         m, BW = self.model, self.BW
         cos, sin = m._rope_from_idxs(self.rot)
         x = m.embd(m._decode_tokens_view(self.tok, BW))
         x = ttnn.to_memory_config(ttnn.reshape(x, (1, 1, BW, x.shape[-1])), DRAM)
         taps = []
-        # the per-row KV-write index tensors, once per pass for every layer (instead of slice + reshape per layer)
-        row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
-        for layer in m.layers:
-            layer.attention.rows_pos_rows = row_idx
+        # the per-row KV-write index tensors, once per pass for every layer (instead of slice + reshape per layer); only
+        # the per-row writes read them (QWEN35_KVROWS=0): the default one-program write reads the masks
+        row_idx = []
+        if os.environ.get("QWEN35_KVROWS", "1") != "1":
+            row_idx = [ttnn.reshape(ttnn.slice(self.masks, (b, 0), (b + 1, BW)), (BW,)) for b in range(BW)]
+            for layer in m.layers:
+                layer.attention.rows_pos_rows = row_idx
         for li, layer in enumerate(m.layers):
             y = self.rows.layer_forward_rows(
                 layer,
@@ -161,6 +215,65 @@ class Verify:
         self.logits = logits  # a trace output: sampled requests (and DFLASH_LP_DIR captures) read it back
         return out
 
+    def _body_fabric(self):
+        """body() with the layer boundaries on the fabric boundary (DFLASH_FB=1): the residual stays replicated (flat,
+        on the boundary core) and each boundary (all-reduce of the per-device partial sums + residual add + the next
+        RMSNorm) is one program instead of reduce-scatter + add + all-gather + RMSNorm; the attention and the MoE return
+        their per-device partial sums. The tap layers' boundaries also write the residual as rows (the drafter's input).
+        """
+        m, BW, fb, g = self.model, self.BW, self.fb, self.fb.gammas
+        cos, sin = m._rope_from_idxs(self.rot)
+        x = m.embd(m._decode_tokens_view(self.tok, BW))
+        x = ttnn.reshape(x, (1, 1, BW, x.shape[-1]))
+        if int(x.shape[-1]) != fb.hidden:  # the embedding is split over the mesh: gather the rows once
+            xg = ttnn.all_gather(x, dim=3, topology=m.args.ccl_topology(), memory_config=ttnn.L1_MEMORY_CONFIG)
+            ttnn.deallocate(x)
+            x = xg
+        res, h = fb(x, None, g["attn"][0])
+        ttnn.deallocate(x)
+        taps = []
+        n = len(m.layers)
+        for li, layer in enumerate(m.layers):
+            att = layer.attention
+            att.rows_kv_write, att.rows_pos_masks = True, self.masks
+            try:
+                part = att.forward_decode(h, self.pos, cos, sin, page_table=self.pt, partial="fabric")
+            finally:
+                att.rows_kv_write, att.rows_pos_masks = False, None
+            ttnn.deallocate(h)
+            h2, ff_in = fb(res, part, g["ffn"][li], "mixer")
+            ttnn.deallocate(res)
+            ttnn.deallocate(part)
+            ff_part = layer.feed_forward.forward(ff_in, mode="decode", partial="fabric")
+            ttnn.deallocate(ff_in)
+            last = li == n - 1
+            out = fb(
+                h2,
+                ff_part,
+                g["final"] if last else g["attn"][li + 1],
+                "mlp",
+                out_memory_config=DRAM if last else ttnn.L1_MEMORY_CONFIG,
+                res_rows_memory_config=DRAM if li in self.dr.taps else None,
+            )
+            ttnn.deallocate(h2)
+            ttnn.deallocate(ff_part)
+            res, h = out[0], out[1]
+            if li in self.dr.taps:
+                taps.append(out[2])
+        ttnn.deallocate(res)
+        cat = ttnn.concat(taps, dim=-1)  # [1, 1, BW, n_taps * H], replicated
+        if self.BW > self.R:  # the padded rows are not context
+            taps.append(cat)
+            cat = ttnn.slice(cat, (0, 0, 0, 0), (1, 1, self.R, int(cat.shape[-1])), memory_config=DRAM)
+        ttnn.copy(cat, self.dr.c_taps[self.R])
+        for t in taps + [cat, cos, sin]:
+            ttnn.deallocate(t)
+        logits = ttnn.linear(h, m.lm_head_weight, compute_kernel_config=m._lm_head_ckc())
+        ttnn.deallocate(h)
+        out = argmax_max(logits)
+        self.logits = logits
+        return out
+
     def read_logits_raw(self, rows, vocab):
         """Host FP32 logits [rows, vocab] of the last run."""
         return read_logits(self.mesh, self.logits, rows, vocab)
@@ -192,6 +305,18 @@ class Verify:
             outs = self.outs
             if cands and self.cand_trace is not None:
                 ttnn.execute_trace(self.mesh, self.cand_trace, cq_id=0, blocking=False)
+        elif self.fb is not None and self.fb.sites is None:  # an eager pass (warm-up): the receive buffers for it only
+            if not self._legacy_warm:
+                # the model's lazily made persistent buffers (the fused MoE rows buffers, the hybrid host-step buffers)
+                # are made by the first pass: made by a fabric pass, its live L1 (flat residual, L1 partials) pushes
+                # them down and the free L1 above them is lost to a long prefill's circular buffers (TT_THROW clash)
+                self._legacy_warm = True
+                read_argmax(
+                    self.mesh, self._body_legacy(), int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1])
+                )
+            self.fb.alloc_sites()
+            outs = self.body()
+            self.fb.free_sites()  # (freeing does not wait for the queued pass: later work is queued behind it)
         else:
             outs = self.body()
         return read_argmax(self.mesh, outs, int(ttnn.get_device_tensors(self.model.lm_head_weight)[0].shape[-1]))
@@ -202,8 +327,12 @@ class Verify:
         if self.cand_trace is not None:
             ttnn.release_trace(self.mesh, self.cand_trace)
         self.trace, self.outs, self.cand_trace, self.cand_outs = None, None, None, None
+        if self.fb is not None:
+            self.fb.free_sites()
 
     def capture(self):
+        if self.fb is not None:
+            self.fb.alloc_sites()  # normally done by the caller before any of the request's captures (_capture)
         tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.outs = self.body()
         ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
@@ -580,6 +709,9 @@ class DFlashServing:
         self._sampler, self._sampling = None, None  # the request's SpecSampler (created by its first sampled step)
         self._out_counts = collections.Counter([] if tok0 is None else [int(tok0)])  # emitted tokens (penalties)
         self._pen_prompt = None  # the prompt's distinct ids, built by the request's first penalized row
+        # the context ids through the step's next input token (suffix_draft.py)
+        self._sfx = SuffixIndex(self._ids + ([] if tok0 is None else [int(tok0)])) if _SUFFIX else None
+        self._choose = Chooser()
         self.stats = {"passes": 0, "tokens": 0, "hist": [0] * self.R, "draft": 0.0, "verify": 0.0, "wall": 0.0}
         self.stats["refills"] = 0
         self.stats["stage"] = 0.0
@@ -590,6 +722,8 @@ class DFlashServing:
         K / V chunk read once for all rows; 40K context ~20% faster per token); shorter ones keep the stock decode
         (cheaper below ~2K positions). Both variants are compiled by _warm_verify."""
         ttnn.synchronize_device(self.mesh)
+        if self.ver.fb is not None:  # before the drafter's capture too: never on a live trace's intermediates
+            self.ver.fb.alloc_sites()
         thr = _rows_sdpa_shared_from()
         self._set_rows_sdpa(bool(thr) and int(pos) >= thr)
         self.dr.capture("pass", self.dr.pass_body)
@@ -614,6 +748,8 @@ class DFlashServing:
                 raise RuntimeError(f"DFlash step at plugin pos {pos} after a host-sampled token at pos {self._pos}")
             self._tok = int(tok)
             self._out_counts.update([self._tok])
+            if self._sfx is not None:
+                self._sfx.extend([self._tok])
         elif host_authoritative and (int(tok), int(pos)) != (self._tok, self._pos):
             raise RuntimeError(
                 f"DFlash step input (tok {tok}, pos {pos}) differs from the step's continuation "
@@ -672,6 +808,31 @@ class DFlashServing:
                 qs.append(self._dist(smp, dc[0][j], dc[1][j], dc[2][j], drafts, full))
                 drafts.append(_draw(smp, qs[-1]))
             self.stats["sample"] = self.stats.get("sample", 0.0) + time.perf_counter() - c0
+        # prompt-lookup drafts: chosen from the match length and the request's tally before either draft is compared
+        sfx_n, sfx, dfl, use_sfx = 0, None, drafts, False
+        if self._sfx is not None and not host_logits:
+            sfx_n, cont = self._sfx.lookup(K)
+            if sfx_n:
+                sfx = cont + drafts[len(cont) :]  # a continuation shorter than K: the drafter's rows after it
+                use_sfx = self._choose.pick(sfx_n)
+                if use_sfx:
+                    drafts = sfx
+                    if qs is not None:  # the suffix rows are point-mass proposals
+                        qs = [(torch.tensor([d]), torch.ones(1)) for d in cont] + qs[len(cont) :]
+        if _FOREIGN:
+            if not hasattr(self, "_foreign"):
+                import random
+
+                self._foreign = [x for seq in json.load(open(_FOREIGN)) for x in seq]
+                self._frng = random.Random(0)
+            keep = int(os.environ.get("DFLASH_BENCH_KEEP", "0"))  # rows 1..keep keep their drafts (this user's)
+            n = K - keep
+            if os.environ.get("DFLASH_BENCH_CONTIG") == "1":  # one other user's n consecutive tokens
+                i = self._frng.randrange(len(self._foreign) - n)
+                fx = self._foreign[i : i + n]
+            else:  # n independent users' tokens
+                fx = [self._foreign[self._frng.randrange(len(self._foreign))] for _ in range(n)]
+            drafts = list(drafts[:keep]) + fx
         a1 = time.perf_counter()
         ver.stage([t] + drafts, list(range(p, p + R)), self._row)
         s2 = time.perf_counter()
@@ -732,6 +893,11 @@ class DFlashServing:
                 tl, ti = lp.topk(32, dim=-1)
                 self._lp.append((lp.gather(1, tgt[:, None])[:, 0], ti.int(), tl.half()))
             self._force_i += a + 1
+        if sfx is not None:
+            self._choose.record(sfx_n, sfx, dfl, use_sfx, a, top[a])
+            if use_sfx:
+                self.stats["sfx_passes"] = self.stats.get("sfx_passes", 0) + 1
+                self.stats["sfx_acc"] = self.stats.get("sfx_acc", 0) + a
         rows_h = ttnn.to_torch(ttnn.get_device_tensors(dr.c_taps[R])[0]).float().reshape(R, -1)[: a + 1]
         self.hist.append(rows_h)
         self.n_hist += rows_h.shape[0]
@@ -747,6 +913,8 @@ class DFlashServing:
         else:
             self._out_counts.update(out)
             self._tok, self._pos = top[a], p + a + 1
+            if self._sfx is not None:
+                self._sfx.extend(out)
         st = self.stats
         st["passes"] += 1
         st["tokens"] += len(out)
@@ -825,18 +993,20 @@ class DFlashServing:
                 f"{st['hist']}, draft {1e3 * st['draft'] / n:.1f} + verify {1e3 * st['verify'] / n:.1f} ms per pass, "
                 f"{st['refills']} refills, sampling {1e3 * st.get('sample', 0.0) / n:.1f} ms per pass "
                 f"({st.get('full_rows', 0)} full-row reads; drafter cands {1e3 * st.get('t_dcand', 0.0) / n:.2f}, verify "
-                f"cands {1e3 * st.get('t_vcand', 0.0) / n:.2f} ms), stage {1e3 * st['stage'] / n:.1f} ms -> "
+                f"cands {1e3 * st.get('t_vcand', 0.0) / n:.2f} ms), suffix drafts {st.get('sfx_passes', 0)} passes "
+                f"({st.get('sfx_acc', 0) / max(1, st.get('sfx_passes', 0)):.2f} accepted), stage {1e3 * st['stage'] / n:.1f} ms -> "
                 f"{st['tokens'] / st['wall']:.1f} tok/s (decode steps only)"
             )
 
     # ------------------------------------------------------------------ standalone generation
     _force = None  # generate(force=...): the recorded token sequence a fixed-text run decodes
 
-    def generate(self, text, n_new, page_table, chat=True, force=None):
+    def generate(self, text, n_new, page_table, chat=True, force=None, sampling=None):
         """Eager prefill + traced DFlash decode of one prompt on `page_table` [1, W] (the runner; the serving warm-up).
         Returns the generated ids and timings; the traces are released at the end. ``force`` = a recorded output
         (ids, first token first): every pass accepts the drafts that match it and continues with it, so runs of
-        different configurations decode the same text (same verify inputs, comparable cost per pass)."""
+        different configurations decode the same text (same verify inputs, comparable cost per pass). ``sampling`` = the
+        step's (temperature, top_k, top_p, seed) for a sampled run."""
         tok = self.gen.tokenizer
         if chat:
             text = tok.apply_chat_template(
@@ -868,7 +1038,7 @@ class DFlashServing:
         out, pos = [t0], P
         t1 = time.time()
         while len(out) < n_new:
-            new = self.step(out[-1], pos)
+            new = self.step(out[-1], pos, sampling=sampling)
             out += new
             pos += len(new)
         dt = time.time() - t1
@@ -902,9 +1072,16 @@ class DFlashServing:
                 "draft": round(1e3 * st["draft"] / n, 1),
                 "verify": round(1e3 * st["verify"] / n, 1),
                 "stage": round(1e3 * st["stage"] / n, 2),  # host input uploads of both (inside draft + verify)
+                # after the verify: the sampled accept (verify candidates, distributions), features, bookkeeping
+                "post": round(1e3 * (st["wall"] - st["draft"] - st["verify"]) / n, 2),
+                "sample": round(1e3 * st.get("sample", 0.0) / n, 2),
+                "dcand": round(1e3 * st.get("t_dcand", 0.0) / n, 2),
+                "vcand": round(1e3 * st.get("t_vcand", 0.0) / n, 2),
             },
             "prefill_s": round(t_pf, 2),
             "drafter_refills": st["refills"],
+            "suffix_passes": st.get("sfx_passes", 0),
+            "suffix_accepted": st.get("sfx_acc", 0),
         }
 
 

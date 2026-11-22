@@ -3,6 +3,7 @@
 Read this first when resuming. Code: `~/FORK-tt-metal/models/experimental/hybrid_moe` on branch
 `raahem/qwen35-397b-hybrid-moe` (fork rnabeelTT/tt-metal, based on `fusion_all`); `~/hybrid-moe-poc` is a symlink to it.
 Run data (`runs/`, `logs/`, `cache/`, `ref397/`) is gitignored. Formal plan: `docs/PLAN.md`; deviations under **Deviations**.
+M2.7 roadmap (bottlenecks, long-context attention, multi-user serving, drafter): `docs/M27_ROADMAP.md`.
 The plugin fork `~/FORK-vllm-tt-plugin` has the same branch (no changes yet; the demo uses the image's plugin).
 
 ## Current focus: MiniMax-M2.7 hybrid + DFlash (updated 2026-11-08)
@@ -78,9 +79,234 @@ Pieces (all traced, per-prompt re-capture):
   the official checkpoint and builds both copies on its first boot (hybrid/firstboot.py, ROUND 9); v1.4 read them from
   the derived repo raahemnabeel/minimax-m2.7-hybrid-qb2-experts.
 - OPEN (2026-11-14, tt-model package e.g. 5e77f21b0271): after a deep elastic round trip (all 24 layers to hybrid and
-  back, HYB_ELASTIC_PREWARM=1) short decode stays ~12% slower until restart (bench 49.3 / 51.9 vs 59.2 / 58.2 after a
-  restart without it; a 45K request's 4-layer round trip leaves it at 58.6 / 56.2). The engine also keeps ~7 GB more
-  host RAM after promoting back. A served ~100K request (19 layers, keep=True) does not do it: bench 54.0 / 56.2 after.
+  back, HYB_ELASTIC_PREWARM=1, a test mode the package does not use) short decode stays ~12% slower until restart
+  (bench 49.3 / 51.9 vs 59.2 / 58.2 after a restart without it; a 45K request's 4-layer round trip leaves it at 58.6 /
+  56.2). A served ~100K request (19 layers, keep=True): bench 54.0 / 56.2 after. 2026-11-15, served 128K, 56K-token
+  prompt (7 layers) x3: short 67.9 -> 67.5 tok/s, no slowdown. The ~7 GB more host RAM after promoting back is the
+  demoted layers' pinned device-format library, kept on purpose for the next demotion (fetch.drop_layer; RSS flat
+  over 3 round trips). Deep round trips not re-measured (host RAM short until the reboot).
+- FIXED (2026-11-15): the SECOND long request after an elastic round trip killed the engine (TT_FATAL DRAM OOM in
+  wcache.gather: 254.8 MB across 8 banks, largest free block 30.2 of 31.9 MB needed). The gather's 192 per-expert
+  slices were allocated first-fit into the largest free block, leaving the concat output no contiguous room although
+  _gather_fits had passed. gather() now reserves the output's block before slicing and frees it right before the
+  concat. 3 x (56K prompt, resend, short) on the served 128K profile: no OOM, HYB_GATHER_CHECK identical every time.
+- ADDED (2026-11-17): prompt-lookup ("suffix") drafts, suffix_draft.py + DFlashServing.step (DFLASH_SUFFIX, default 1).
+  Host lookup of the longest earlier occurrence of the context's last 3+ tokens (~0.1 ms at 130K); its continuation
+  replaces the drafter's block when the request's per-match-length head-to-head tally has the suffix ahead (starts on
+  DFlash; counted while unused). Fixed-text A/B (scratch ab_force.py: the same recorded text decoded off / on in one
+  process, 13 workloads, full length): tokens per pass code edits +35 / +6 / +6%, document quotes +16%, code explain
+  +0.4%, chat +0.2% (no workload outside +-1.5% noise below off). Usage-weighted: general assistant mix +3%, coding
+  mix +7.5%. A first rule (suffix on ties) lost up to 1.6% on chat; the committed rule was picked offline on logged
+  per-pass drafts (policy_sim.py), min 0.0%.
+- OPEN (2026-11-16): long prefills after a demotion run 2048-token segments (~20% slower: 56K TTFT ~33-35 s vs 26 s
+  at 4096). Tried and reverted (diff: ~/m27-pkg/prefill_room_experiment.diff): a demotion that holds a 72 MB/bank block for the prefill
+  (Elastic._hold_room) plus a gather that frees the full tensor before its final concat (ttnn.concat runs > 47
+  inputs in batches through intermediates it allocates inside the call). It kept a >= 72 MB block after every 56K
+  demotion (56K TTFT 34.8 -> 27.9 s, 3 cycles, gathers byte-identical), but 4096-token segments then OOMed: a 73K
+  prompt (11 layers, 131 MB/bank free, largest 94) and once a 56K one (138 free, largest 72.0). Allocating out_dn
+  before the small intermediates (optimized_decoder._routed_sorted) did not fix it. Measured: a 4096 segment's MoE
+  needs x_disp + out_dn (~35 MB/bank each at G ~1400 groups) on top of ~45 MB of other prefill state, and with
+  131-138 MB free per bank in pieces that only fits sometimes. So the demoted profile is at the DRAM limit; this is
+  not just fragmentation. The successes all had a second free block >= 29 MB, and the failures did not.
+  `HYB_DRAM_MAP=1` (in the diff) logs the free list at each switch step.
+- FIXED (2026-11-16, v1.6): the generator's 4096-segment test (largest free block >= QWEN35_PREFILL_TIGHT_MB = 72)
+  could pass after a demotion and then OOM (above). While layers are demoted (elastic sets gen.prefill_demoted) the
+  4096 segments now also need QWEN35_PREFILL_TIGHT_DEMOTED_MB (default 140) MB per bank free in total. Free per bank
+  after a switch: 0 layers 148, 4 (45K) 140-143, 7 (56K) 134-138, 11 (73K) 131. Served 128K: 45K keeps 4096
+  segments when its block fits (TTFT 20.3 s, as before); 56K with an 89 MB block now takes 2048 (34-35 s). Static
+  profiles (no demotion) are unchanged. Published: HF rev eacfa120 (image 69268fc9c617), serving here.
+- PROFILE (2026-11-16, package v1.6 config, 32K pool, short prompt; device profiler + an op-order hook since traced
+  runtime ids do not resolve through the inspector): a verify pass is ONE trace of 1783 programs; a full layer is 26
+  programs, 403 us on the critical path (median over 14 layers). MoE ~262 us (fused union experts ~205, router 12,
+  RS 11.5, ffn norm all_gather 20 + rms 6). Attention ~141 us: attn norm AG 12.5 + rms 6.7, QKV 22.4, QKStats 4.2,
+  stats all_gather 9.6, prep 12.7, KV write 17.1 (4 programs), SDPA 17.8, post 6.5, WO 16.8, RS 9.9, add 2.8. The
+  layer boundaries (RS + add + AG + rms_norm, twice per layer) are ~75 us of every layer: the largest lever. The
+  qwen36 fabric boundary (fabric_boundary/ops.py: all-reduce + add + RMSNorm in one program, up to 8 rows) does this,
+  but the hybrid overlay forces it off (hybrid/__init__.py _ENV_OFF; HYB_BOUNDARY was slower / degraded on the 397B,
+  2026-11-04) and it has never run on M2.7: it needs the replicated residual through the rows path, the hybrid MoE's
+  partial handoff for 4 rows, the DFlash taps and the elastic rebuild.
+  - DONE: the verify pass now writes K / V with the one-program kvrows op (it took the 4 per-row calls because
+    dflash_serve set rows_pos_rows, which disabled kvrows): tokens identical (3 prompts x 128, fixed fetch so the run
+    is deterministic: old vs old identical, old vs new identical), served short greedy 67.2 / 66.3 -> 68.3 / 68.4,
+    sampled 54.4 / 54.0 -> 54.5 / 57.1 tok/s.
+  - Smaller attention items left: post (6.5 us, the head concat x ones) into the SDPA writer; QKStats + its all_gather
+    (13.8 us).
+  - DONE (DFLASH_FB=1, default): the verify pass's layer boundaries on the qwen36 fabric boundary
+    (dflash_serve.Verify._body_fabric): residual replicated (flat on one core), each boundary = fabric all-reduce of the
+    per-device partials + residual add + the next RMSNorm in one program (was RS + add + AG + rms). The attention's
+    wo writes an L1 BF16 partial (tp.py l1_bf16; was bfp8 DRAM), the hybrid layers' fused rows add the host partial
+    into an L1 BF16 tensor, the HYB_FULL_LAYERS layers run the port's fused rows into a per-call L1 output
+    (patch._port_fabric_rows); the tap layers' boundaries also write residual' as rows (fb_rows.cpp FB_RES_ROWS) for
+    the drafter. L1: the receive buffers + semaphores (FabricBoundary lazy_sites) live only while a verify trace does
+    (allocated before the drafter's capture, freed by release), and the first eager warm pass runs the legacy body so
+    the model's lazily made persistent buffers land where they did: otherwise a 4.6K prefill hit a CB / L1 clash.
+    Verify per pass (fixed fetch, deterministic): short 44.3 -> 42.6 ms, 4.6K 46.7 -> 43.9, 4 forced prompts 45.3 ->
+    43.5. Quality vs the BF16 reference (same tokens forced): 4.6K text top-1 0.9071 both, KL 0.0765 -> 0.0783; 4
+    short texts (runs/m27/ref_fb2, new: ref_fb no longer matches fb_rec) top-1 0.8898 both, KL 0.0369 -> 0.0351.
+    Published as v1.7 (image 3201778b998a, serving here; launch cmd ~/m27-pkg/serve_default_running.cmd, v1.6's kept as
+    serve_default_running_v16.cmd). Served 128K card (OSL 128, greedy / sampled): short 73.8 / 57.6 tok/s (v1.5 68.9 /
+    53.7), TTFT 0.57 s; 44.7K first 40.1 / 36.8 (TTFT 23.4 s incl. switch); resent 44.7 / 38.3 (TTFT 1.3 s); short
+    after long greedy 55.3, sampled 42.0 (2 runs; a single run read 29: sampling noise). No errors, switches clean.
+- CPU EXPERT PROFILE (2026-11-16, v1.7 package config incl. auto fetch, 32K pool, 3 short prompts x 128 greedy; runner
+  run_dflash_traced.py): pass = draft 4.6-5.0 + verify 27.1-29.0 + stage ~1.5 ms, 2.33-2.43 tokens per pass, 68-76 tok/s.
+  Experts on the device for 97% of decode picks (dec_hits 552-560 of 576 per pass, ~13 fetched per pass); 15-20 experts
+  per pass on the CPU: t_host 4.2-5.4 ms of kernel time, t_wait 2.9-4.0 ms of it on the critical path. HYB_SKIP=1 (no
+  CPU experts; timing floor only, it changes the output): verify 22.2-23.0 ms. So the CPU experts cost ~5 ms of a ~28 ms
+  verify (~15% of a pass); the rest is device time (t_read ~18 ms = the host waiting on the device). The host is a Ryzen
+  7 9700X (8 cores, 2-channel DDR5): ~1 expert (~7 MB int4) per hybrid layer at ~28 GB/s effective, latency-bound per
+  layer rather than bandwidth-bound; the kernel already splits each expert over the threads. NOTE: the 42-46 ms verify
+  figures above are the deterministic A/B config (HYB_FETCH_POLICY=fixed, FRAC=0: ~90 CPU experts per pass), not
+  serving.
+- DEVICE PROFILE v1.7 (2026-11-16, package config, short prompt; scratch p17/seq.csv): the verify trace is 1047 programs
+  (was 1783), 29.9 ms device span per pass (drafter trace 350 programs, 3.5 ms). 44 full layers 14.8 ms (median 333 us,
+  was 403); 18 hybrid layers 14.4 ms (median 771 us; ~230 us with no CPU wait: layers 26/28/31/61; the rest is the
+  socket recv of the host partial waiting on the CPU experts, up to 635 us in one layer, plus ~50 us host routing round
+  trip per hybrid layer). Full layer, end to end (program ends; the FW zones start early while waiting for go): attention
+  99 us, mixer boundary 15, MoE 205 (router matmul + route 42, fused experts 163), mlp boundary 15. Prologue 0.15 ms
+  (the embedding all_gather reads 104 us), epilogue (taps, LM head, argmax) 0.55 ms. Device floor without CPU waits
+  ~20 ms, of which MoE ~14 ms (experts ~10 ms, router+route ~2.6 ms).
+- MOE EXPERT BANDWIDTH (2026-11-16, one chip, scratch moebw/bench.py at M2.7 per-die shapes, 4 rows): distinct experts
+  per layer for 4 consecutive tokens 23.3 mean (21-27; ref_held routing). Fused experts scale linearly at ~6.5 us per
+  expert (~300 GB/s) + ~12 us per call: bandwidth-bound. The chip streams ~490 GB/s with >= 4 readers per bank (qwen36
+  DecodeLinear: 294 GB/s at 2 per bank, 488-490 at 4-10). gate|up runs 4 readers per column group = 2 per bank (16
+  cores; 349 GB/s at union 23); more readers are slower (5: 94, 6: 103, 8: 163 us vs 88: the extra cores sit off the
+  banks' rows), so its gap to ~490 GB/s needs a layout change (readers on the banks' rows / both NOCs), not a knob:
+  ~88 -> ~62 us per layer at the ceiling. down: QWEN35_MOE_DN_READERS=6 / CHUNK=2 (48 cores) 48.8 vs 57.5 us (4 / 4),
+  repeatable; 12 readers do not fit. Now the package / serve_m27.sh default: forced 4 prompts (runs/m27/ref_fb2) top-1
+  0.8898 / KL 0.0351 both (identical), verify 41.9 -> 41.2 ms per pass (fixed fetch A/B config).
+- GATE|UP PLACEMENT (2026-11-16): per-core profile of the gate|up rows op (scratch moebw/bench3.py): group 0 (banks 0
+  and 4, whose optimal reader rows are both row 9) ran ~100 us per core vs 60-75 for groups 1-3 and set the op's time;
+  banks 0 / 4 stream like the others with bank-local readers (DecodeLinear: all 8 banks 166 us), so it is the two
+  banks' responses converging on one row's links. Moving the group to row 8 (NOC1) did not help (they converge there);
+  spreading its 4 readers over the rows free of bank readers (2, 5, 8) and reading on NOC1 did: QWEN35_MOE_GU_OFFROW=2
+  (qwen36 moe_decode/union.py; code default 0, M2.7 package / serve_m27.sh 2): gate|up union 23 100.4 -> 76.7 us
+  (304 -> 398 GB/s), union 32 138 -> 101, union 14 unchanged; bit-identical. Full model: forced log-probs identical
+  (KL 0.0, 735 positions), verify 41.2 -> 39.9 ms per pass (41.9 before the down change). Ornith-35B / Coder-Next
+  (m = 1, also two-bank groups) may gain the same: untested there.
+- DOWN PLACEMENT (2026-11-16): the down rows op reads bank-locally (each core one bank) but banks 0 / 4 put 12 readers
+  on row 9: per core 44 / 49 vs 34-37 us. QWEN35_MOE_DN_OFFROW=1 (place_banks_offrow: bank 4's readers on row 8, NOC1;
+  code default 0, M2.7 package / serve_m27.sh 1): down union 23 49.1 -> 34.5 us (311 -> 442 GB/s), union 32 67 -> 47,
+  bit-identical. Verify device profile (scratch attnprof/p18 vs p17, same short prompt): full-layer experts 162.7 ->
+  115.5 us, full layer 333 -> 287 us, 44 full layers 14.77 -> 12.81 ms, verify span 29.9 -> 27.9 ms; the 18 hybrid
+  layers unchanged (14.4 ms: their device time saved is spent waiting on the CPU experts). Forced 4 prompts: log-probs
+  identical (KL 0.0), verify 41.9 (morning) -> 39.7 ms with all three MoE changes. Experts now ~400-440 GB/s of the
+  ~490 ceiling; next MoE item: router + route (42 us per layer).
+- ROUTING SPLIT (2026-11-16): of the full layer's router + route 42 us, the router matmul is ~11 and the routing
+  (RouteRows: one core per row, sigmoid + bias top-8 in 64-bit fixed point on FPU-less RISC-Vs) ~31. QWEN35_ROUTE_SPLIT=P
+  (qwen36 moe_decode RouteRows + route_rows_*.cpp ROUTE_SPLIT; code default 1, M2.7 package / serve_m27.sh 8): P cores
+  per row each take E / P experts, the part-0 core merges in part order (ties keep the lower id, as before). Route table
+  byte-identical (random, tied logits; E 256 and 192): E 256 43.4 -> 10.8 us (split 8; 2: 18.7, 4: 12.7), E 192 24.1
+  -> 9.6. Full model: forced log-probs identical (KL 0.0), verify 39.7 -> 38.6 ms per pass (morning 41.9). Left: the
+  router matmul (~11 us; qwen36's boundary consumer fusion is one-row only, and M2.7 needs FP32 logits).
+- v1.8 PUBLISHED (2026-11-16, image f805268bc619 from 1442c03f805, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.7's kept as serve_default_running_v17.cmd): the MoE changes above on in the package
+  env. Served 128K card (OSL 128, greedy / sampled; ~/m27-pkg/card_run_v18.out): short 80.9 / 60.8 tok/s (v1.7 73.8 /
+  57.6), TTFT 0.59 s; 44.7K first 45.7 / 40.3 (v1.7 40.1 / 36.8), TTFT 23.8 s incl. switch; resent 47.4 / 38.9 (44.7 /
+  38.3), TTFT 1.3 s; short after long greedy 67.8 (55.3), sampled 36.5 (N = 1, noisy: 29-42 seen before). No errors.
+  Artifact v34 updated (tiles, bars, served table, v1.8 note).
+- SAMPLED VS GREEDY + SLOWDOWN AFTER LONG PROMPTS (2026-11-16, v1.8 config):
+  - Runner A/B, same 4 prompts x 128 (POC_SAMPLING=1.0,40,0.95,0 vs greedy; scratch attnprof/smpG, smpS): greedy 76.6,
+    sampled 69.0 tok/s (-10%): 2.28 vs 2.21 tokens per pass, draft 4.8 vs 6.0 ms, verify equal (24.6 / 24.8), post-
+    verify 0.4 vs 1.27 ms. Host math is small (row distribution 25 us, draw 5, accept 30); the rest is the two
+    candidate traces (top-64 per vocab chunk, ~710 us each on one die) and their readbacks. One 65536-wide chunk per
+    die is 2x faster (353 us, same top-64 incl. ties) but ttnn.topk past 32768 segfaults on mesh tensors: kept at 2.
+  - The served card's 25% sampled gap is mostly the order of the bench (sampled after the long cycles) plus a
+    slowdown after long prompts: runner short/long/short (rt1) 81.2 -> 77.2 tok/s with the device time unchanged
+    (t_read 14.5-15 ms) and host time up (draft +0.6 ms, t_lg2rows +0.3). Served: one 44.7K request took available
+    host RAM from 55 to 18 GB; the next short decode swapped in at 1-8 MB/s and read the int4 library back from disk
+    at 14-21 MB/s (62 vs ~80 tok/s). Cause: this host's ~140 GB leaked by OOM-killed runs (only a reboot frees it).
+    Re-measure the card after a reboot before optimizing further.
+  - Runner: POC_SAMPLING, POC_AFTER_LONG, ms_per_pass post / sample / dcand / vcand.
+- AFTER THE REBOOT (2026-11-16, ~140 GB freed): served v1.8 card, same order as before: short 81.6 / 66.2 tok/s
+  (greedy / sampled; sampled was 60.8 under the RAM pressure), 44.7K first 44.2 / 40.4 (TTFT 23.0 s), resent 47.3 /
+  43.0, short after long 70.7 / 55.5 (one prompt that runs ~70 anyway): no slowdown after long prompts, swap 0.
+- PREFILL (2026-11-16, bench_prefill 44.7K tokens, served long state: 40 full layers, 49K pool, 4096 segments):
+  - BENCH_LAYER_TIMES=2 (synchronized): MoE 77% (full 6.8 s, hybrid 8.8 s: routed on device 4.2, streaming 2.3),
+    attention 3.65 s. QWEN35_MOE_PF_TIMES=1 (sorted path steps): gate|up matmul 6.8 s, dispatch build 4.4 s (~1370
+    calls), down matmul 3.3, gather rows 2.4, swiglu + weights 1.5, undispatch 1.45.
+  - QWEN35_SORTED_GROUP_ROWS 64: slower (19.1 vs 17.8 s); 128: over the 65536-row dispatch limit.
+  - moe_sorted_dispatch kernel rewrite (90e8de52420): 2.44 -> 1.74 ms per 4096-token call, outputs byte-identical;
+    prefill 17.8 -> 17.3-17.6 s, logits identical.
+  - gate|up in 2 resident column blocks (01f7c9b5f12, grouped sparse matmul per_core_N < Nt; QWEN35_GU_COL_SPLIT,
+    default 1): the 1.33 MB weight block missed the 1.3 MB resident budget, so weights were re-read per 32-row
+    group. Prefill 17.3 -> 15.5 s, logits bit-identical. Not in a published image yet (dev image 95b4b894d9b9).
+- LONG-CONTEXT DECODE (2026-11-16, device profile at 44K, scratch p19 vs p18): verify span 27.9 -> 41.8 ms.
+  Attention 6.0 -> 12.5 ms (SDPA 22 -> 126 us per layer: the shared-KV rows op reads ~24 MB per layer per die,
+  ~230 GB/s vs ~490; per-core flash-decode loop over ~800 tokens, likely compute / latency bound); hybrid layers 12.4
+  -> 21.6 ms (22 vs 18 layers, ~36 vs 15-20 CPU experts per pass unprofiled, t_wait ~5 vs ~3 ms); full-layer MoE
+  7.9 -> 6.1 ms. Acceptance 1.94 vs ~2.3 tokens per pass (drafter).
+  SDPA per call (one chip, rows op, 64-128-token chunks): ~400 GB/s marginal from 16K to 64K tokens, plus ~50-60 us
+  fixed: per core ~10 us per 128-token chunk of compute (QK, softmax, PV; the reader runs ~3.5 GB/s per core) and a
+  ~30 us six-round tree reduction over 55 cores. Not pursued (user, 2026-11-16): a cheaper tree ~3-4% at 44K;
+  approx exp / lower fidelity needs the quality gate.
+- MULTI-USER COST STUDY, stage 1 (2026-11-18, ~/m27-pkg/batch, runner with the v1.11 serving env, 32K layout, auto
+  fetch, 4 short prompts x 128, first prompt dropped): DFLASH_BENCH_FOREIGN puts tokens drawn from other texts in the
+  verify rows (DFLASH_BENCH_KEEP / _CONTIG), dec_union counts distinct experts per hybrid layer. Verify ms / distinct
+  experts per hybrid layer / CPU experts per pass:
+  - rows ops + fused boundary (serving): 4 rows own drafts 24.5 / 21.5 / 16.7; 4 rows, 3 foreign 25.1 / 23.4 / 19.9.
+  - unfused boundary (DFLASH_FB=0): 4 rows 27.7 / 21.2 / 17.1.
+  - stock attention (QWEN35_ROWS_ATTN_OPS=0, unfused): 4 rows 32.2 / 21.5 / 16.9 (foreign 33.4 / 23.5 / 22.0);
+    8 rows own drafts 43.1 / 32.1 / 29.8 (2.74 tokens per pass vs 2.33: 7 drafts); 8 rows, 7 foreign 43.3 / 37.3 /
+    36.8; 8 rows = own 4 + another text's 4 consecutive 46.2 / 36.6 / 46.6 (t_wait 7.1 vs 2.6 ms).
+  Blockers found: 8 rows fail in the fused boundary (fabric_boundary ops CB config) and in rows_sdpa_decode (rows x
+  q heads per kv head must fit one tile: 8 x 6 = 48 > 32; M2.7's limit is 5 rows): multi-user verify needs per-user
+  attention calls (each user's rows against its own KV) and an 8-row boundary. Foreign tokens in ONE context raise
+  the union far less than independent users would (23 vs ~30 at 4 rows, 37 vs ~56 at 8; routing data ref_held): the
+  routing follows the context, so the MoE / CPU costs above are a floor for real multi-user rows.
+- DRAFTER ACCEPTANCE GAP (2026-11-18, scratch ~/m27-pkg/drafter): NVIDIA's card reports AL 3.05 (MT-Bench, draft
+  length 3; 3.08 at 7) for nvidia/MiniMax-M2.7-DFlash. Served v1.11 on the 80 MT-Bench first turns (greedy, 1024
+  tokens, DFLASH_STATS): 2.47 overall (writing 2.49, roleplay 2.48, reasoning 2.52, math 3.02, coding 2.70,
+  extraction 2.55, stem 2.35, humanities 2.01). CPU oracle (dflash_oracle.py + a served-text variant): the bf16
+  reference drafter on the BF16 CPU reference's taps, full context, 4 MT-Bench answers x 1024 tokens generated by
+  the server: AL 2.42 (vs the BF16 greedy tokens) / 2.45 (vs the served text) at k = 3, 2.58 / 2.62 at 5, 2.61 / 2.65
+  at 7. So the device path (bfp4 target, bfp8 drafter, window 256) loses nothing against the exact reference; the
+  3.05 does not reproduce outside NVIDIA's stack. Checked equal to ours: tap layers (their capture ids [2,17,31,45,60]
+  = hidden_states index, i.e. layer outputs 1/16/30/44/59), mask token 200054, block 8, and the module (Model-
+  Optimizer modeling_dflash.py read side by side with dflash_ref.py: same KV injection, QK-norm, RoPE, fusion).
+  Their target was vLLM FP8 (w8a8) at 4096-token training length with chat_template_train.jinja. Levers left: more
+  drafts (k 3 -> 5: +6.5% AL, verify cost grows; DK=4 was a loss before), draft trees, or fine-tuning the drafter.
+- v1.11 PUBLISHED (2026-11-18, image 1f029208ef76 from 91a8759ba10, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.10's kept as serve_default_running_v110.cmd): v1.10 + error-aware bfp4 rounding of the
+  device experts (bfp4_round.py, HYB_BFP4_ROUND=plans/bfp4_recipe.json: gate|up GPTQ with the layer Hessian, damping
+  0.1, layers 1/3/5-8/60/61 the experts' own; down GPTQ with each expert's routed Hessian, damping 0.3; rtne under 64
+  calibration tokens). Recipe picked per layer on study4's selection split; CPU model-level vs BF16 on held-out text
+  (4 code + 8 chat x 1024): KL 0.0797 -> 0.0603, top-1 0.8917 -> 0.9044, NLL 1.884 -> 1.867 (BF16 1.869). Served
+  forced 4 prompts (ref_fb2, 735 positions): top-1 0.8898 -> 0.9034, KL mean 0.0351 -> 0.0329, median 0.0192 ->
+  0.0160. Card (~/m27-pkg/q1/card_fix.out, cards_fix.out): short 83.3 / sampled 64.8 tok/s; 44.7K first 46.2 (TTFT
+  20.7 s), resent 49.5; 85K first 37.5 (TTFT 58.0 s), resent 41.4; sampled 44.7K 38.2 (N = 1; 40.5 in the run
+  before). First boot: + calibration capture (bfp4_calib.py, 24 x 1024 tokens of plans/bfp4_cal_tokens.npy through
+  the CPU reference, ~15 min, HYB_BFP4_CAL=/weight-cache/bfp4_cal, 8.8 GB) and GPTQ in every conversion (dev copies
+  dev_s152_q, 62 layer images): ~1.5 h more than v1.10. Bugs found shipping it:
+  - the hybrid state dict holds a layer's resident experts in slot order (HYB.plan, -1 = empty / sink), so gptqe
+    read row j as expert j and the all-zero sink stopped the boot (52980da52c6: patch.py passes experts=HYB.plan(L));
+  - a full disk made the image write return short and the truncated image was renamed into place (99bf6b04550:
+    _write_all / _write_image);
+  - an elastic demotion whose on-device gather does not fit loads the layer's hybrid image, and a missing one was
+    converted (GPTQ, ~65 s per layer) while the request waited: 85K TTFT 123 s (91a8759ba10: the missing hybrid image
+    is cut from the full image on the host, the gather's bytes; gate|up identical to a conversion, down differs in
+    a few bytes of a few experts: GPTQ's batched float order).
+  Disk cleanup (2026-11-18, disk full): deleted the v1.10 and older wcache entries (only v1.11's 166 images remain),
+  dev_s152, the v1.10 / v1.9 images and the dev runner's ~/.cache/hybrid-moe/minimax_m27_* + wcache_m27 (296 GB;
+  run_m27_dflash.sh's /hyblib libraries must be rebuilt to use it). A v1.10 rollback is a full first boot.
+- v1.10 BUILT, SERVING HERE, NOT PUSHED TO HF (2026-11-17, image 84de706535cf from e39472160b3; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.9's kept as serve_default_running_v19.cmd): v1.9 + the suffix drafts. The first build
+  (f0c990a4a674, from 65f8c420c5f) failed at engine start: the manifest did not list suffix_draft.py. Served card
+  (128K, ~/m27-pkg/card110*_128k.out): 44.7K first 44.7 tok/s (TTFT 20.8 s), resent 50.8; 85K first 34.3 (TTFT 56.1
+  s), resent 41.3; sampled short 65.2, 44.7K 41.3. Short-prompt decode, same day, 3-5 x 8 runs each: v1.9 79.6-80.9,
+  v1.10 78.4-81.1 (the v1.9 card's 82.3 was a different day). A served code edit (code_edit_hints, 1500 tokens):
+  147 of 576 passes used the suffix proposal (2.95 tokens accepted each), and the request's running average rose
+  from ~69 to 80.8 tok/s once the copy began; chat requests used it on 0-2 passes.
+- bfp4 packer (2026-11-17, ~/m27-pkg/bfp4q/t_pack.py on one p300 board; one chip alone fails: the CUSTOM cluster type
+  needs a mesh descriptor): ttnn.from_torch(bfloat4_b) keeps values already on the bfp4 grid exactly (exponent-search
+  RTN and GPTQ outputs), so a better rounding needs no packer or kernel change; it only replaces round_sig + the
+  packer's RTN in build_dev_experts.py and the fused-weight build.
+- v1.9 PUBLISHED (2026-11-16, image b07f953e02c9 from 2d154a47974, serving here; launch cmd ~/m27-pkg/
+  serve_default_running.cmd, v1.8's kept as serve_default_running_v18.cmd): + the dispatch kernel rewrite and the
+  gate|up column split. Served card (~/m27-pkg/card_run_v19.out, greedy / sampled): 128K short 82.3 / 67.1 tok/s,
+  TTFT 0.60 s; 44.7K first 43.4 / 40.1 (TTFT 21.6 s, was 23.0), resent 49.1 / 42.5 (1.3-1.5 s); 85K first 33.9
+  (TTFT 64.4 s), resent 39.0 (2.6 s). 64K short 74.5 / 60.0, 44.7K first TTFT 16.5 s 42.5 / 38.5, resent 46.3 / 43.7.
+  32K short 79.7 / 62.6, 23.5K TTFT 8.3 s 52.2 / 45.4, resent 57.4 / 42.1. bench_prefill (44 full layers): 2K 1.34 s,
+  8K 2.73, 16K 5.0. No errors. Artifact v37: every number refreshed to v1.9 (runner and no-spec bars dropped).
 - `hybrid/stream.py`: prefill streams missed experts to the device (8K prompt prefill ~11 s).
 - Prefill speed-up (2026-11-09, `bench_prefill.py` / `run_prefill_bench.sh`, `runs/m27/pf_full2`, 128K profile,
   NS=128): 4096-token segments (`QWEN35_PREFILL_SEGMENT`), sentinel ids for the picks outside a staging round (no row,
@@ -145,9 +371,13 @@ Pieces (all traced, per-prompt re-capture):
     tokens): 70-100% of rows fell back to full logits (10 ms); 64 per 32K chunk never does.
   - Greedy is not bit-reproducible across requests: the experts' device (bfp4) / host (int4) placement follows earlier
     requests, so near-tied tokens can flip; every variant is coherent after the fix.
+  - Packaging: the manifest lists the hybrid_moe top-level modules one by one (code paths): a new module imported at
+    serve time (suffix_draft.py, 2026-11-17) must be added there, or the engine fails with ModuleNotFoundError.
   - Packaging: tt-model-hybrid.yaml packages from the ~/m27-hybrid worktree (source.tt_metal): move it to the commit to
     ship (`git checkout --detach <sha>`) or the image carries old code (a first v1.5 build did). Disk was 100% full:
     old package images + `docker builder prune -af` freed ~130 GB.
+    2026-11-16: wcache images and pin regions not read since 2026-11-14 (pre-v1.5 keys; dev-run pins, whose key holds
+    the dev dir path) deleted from both hard-linked dirs, 101 GiB; a missing image or pin only re-converts / re-pins.
   - Eval harness: serve/evalq.py SAMPLE_SEED (random draw), TEMPERATURE / TOP_P / TOP_K / SEED / SYSTEM, AIME 2026.
 - ROUND 9 (2026-11-15): v1.5 package, evals, first boot, license.
   - Accuracy (package image e2c3eb6fe803, p300x2-64k, T 1.0 / top-p 0.95 / top-k 40, MiniMax system prompt,
@@ -526,9 +756,10 @@ Device memory: 4-layer 397B at C=224 = 2.36 GiB/die; full model ≈ 26 GiB of 31
 - vLLM eager: `--override-tt-config '{"trace_mode":"none"}'`; overlay enters via `serve/sitecustomize.py` (HYB_ENABLE=1).
 
 ## Next
-- Finish M2 (full 397B coherent), then re-run with HYB_PLAN from its recorded routing.
-- M5 vLLM eager serving (sitecustomize); then M4 speed (per-layer traces).
-- Later: turn the overlay into a `qwen_qwen3_5_397b_a17b` autoport in `~/FORK-tt-metal` (user's bring-up fork).
+- MiniMax-M2.7 (current work): `docs/M27_ROADMAP.md` covers the bottleneck breakdown, long-context attention,
+  multi-user serving (measured costs, blockers, staged plan) and the drafter findings.
+- 397B (paused since 2026-11-06): finish M2 (full 397B coherent), then re-run with HYB_PLAN from its recorded routing;
+  M5 vLLM eager serving, then M4 speed; later an autoport in `~/FORK-tt-metal`.
 
 ## Log
 - 2026-11-05: quality vs real 397B measured (skip 0.15 costs ~6 pts top-1); HYB_LOWBIT 2-bit misses added.

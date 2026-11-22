@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Tenstorrent USA, Inc.
 """Device-format copies of the experts that can miss, for HYB_LRU fetches (hybrid/fetch.py): per (layer, expert) the
 TP-sharded fused layout of the port (minimaxai_minimax_m2_7/tt/moe.py: gate|up packed per die as [up_d | gate_d],
-down rows per die), rounded to 5 significant bits like the fused weights (moe_decode.fused.round_sig) and converted to
-bfp4 per die; the 4 die shards are aggregated into one host tensor and dumped as <out>/<L>_<e>_gu.tensorbin /
+down rows per die), rounded to 5 significant bits like the fused weights (moe_decode.fused.round_sig; or first onto the bfp4 grid by
+HYB_BFP4_ROUND, bfp4_round.py, like the port's EXPERT_ROUND_HOOK) and converted to bfp4 per die; the 4 die shards are aggregated into one host tensor and dumped as <out>/<L>_<e>_gu.tensorbin /
 <L>_<e>_dn.tensorbin. ttnn's bfp4 packing needs the cluster (run in the image with the device attached; no mesh is
 opened, but run it while no other job uses the device).
 
@@ -23,6 +23,7 @@ from safetensors import safe_open
 import ttnn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bfp4_round import round_experts  # noqa: E402
 from build_int4_library import dequant  # noqa: E402
 
 TP, SIG_BITS = 4, 5
@@ -104,21 +105,35 @@ def main():
     # HYB_DEV_PARTS: which copies to write (default "gu,dn"; "dn": the own-format downs of HYB_FETCH_DN_EXPERTS, whose
     # gate/up the main copies already hold)
     parts = set(os.environ.get("HYB_DEV_PARTS", "gu,dn").split(","))
+    def one(L, e):  # (gate [N,H], up [N,H], down [H,N]) of one expert
+        if port_sd is not None:  # the port owns the checkpoint layout
+            gu, down = port_sd.one_expert(L, e)
+            gu, down = gu.float(), down.float()
+            return gu[: gu.shape[0] // 2], gu[gu.shape[0] // 2 :], down
+        pre = pre_fmt.format(L=L, e=e)
+        return tuple(get(pre + n + ".weight") for n in names)
+
     for L in layers:
         t0 = time.time()
-        ids = sorted(order[L, int(S) :].tolist())
-        done = 0
-        for e in ids:
+        ids = [
+            e
+            for e in sorted(order[L, int(S) :].tolist())
+            if not os.path.exists(os.path.join(out, f"{L}_{e}_dn.tensorbin"))
+        ]
+        rounded = None
+        if ids and os.environ.get("HYB_BFP4_ROUND"):  # the layer's experts round together (the GPTQ methods batch them)
+            w = [one(L, e) for e in ids]
+            gu = torch.stack([torch.cat([g, u]) for g, u, _ in w])  # [n, 2N, H]
+            dn = torch.stack([d for _, _, d in w])  # [n, H, N]
+            del w
+            qg = round_experts(L, "gu", gu, experts=ids)  # grid values, or None (the default rounding)
+            qd = round_experts(L, "dn", dn, experts=ids, gate_up=gu)
+            gu, dn = (gu if qg is None else qg), (dn if qd is None else qd)
+            N = gu.shape[1] // 2
+            rounded = lambda j: (gu[j, :N], gu[j, N:], dn[j])  # noqa: E731
+        for j, e in enumerate(ids):  # without HYB_BFP4_ROUND one expert at a time (a layer of fp32 experts is many GB)
             p = os.path.join(out, f"{L}_{e}")
-            if os.path.exists(p + "_dn.tensorbin"):
-                continue
-            if port_sd is not None:
-                gu, down = port_sd.one_expert(L, e)
-                gu, down = gu.float(), down.float()
-                gate, up = gu[: gu.shape[0] // 2], gu[gu.shape[0] // 2 :]
-            else:
-                pre = pre_fmt.format(L=L, e=e)
-                gate, up, down = (get(pre + n + ".weight") for n in names)  # [N,H] [N,H] [H,N]
+            gate, up, down = rounded(j) if rounded else one(L, e)  # [N,H] [N,H] [H,N]
             N, H = gate.shape
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]
@@ -129,9 +144,8 @@ def main():
             if "gu" in parts:
                 dump(p + "_gu.tensorbin", round_sig(packed).reshape(1, 1, H, -1), -1, layer_dtype(L, "gate_up"))
             dump(p + "_dn.tensorbin", round_sig(down.T.contiguous()).reshape(1, 1, N, H), -2, layer_dtype(L, "down"))
-            done += 1
         handles.clear()
-        print(f"layer {L}: {done} of {len(ids)} experts in {time.time() - t0:.0f}s", flush=True)
+        print(f"layer {L}: {len(ids)} experts in {time.time() - t0:.0f}s", flush=True)
 
 
 if __name__ == "__main__":

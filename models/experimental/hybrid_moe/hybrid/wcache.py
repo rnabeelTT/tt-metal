@@ -25,21 +25,45 @@ VERSION = 1
 _DT = {"DataType.BFLOAT4_B": ttnn.bfloat4_b, "DataType.BFLOAT8_B": ttnn.bfloat8_b}
 
 
+def _write_all(path, mv):
+    """Write every byte of mv to path. One unbuffered write() may write less (a full disk can return a short count
+    rather than raise), and a short image renamed into place breaks every later start."""
+    with open(path, "wb", buffering=0) as f:
+        done = 0
+        while done < len(mv):
+            w = f.write(mv[done:])
+            if not w:
+                raise OSError(f"wcache: write to {path} stopped at {done} of {len(mv)} bytes")
+            done += w
+
+
+def _write_image(path, mv):
+    """mv as the image file path: written in full to path.tmp, then renamed (the .tmp is removed on an error)."""
+    tmp = path + ".tmp"
+    try:
+        _write_all(tmp, mv)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+    os.replace(tmp, path)
+
+
 class ExpertImageCache:
     def __init__(self, root, resident_fn, tag=""):
         self.root, self.resident_fn, self.tag = root, resident_fn, tag
         os.makedirs(root, exist_ok=True)
         self.px = None
         self.regions = {}  # bytes -> (region id, uint8 view)
-        self.hits = self.misses = self.gathered = self.gather_skipped = 0
-        self.t_load = self.t_store = self.t_gather = 0.0
+        self.hits = self.misses = self.gathered = self.gather_skipped = self.sliced = 0
+        self.t_load = self.t_store = self.t_gather = self.t_slice = 0.0
         self.specs = {}  # layer -> the spec of its last build (a full layer's, for gather())
         self.gather_src = {}  # layer -> (up_gate, down) of its full build, kept by an elastic demotion (gather())
         self.gather_check = os.environ.get("HYB_GATHER_CHECK") == "1"
 
     # ------------------------------------------------------------------ helpers
-    def _key(self, layer, spec):
-        ids = [int(e) for e in self.resident_fn(layer)]
+    def _key(self, layer, spec, ids=None):
+        ids = [int(e) for e in (self.resident_fn(layer) if ids is None else ids)]
         blob = json.dumps({"v": VERSION, "tag": self.tag, "layer": int(layer), "ids": ids, **spec}, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
@@ -84,9 +108,9 @@ class ExpertImageCache:
             if out is not None:
                 self.specs[layer] = spec
                 return out
-        self.specs[layer] = spec
+        prev, self.specs[layer] = self.specs.get(layer), spec
         pgu, pdn = self._paths(layer, self._key(layer, spec))
-        if not (os.path.exists(pgu) and os.path.exists(pdn)):
+        if not (os.path.exists(pgu) and os.path.exists(pdn)) and not self._slice_full_image(mesh, layer, spec, prev):
             self.misses += 1
             return None
         bad = [p for p in (pgu, pdn) if os.path.getsize(p) != self._expected_bytes(mesh, spec, p == pgu)]
@@ -131,6 +155,40 @@ class ExpertImageCache:
         ttnn.deallocate(t)
         return px.tp * n
 
+    def _slice_full_image(self, mesh, layer, spec, full):
+        """A demoted layer's missing hybrid image cut from its full image on the host, the bytes gather() builds on the
+        device: per device shard, slot s takes expert resident_fn(layer)[s]'s contiguous tiles (an empty slot, id < 0,
+        zero bytes: an all-zero bfp tile). full: the spec of the layer's previous (full) build; only when its image
+        exists and matches spec but for the expert count.
+        Converting instead re-reads the checkpoint and reruns HYB_BFP4_ROUND's rounding (~1 min per layer for gptq)
+        while a request waits. -> whether the image now exists."""
+        if full is None or {k: v for k, v in full.items() if k != "E"} != {k: v for k, v in spec.items() if k != "E"}:
+            return False
+        E_full = int(full["E"])
+        ids = [int(e) for e in self.resident_fn(layer)]
+        src = self._paths(layer, self._key(layer, full, ids=list(range(E_full))))
+        if len(ids) != spec["E"] or not all(os.path.exists(p) for p in src):
+            return False
+        t0 = time.perf_counter()
+        tp = self._pinx(mesh).tp
+        for sp, dp in zip(src, self._paths(layer, self._key(layer, spec))):
+            with open(sp, "rb") as f:
+                data = f.read()
+            n_full = len(data) // tp
+            if len(data) != tp * n_full or n_full % E_full:
+                raise RuntimeError(f"wcache: {sp} holds {len(data)} bytes: not {tp} shards of {E_full} experts")
+            c = n_full // E_full
+            zero = bytes(c)
+            out = bytearray()
+            for d in range(tp):
+                base = d * n_full
+                for e in ids:
+                    out += zero if e < 0 else data[base + e * c : base + (e + 1) * c]
+            _write_image(dp, memoryview(out))
+        self.sliced += 1
+        self.t_slice += time.perf_counter() - t0
+        return True
+
     def gather(self, mesh, layer, spec, up_gate, down):
         """An elastic demotion's hybrid tensors from the layer's full ones, on the device: slot s holds expert
         resident_fn(layer)[s] (ttnn.slice along the expert dim), an empty slot (id < 0: LRU / sink) a zero expert, and
@@ -151,6 +209,12 @@ class ExpertImageCache:
         out = []
         for t in (up_gate, down):
             shp = [int(v) for v in t.shape]  # per device [1, E_full, rows, cols]
+            # the concat output's block is reserved before the per-expert slices are allocated: first-fit slices would
+            # otherwise take the largest free block and leave the concat no contiguous room (a second elastic round
+            # trip in a fragmented DRAM: OOM, 2026-11-15); freed right before the concat, which then fits in it
+            reserve = ttnn.allocate_tensor_on_device(
+                ttnn.Shape([1, len(ids), shp[2], shp[3]]), t.dtype, ttnn.TILE_LAYOUT, mesh, ttnn.DRAM_MEMORY_CONFIG
+            )
             zero, parts = None, []
             for e in ids:
                 if e < 0:
@@ -167,6 +231,7 @@ class ExpertImageCache:
                     parts.append(
                         ttnn.slice(t, [0, e, 0, 0], [1, e + 1, shp[2], shp[3]], memory_config=ttnn.DRAM_MEMORY_CONFIG)
                     )
+            ttnn.deallocate(reserve)
             g = ttnn.concat(parts, dim=1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
             for p in {id(p): p for p in parts}.values():
                 ttnn.deallocate(p)
@@ -181,7 +246,7 @@ class ExpertImageCache:
 
     def _gather_fits(self, mesh, up_gate, n_slots):
         """Whether the DRAM has room for a gather next to the full tensors it reads: the slices plus the contiguous
-        concat output of the larger (gate|up) tensor, with 25% margin. The image path frees the full tensors first, so
+        concat output of the larger (gate|up) tensor (reserved first, see gather), with 25% margin. The image path frees the full tensors first, so
         a tight DRAM (many elastic switches fragment it) takes that path instead."""
         mv = ttnn.get_memory_view(mesh, ttnn.BufferType.DRAM)
         from .pin import tile_bytes
@@ -229,21 +294,12 @@ class ExpertImageCache:
             dst, n = px.dst(t)
             rid, buf = self._region(tp * n)
             px.read(dst, rid, [d * n for d in range(tp)])
-            tmp = path + ".tmp"
-            mv = memoryview(buf)[: tp * n]
-            with open(tmp, "wb", buffering=0) as f:
-                done = 0
-                while done < len(mv):  # a raw write may write less than asked (> ~2 GB, ENOSPC) without raising
-                    w = f.write(mv[done:])
-                    if not w:
-                        raise OSError(f"wcache: write of {tmp} stalled at {done} of {len(mv)} bytes")
-                    done += w
-            os.replace(tmp, path)
+            _write_image(path, memoryview(buf)[: tp * n])
         self.t_store += time.perf_counter() - t0
 
     def summary(self):
         return (
             f"HYB_WCACHE: {self.hits} layers loaded from images ({self.t_load:.1f} s), {self.misses} converted "
             f"(image writes {self.t_store:.1f} s), {self.gathered} gathered on the device ({self.t_gather:.1f} s, "
-            f"{self.gather_skipped} skipped for DRAM room)"
+            f"{self.gather_skipped} skipped for DRAM room), {self.sliced} cut from full images ({self.t_slice:.1f} s)"
         )

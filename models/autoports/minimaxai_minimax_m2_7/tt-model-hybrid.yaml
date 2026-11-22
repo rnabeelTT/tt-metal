@@ -36,10 +36,15 @@ source:
     - models/experimental/hybrid_moe/serve/sitecustomize.py
     - models/experimental/hybrid_moe/dflash_serve.py
     - models/experimental/hybrid_moe/dflash_tt.py
+    - models/experimental/hybrid_moe/suffix_draft.py
+    - models/experimental/hybrid_moe/bfp4_round.py
+    - models/experimental/hybrid_moe/bfp4_calib.py
     - models/experimental/hybrid_moe/ref_m27.py
     - models/experimental/hybrid_moe/build_int4_library.py
     - models/experimental/hybrid_moe/build_dev_experts.py
     - models/experimental/hybrid_moe/plans/m27_plan.npz
+    - models/experimental/hybrid_moe/plans/bfp4_cal_tokens.npy
+    - models/experimental/hybrid_moe/plans/bfp4_recipe.json
     - models/demos/blackhole/qwen36
     - models/demos/qwen3_vl
     - models/experimental/gated_attention_gated_deltanet
@@ -92,10 +97,16 @@ serve:
     # hybrid) are copied from the checkpoint on the first boot into the weight cache: int4 for the CPU, bfp4 for PCIe
     # fetches (hybrid/firstboot.py; byte-identical to the earlier published copies). Only official weights download.
     HYB_LIB: /weight-cache/int4_s152
-    HYB_DEV_EXPERTS: /weight-cache/dev_s152
+    HYB_DEV_EXPERTS: /weight-cache/dev_s152_q
     HYB_LIB_KEYS: minimax_m2
     HYB_BUILD_STATIC: "152"
     HYB_BUILD_LAYERS: "0,1,3,19,21,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,40,41,42,43,44,45,46,47,48,50,51,52,53,54,55,56,57,58,59,60,61"
+    # error-aware bfp4 rounding of the routed experts (bfp4_round.py): GPTQ per layer recipe (plans/bfp4_recipe.json)
+    # from a calibration capture the first boot runs on the CPU reference (bfp4_calib.py, 24 x 1024 tokens of tt-metal
+    # sources). vs plain rounding, KL to the BF16 model 0.080 -> 0.060 (CPU reference, 12 held-out sequences); the
+    # first boot spends ~1.5 h more on the CPU; the device copies above and the images below depend on it.
+    HYB_BFP4_ROUND: /opt/tt-metal/models/experimental/hybrid_moe/plans/bfp4_recipe.json
+    HYB_BFP4_CAL: /weight-cache/bfp4_cal
     # expert placement: per layer, the routed mass of reference runs (ranks the static experts) and the build order
     # (plans/m27_plan.npz, 85 KB of statistics, no weights)
     HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/m27_plan.npz
@@ -122,8 +133,11 @@ serve:
     QWEN35_PREFILL_SEGMENT: "4096"
     QWEN35_PREFILL_GROUP: "8"
     QWEN35_PREFIX_CACHING: "1"
-    QWEN35_MOE_DN_READERS: "4"
-    QWEN35_MOE_DN_CHUNK: "4"
+    QWEN35_MOE_DN_READERS: "6"
+    QWEN35_MOE_DN_CHUNK: "2"
+    QWEN35_MOE_GU_OFFROW: "2"
+    QWEN35_MOE_DN_OFFROW: "1"
+    QWEN35_ROUTE_SPLIT: "8"
     # shared-KV rows SDPA for the verify from 4096 context positions (both variants compiled at startup and after every
     # elastic switch): long-context decode ~+30% at 45K
     QWEN35_ROWS_SDPA_SHARED_FROM: "4096"
@@ -134,6 +148,7 @@ serve:
     QWEN35_EXT_SPEC_K: "3"
     DFLASH_TP: "1"
     DFLASH_WINDOW: "256"
+    DFLASH_FB: "1"
     DFLASH_WARMUP: "384"
 
 # 4 Blackhole dies, single user, DFlash speculative decoding. The profiles trade context for host RAM
@@ -248,7 +263,7 @@ card:
 
     | profile (QB2 / 4 x p150) | max context | layout | free host RAM | short decode, sampled / greedy | when to pick it |
     | --- | --- | --- | --- | --- | --- |
-    | `p300x2-128k` (default) / `p150x4-128k` | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~54 / ~69 tok/s | the default: short chats at full speed, long documents / agent sessions when they come |
+    | `p300x2-128k` (default) / `p150x4-128k` | 131,072 | elastic: 44 full layers, down to 20 as a request needs | ~85 GB | ~65 / ~83 tok/s | the default: short chats at full speed, long documents / agent sessions when they come |
     | `p300x2-64k` / `p150x4-64k` | 65,536 | 36 full, 26 hybrid | ~57 GB | ~51 / ~62 tok/s | steady long contexts without switch pauses |
     | `p300x2-32k` / `p150x4-32k` | 32,768 | 44 full, 18 hybrid | ~43 GB | ~54 / ~67 tok/s | less host RAM; a machine with other jobs running |
 
@@ -261,12 +276,14 @@ card:
 
     The first boot downloads ~235 GB (MiniMax-M2.7 and the drafter), builds the host copies of the experts that can miss
     from it (69 GB: int4 for the CPU and bfp4 for streaming to the chips, ~13 minutes on the QB2; byte-identical to
-    the copies earlier versions downloaded) and converts the experts into device images (about an hour); later boots load
+    the copies earlier versions downloaded), runs ~24K tokens of calibration text through a CPU reference of the model
+    (~15 minutes: the device experts are rounded to 4 bits with GPTQ against it) and converts the experts into device
+    images (about 2 hours with that rounding); later boots load
     them in ~40 s and are ready in 3-7 minutes. With the elastic profile, a request that needs more than 32K tokens of
     context waits for a switch first: ~2-5 s up to ~50K tokens, ~7-9 s at ~85K, and the next short request switches
     back (~3 s from 50K, ~9 s from 85K). A layer moving to hybrid is gathered from its on-device experts; only when the
-    device memory is too fragmented for that does it load a device image, which a fresh install converts once (~20 s
-    per layer).
+    device memory is too fragmented for that does it load a device image, cut from the layer's full image on the
+    host when it is missing (~1 s).
   usage: |
     A request that sets no sampling parameters is sampled with MiniMax's recommended settings, temperature 1.0, top_p
     0.95, top_k 40 (the settings of the evals under Performance). Sampling is exact (speculative sampling: the output
@@ -284,6 +301,7 @@ card:
     | GPQA-Diamond, thinking | 86.7% (52/60) | 87.4-89.8 | 60 random of 198 |
     | AIME 2026, thinking | 86.7% (13/15; 1 hit the 60K-token cap) | 94.2 | 15 random of 30 |
     | IFEval, prompt-level strict / loose | 87.3% / 90.7% (instruction-level strict 90.1%) | — | 150 random of 541 |
+    | Top-1 token agreement with the BF16 CPU reference, the model's own continuations of 4 chat prompts (735 tokens) | 0.903 (KL 0.033) | — | v1.11; 0.890 / 0.035 with plain rounding |
     | Top-1 token agreement, teacher forced vs the BF16 CPU reference | 0.847 (confident tokens 0.935) | — | 8 x 1000 tokens, held out |
 
     Evals ran on this package (`p300x2-64k`) with MiniMax's recommended settings (temperature 1.0, top_p 0.95, top_k
@@ -305,22 +323,22 @@ card:
     | p300x2-64k | greedy | 44,767 | 128 | 1 | 1 | 19.3 s | 2,318 | 37.0 | 22.7 s |
     | p300x2-64k, prompt resent | greedy | 44,767 | 128 | 1 | 1 | 1.8 s | — | 39.9 | 5.0 s |
     | p300x2-64k, prompt resent | sampled | 44,767 | 128 | 1 | 2 | 1.6 s | — | 36.3 | 5.1 s |
-    | p300x2-128k | greedy | ~50 | 128 | 1 | 32 | 0.60 s | — | 68.9 | 2.5 s |
-    | p300x2-128k | sampled | ~50 | 128 | 1 | 16 | 0.65 s | — | 53.7 | 3.1 s |
-    | p300x2-128k, incl. the ~2-5 s switch | greedy | 44,767 | 128 | 1 | 2 | 24.0 s | 1,868 | 40.8 | 27.1 s |
-    | p300x2-128k, incl. the switch | sampled | 44,767 | 128 | 1 | 1 | 20.1 s | 2,232 | 36.8 | 23.5 s |
-    | p300x2-128k, prompt resent | greedy | 44,767 | 128 | 1 | 2 | 1.3 s | — | 42.6 | 4.3 s |
-    | p300x2-128k, prompt resent | sampled | 44,767 | 128 | 1 | 1 | 1.2 s | — | 38.3 | 4.5 s |
-    | p300x2-128k, incl. the ~7-9 s switch | greedy | 85,516 | 128 | 1 | 2 | 61.1 s | 1,400 | 31.2 | 65.1 s |
-    | p300x2-128k, prompt resent | greedy | 85,516 | 128 | 1 | 2 | 1.1 s | — | 33.6 | 4.9 s |
+    | p300x2-128k | greedy | ~50 | 128 | 1 | 32 | 0.60 s | — | 83.3 | 2.1 s |
+    | p300x2-128k | sampled | ~50 | 128 | 1 | 16 | 0.62 s | — | 64.8 | 2.7 s |
+    | p300x2-128k, incl. the ~2-5 s switch | greedy | 44,794 | 128 | 1 | 2 | 20.7 s | 2,161 | 46.2 | 23.5 s |
+    | p300x2-128k, incl. the switch | sampled | 44,794 | 128 | 1 | 1 | 23.3 s | 1,926 | 38.2 | 26.6 s |
+    | p300x2-128k, prompt resent | greedy | 44,794 | 128 | 1 | 2 | 1.5 s | — | 49.5 | 4.1 s |
+    | p300x2-128k, prompt resent | sampled | 44,794 | 128 | 1 | 1 | 1.4 s | — | 44.7 | 4.2 s |
+    | p300x2-128k, incl. the ~7-9 s switch | greedy | 85,113 | 128 | 1 | 2 | 58.0 s | 1,467 | 37.5 | 61.4 s |
+    | p300x2-128k, prompt resent | greedy | 85,113 | 128 | 1 | 2 | 1.5 s | — | 41.4 | 4.6 s |
 
-    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, warm caches,
-    2026-11-14 (`serve/card_bench.py`, `--sampled` for the sampled rows: temperature 1.0, top_p 0.95, top_k 40, the
+    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, warm caches:
+    the p300x2-128k rows on this version (v1.11, 2026-11-18), the 32k / 64k rows on an earlier one (2026-11-14; the
+    decode path has been sped up since, so they are low)
+    (`serve/card_bench.py`, `--sampled` for the sampled rows: temperature 1.0, top_p 0.95, top_k 40, the
     recommended settings); the ~50-token rows are the 8 short chat prompts per run. Prefill tok/s = prompt tokens / TTFT
     (the elastic rows include the switch). Sampled decode is ~15-20% slower than greedy at short context (fewer drafted
-    tokens accepted: ~2.07 vs ~2.26 per pass, plus ~3 ms per pass of candidate read-back) and ~5-10% at 45K. The 85K
-    rows ran with `HYB_RAM_CHECK=warn` on a host with less free RAM than the 128K profile asks for; a later 85K request
-    on that host was killed by the kernel's OOM killer (host RAM, see Prerequisites). Prefill falls back to 2048-token
+    tokens accepted: ~2.07 vs ~2.26 per pass, plus ~3 ms per pass of candidate read-back) and ~5-10% at 45K. Prefill falls back to 2048-token
     segments (~20% slower prefill, identical logits) when elastic switches leave the device memory fragmented, which
     shows in the 45K elastic TTFT. Decode varies about ±5% between runs with the text (speculative acceptance).
     Long-context decode uses a shared-KV multi-row attention for the speculative verify from 4096 tokens (vs the BF16
@@ -330,7 +348,7 @@ card:
   limitations: |
     - One user at a time; batching is not supported by the hybrid path.
     - Decode speed depends on the text: the fewer of a token's experts are on the device, the more the CPU does.
-      Long contexts run with fewer all-on-device layers (greedy about 41 tok/s at 45K and 31-34 tok/s at 85K vs ~62-69
+      Long contexts run with fewer all-on-device layers (greedy about 46 tok/s at 45K and ~37 tok/s at 85K vs ~83
       short).
     - Elastic profile: a request that crosses the 32K layout waits for a layer switch (see Quickstart), and the next
       short request switches back.

@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Decode layer boundary, pack + to rows (fabric_boundary/ops.py: FabricBoundary).
-// FB_PACK_ROWS: first packs row 0 of output tiles tile0 .. tile0 + tiles - 1 of this device's partial sum (any TensorAccessor
-// layout, BF16) flat into this device's slot of the site's receive buffer on the boundary core (2 x 32 B per tile) and
-// increments program semaphore 1 there (the sender publishes the slot once every to-rows core did).
-// Then, once the boundary core has the normed
-// output (program semaphore 0 incremented by fb_reader.cpp), builds `tiles` 32x32 BF16 tiles of the [1, 1, 32, H]
-// output, row 0 = values 32 t .. 32 t + 31 of the flat vector on the boundary core, rows 1..31 zero, and writes them
-// to output pages tile0 .. tile0 + tiles - 1 (any TensorAccessor layout). After gpt-oss's boundary_to_rows.cpp.
+// FB_PACK_ROWS: first packs row 0 of output tiles tile0 .. tile0 + tiles - 1 of this device's partial sum (any
+// TensorAccessor layout, BF16) flat into this device's slot of the site's receive buffer on the boundary core (2 x 32 B
+// per tile) and increments program semaphore 1 there (the sender publishes the slot once every to-rows core did). Then,
+// once the boundary core has the normed output (program semaphore 0 incremented by fb_reader.cpp), builds `tiles` 32x32
+// BF16 tiles of the [1, 1, 32, H] output, row 0 = values 32 t .. 32 t + 31 of the flat vector on the boundary core,
+// rows 1..31 zero, and writes them to output pages tile0 .. tile0 + tiles - 1 (any TensorAccessor layout). After
+// gpt-oss's boundary_to_rows.cpp.
 //
-// runtime args: [x_flat_addr, out_addr, tile0, (FB_PACK_ROWS) partial_addr, slot_addr]
+// FB_RES_ROWS: then the same for the boundary's residual' (flat, on the boundary core: packed before the normed output,
+// so complete once program semaphore 0 fires) into a second [1, 1, 32, H] output (the residual rows a caller taps).
+//
+// runtime args: [x_flat_addr, out_addr, tile0, (FB_PACK_ROWS) partial_addr, slot_addr, (FB_RES_ROWS) res_flat_addr,
+// res_out_addr]; compile-time: ..., (FB_RES_ROWS) the residual output's TensorAccessorArgs last
 
 #include <stdint.h>
 
@@ -29,6 +33,15 @@ void kernel_main() {
 #ifdef FB_PACK_ROWS
     constexpr auto part_args = TensorAccessorArgs<out_args.next_compile_time_args_offset()>();
     constexpr uint32_t cb_pk = get_compile_time_arg_val(part_args.next_compile_time_args_offset());
+#endif
+#ifdef FB_RES_ROWS
+#ifdef FB_PACK_ROWS
+    constexpr auto res_args = TensorAccessorArgs<part_args.next_compile_time_args_offset() + 1>();
+    constexpr uint32_t res_arg0 = 5;
+#else
+    constexpr auto res_args = TensorAccessorArgs<out_args.next_compile_time_args_offset()>();
+    constexpr uint32_t res_arg0 = 3;
+#endif
 #endif
 
     constexpr uint32_t tile_bytes = 2048;
@@ -101,4 +114,30 @@ void kernel_main() {
         noc_async_write(dst0 + t * tile_bytes, s_out.get_noc_addr(tile0 + t), tile_bytes);
     }
     noc_async_write_barrier();
+#ifdef FB_RES_ROWS
+    // rows 0 .. FB_ROWS-1 of the tiles are overwritten, the zero rows stay
+    const uint32_t res_flat = get_arg_val<uint32_t>(res_arg0);
+    for (uint32_t r = 0; r < FB_ROWS; ++r) {
+        noc_async_read(
+            get_noc_addr(x_noc_x, x_noc_y, res_flat + r * FB_ROW_BYTES + tile0 * 2 * half_row),
+            gx + r * 64 * tiles,
+            64 * tiles);
+    }
+    noc_async_read_barrier();
+    for (uint32_t t = 0; t < tiles; ++t) {
+        const uint32_t base = dst0 + t * tile_bytes;
+        for (uint32_t r = 0; r < FB_ROWS; ++r) {
+            const uint32_t roff = (r / 16) * 1024 + (r % 16) * 32;
+            const uint64_t src = get_noc_addr(gx + r * 64 * tiles + 64 * t);
+            noc_async_read(src, base + roff, half_row);
+            noc_async_read(src + half_row, base + roff + face_bytes, half_row);
+        }
+    }
+    noc_async_read_barrier();
+    const auto s_res = TensorAccessor(res_args, get_arg_val<uint32_t>(res_arg0 + 1), tile_bytes);
+    for (uint32_t t = 0; t < tiles; ++t) {
+        noc_async_write(dst0 + t * tile_bytes, s_res.get_noc_addr(tile0 + t), tile_bytes);
+    }
+    noc_async_write_barrier();
+#endif
 }

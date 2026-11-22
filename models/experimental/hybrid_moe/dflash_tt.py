@@ -368,6 +368,8 @@ class DFlashDrafterTraced(DFlashDrafterTT):
 # each. A chunk can hide part of a row's top-k only if all its CAND_K candidates are in it, so top-k <= CAND_K is always
 # exact (common tokens have low ids: with 32 per chunk the top 40 often filled die 0's first chunk). dflash_serve's
 # cand_probs still checks it per row and reads the row's logits otherwise (top-k > 64, or no top-k).
+# (One 65536-wide chunk per die is 2x faster on one chip, 353 vs 710 us, but ttnn.topk past the 32768 multi-core bound
+# segfaults on mesh tensors, 2026-11-16.)
 CAND_K, CAND_CHUNKS = 64, 2
 
 

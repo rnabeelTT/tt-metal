@@ -277,6 +277,7 @@ class HybridState:
             "t_up_conv": 0.0,
             "t_lib_load": 0.0,
             "dec_picks": 0,
+            "dec_union": 0,
             "dec_hits": 0,
             "pf_act": 0,
             "pf_pred": 0,
@@ -808,6 +809,21 @@ def install():
         _moe = _port("moe")
         _moe.EXPERT_WEIGHT_HOOK = HYB.wcache
         _sys.modules[_moe.Qwen35MoE.__module__].EXPERT_WEIGHT_HOOK = HYB.wcache
+    if os.environ.get("HYB_BFP4_ROUND"):  # error-aware bfp4 rounding of the routed experts (bfp4_round.py)
+        import sys as _sys
+        import types
+
+        import bfp4_round
+
+        # the port's state dict holds a layer's resident experts in slot order (HYB.plan; -1 = an empty slot), so
+        # the per-expert methods get those ids rather than reading row j as expert j
+        hook = types.SimpleNamespace(
+            tag=bfp4_round.tag,
+            round_experts=lambda L, kind, W, **kw: bfp4_round.round_experts(L, kind, W, experts=HYB.plan(L), **kw),
+        )
+        _moe = _port("moe")
+        _moe.EXPERT_ROUND_HOOK = hook
+        _sys.modules[_moe.Qwen35MoE.__module__].EXPERT_ROUND_HOOK = hook
 
     orig_init = od.Qwen35MoEOptimized.__init__
 
@@ -1419,6 +1435,7 @@ def _route_host(self, lg, m, ids=None):
     st["hits"] += nh
     st["dec_picks"] += m * k
     st["dec_hits"] += nh
+    st["dec_union"] += len(np.unique(ids[:m]))  # distinct experts of the step's rows (summed over hybrid layers)
     st["steps"] += 1
     if HYB.record is not None:
         HYB.record.append((L, torch.from_numpy(ids[0].astype(np.int64)), torch.from_numpy(sc[0].astype(np.float32))))
@@ -1873,11 +1890,12 @@ def _forward_fused(self, x4, orig, partial, logits=None):
             ttnn.deallocate(dc_ids)
     host = ttnn.to_layout(B["host_sock" if sock else "host_rm"], ttnn.TILE_LAYOUT, memory_config=dram)
     if partial == "fabric":
-        if mk != 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
-            raise NotImplementedError(
-                "fused hybrid on the fabric boundary needs the one-row kernels: HYB_SINGLE_ROWS=0"
-            )
-        out = ttnn.add(part, host, output_tensor=part)
+        if mk == 1:  # the boundary reads (and never frees) the one-row kernels' model-wide L1 output
+            out = ttnn.add(part, host, output_tensor=part)
+        else:  # rows: a per-call L1 BF16 partial the boundary's packers read (the caller frees it)
+            out = ttnn.add(part, host, memory_config=ttnn.L1_MEMORY_CONFIG, dtype=ttnn.bfloat16)
+            if mk != m:
+                ttnn.deallocate(part)
         ttnn.deallocate(host)
         return out
     out = ttnn.add(part, host, memory_config=dram)
@@ -1933,10 +1951,38 @@ def _to_dram(t, free):
     return d
 
 
+def _port_fabric_rows(self, x, mode):
+    """A device-only layer's (HYB_FULL_LAYERS, the port's own MoE) rows on the fabric boundary: the port's fused rows
+    kernels write this device's partial sum into a per-call L1 BF16 [1, 1, m, H] tensor that the boundary's packers read
+    (the caller frees it); the port's own forward would clone it to DRAM and reduce-scatter it."""
+    f = getattr(self, "_fused", None)
+    m = int(x.shape[-2])
+    if (
+        f is None
+        or mode == "prefill"
+        or getattr(self, "has_shared", False)
+        or not 2 <= m <= HYB.rows_max
+        or len(x.shape) != 4
+        or math.prod(list(x.shape)[:-1]) != m
+    ):
+        raise RuntimeError(
+            f"layer {getattr(self, 'layer_num', '?')}: fabric rows need the port's fused rows kernels, no shared expert "
+            f"and 2..{HYB.rows_max} decode rows (fused {f is not None}, mode {mode}, shape {list(x.shape)})"
+        )
+    if x.is_sharded():
+        x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
+    out = ttnn.allocate_tensor_on_device(
+        ttnn.Shape([1, 1, m, int(x.shape[-1])]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.device, ttnn.L1_MEMORY_CONFIG
+    )
+    return f.rows(x, self.up_gate, self.down, out=out)
+
+
 def _forward(self, x, mode=None, partial=False, logits=None):
     from .seg import SEG
 
     if not getattr(self, "_hyb_on", True):
+        if partial == "fabric":
+            return _port_fabric_rows(self, x, mode)
         if partial is False and logits is None:  # ports whose MoE forward takes only (x, mode) (MiniMax-M2)
             return _orig_forward(self, x, mode=mode)
         return _orig_forward(self, x, mode=mode, partial=partial, logits=logits)
@@ -2828,6 +2874,7 @@ def _decide_core(self, x4, idh, sch, mode, defer_host=False, xh_fn=None):
     HYB.st["hits"] += int(valid * k - v_miss.sum())
     if mode != "prefill":
         HYB.st["dec_picks"] += int(valid * k)
+        HYB.st["dec_union"] += int(torch.unique(idh[:valid]).numel())
         HYB.st["dec_hits"] += int(valid * k - v_miss.sum())
     HYB.st["dyn_hits"] += int(in_d[:valid].sum())
     if mode == "prefill":
