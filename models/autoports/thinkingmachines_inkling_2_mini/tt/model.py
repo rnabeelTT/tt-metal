@@ -38,6 +38,8 @@ SQRT5 = math.sqrt(5.0)
 FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
 _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
+GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
+MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 
 
@@ -59,6 +61,18 @@ class Ops:
         self.ckc = ttnn.init_device_compute_kernel_config(
             mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
             packer_l1_acc=False)
+        self.qrep = {}  # id(Q) -> Qrep [1,1,H,nq*32] (tt/mixw.py)
+        self.mixk = None
+        self.gatek = None
+
+    def query(self, Qcols):
+        """Qcols [H, nq] (pre-scaled) -> Q [1,1,H,32] fp32 (columns 0..nq-1); also builds the mix kernel's Qrep."""
+        H, nq = Qcols.shape
+        Q = torch.zeros(H, 32)
+        Q[:, :nq] = Qcols
+        t = self.up(Q.reshape(1, 1, H, 32))
+        self.qrep[id(t)] = self.up(Qcols.repeat_interleave(32, dim=1).reshape(1, 1, H, nq * 32))
+        return t
 
     def up(self, t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT):
         return ttnn.from_torch(t.contiguous(), dtype=dtype, layout=layout, device=self.mesh, memory_config=DRAM,
@@ -77,16 +91,28 @@ class Ops:
     def mix(self, srcs_normed, Q, nq):
         """Block attention residual: srcs_normed list of n fp32 [1,1,T,H] (rms-normed sources), Q [1,1,H,32] fp32
         (nq queries in columns, pre-scaled by H^-0.5) -> nq fp32 outputs sum_i softmax_i(src_i . q) src_i."""
+        T = int(srcs_normed[0].shape[2])
+        n = len(srcs_normed)
+        if MIX_KERNEL and FUSED_OPS and T <= 32 and n <= 6 and id(Q) in self.qrep:
+            if self.mixk is None:
+                from .mixw import MixKernel
+                self.mixk = MixKernel(self.mesh, int(srcs_normed[0].shape[3]))
+            src = [ttnn.sharded_to_interleaved(s, ttnn.L1_MEMORY_CONFIG) if s.is_sharded() else s for s in srcs_normed]
+            S = src[0] if n == 1 else ttnn.concat(src, dim=1, memory_config=ttnn.L1_MEMORY_CONFIG)
+            lg = ttnn.matmul(S, self.qrep[id(Q)], compute_kernel_config=self.ckc, dtype=ttnn.float32,
+                             memory_config=ttnn.L1_MEMORY_CONFIG)  # [1, n, T, nq*32]
+            return self.mixk(S, lg, n, nq)
         if FUSED_OPS:
-            S = srcs_normed[0] if len(srcs_normed) == 1 else ttnn.concat(srcs_normed, dim=1)  # [1, n, T, H]
-            lg = ttnn.matmul(S, Q, compute_kernel_config=self.ckc, dtype=ttnn.float32)  # [1, n, T, 32]
+            # Qrep [H, nq*32]: query q in all 32 columns of tile q -> every slice below starts on a tile boundary
+            # (a width-1 slice at an unaligned column of a [1, n, T, 32] tile tensor returns wrong weights for n > 1)
+            S = srcs_normed[0] if n == 1 else ttnn.concat(srcs_normed, dim=1)  # [1, n, T, H]
+            lg = ttnn.matmul(S, self.qrep[id(Q)], compute_kernel_config=self.ckc, dtype=ttnn.float32)  # [1,n,T,nq*32]
             m = ttnn.max(lg, dim=1, keepdim=True)
             e = ttnn.exp(ttnn.subtract(lg, m))
-            w = ttnn.multiply(e, ttnn.reciprocal(ttnn.sum(e, dim=1, keepdim=True)))  # [1, n, T, 32]
-            T = int(S.shape[2])
+            w = ttnn.multiply(e, ttnn.reciprocal(ttnn.sum(e, dim=1, keepdim=True)))
             outs = []
             for qi in range(nq):
-                wq = ttnn.slice(w, [0, 0, 0, qi], [1, int(S.shape[1]), T, qi + 1])  # [1, n, T, 1]
+                wq = ttnn.slice(w, [0, 0, 0, qi * 32], [1, n, T, qi * 32 + 1])  # [1, n, T, 1]
                 outs.append(ttnn.sum(ttnn.multiply(S, wq), dim=1, keepdim=True))  # [1, 1, T, H]
             return outs
         logits = [ttnn.matmul(s, Q, compute_kernel_config=self.ckc, dtype=ttnn.float32) for s in srcs_normed]
@@ -128,8 +154,15 @@ class MessageGate:
         hf, mf = _f32(h), _f32(m)
         hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
         g = ttnn.matmul(hm, self.wd, compute_kernel_config=o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
-        fg = ttnn.tanh(ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32))  # [.., 2H]
         T = int(hf.shape[-2])
+        if GATE_KERNEL and T <= 32:
+            fg = ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32,
+                             memory_config=ttnn.L1_MEMORY_CONFIG)  # pre-tanh [.., 2H]
+            if o.gatek is None:
+                from .gatet import GateTail
+                o.gatek = GateTail(o.mesh, H)
+            return o.gatek(fg, hf, mf)
+        fg = ttnn.tanh(ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32))  # [.., 2H]
         lead = [int(d) for d in hf.shape][:-1]
         f = ttnn.slice(fg, [0] * (len(lead)) + [0], lead + [H])
         a = ttnn.slice(fg, [0] * (len(lead)) + [H], lead + [2 * H])
@@ -150,12 +183,8 @@ class Layer:
         q = ck.attn_query(li)
         self.nq = 0 if q is None else q.shape[0]
         if q is not None:
-            Q = torch.zeros(H, 32)
-            Q[:, : self.nq] = q.T * sc
-            self.attn_Q = ops.up(Q.reshape(1, 1, H, 32))
-        Q = torch.zeros(H, 32)
-        Q[:, :1] = ck.mlp_query(li).T * sc
-        self.mlp_Q = ops.up(Q.reshape(1, 1, H, 32))
+            self.attn_Q = ops.query(q.float().T * sc)
+        self.mlp_Q = ops.query(ck.mlp_query(li).float().reshape(-1, H).T * sc)
         if self.sliding:
             self.in_norm = wv("attn_norm.weight")
         else:
@@ -226,12 +255,8 @@ class Inkling2Model:
         mq = ck.message_queries()
         self.msg_Q = []
         for i in range(mq.shape[0]):
-            Q = torch.zeros(H, 32)
-            Q[:, :4] = mq[i].T * H**-0.5
-            self.msg_Q.append(ops.up(Q.reshape(1, 1, H, 32)))
-        Q = torch.zeros(H, 32)
-        Q[:, :1] = ck.final_query().T * H**-0.5
-        self.final_Q = ops.up(Q.reshape(1, 1, H, 32))
+            self.msg_Q.append(ops.query(mq[i].float().T * H**-0.5))
+        self.final_Q = self.ops.query(ck.final_query().float().reshape(-1, H).T * H**-0.5)
         self.final_norm = ops.up(ck.get("model.llm.norm.weight").float().reshape(1, 1, 1, -1))
         self.embed_norm = ops.up(ck.get("model.llm.embed_norm.weight").float().reshape(1, 1, 1, -1))
         V = cfg.unpadded_vocab_size

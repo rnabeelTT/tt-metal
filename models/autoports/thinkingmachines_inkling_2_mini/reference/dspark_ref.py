@@ -397,6 +397,50 @@ class TargetRunner:
         logits = self.model.logit_softcap(logits)
         return taps, logits.argmax(-1)
 
+    @torch.no_grad()
+    def _step(self, ids: torch.Tensor, cache):
+        self.calls, self.captured = {}, {}
+        out = self.lm(input_ids=ids[None], cache=cache, use_cache=True)
+        final = out.last_hidden_state[0].to(BF16)
+        taps = torch.stack([self.captured[v] for v in self.target_layer_ids[:-1]] + [final], dim=1)
+        logits = self.model.logit_softcap(self.model.lm_head(final).float())
+        return taps, logits.argmax(-1), out.cache
+
+    @torch.no_grad()
+    def run_greedy_windows(self, ids: torch.Tensor, anchors, window: int, rewrite: bool = True):
+        """Incremental (KV-cached) target pass that splices the target's own greedy
+        decode into the text after every anchor: chunk-prefill text up to position a,
+        then greedy-decode positions a+1 .. a+window-1 one token at a time (position
+        a+window gets the greedy token too and starts the next chunk).  Every compared
+        target token is then exactly the target's greedy continuation of its prefix.
+        rewrite=False feeds the original text through the same chunking (consistency check).
+        Returns (seq, taps [T, 4, H], greedy [T])."""
+        seq = ids.clone()
+        T = seq.shape[0]
+        taps = [None] * T
+        greedy = torch.zeros(T, dtype=torch.long)
+        cache, pos = None, 0
+
+        def feed(lo, hi):
+            nonlocal cache
+            t, g, cache = self._step(seq[lo:hi], cache)
+            for i in range(hi - lo):
+                taps[lo + i] = t[i]
+            greedy[lo:hi] = g
+
+        for a in anchors:
+            feed(pos, a + 1)
+            for j in range(window - 1):  # positions a+1 .. a+window-1
+                if rewrite:
+                    seq[a + 1 + j] = greedy[a + j]
+                feed(a + 1 + j, a + 2 + j)
+            if rewrite:
+                seq[a + window] = greedy[a + window - 1]
+            pos = a + window
+        if pos < T:
+            feed(pos, T)
+        return seq, torch.stack(taps), greedy
+
 
 def accepted_len(draft: torch.Tensor, target: torch.Tensor) -> int:
     n = 0
@@ -436,7 +480,8 @@ def main():
     ap.add_argument("--only", default=None, help="comma-separated text names")
     ap.add_argument("--num-anchors", type=int, default=40)
     ap.add_argument("--min-anchor", type=int, default=64)
-    ap.add_argument("--max-passes", type=int, default=12, help="greedy-consistency fixed-point passes (1 = TF only)")
+    ap.add_argument("--tf-only", action="store_true", help="skip the greedy-window measurement")
+    ap.add_argument("--check-incremental", action="store_true", help="compare cached chunked pass with the full forward")
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--report", default=None)
     args = ap.parse_args()
@@ -514,31 +559,23 @@ def main():
         results["tf_markov"][name], results["tf_base"][name] = acc_m, acc_b
         log(fmt_row(f"{name}/tf markov", acc_m, gamma))
         log(fmt_row(f"{name}/tf base", acc_b, gamma))
-        if args.max_passes <= 1:
+        if args.tf_only:
             continue
-        # --- greedy-consistent: overwrite positions a+1..a+8 with the target's own greedy
-        # continuation (anchor = bonus token argmax at a, then the greedy chain), iterate
-        # to a fixed point so every compared target token is the true greedy decode.
-        seq = ids.clone()
-        consistent = None
-        for it in range(2, args.max_passes + 1):
-            new = seq.clone()
-            for a in anchors:
-                new[a + 1 : a + 1 + B] = greedy[a : a + B]
-            changed = int((new != seq).sum())
-            seq = new
+        if args.check_incremental:
             t1 = time.time()
-            taps, greedy = runner.run(seq)
-            consistent = [bool((seq[a + 1 : a + 1 + B] == greedy[a : a + B]).all()) for a in anchors]
+            _, taps_i, greedy_i = runner.run_greedy_windows(ids, anchors, B, rewrite=False)
+            dt = (taps_i.float() - taps.float()).abs().amax(dim=(0, 2))
             log(
-                f"[{name}] pass {it}: {changed} tokens rewritten, forward {time.time() - t1:.0f}s, "
-                f"{sum(consistent)}/{len(anchors)} windows greedy-consistent"
+                f"[{name}] incremental-vs-full check ({time.time() - t1:.0f}s): greedy agreement "
+                f"{(greedy_i == greedy).float().mean():.4f}, max |tap diff| per tap {dt.tolist()}"
             )
-            if all(consistent):
-                break
-        # A window is exact iff the anchor and the 6 tokens the compared targets condition on
-        # equal the greedy chain under the final pass (positions a+1..a+7).
+        # --- greedy: splice the target's own greedy continuation after every anchor
+        # (anchor = bonus token argmax at a, then the greedy chain), KV-cached, so every
+        # compared target token is exactly the target's greedy decode of its prefix.
+        t1 = time.time()
+        seq, taps, greedy = runner.run_greedy_windows(ids, anchors, B)
         exact = [bool((seq[a + 1 : a + 1 + gamma] == greedy[a : a + gamma]).all()) for a in anchors]
+        log(f"[{name}] greedy-window pass {time.time() - t1:.0f}s, {sum(exact)}/{len(anchors)} windows consistent")
         acc_m, acc_b = eval_anchors(seq, taps, greedy, anchors, "greedy", exact)
         results["greedy_markov"][name], results["greedy_base"][name] = acc_m, acc_b
         log(fmt_row(f"{name}/greedy markov", acc_m, gamma))
