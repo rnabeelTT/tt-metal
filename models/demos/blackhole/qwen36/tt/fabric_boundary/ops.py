@@ -49,9 +49,12 @@ def _f32_bits(v):
 
 
 class FabricBoundary:
-    def __init__(self, mesh_device, hidden, eps, ring_topology=None, max_rows=MAX_ROWS):
+    def __init__(self, mesh_device, hidden, eps, ring_topology=None, max_rows=MAX_ROWS, math_fidelity=None):
         assert hidden % 1024 == 0, "whole flat pages"
         self.mesh_device = mesh_device
+        # the compute kernel's FPU fidelity (the norm's products: residual x gamma, squares, x rs); None ->
+        # QWEN35_FB_FIDELITY (default HiFi2). A model may pass its own (Hy4: HiFi3)
+        self.math_fidelity = getattr(ttnn.MathFidelity, math_fidelity or os.environ.get("QWEN35_FB_FIDELITY", "HiFi2"))
         self.hidden, self.eps = hidden, eps
         self.max_rows = max_rows
         self.tiles = hidden // 1024
@@ -228,7 +231,7 @@ class FabricBoundary:
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "fb_compute.cpp"), core_ranges=self.cores, compile_time_args=compute_ct,
                 runtime_args=[],
-                config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=True,
+                config=ttnn.ComputeConfigDescriptor(math_fidelity=self.math_fidelity, fp32_dest_acc_en=True,
                                                     math_approx_mode=False),
             ),
         ]

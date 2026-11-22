@@ -464,7 +464,10 @@ class Boundary:
             # the receive buffers are sharded L1 (rows x ring x H bf16 per site) and an L1 address range is reserved
             # on every core: 8 rows (2 x 192 KB + the zero vectors) crowded the streamed linears' circular buffers off
             # L1. Size for the plain decode row (HY4_BOUNDARY_ROWS, default 1); wider passes take the all-reduce.
-            fb = FabricBoundary(mesh, hidden, eps, max_rows=max(Boundary.row_set()))
+            # HY4_FB_FIDELITY (default HiFi3): the boundary norm's FPU fidelity. HiFi2 put its error vs FP32 at 1.2e-2,
+            # 2x the all-reduce + rms_norm path's; HiFi3 5.4-6.5e-3 (= all-reduce + rms_norm) at rows 1, 2, 4
+            fb = FabricBoundary(mesh, hidden, eps, max_rows=max(Boundary.row_set()),
+                                math_fidelity=os.environ.get("HY4_FB_FIDELITY", "HiFi3"))
             zero = {}
             for r in sorted(Boundary.row_set()):
                 pages = r * fb.tiles
