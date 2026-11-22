@@ -351,17 +351,18 @@ class Hy4BatchEngine:
         self.stats["ra_undone"] = self.stats.get("ra_undone", 0) + 1
 
     def _take_ra(self, rows: dict) -> dict:
-        """{slot: logits} of the settled run-ahead rows when they cover every row of `rows` (same slot, lane and token;
-        slots finished since may be missing from rows); otherwise every run-ahead row is undone (a new request joined, a
-        token was overridden: rare) and the caller runs the whole step (a pass of only the other rows could need a
-        program warm-up never compiled, e.g. one batched row)."""
+        """{slot: logits} of the settled run-ahead rows when `rows` continues exactly the pass's sequences (same slots,
+        lanes and tokens); otherwise every run-ahead row is undone (a request finished or joined, a row skipped, a token
+        overridden: about once per request) and the caller runs the step itself: the pass a step runs is always the one
+        it would run without run-ahead (same rows, so the same programs and numerics: a 2-row pass's row differs from
+        the solo path's, and a pass of other rows could need a program warm-up never compiled)."""
         self._settle()
         done, self._ra_done = self._ra_done or {}, None
         # (the same sequence: its slot still holds the lane object the pass advanced; a finished slot needs nothing)
         alive = {s for s, (_, info) in done.items() if self.seqs.get(s) is not None
                  and self.seqs[s].get("lane") == info["lane"] and self.dec.lanes[info["lane"]] is info["ln"]}
         acc = {s: lg for s, (lg, info) in done.items() if s in alive and s in rows and list(rows[s]) == [info["tok"]]}
-        if acc and set(acc) == set(rows) == alive:
+        if acc and set(acc) == set(rows) == alive == set(done):
             return acc
         for slot, (lg, info) in done.items():
             self._ra_undo(slot, info)
