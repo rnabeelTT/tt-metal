@@ -159,7 +159,11 @@ class Hy4MoE:
                          cache=cache(f"latent_up.{sm_dt}"))
         # routed experts: gate_up [E, 2I, L] (gate rows first), down [E, L, I]
         E, L, I = self.E, self.L, self.I
-        have_cache = cache_dir and os.path.exists(cache(f"experts.up_gate.{gu_dt}") + ".tensorbin")
+        # (the names ttnn.as_tensor gives the files: "<name>_dtype_<DTYPE>_layout_TILE.tensorbin"; the old check of
+        # "<name>.tensorbin" never matched, so every start re-read the BF16 experts and repacked them (~90 s))
+        have_cache = bool(cache_dir) and all(
+            os.path.exists(f"{cache(f'experts.{n}.{dt}')}_dtype_{dt.name}_layout_TILE.tensorbin")
+            for n, dt in (("up_gate", gu_dt), ("down", dn_dt)))
         if have_cache:
             gu_packed = torch.zeros(1)  # unused: as_tensor reads the cache file
             dn_t = torch.zeros(1)
@@ -177,12 +181,13 @@ class Hy4MoE:
         self.down = self._up(dn_t, dn_dt, -2, cache(f"experts.down.{dn_dt}"), have_cache, (1, E, I, L))
         del gu_packed, dn_t
         # shared expert (TP)
+        # (tensor-cached: a plain upload tilized them on the host at every start)
         self.sw1 = upload(mesh, bf(sd["shared_experts.gate_proj.weight"]).T.reshape(1, 1, cfg.hidden, -1), sm_dt,
-                          mapper=("shard", -1))
+                          mapper=("shard", -1), cache=cache(f"shared_gate.{sm_dt}.tp{tp}"))
         self.sw3 = upload(mesh, bf(sd["shared_experts.up_proj.weight"]).T.reshape(1, 1, cfg.hidden, -1), sm_dt,
-                          mapper=("shard", -1))
+                          mapper=("shard", -1), cache=cache(f"shared_up.{sm_dt}.tp{tp}"))
         self.sw2 = upload(mesh, bf(sd["shared_experts.down_proj.weight"]).T.reshape(1, 1, -1, cfg.hidden), sm_dt,
-                          mapper=("shard", -2))
+                          mapper=("shard", -2), cache=cache(f"shared_down.{sm_dt}.tp{tp}"))
         self.norm = RMSNorm(mesh, sd["combine_output_norm.weight"], cfg.rms_eps)
         self.ones_mask = upload(mesh, torch.ones(1, 1, 1, E, dtype=torch.bfloat16), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
         self.iota = upload(mesh, torch.arange(E, dtype=torch.float32).reshape(1, 1, 1, E), ttnn.float32)
@@ -264,7 +269,15 @@ class Hy4MoE:
     def _up(self, t, dtype, dim, cache_name, have_cache, shape):
         kw = {"mesh_mapper": ttnn.ShardTensorToMesh(self.mesh, dim=dim)} if self.N > 1 else {}
         if have_cache:
-            t = torch.zeros(shape, dtype=torch.bfloat16)  # shape only; the cache file supplies the data
+            # shape only; the cache file supplies the data. torch.empty: never touched (torch.zeros of the 4.8 + 2.4 GB
+            # placeholders page-faulted ~3.5 s per layer, ~150 s of the build); a failed load raises instead of
+            # "repairing" the cache file from the placeholder
+            t = torch.empty(shape, dtype=torch.bfloat16)
+            repair = getattr(ttnn, "as_tensor_cache_repair", None)
+            if repair is not None:
+                with repair(False):
+                    return ttnn.as_tensor(t, dtype=dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                                          memory_config=ttnn.DRAM_MEMORY_CONFIG, cache_file_name=cache_name, **kw)
         return ttnn.as_tensor(t if t.dtype == torch.bfloat16 else t.to(torch.bfloat16), dtype=dtype,
                               layout=ttnn.TILE_LAYOUT, device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG,
                               cache_file_name=cache_name, **kw)

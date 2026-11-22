@@ -34,6 +34,7 @@ LANE_ROWS = os.environ.get("HY4_LANE_ROWS", "1") == "1"
 # gathered by a per-pass one-hot Esel [r n, 64 L] (n = max(32, 8 L) pooled rows) instead of every lane's 16 window
 # groups (constant Ecat [r 32 L, 64 L], n = 32 L). Same values for every visible group (recomputed from the same rows).
 LANE_POOL = os.environ.get("HY4_LANE_POOL", "1") == "1"
+PRECOPY = os.environ.get("HY4_PRECOPY", "1") == "1"
 
 
 def pool_rows(L):
@@ -404,8 +405,19 @@ class Hy4BatchDecoder(Hy4Decoder):
              self.lanes[l]["base"]["sparse"], self.lanes[l]["base"]["swa"]) for l in sorted(rows))
 
     def _copy_b(self, h):
+        self._copy_tok(h)
+        self._copy_pos(h)
+
+    def _copy_tok(self, h):
+        """The token-dependent inputs (token ids, Engram rows)."""
         si, c = self.bsi, ttnn.copy_host_to_device_tensor
         c(h["tok"], si.tok)
+        for li, t in si.engram.items():
+            c(h[f"eng_{li}"], t)
+
+    def _copy_pos(self, h):
+        """The position-dependent inputs (everything _host_b(with_tok=False) builds)."""
+        si, c = self.bsi, ttnn.copy_host_to_device_tensor
         for k in ("sparse", "swa"):
             c(h[f"cos_{k}"], si.cos_sin[k][0])
             c(h[f"sin_{k}"], si.cos_sin[k][1])
@@ -417,12 +429,37 @@ class Hy4BatchDecoder(Hy4Decoder):
             c(h[f"roffs_{k}"], si.row_offs[k])
         if si.Esel is not None:
             c(h["Esel"], si.Esel)
-        for li, t in si.engram.items():
-            c(h[f"eng_{li}"], t)
 
     # ------------------------------------------------------------------ a pass
     def run_batch(self, rows: dict) -> dict:
         """rows: {lane: [token ids]} (each lane continues its sequence) -> {lane: logits fp32 [n, V]}."""
+        return self.collect(self.launch(rows))
+
+    def collect(self, hd) -> dict:
+        """The logits of a launched pass (waits for the device): {lane: logits fp32 [n, V]}."""
+        out = hd["out"]
+        if out is None:
+            out = self.model.read_logits(self.bout[hd["key"]], hd["R"])
+        if hd["tm"] is not None:
+            t0, t1, t2 = hd["tm"]
+            t3 = time.perf_counter()
+            self._tm = getattr(self, "_tm", [])
+            self._tm.append((t1 - t0, t2 - t1, t3 - t2))
+            if len(self._tm) % 64 == 0:
+                med = [sorted(x[i] for x in self._tm[-64:])[32] * 1e3 for i in range(3)]
+                logger.info(f"batched pass R={hd['R']}: host {med[0]:.2f} ms, copy {med[1]:.2f} ms, device+read {med[2]:.2f} ms; "
+                            f"prebuilt passes so far {getattr(self, 'n_prebuilt', 0)}")
+        res, s = {}, 0
+        for l, ids in hd["order"]:
+            n = len(ids)
+            res[l] = out[s : s + n]
+            s += n
+        return res
+
+    def launch(self, rows: dict) -> dict:
+        """The host inputs, copies and the (traced: non-blocking) pass of rows {lane: [token ids]}; the lanes advance.
+        -> a handle for collect(). A replayed pass's logits stay in its trace output until collect(): no other pass of
+        this decoder may run in between."""
         tm = os.environ.get("HY4_TIME_BATCH", "0") in ("1", "2")  # 2: no device sync (copy = host enqueue time only)
         t0 = time.perf_counter()
         pre, self._pre = getattr(self, "_pre", None), None
@@ -434,10 +471,15 @@ class Hy4BatchDecoder(Hy4Decoder):
             self._host_tok(order, h)
             self._sel = sel
             self.n_prebuilt = getattr(self, "n_prebuilt", 0) + 1
+            copied = pre[2]
         else:
             h, R, width, order = self._host_b(rows)
+            copied = False
         t1 = time.perf_counter()
-        self._copy_b(h)
+        if copied:  # the position inputs went in behind the last pass (in-order queue): only the token inputs now
+            self._copy_tok(h)
+        else:
+            self._copy_b(h)
         if tm and os.environ.get("HY4_TIME_BATCH") == "1":
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
@@ -446,6 +488,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         si.width = width if si.sel else 0
         key = ("b", R, si.width)
         advanced = False
+        out = None
         if not self.trace:
             lg = self.model.step(si, R, mem=self.mem)
             out = self.model.read_logits(lg, R)
@@ -468,24 +511,16 @@ class Hy4BatchDecoder(Hy4Decoder):
                 # 38.46, 2: 35.94 -> 35.03 (2026-11-20)
                 if os.environ.get("HY4_PREBUILD", "1") == "1":
                     self._prebuild(order)  # the next pass's position inputs while the device runs this one
-                out = self.model.read_logits(self.bout[key], R)
+                    # HY4_PRECOPY=1 (default): and their copies, queued behind this pass (the queue is in order: the
+                    # pass reads the current inputs first); the next pass then copies only its token / Engram inputs.
+                    # Only run_batch writes these inputs, and a pass whose snapshot differs copies them all again.
+                    if self._pre is not None and PRECOPY:
+                        self._copy_pos(self._pre[1][0])
+                        self._pre = self._pre[:2] + (True,)
                 advanced = True
-        if tm:
-            t3 = time.perf_counter()
-            self._tm = getattr(self, "_tm", [])
-            self._tm.append((t1 - t0, t2 - t1, t3 - t2))
-            if len(self._tm) % 64 == 0:
-                med = [sorted(x[i] for x in self._tm[-64:])[32] * 1e3 for i in range(3)]
-                logger.info(f"batched pass R={R}: host {med[0]:.2f} ms, copy {med[1]:.2f} ms, device+read {med[2]:.2f} ms; "
-                            f"prebuilt passes so far {getattr(self, 'n_prebuilt', 0)}")
         if not advanced:
             self._advance(order)
-        res, s = {}, 0
-        for l, ids in order:
-            n = len(ids)
-            res[l] = out[s : s + n]
-            s += n
-        return res
+        return {"key": key, "R": R, "order": order, "out": out, "tm": (t0, t1, t2) if tm else None}
 
     def _advance(self, order):
         for l, ids in order:
@@ -503,7 +538,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         sel_now = self._sel
         h, R, width, o = self._host_b(nxt, with_tok=False)
         nbgb = {l: (self.lanes[l]["nb"], self.lanes[l]["gb"]) for l in nxt}
-        self._pre = (snap, (h, R, width, o, self._sel, nbgb))
+        self._pre = (snap, (h, R, width, o, self._sel, nbgb), False)
         self._sel = sel_now
 
     def _has_traces(self):

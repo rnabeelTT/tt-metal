@@ -11,13 +11,21 @@ serves them); asking for one raises.
 from __future__ import annotations
 
 import json
+import mmap
 import os
+import struct
 from collections.abc import Mapping
 
 import torch
 from safetensors import safe_open
 
 from models.autoports.tencent_hy4_flash.tt.config import checkpoint_dir
+
+# HY4_FAST_LOAD=1 (default): checkpoint tensors >= HY4_FAST_LOAD_MIN_MB (16) read with O_DIRECT (Hy4Weights._get_direct)
+_FAST = os.environ.get("HY4_FAST_LOAD", "1") == "1"
+_FAST_MIN = int(float(os.environ.get("HY4_FAST_LOAD_MIN_MB", "16")) * 2**20)
+_DT = {"BF16": torch.bfloat16, "F32": torch.float32, "F16": torch.float16, "I64": torch.int64, "I32": torch.int32,
+       "U8": torch.uint8, "F8_E4M3": torch.float8_e4m3fn}
 
 
 class Hy4Weights:
@@ -40,7 +48,45 @@ class Hy4Weights:
     def get(self, name: str) -> torch.Tensor:
         if name.endswith("multi_head_embedding.embedding.weight"):
             raise RuntimeError(f"{name}: Engram tables are served by the host store, not loaded as tensors")
+        if _FAST:
+            t = self._get_direct(name)
+            if t is not None:
+                return t
         return self._f(self.map[name]).get_tensor(name)
+
+    def _header(self, shard):
+        """(header dict, data start) of a shard (cached)."""
+        hd = self._hdr.get(shard) if hasattr(self, "_hdr") else None
+        if hd is None:
+            self._hdr = getattr(self, "_hdr", {})
+            with open(os.path.join(self.dir, shard), "rb") as fh:
+                n = struct.unpack("<Q", fh.read(8))[0]
+                hd = self._hdr[shard] = (json.loads(fh.read(n)), 8 + n)
+        return hd
+
+    def _get_direct(self, name):
+        """A large tensor read with O_DIRECT (tt/fastload.py: this host's page-cache reads run at ~0.2-1 GB/s; the
+        safetensors memory map reads through it). The same bytes as safe_open's get_tensor; None: use safe_open."""
+        shard = self.map[name]
+        hdr, data0 = self._header(shard)
+        meta = hdr.get(name)
+        dt = _DT.get(meta["dtype"]) if meta else None
+        if dt is None:
+            return None
+        a, b = meta["data_offsets"]
+        if b - a < _FAST_MIN:
+            return None
+        try:
+            from models.autoports.tencent_hy4_flash.tt import fastload
+
+            start, end = data0 + a, data0 + b
+            off0 = (start // fastload.ALIGN) * fastload.ALIGN
+            mm = mmap.mmap(-1, -(-(end - off0) // fastload.ALIGN) * fastload.ALIGN)
+            fastload.read_direct(os.path.join(self.dir, shard), mm, off0, end - off0)
+            t = torch.frombuffer(mm, dtype=torch.uint8, count=b - a, offset=start - off0)
+            return t.view(dt).reshape(meta["shape"])
+        except Exception:  # noqa: BLE001
+            return None
 
     def get_slice(self, name: str):
         return self._f(self.map[name]).get_slice(name)

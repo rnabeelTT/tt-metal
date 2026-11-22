@@ -216,6 +216,21 @@ def _psi_wait(limit=None, max_wait=30.0, floor=0):
         time.sleep(0.5)
 
 
+def _mlock(mm):
+    """mlock an mmap object's pages (returns the bytes locked, 0 when the lock fails: RLIMIT_MEMLOCK, ...)."""
+    import ctypes
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        addr = ctypes.addressof(ctypes.c_char.from_buffer(mm))
+        if libc.mlock(ctypes.c_void_p(addr), ctypes.c_size_t(len(mm))) == 0:
+            return len(mm)
+        print(f"engram: mlock failed (errno {ctypes.get_errno()}): the copy may be swapped out", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"engram: mlock failed ({e})", flush=True)
+    return 0
+
+
 class EngramStore:
     """The four FP8 tables (memory-mapped; `in_ram=True` reads them into RAM) and their hashers."""
 
@@ -304,6 +319,12 @@ class EngramStore:
             waited[0] += time.time() - t
 
         direct = os.environ.get("HY4_ENGRAM_DIRECT", "1") == "1"
+        # HY4_ENGRAM_MLOCK=1 (default): the copy locked in RAM. Table rows are touched at random and rarely, so the
+        # kernel swapped them out on this host (swap in use, kswapd busy): served lookups took ~1.3 ms per decode step
+        # instead of ~0.1 ms (major faults on the row gathers). Locking keeps the same footprint, unswappable.
+        lock = direct and os.environ.get("HY4_ENGRAM_MLOCK", "1") == "1"
+        huge = direct and os.environ.get("HY4_ENGRAM_HUGEPAGE", "0") == "1"
+        locked = [0]
         rd = None
         if direct:
             import mmap
@@ -325,7 +346,11 @@ class EngramStore:
                 # at the header offset (no second copy)
                 size = os.path.getsize(path)
                 mm = mmap.mmap(-1, -(-size // fastload.ALIGN) * fastload.ALIGN)
+                if huge and hasattr(mmap, "MADV_HUGEPAGE"):
+                    mm.madvise(mmap.MADV_HUGEPAGE)
                 fastload.read_direct(path, mm, 0, size, chunk=chunk, wait=wait, pool=rd)
+                if lock:
+                    locked[0] += _mlock(mm)
                 dst = np.frombuffer(mm, src.dtype, count=src.size, offset=src.offset).reshape(src.shape)
             else:
                 dst = np.empty(src.shape, src.dtype)
@@ -347,7 +372,8 @@ class EngramStore:
             rd.shutdown()
         self.load_s = time.time() - t0
         print(f"engram tables in RAM ({need / 2**30:.0f} GiB, {self.load_s:.0f} s; throttled {waited[0]:.0f} s, PSI limit "
-              f"{limit:.0f} (start {base:.0f}){', O_DIRECT' if direct else ''})", flush=True)
+              f"{limit:.0f} (start {base:.0f}){', O_DIRECT' if direct else ''}"
+              f"{f', mlocked {locked[0] / 2**30:.0f} GiB' if lock else ''}{', MADV_HUGEPAGE' if huge else ''})", flush=True)
 
     def rewarm(self):
         if self.mode != "warm":

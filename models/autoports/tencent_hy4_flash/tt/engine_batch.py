@@ -25,6 +25,12 @@ from loguru import logger
 
 from models.autoports.tencent_hy4_flash.tt.engine import HostSampler
 
+# HY4_RUNAHEAD=1 (default): after a batched step samples its tokens, the next batched pass (those tokens, the same
+# slots) is launched before step() returns, so the device runs while vLLM processes the step and calls the next one;
+# the next step() takes that pass's logits for every slot it continues with the same token (any other slot: undone on
+# the host, recomputed). Same passes, same inputs: identical outputs.
+RUNAHEAD = os.environ.get("HY4_RUNAHEAD", "1") == "1"
+
 
 class Hy4BatchEngine:
     multi = True
@@ -50,6 +56,9 @@ class Hy4BatchEngine:
         self.solo = None  # the slot decoding on the single path (its lane released)
         self.solo_on = os.environ.get("HY4_BATCH_SOLO", "1") == "1"
         self.last_logits = {}
+        self._ra = None  # the run-ahead pass in flight: {"hd": decoder handle, "slots": {slot: info}}
+        self._ra_done = None  # its collected rows: {slot: (logits [V], info)}
+        self._warming = False  # (warm(): no run-ahead; every step compiles / captures its own pass)
         self.stats = {"steps": 0, "rows": 0, "t_step": 0.0, "t_prefill": 0.0, "prefills": 0, "prefill_tokens": 0,
                       "reused_tokens": 0}
         # prefix reuse (HY4_PREFIX_CACHE, default 1): a finished sequence's slot keeps its caches and token history; a new
@@ -93,6 +102,7 @@ class Hy4BatchEngine:
         return min(free, key=lambda s: (self.kept.get(s, {}).get("t", 0.0), s))
 
     def finish(self, slot: int):
+        self._settle()
         q = self.seqs.pop(int(slot), None)
         if self.solo == int(slot):
             self.solo = None
@@ -184,6 +194,7 @@ class Hy4BatchEngine:
         """mm: image inputs of the prompt (Hy4Model.set_images kwargs, tt/vision.py Hy4Vision.prepare)."""
         t0 = time.time()
         slot = int(slot)
+        self._settle()
         self.finish(slot)
         if self.solo is not None:  # the attention staging windows are shared: the solo sequence back to a lane first
             self._exit_solo()
@@ -222,6 +233,7 @@ class Hy4BatchEngine:
         """reqs [(slot, ids, sampling)] -> first tokens. Simultaneous short prompts (dense regime, ordinary text) run as
         one packed prefill pass (Hy4Model.forward_packed: B prompts on the attention's batch dimension); otherwise one
         prefill each."""
+        self._settle()
         m = self.model
         idl = [torch.as_tensor(ids, dtype=torch.long).reshape(-1) for _, ids, _ in reqs]
         if self.pc_on and len(reqs) > 1:  # prompts continuing a kept sequence: their own (continued) prefill
@@ -312,6 +324,78 @@ class Hy4BatchEngine:
         q["lane"] = d.add(slot, q["pos"], q["toks"], stage=(d.ob, d.ogb))  # its current single-path windows
         q["n"] = None
 
+    # ------------------------------------------------------------------ run-ahead
+    def _settle(self):
+        """Wait for the run-ahead pass in flight (if any) and keep its rows for the next step()."""
+        ra, self._ra = self._ra, None
+        if ra is None:
+            return
+        lo = self.dec.collect(ra["hd"])
+        done = self._ra_done or {}
+        for slot, info in ra["slots"].items():
+            done[slot] = (lo[info["lane"]][0], info)
+        self._ra_done = done
+
+    def _ra_undo(self, slot, info):
+        """A run-ahead row not taken: the slot's host state back to before that pass (its lane's staging windows stay
+        based where the pass left them; the recomputing pass at the same position overwrites what it wrote). A finished
+        slot needs nothing (its fed token is in its token history, its KV written)."""
+        q = self.seqs.get(slot)
+        if q is None or q.get("lane") != info["lane"] or self.dec.lanes[info["lane"]] is not info["ln"]:
+            return
+        ln = info["ln"]
+        ln["pos"], ln["eng"] = info["pos"], info["eng"]
+        del ln["tokens"][info["ntok_lane"]:]
+        del q["toks"][info["ntok"]:]
+        self.dec._pre = None
+        self.stats["ra_undone"] = self.stats.get("ra_undone", 0) + 1
+
+    def _take_ra(self, rows: dict) -> dict:
+        """{slot: logits} of the settled run-ahead rows when they cover every row of `rows` (same slot, lane and token;
+        slots finished since may be missing from rows); otherwise every run-ahead row is undone (a new request joined, a
+        token was overridden: rare) and the caller runs the whole step (a pass of only the other rows could need a
+        program warm-up never compiled, e.g. one batched row)."""
+        self._settle()
+        done, self._ra_done = self._ra_done or {}, None
+        # (the same sequence: its slot still holds the lane object the pass advanced; a finished slot needs nothing)
+        alive = {s for s, (_, info) in done.items() if self.seqs.get(s) is not None
+                 and self.seqs[s].get("lane") == info["lane"] and self.dec.lanes[info["lane"]] is info["ln"]}
+        acc = {s: lg for s, (lg, info) in done.items() if s in alive and s in rows and list(rows[s]) == [info["tok"]]}
+        if acc and set(acc) == set(rows) == alive:
+            return acc
+        for slot, (lg, info) in done.items():
+            self._ra_undo(slot, info)
+        return {}
+
+    def _launch_ra(self, slots):
+        """The next batched pass of `slots` (each feeds its sampled token), launched now; collected by _settle."""
+        d = self.dec
+        if not (RUNAHEAD and self.trace and d.trace and not self._warming and not d.min_width and self.solo is None
+                and len(slots) >= 2):
+            return
+        rows, info = {}, {}
+        for slot in slots:
+            q = self.seqs[slot]
+            lane = q.get("lane")
+            if lane is None or q["tok"] is None or self.model.max_ctx - 64 <= q["pos"] + 1:
+                return
+            ln = d.lanes[lane]
+            rows[lane] = [q["tok"]]
+            info[slot] = {"lane": lane, "tok": q["tok"], "ln": ln, "pos": ln["pos"], "eng": ln["eng"],
+                          "ntok_lane": len(ln["tokens"]), "ntok": len(q["toks"])}
+        key = ("b", len(rows))
+        if not any(k[:2] == key for k in d.btraces):  # (a pass without a trace yet: compile / capture synchronously)
+            return
+        t0 = time.time()
+        hd = d.launch(rows)
+        for slot in slots:
+            q = self.seqs[slot]
+            q["toks"] += [q["tok"]]
+            q["n"] = None
+        self._ra = {"hd": hd, "slots": info}
+        self.stats["t_step"] += time.time() - t0
+        self.stats["ra_launched"] = self.stats.get("ra_launched", 0) + 1
+
     def _pass(self, rows: dict) -> dict:
         """rows {slot: [ids]} -> {slot: logits [n, V]} (solo: the single path)."""
         t0 = time.time()
@@ -354,17 +438,25 @@ class Hy4BatchEngine:
                 q["tok"] = int(tok)
             self._check_pos(slot, q, None)
             rows[slot] = [q["tok"]]
-        if self.k > 0 and len(rows) == 1 and self.solo is not None and self.solo in rows:
+        acc = self._take_ra(rows)
+        if not acc and self.k > 0 and len(rows) == 1 and self.solo is not None and self.solo in rows:
             q = self.seqs[self.solo]
             if q.get("n") is not None and q["pos"] + self.k + 1 + 64 <= self.model.max_ctx:
                 return {self.solo: self._spec_step(self.solo)}
-        out = self._pass(rows)
+        if acc:
+            out = {s: lg[None] for s, lg in acc.items()}
+            self.stats["steps"] += 1
+            self.stats["rows"] += len(acc)
+            self.stats["ra_taken"] = self.stats.get("ra_taken", 0) + len(acc)
+        else:
+            out = self._pass(rows)
         res = {}
         for slot, lg in out.items():
             q = self.seqs[slot]
             nxt = q["smp"](lg[0])
             q["tok"], q["pos"] = nxt, q["pos"] + 1
             res[slot] = [nxt]
+        self._launch_ra(sorted(res))
         return res
 
     def _spec_step(self, slot) -> list:
@@ -408,6 +500,7 @@ class Hy4BatchEngine:
 
     def step_logits(self, reqs: dict) -> dict:
         """Host-sampled step: reqs {slot: (tok, pos)} (each continues its sequence) -> {slot: next-token logits}."""
+        self._take_ra({})  # (no run-ahead here: its rows undone)
         rows = {}
         for slot, (tok, pos) in reqs.items():
             q = self.seqs[slot]
@@ -426,6 +519,14 @@ class Hy4BatchEngine:
     def warm(self, prompt_len=None):
         """Compile every program serving runs before any trace is captured: the prefill buckets (slot 0), then each
         batch size 1..S at every score width bucket (eager), then capture the common traces."""
+        self._take_ra({})
+        self._warming = True
+        try:
+            self._warm(prompt_len)
+        finally:
+            self._warming = False
+
+    def _warm(self, prompt_len=None):
         t0 = time.time()
         g = torch.Generator().manual_seed(0)
         rnd = lambda n: torch.randint(1000, 100000, (n,), generator=g).tolist()  # noqa: E731
