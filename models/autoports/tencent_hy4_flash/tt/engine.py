@@ -19,6 +19,11 @@ import torch
 from loguru import logger
 
 
+# HY4_FAST_DRAW=1 (default): sampled tokens by inverse CDF instead of torch.multinomial (same distribution; a seeded
+# request draws a different, equally distributed sequence than before)
+_FAST_DRAW = os.environ.get("HY4_FAST_DRAW", "1") == "1"
+
+
 class HostSampler:
     def __init__(self, sampling):
         t, k, p, seed = sampling if sampling is not None else (0.0, 0, 1.0, None)
@@ -48,7 +53,22 @@ class HostSampler:
         return x.softmax(-1)
 
     def draw(self, p: torch.Tensor) -> int:
+        if _FAST_DRAW:
+            return self._icdf(p.float(), inplace=False)
         return int(torch.multinomial(p, 1, generator=self.gen))
+
+    def _icdf(self, w: torch.Tensor, inplace: bool) -> int:
+        """One draw from the distribution proportional to the non-negative weights w (inverse CDF: cumsum + one uniform
+        + binary search). Same distribution as torch.multinomial, ~20x cheaper on a 120K vocabulary (multinomial: 1.6 ms
+        per row single-threaded; 8 sampled rows were 14 ms per batched step)."""
+        c = w.cumsum_(0) if inplace else w.cumsum(0)
+        u = float(torch.rand(1, generator=self.gen, dtype=torch.float64)) * float(c[-1])
+        i = int(torch.searchsorted(c, torch.tensor([u], dtype=c.dtype), right=True))
+        n = c.numel() - 1
+        i = min(i, n)
+        while i > 0 and w is not c and float(w[i]) == 0.0:  # never land on a zero-weight (filtered) entry
+            i -= 1
+        return i
 
     def uniform(self) -> float:
         return float(torch.rand(1, generator=self.gen))
@@ -66,6 +86,8 @@ class HostSampler:
             drop = cp - sx.softmax(-1) > self.p
             sx[drop] = float("-inf")
             x = torch.full_like(x, float("-inf")).scatter(0, si, sx)
+        if _FAST_DRAW:
+            return self._icdf((x - x.max()).exp_(), inplace=False)
         return int(torch.multinomial(x.softmax(-1), 1, generator=self.gen))
 
 

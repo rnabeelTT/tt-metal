@@ -354,6 +354,21 @@ class HYV4FlashForConditionalGeneration:
         tl = self.__dict__.setdefault("_t_log", [])
         if last is not None and t0 - last < 1.0:  # back-to-back steps (not after an idle gap / a prefill)
             tl.append((t1 - t0, t0 - last))
+            try:  # per live-row count: mean / p90 / max / spikes (HY4_STEP_STATS=1, default)
+                pos_ = torch.as_tensor(kwargs.get("start_pos", args[1] if len(args) > 1 else None)).reshape(-1)
+                nl = int((pos_ >= 0).sum())
+                ps = self.__dict__.setdefault("_t_live", {}).setdefault(nl, [])
+                ps.append(t1 - t0)
+                if len(ps) >= 256:
+                    v = sorted(ps)
+                    md = v[len(v) // 2]
+                    logger.info(f"Hy4 decode steps, {nl} live: n {len(v)} median {md * 1e3:.2f} mean "
+                                f"{sum(v) / len(v) * 1e3:.2f} p90 {v[int(0.9 * len(v))] * 1e3:.2f} max {v[-1] * 1e3:.2f} ms, "
+                                f"{sum(1 for x in v if x > 1.5 * md)} > 1.5x median (sum excess "
+                                f"{sum(x - md for x in v if x > 1.5 * md) * 1e3:.0f} ms)")
+                    ps.clear()
+            except Exception:  # noqa: BLE001
+                pass
         if len(tl) >= 512:
             med = [sorted(x[i] for x in tl)[len(tl) // 2] * 1e3 for i in (0, 1)]
             logger.info(f"Hy4 decode steps (median of {len(tl)}): {med[0]:.2f} ms in the model, {med[1]:.2f} ms between "

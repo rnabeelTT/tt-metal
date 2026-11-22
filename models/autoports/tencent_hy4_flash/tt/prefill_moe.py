@@ -23,6 +23,15 @@ GS = 32
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 
 
+def _dispatch_mc_ok(T, E, k, Rd, gs) -> bool:
+    """HY4_PF_DISPATCH_MC=1 (default) and the multi-core dispatch's per-core L1 plan fits this chunk."""
+    if os.environ.get("HY4_PF_DISPATCH_MC", "1") != "1":
+        return False
+    from models.demos.blackhole.qwen36.tt.moe_prefill.dispatch_mc import fits
+
+    return fits(T, E, k, Rd, gs)
+
+
 def _grouped_cfg(device, k_dim, n_tiles, w_tile_bytes, in0_cap=8, sub_w=4, fp32_acc=False):
     """The M2.7 grouped-factory config: whole 32-row groups per core, K in in0_block_w tiles, fitting its L1 budget."""
     grid = device.compute_with_storage_grid_size()
@@ -87,8 +96,17 @@ class SortedExperts:
         G = Rd // gs
         assert Rd <= md.MAX_DISPATCH_ROWS, f"sorted dispatch admits at most {md.MAX_DISPATCH_ROWS} rows (T={T}: {Rd})"
         ids_t, sc_t = d._tiled(ids), d._tiled(scores)
-        op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
-        src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=DRAM, pad_group_id=d.pad_group_id)
+        if _dispatch_mc_ok(T, E, k, Rd, gs):
+            # HY4_PF_DISPATCH_MC (default 1): the qwen36 multi-core drop-in (generic_op, bit-identical outputs; the
+            # single-core op walks the T*k pairs on one RISC-V: ~2 ms per layer at 2K rows, top-16 of 512)
+            from models.demos.blackhole.qwen36.tt.moe_prefill.dispatch_mc import dispatch_mc
+
+            src_tok, w_disp, group_ids, und = dispatch_mc(ids_t, sc_t, E, k, gs, Rd, pad_group_id=d.pad_group_id,
+                                                          memory_config=DRAM)
+        else:
+            op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
+            src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=DRAM,
+                                                 pad_group_id=d.pad_group_id)
         for t in (ids_t, sc_t):
             if t is not ids and t is not scores:
                 ttnn.deallocate(t)
