@@ -125,7 +125,25 @@ void kernel_main() {
             rf(nw.get_noc_addr(t0 + i), get_write_ptr(cb_nw) + i * F32);
         }
     }
+#if POST_RT
+    {  // the router weight's bf16 hi / lo rows of this core's tiles: [half][t][e]
+        constexpr uint32_t ET = POST_RT;
+        cb_reserve_back(POST_CB_RW, 2 * PER * ET);
+        const uint32_t rw = get_write_ptr(POST_CB_RW);
+        for (uint32_t half = 0; half < 2; ++half) {
+            const auto ar = TensorAccessor(w_args, get_common_arg_val<uint32_t>(a_blk + 3 * NB + half), BF);
+            for (uint32_t i = 0; i < PER; ++i) {
+                for (uint32_t e = 0; e < ET; ++e) {
+                    noc_async_read(ar.get_noc_addr((t0 + i) * ET + e), rw + ((half * PER + i) * ET + e) * BF, BF);
+                }
+            }
+        }
+    }
+#endif
     noc_async_read_barrier();
+#if POST_RT
+    cb_push_back(POST_CB_RW, 2 * PER * POST_RT);
+#endif
     cb_push_back(cb_q, PER);
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NQ);

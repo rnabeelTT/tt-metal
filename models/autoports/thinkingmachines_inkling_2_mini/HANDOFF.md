@@ -205,6 +205,12 @@ packing).
 | + the attention-side gates with their q / k / v norms | 20.1 | 28.7 | | |
 | packed all-reduce: the live rows in 3 / 9 / 18 tiles (tt/ccl.py, kernels/arpack.cpp; bit-identical sums) | 19.2 | 28.0 | | |
 | MoE output read by the all-reduce in place (no clone / slice) | 19.0 | 27.9 | | |
+| router logits in the post-attention program (applications without message gates; <= 4 rows) | 18.7 | 27.9 | | |
+| attention output gate in one program (tt/agate.py; bit-identical) | 17.9 | 27.1 | | |
+
+B = 8 at this point: 31.9 ms (251 tok/s). The post router round is limited to 4 rows: at 8 its CBs (~890 KB per core)
+overlapped L1 tensors and the B = 8 trace hung (fast runtime mode does not check CB / L1 clashes). Tried and dropped:
+the attention projections streamed per DRAM bank (qwen36 DecodeLinear): no faster (compute-bound at one row).
 
 Decode quality after the packed all-reduce row (TP4, 8 x 736 teacher-forced): 0.9720 / 0.9970 / 0.0156 (0.9689 / 0.9962 /
 0.0156 before the gate rows). The packed all-reduce's pack reads a DRAM source through an aligned staging buffer: a

@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 template <uint32_t T, uint32_t E>
 inline void write_rows(uint32_t src, uint64_t dst) {
@@ -75,6 +76,8 @@ void kernel_main() {
         tot3 = get_write_ptr(cb_tot3);
     }
     const uint32_t g = get_write_ptr(cb_gath);  // (the base: every round wraps back to it)
+    {
+    DeviceZoneScopedN("G2_W_HS");
     noc_semaphore_inc(get_noc_addr(rx, ry, s_ready), 1);
     if (root) {
         noc_semaphore_wait(sem(s_ready), C);
@@ -82,6 +85,7 @@ void kernel_main() {
         noc_semaphore_set_multicast(s_go, mc(s_go), C - 1);
     }
     noc_semaphore_wait(sem(s_go), 1);
+    }
     if (root) {  // rows past C T of each part's last gather tile -> 0 (the 0 / 1 matrices skip them; 0 x NaN would not)
         constexpr uint32_t r0 = USED % 32;
         if constexpr (r0 != 0) {
@@ -149,9 +153,16 @@ void kernel_main() {
         noc_semaphore_wait(sem(s_done), k);
         cb_push_back(cb_t, ntot);
     };
+    {
+    DeviceZoneScopedN("G2_W_R1");
     round(4, cb_tot, tot, 1, true);
+    }
+    {
+    DeviceZoneScopedN("G2_W_R2");
     round(4, cb_tot2, tot2, 2, true);
+    }
     if constexpr (NORM) {
+        DeviceZoneScopedN("G2_W_R3");
         round(2, cb_tot3, tot3, 3, true);
     }
     for (uint32_t i = 0; i < PER; ++i) {
@@ -166,6 +177,7 @@ void kernel_main() {
         cb_pop_front(cb_out, 1);
     }
     if constexpr (ROUTER) {
+        DeviceZoneScopedN("G2_W_R4");
         round(2 * ET, 0, 0, 4, false);
         if (root) {  // the logits rows ([Tp, E] fp32)
             const auto al = TensorAccessor(l_args, ca(1), F32);

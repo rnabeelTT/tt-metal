@@ -483,12 +483,70 @@ void kernel_main() {
             cb_reserve_back(cb_out, 1);
             tile_regs_wait();
             pack_to(0, cb_out);
+#if POST_RT
+            pack_tile(0, POST_CB_XB);
+#endif
             tile_regs_release();
             cb_push_back(cb_out, 1);
         }
         cb_pop_front(cb_red, 1);
         cb_pop_front(cb_mi, PER);
         cb_pop_front(cb_nw, PER);
+#if POST_RT
+        {  // router round: out (bf16) @ [W hi | W lo] rows of this core's tiles -> ET tiles -> hi / lo parts
+            constexpr uint32_t ET = POST_RT, cb_xb = POST_CB_XB, cb_rw = POST_CB_RW, cb_p3 = POST_CB_P3;
+            cb_push_back(cb_xb, PER);
+            cb_wait_front(cb_xb, PER);
+            cb_wait_front(cb_rw, 2 * PER * ET);
+            tile_regs_acquire();
+            mm_begin(cb_xb, cb_rw);
+            for (uint32_t e = 0; e < ET; ++e) {
+                for (uint32_t half = 0; half < 2; ++half) {
+                    for (uint32_t i = 0; i < PER; ++i) {
+                        matmul_tiles(cb_xb, cb_rw, i, (half * PER + i) * ET + e, e);
+                    }
+                }
+            }
+            sinit();
+            for (uint32_t e = 0; e < ET; ++e) {
+                split(e, e, 4 + e);
+            }
+            tile_regs_commit();
+            cb_reserve_back(cb_p3, 2 * ET);
+            tile_regs_wait();
+            pack_reconfig_data_format(cb_p3);
+            for (uint32_t e = 0; e < ET; ++e) {
+                pack_tile(e, cb_p3);
+                pack_tile(4 + e, cb_p3);
+            }
+            tile_regs_release();
+            cb_push_back(cb_p3, 2 * ET);
+            cb_pop_front(cb_xb, PER);
+            cb_pop_front(cb_rw, 2 * PER * ET);
+            if (root) {
+                constexpr uint32_t cb_g3 = POST_CB_G3, cb_t3 = POST_CB_T3;
+                cb_wait_front(cb_g3, 2 * ET * NQ);
+                tile_regs_acquire();
+                mm_begin(cb_sel, cb_g3);
+                for (uint32_t e = 0; e < ET; ++e) {
+                    for (uint32_t k = 0; k < NQ; ++k) {
+                        matmul_tiles(cb_sel, cb_g3, k, (2 * e) * NQ + k, e);
+                        matmul_tiles(cb_sel, cb_g3, k, (2 * e + 1) * NQ + k, e);
+                    }
+                }
+                tile_regs_commit();
+                cb_reserve_back(cb_t3, ET);
+                tile_regs_wait();
+                pack_reconfig_data_format(cb_t3);
+                for (uint32_t e = 0; e < ET; ++e) {
+                    pack_tile(e, cb_t3);
+                }
+                tile_regs_release();
+                cb_push_back(cb_t3, ET);
+                cb_pop_front(cb_g3, 2 * ET * NQ);
+            }
+        }
+#endif
     } else {
         cb_pop_front(cb_red, 2);
     }

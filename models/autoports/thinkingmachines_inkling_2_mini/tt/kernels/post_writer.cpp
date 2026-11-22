@@ -108,8 +108,17 @@ void kernel_main() {
             const uint32_t z = get_write_ptr(cb_zero);
             noc_async_read(zz.get_noc_addr(0), z, 2048);
             noc_async_read_barrier();
-            for (uint32_t p = 0; p < 4 + (NORM ? 2 : 0); ++p) {
-                const uint32_t tile = (p < 4 ? g1 + p * NQ * F32 : g2 + (p - 4) * NQ * F32) + (NQ - 1) * F32;
+#if POST_RT
+            constexpr uint32_t P3 = 2 * POST_RT;
+            const uint32_t g3 = get_write_ptr(POST_CB_G3);
+#else
+            constexpr uint32_t P3 = 0;
+            const uint32_t g3 = 0;
+#endif
+            for (uint32_t p = 0; p < 4 + (NORM ? 2 : 0) + P3; ++p) {
+                const uint32_t tile = (p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
+                                                                  : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32) +
+                                      (NQ - 1) * F32;
                 if (r0 < 16) {  // faces 0 / 1 rows r0..15, faces 2 / 3 whole
                     const uint32_t n = (16 - r0) * 64;
                     noc_async_write(z, get_noc_addr(tile + r0 * 64), n);
@@ -187,9 +196,50 @@ void kernel_main() {
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
         write_rows<T, OUTB / 1024>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i));
+#if POST_DUP
+        write_rows<T, OUTB / 1024>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + 16 * (OUTB / 1024));
+#endif
         noc_async_write_barrier();
         cb_pop_front(cb_out, 1);
     }
+#if POST_RT
+    {  // router round: the partial logits' live rows -> the root's gather; the root writes the logits rows
+        constexpr uint32_t ET = POST_RT, parts = 2 * ET;
+        constexpr auto l_args = TensorAccessorArgs<z_args.next_compile_time_args_offset()>();
+        const uint32_t g3 = get_write_ptr(POST_CB_G3);
+        cb_wait_front(POST_CB_P3, parts);
+        const uint32_t src = get_read_ptr(POST_CB_P3);
+        for (uint32_t p = 0; p < parts; ++p) {
+            for (uint32_t t = 0; t < T; ++t) {
+                const uint32_t rho = c * T + t;
+                const uint32_t d = g3 + (p * NQ + rho / 32) * F32 + row_off(rho % 32);
+                const uint32_t s = src + p * F32 + row_off(t);
+                noc_async_write(s, get_noc_addr(rx, ry, d), 64);
+                noc_async_write(s + 1024, get_noc_addr(rx, ry, d + 1024), 64);
+            }
+        }
+        noc_async_write_barrier();
+        noc_semaphore_inc(get_noc_addr(rx, ry, s_g), 1);
+        cb_pop_front(POST_CB_P3, parts);
+        if (root) {
+            cb_reserve_back(POST_CB_G3, parts * NQ);
+            noc_semaphore_wait(sem(s_g), C * (NORM ? 3 : 2));
+            cb_push_back(POST_CB_G3, parts * NQ);
+            const auto al = TensorAccessor(l_args, ca(12), F32);
+            cb_wait_front(POST_CB_T3, ET);
+            const uint32_t ts = get_read_ptr(POST_CB_T3);
+            for (uint32_t e = 0; e < ET; ++e) {
+                const uint64_t dl = al.get_noc_addr(e);
+                write_rows<T, 4>(ts + e * F32, dl);
+#if POST_DUP
+                write_rows<T, 4>(ts + e * F32, dl + 64);
+#endif
+            }
+            noc_async_write_barrier();
+            cb_pop_front(POST_CB_T3, ET);
+        }
+    }
+#endif
     *sem(s_ready) = 0;
     *sem(s_go) = 0;
     *sem(s_g) = 0;

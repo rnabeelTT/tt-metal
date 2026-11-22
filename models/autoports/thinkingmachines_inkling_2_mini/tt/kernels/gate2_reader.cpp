@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 template <uint32_t T, uint32_t E>
 inline void read_rows(uint64_t src, uint32_t dst) {
@@ -52,6 +53,7 @@ void kernel_main() {
     const auto aones = TensorAccessor(w_args, ca(4), BF);
     const auto asel = TensorAccessor(w_args, ca(5), BF);
 
+    DeviceZoneScopedN("G2_R_ALL");
     cb_reserve_back(cb_h, PER);
     cb_reserve_back(cb_m, PER);
     for (uint32_t t = 0; t < PER; ++t) {

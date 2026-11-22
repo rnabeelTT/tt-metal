@@ -24,6 +24,7 @@
 #include "api/compute/pack.h"
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 #ifndef ROWS
 #define ROWS 16
@@ -164,6 +165,7 @@ void kernel_main() {
     const bool root = get_arg_val<uint32_t>(0) == 0;
 
     compute_kernel_hw_startup(cb_h, cb_out);
+    DeviceZoneScopedN("G2_C_ALL");
     cb_wait_front(cb_h, PER);
     cb_wait_front(cb_m, PER);
     cb_wait_front(cb_ones, 1);

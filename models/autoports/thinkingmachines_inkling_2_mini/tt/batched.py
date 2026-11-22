@@ -43,6 +43,8 @@ PRE = __import__("os").environ.get("I2M_PRE", "1") == "1"  # the fused pre-atten
 # program (tt/gate.py GateKernel2); 0: separate ops
 GATE_NORM = int(__import__("os").environ.get("I2M_GATE_NORM", "2"))
 GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1"  # likewise the attention-side gates
+POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"  # the router logits in tt/post.py
+AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
 class Tail:
@@ -294,6 +296,8 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
         ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=ba.write_table)
         ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=ba.write_table)
         g0 = w.qd + w.rd + w.sd
+        if AGATE and B <= 16 and g0 % 32 == 0:  # (the gate read from pq in the output-gate program)
+            return _attn_out(w, c, ba, q, rq, sk, None, pos_sdpa, B, tt_ccl, pq=pq, g0=g0)
         g = ttnn.slice(pq, (0, 0, 0, g0), (1, 1, B, g0 + w.gd))
         return _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl)
     o0 = 0
@@ -341,12 +345,27 @@ def _old_prep(w, pq, k, v, tau, B):
     return _bf(q), rq, _bf(k), _bf(v), sk
 
 
-def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl):
+_AGATE = {}
+
+
+def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None):
     NH, HD, N = w.NH, w.HD, w.N
-    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
-    o = ttnn.reshape(o, (1, 1, B, NH * HD))
-    o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
+    if pq is not None:  # the output gate in one program (tt/agate.py): SDPA output in L1
+        o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=L1)
+        key = (id(w.mesh), NH, HD)
+        if key not in _AGATE:
+            from .agate import AttnGate
+
+            _AGATE[key] = AttnGate(w.mesh, NH, HD)
+        og = _AGATE[key](o, pq, g0)
+        ttnn.deallocate(o)
+        o = og
+    else:
+        o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
+        o = ttnn.reshape(o, (1, 1, B, NH * HD))
+        o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, w.H))
@@ -566,9 +585,16 @@ class BatchedDecoder:
             att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att
             att = att if att.memory_config() == L1 else ttnn.to_memory_config(att, L1)
             lgs = [(D[b], self.plan.off[(b, ("mlp", a))]) for b in ids]
-            resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
-                                 nw=None if messages is not None else self.nw_rows[li])
             lg, dup = None, False
+            T = int(att.shape[-2])
+            if messages is None and GATE_NORM == 2 and POST_ROUTER and getattr(L.moe, "fused", False):
+                # + the router logits (and the row duplicated for the one-row MoE) in the same program
+                resid, o, lg = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
+                                         nw=self.nw_rows[li], router=L.moe.router_hl, dup=T == 1)
+                dup = lg is not None and T == 1
+            else:
+                resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
+                                     nw=None if messages is not None else self.nw_rows[li])
             if messages is not None:
                 # the gate + the MoE-input norm (+ the router logits) in one program (tt/gate.py GateKernel2)
                 T = int(o.shape[-2])
