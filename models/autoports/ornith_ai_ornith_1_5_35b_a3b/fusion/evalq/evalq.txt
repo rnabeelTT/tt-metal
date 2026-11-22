@@ -1,7 +1,6 @@
 # 122B HLE at 81,920 skipped for now (user, 2026-11-02): ~4 h per 64 (KV pool holds ~19 full answers); extension runs biased (presence penalty)
 # 81,920-token budget (user, 2026-11-02): 32k answers were our cap, not the cards'; hard sets halved to stay ~2 h
 #BIASED-EXTEND o122 extend hle BUDGET=81920 SRC_TAG=pp SUBSAMPLE=64 CONC=32 TAG=b81920_n64
-orn lmeval r1_gpqa_diamond SEED=42 SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=32 TAG=s42_b81920
 # Precision A/B (user 2026-10-30): shipped HLE 128 at the card preset = 17.97 vs card 37.68 -> o122p8 runs; o122 lines #WAIT-P8 until the A/B is judged
 # o122p8 KV pool capped at 655,360 tokens (QWEN35_MAX_TOKENS_ALL_USERS in variants/o122p8/env.list): the 8-bit weights take ~5.6 GiB/die more than the context contract assumes; first boot OOMed allocating KV
 # o122p8 also mounts variants/o122p8/tp_common.py (QWEN35_PREFILL_MAX_ROWS=1024): bfp8 GDN qkvz weights overflow L1 in the 2048-row prefill matmul (20 KB CB clash)
@@ -19,14 +18,14 @@ orn lmeval r1_gpqa_diamond SEED=42 SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=3
 # Ornith-1.5-122B (user priority)
 # Ornith-1.5-35B: GPQA x5 (the card averages 5 runs), HLE
 # Qwen3.5-122B text
-q122 lmeval r1_gpqa_diamond SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=20
-q122 lmeval ifeval MAX_TOKENS=81920 CONC=32
-q122 lmeval livecodebench_v6 SAMPLE_N=88 TOTAL=175 MAX_TOKENS=81920 CONC=20
 q122 text2 ifbench MAX_TOKENS=81920 CONC=32
-q122 text2 hmmt_feb25 MAX_TOKENS=81920 CONC=20
-q122 text2 hmmt_nov25 MAX_TOKENS=81920 CONC=20
-q122 text2 longbench_v2 SAMPLE_N=64 MAX_TOKENS=81920 CONC=32
-q122 text2 ojbench SAMPLE_N=32 MAX_TOKENS=81920 CONC=20
+q122 lmeval ifeval MAX_TOKENS=81920 CONC=32
+# q122 reasoning-heavy sets dropped from the 122B cards (user, 2026-11-03): at 81,920 most answers hit the cap (HMMT Nov 18/21, Feb 16/30; GPQA 34/99 in 150 min)
+#DROP-122LEN q122 lmeval r1_gpqa_diamond SAMPLE_N=99 TOTAL=198 MAX_TOKENS=81920 CONC=20
+#DROP-122LEN q122 lmeval livecodebench_v6 SAMPLE_N=88 TOTAL=175 MAX_TOKENS=81920 CONC=20
+#DROP-122LEN q122 text2 hmmt_feb25 MAX_TOKENS=81920 CONC=20
+#DROP-122LEN q122 text2 hmmt_nov25 MAX_TOKENS=81920 CONC=20
+#DROP-122LEN q122 text2 ojbench SAMPLE_N=32 MAX_TOKENS=81920 CONC=20
 q122 text2 fullstackbench_en SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
 q122 text2 fullstackbench_zh SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
 q122 text2 bfcl_v4 BLOCKLIST=bench BFCL_PER_CAT=20 MAX_TOKENS=81920 CONC=32
@@ -42,7 +41,7 @@ q122 qtext mmmlu SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
 q122 qtext mmlu_prox SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
 q122 qtext include SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
 q122 qtext global_piqa SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
-q122 qtext polymath SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
+#DROP-122LEN q122 qtext polymath SAMPLE_N=200 MAX_TOKENS=81920 CONC=32
 q122 qtext wmt24pp SAMPLE_N=400 MAX_TOKENS=81920 CONC=32
 # Qwen3.5-122B images (vision harness; Qwen3-VL report prompts; Qwen's script settings where published)
 q122 vision ai2d SAMPLE_N=300 MAX_TOKENS=81920 CONC=32

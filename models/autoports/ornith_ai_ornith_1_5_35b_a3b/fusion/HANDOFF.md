@@ -17,6 +17,11 @@ MoE ports (Qwen3-Coder-30B, Qwen3-Coder-Next, Qwen3.5-122B-A10B, GLM-4.5-Air).
   a perf row or two, and the scorecard's evals only before calling a milestone done.
 - Don't read token/credential files. The HF login on the box is enough; override only `HF_HUB_CACHE` / `HF_DATASETS_CACHE`.
 
+## Eval status (2026-11-03)
+
+Card benchmarks are stopped; state, card rows and how to resume: `fusion/REF_EVALS.md`, section "State: stopped
+2026-11-03". Latest published Ornith-1.5-35B image: 9db29447a98d (mixed image / text prefill fixes).
+
 ## Branch contents
 
 | Commit / path | What |
