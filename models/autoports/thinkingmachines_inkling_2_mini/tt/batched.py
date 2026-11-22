@@ -27,6 +27,10 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 SDPA_K_CHUNK = 256
+# I2M_GLUE_L1 (default 1): the decode step's activations live in L1 (interleaved): the glue ops (norms, mixes, gates,
+# residual adds) inherit their input's memory config, so the chain stays out of DRAM
+GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
+L1 = ttnn.L1_MEMORY_CONFIG
 
 
 def _f32(t):
@@ -249,6 +253,8 @@ class BatchedDecoder:
         m, B, ops, cfg = self.m, self.B, self.m.ops, self.m.cfg
         e = ttnn.embedding(self.tokens, m.embed, layout=ttnn.TILE_LAYOUT)
         x = _bf(ops.rms(ttnn.reshape(e, (1, 1, B, m.H)), m.embed_norm))
+        if GLUE_L1:
+            x = ttnn.to_memory_config(x, L1)
         pos_w, pos_wr, pos_sdpa, tau = self.pos_w, self.pos_wr, self.pos_sdpa, self.tau
         blocks_n, pre_x, pre_blocks, prev_src = [], None, None, None
         for a, (li, p) in enumerate(m.sched):
@@ -302,7 +308,8 @@ class BatchedDecoder:
         if messages is not None:
             mi = L.gates["mlp"](mi, messages[3])
         mo = ba.mlp.step(L.moe.forward(_bf(ops.rms(mi, L.mlp_norm))))
-        return _bf(ttnn.add(resid, _f32(mo)))
+        out = _bf(ttnn.add(resid, _f32(mo)))
+        return ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out
 
 
 class TracedDecoder:
