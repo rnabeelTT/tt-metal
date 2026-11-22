@@ -142,14 +142,20 @@ total tok/s and TTFT at 16 / 32 users (128-token prompts), before -> after this 
 
 | profile | 1 user | 16 users x 128: total, TTFT | 32 users x 128: total, TTFT | 1K x 16: total, TTFT |
 |---|---|---|---|---|
-| p300x2 (4 dies, 32 x 64K) | 30.3 -> 34.6-36.2 | 146 -> 207, 6.6 -> 3.2 s | 163 -> 236, 13.4 -> 6.5 s | 146 -> 154, 14.5 -> 14.7 s |
+| p300x2 (4 dies, 32 x 64K) | 30.3 -> 35.9-37.1 | 146 -> 206, 6.6 -> 3.2 s | 163 -> 240, 13.4 -> 6.5 s | 146 -> 157, 14.5 -> 14.7 s |
 | p300 (2 dies, 16 x 32K) | 28.7 -> 33.3-34.0 | 116 -> 170, 9.0 -> 3.9 s | | 114 -> 118, 19.8 -> 19.8 s |
 | p150 (1 die, 8 x 8K) | 24.7 -> 25.7-26.3 | (8 users) 65 -> 76, 6.0 -> 4.0 s | | (8 users) 50 -> 50 |
 
 Full tables: tt-model.yaml card.performance. One-die DRAM (tools/mem_probe.py): model 30.51 GiB (1.03 free), the
 adapter's decode widths 0.42 GiB, one prefix snapshot 0.16 GiB; so one die keeps 1 snapshot, 4 prefill lanes and no
-MixPlan (its ~184 MB of concatenated queries). Gaps: prefill ~1,100 tok/s on 4 dies (long prompts queue); host time
-per served decode step ~2 ms above the device step (8 small top-k readbacks on 4 dies).
+MixPlan (its ~184 MB of concatenated queries). Served step on 4 dies, 1 user (I2M_TIMING=1): device 26.0 ms, inputs
+0.2, readback 0.2 (the dies' top-k candidates all-gathered on device: 1.3 ms when each die was read), plugin + sampling
+0.5. Gap: prefill ~1,100 tok/s on 4 dies (long prompts queue).
+
+Served-path bug found and fixed: vLLM does not clear a reused block-table row past the new request's allocation;
+stale ids reached the global page rows and the prefill's padding rows overwrote this request's own first block
+(prompt misread, tool calls looping on <|end_message|>, nondeterministic across runs). GlobalPages.set_row keeps only
+the request's own entries (tests/test_reuse_device.py STALE=1).
 
 ## Prefix caching (vLLM prefix cache + state snapshots)
 
