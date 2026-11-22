@@ -19,7 +19,7 @@ import ttnn
 
 KDIR = Path(__file__).parent / "kernels"
 # I2M_BCONV_ROWS: <= 16 live rows -> the conv's SFPU work on those rows only (bconv_compute.cpp BCONV_ROWS)
-ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "0") == "1"
+ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "1") == "1"
 TILE = 32
 
 

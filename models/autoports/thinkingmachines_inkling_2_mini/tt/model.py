@@ -45,8 +45,8 @@ ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q
 GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"  # the whole message gate in one program (tt/gate.py)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
-# I2M_RMS_CAST (default 1): a one-row norm's input / output dtype casts inside its reshards (2 ops fewer per norm)
-RMS_CAST = os.environ.get("I2M_RMS_CAST", "0") == "1"
+# I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
+RMS_CAST = os.environ.get("I2M_RMS_CAST", "1") == "1"
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 # packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
@@ -118,9 +118,9 @@ class Ops:
                 ttnn.to_memory_config(x, mc)
             y = ttnn.rms_norm(xs, epsilon=self.eps, weight=w, program_config=pc, memory_config=mc,
                               compute_kernel_config=self.ckc)
-            if out_dtype is not None and out_dtype != ttnn.float32:
-                return ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG, dtype=out_dtype)
-            return ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG)
+            y = ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG)
+            # (the output cast stays a typecast: the reshard's fp32 -> bf16 conversion rounds differently, 1 ulp)
+            return ttnn.typecast(y, out_dtype) if out_dtype is not None and out_dtype != ttnn.float32 else y
         y = self._rms(x, w)
         return ttnn.typecast(y, out_dtype) if out_dtype is not None and y.dtype != out_dtype else y
 

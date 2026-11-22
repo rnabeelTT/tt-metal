@@ -29,7 +29,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
 ROW1 = os.environ.get("I2M_MOE_ROW1", "0") == "1"
 # I2M_MOE_DUPROW (default 1): one decode row duplicated into its tiles' padding row in place (tt/duprow.py), not concat
-DUPROW = os.environ.get("I2M_MOE_DUPROW", "0") == "1"
+DUPROW = os.environ.get("I2M_MOE_DUPROW", "1") == "1"
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
 SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
 # I2M_MOE_SUBS1 (one die): "768,384" -> two sub-shards (m = 6 and 3 column tiles per bank: both supported) instead of 3
