@@ -33,6 +33,7 @@ SCORE_ROWS = int(os.environ.get("HY4_IDX_SCORE_ROWS", "256"))
 
 
 class Hy4Indexer:
+    _IOTA_ALL = {}  # (mesh, gcap) -> the group-index row every layer's score masks read
     _SLOT_ATTRS = ("gkeys", "_mirror", "_mirror_stale", "_gk_pending", "n_tok", "n_groups", "_open_keys",
                    "_open_pending", "_tk_hist", "_tk_pending", "tk_hist_base", "tk_stage", "g_stage")
 
@@ -84,7 +85,12 @@ class Hy4Indexer:
         self._off_cache = {}
         # 32 columns past any score width (<= gcap): a slice of the whole tensor would alias it, and _iota_rows
         # deallocates its slice (the full-capacity decode bucket freed self.iota)
-        self.iota = upload(mesh, torch.arange(self.gcap + 32, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
+        # (one tensor shared by the sparse layers: read-only; ~4.5 MB per layer at a 128K slot)
+        ik = (id(mesh), self.gcap)
+        if ik not in Hy4Indexer._IOTA_ALL:
+            Hy4Indexer._IOTA_ALL[ik] = upload(mesh, torch.arange(self.gcap + 32, dtype=torch.float32).reshape(1, 1, 1, -1),
+                                              ttnn.float32)
+        self.iota = Hy4Indexer._IOTA_ALL[ik]
         self.offs4 = upload(mesh, torch.arange(self.r, dtype=torch.float32).reshape(1, 1, 1, self.r), ttnn.float32)
         self.tk_stage = None
         self.g_stage = None

@@ -157,6 +157,13 @@ class Hy4Attention:
                 and os.environ.get("HY4_PF_RP", "1") == "1"):
             qs_all = torch.zeros(1, H, 1, SINK_COLS)
             qs_all[0, :, 0, 0], qs_all[0, :, 0, 1] = s_hi, s_lo
+            if os.environ.get("HY4_PF_RP_GATHER", "1") == "1":
+                # HY4_PF_RP_GATHER=1 (default): no resident all-head copies (~74 MB per sparse layer per die, 0.87 GiB
+                # in all); each selecting chunk all-gathers them per layer from the head shards every die holds (the
+                # same values: shards in die order)
+                self.rp = {"gather": True, "qs": upload(mesh, qs_all, ttnn.bfloat16)}
+        if self.rp is None and (self.kind == "sparse" and share is None and N > 1 and H % 32 == 0
+                                and os.environ.get("HY4_PF_RP", "1") == "1"):
             self.rp = {
                 "qb": upload(mesh, bf(sd["q_b_proj.weight"]).T.reshape(1, 1, cfg.q_lora, H * 256), wdt),
                 "wuk": upload(mesh, wuk.reshape(1, H, self.nope, self.kvl), udt),
@@ -674,7 +681,26 @@ class Hy4Attention:
         group keys), x_own [1, 1, Tp / N, 3072] this die's rows. -> this die's rows of the o_proj output summed over
         every head [1, 1, Tp / N, 3072] (no reduce-scatter)."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
-        cfg, H, rp = self.cfg, self.H, self.rp
+        rp = self._rp_weights()
+        try:
+            return self._forward_part_rows(x, x_own, p0, T, cos_sin, mem, rp)
+        finally:
+            if rp is not self.rp:
+                for k, t_ in rp.items():
+                    if k != "qs":
+                        ttnn.deallocate(t_)
+
+    def _rp_weights(self):
+        """The row-parallel path's all-head weights: resident (HY4_PF_RP_GATHER=0) or all-gathered from the head shards."""
+        if not self.rp.get("gather"):
+            return self.rp
+        ag = lambda t, d: ttnn.all_gather(t, dim=d, cluster_axis=1, topology=ttnn.Topology.Linear,  # noqa: E731
+                                          memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        return {"qb": ag(self.wqb, 3), "wuk": ag(self.wuk, 1), "wuvT": ag(self.wuvT, 1), "wg": ag(self.wg, 3),
+                "wo": ag(self.wo, 2), "qs": self.rp["qs"]}
+
+    def _forward_part_rows(self, x, x_own, p0, T, cos_sin, mem, rp):
+        cfg, H = self.cfg, self.H
         cos, sin = cos_sin[self.kind]
         Tp, Tq = int(x.shape[-2]), int(x_own.shape[-2])
         row = self._kv_row(x, cos, sin, mem)
@@ -1061,6 +1087,22 @@ class Hy4Attention:
 
     def _write_rows(self, row_rm, p0: int, T: int):
         """Write rows [0, T) of row_rm [1,1,Tp,608] RM to the cache at positions p0.. (ring rows for SWA)."""
+        if (os.environ.get("HY4_PF_SLAB_WRITE", "1") == "1" and T % 32 == 0 and p0 % 32 == 0
+                and T <= int(row_rm.shape[-2]) and self.rows % 32 == 0):
+            # one slab_write (tt/slab_write) of 32-row slabs at runtime offsets: one program per chunk size; slice_write
+            # baked the destination row into its program (a 128K prompt compiled 2-4 programs per chunk past the
+            # warm-up's positions at serve time, releasing every trace)
+            from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+            n = T // 32
+            pos = p0 + 32 * np.arange(n)
+            rows = self.base + (pos if self.kind == "sparse" else pos % self.rows)
+            o = np.zeros(-(-n // 8) * 8, dtype=np.int32)
+            o[:n] = rows
+            offs = upload(self.mesh, torch.from_numpy(o).reshape(1, 1, 1, -1), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+            slab_write(row_rm, self.cache, offs, n)
+            ttnn.deallocate(offs)
+            return
         start = p0 if self.kind == "sparse" else p0 % self.rows
         first = min(T, self.rows - start)
         segs = [(0, self.base + start, first)]

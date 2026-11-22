@@ -274,10 +274,14 @@ class Hy4Model:
             os.environ.setdefault("HY4_TENSOR_CACHE", cache_dir)
         self.ag = AllGather(mesh)
         t0 = time.time()
-        # embedding (replicated bf16 table, row-major for ttnn.embedding; tensor-cached: a plain upload of the 742 MB
-        # table took minutes)
+        # embedding (bf16 table, row-major for ttnn.embedding; tensor-cached: a plain upload of the 742 MB table took
+        # minutes). HY4_EMB_SHARD=1 (default): the table's columns sharded over the dies (185 MB per die instead of 742 MB
+        # replicated; each die looks up its H / N columns, one all-gather rebuilds the rows: the same values)
+        self.emb_shard = self.N > 1 and os.environ.get("HY4_EMB_SHARD", "1") == "1"
         self.emb = upload(mesh, w.get("model.embed_tokens.weight").to(torch.bfloat16), ttnn.bfloat16,
-                          ttnn.ROW_MAJOR_LAYOUT, cache=os.path.join(cache_dir, "embed_tokens.rm") if cache_dir else None)
+                          ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", -1) if self.emb_shard else "rep",
+                          cache=(os.path.join(cache_dir, "embed_tokens.rm" + (f".cols{self.N}" if self.emb_shard else ""))
+                                 if cache_dir else None))
         logger.info(f"embedding loaded ({time.time() - t0:.0f} s)")
         self.layers = []
         for li in self.layer_ids:
@@ -290,9 +294,12 @@ class Hy4Model:
         lm = torch.zeros(cfg.hidden, self.Vp, dtype=torch.bfloat16)
         lm[:, :V] = w.get("lm_head.weight").to(torch.bfloat16).T
         lm_dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b}[os.environ.get("HY4_LM_DTYPE", "bf16")]
-        self.lm = upload(mesh, lm.reshape(1, 1, cfg.hidden, self.Vp), lm_dt, mapper=("shard", -1),
-                         cache=os.path.join(cache_dir, f"lm_head.{lm_dt}") if cache_dir else None)
         self.lm_dec = None
+        # HY4_LM_ONE_COPY=1 (default, with the streamed copy): no interleaved LM head; prefill heads run the streamed
+        # copy per 32-row block (bit-identical: bf16 weights, FP32 DST), saving its ~185 MB per die
+        one = stream_enabled(mesh) and os.environ.get("HY4_LM_ONE_COPY", "1") == "1"
+        self.lm = None if one else upload(mesh, lm.reshape(1, 1, cfg.hidden, self.Vp), lm_dt, mapper=("shard", -1),
+                                          cache=os.path.join(cache_dir, f"lm_head.{lm_dt}") if cache_dir else None)
         if stream_enabled(mesh):  # decode LM head: streamed copy, fp32 logits (bit-identical to the interleaved matmul)
             n = self.Vp // self.N
             self.lm_dec = StreamLinear(mesh, [lm[:, i * n : (i + 1) * n] for i in range(self.N)], lm_dt,
@@ -330,8 +337,7 @@ class Hy4Model:
     def _step(self, si, R, mem=None):
         cfg = self.cfg
         si.R = R  # the real rows (the decode boundary all-reduces only those)
-        x = ttnn.embedding(si.tok, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
-        x = ttnn.reshape(x, (1, 1, 32, cfg.hidden))
+        x = self.embed(si.tok, 32, mem)
         fused_hc = self.head_hc.fused and int(x.shape[-2]) == 32
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)),
                         memory_config=ttnn.DRAM_MEMORY_CONFIG if fused_hc else (mem or ttnn.DRAM_MEMORY_CONFIG))
@@ -581,7 +587,7 @@ class Hy4Model:
         tok = torch.zeros(1, Tb, dtype=torch.int32)
         tok[0, :T] = ids.to(torch.int32)
         tok_h = ttnn.from_torch(tok, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
-                                mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=1))
+                                mesh_mapper=rep if self.emb_shard else ttnn.ShardTensorToMesh(mesh, dim=1))
         eng_h = {}
         for layer in self.layers:
             if layer.engram is not None and self.engram is not None:
@@ -625,10 +631,28 @@ class Hy4Model:
                 layer.attn.indexer.after_traced_prefill(T, Tb)
         return self._head_split(st["X"], T, Tb, "last", None)
 
+    def embed(self, tok_t, rows: int, mem=None, split: bool = False):
+        """Token ids (uint32 RM: `rows` ids replicated; split without HY4_EMB_SHARD: this die's rows / N) -> [1, 1, rows
+        (split: rows / N, this die's), H] bf16 TILE. Column-sharded table: each die looks up its H / N columns of every
+        row, an all-gather over the columns rebuilds the rows (split: then this die's rows are kept)."""
+        H, mem = self.cfg.hidden, mem or ttnn.DRAM_MEMORY_CONFIG
+        if not self.emb_shard:
+            x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem)
+            return ttnn.reshape(x, (1, 1, rows // self.N if split else rows, H))
+        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        x = ttnn.reshape(x, (1, 1, rows, H // self.N))
+        xg = ttnn.all_gather(x, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear,
+                             memory_config=ttnn.DRAM_MEMORY_CONFIG if split else mem)
+        ttnn.deallocate(x)
+        if not split:
+            return xg
+        xs = ttnn.mesh_partition(xg, dim=2, cluster_axis=1, memory_config=mem)
+        ttnn.deallocate(xg)
+        return xs
+
     def _embed_split(self, tok_t, Tp):
         cfg = self.cfg
-        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT)
-        x = ttnn.reshape(x, (1, 1, Tp // self.N, cfg.hidden))
+        x = self.embed(tok_t, Tp, split=True)
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
         ttnn.deallocate(x)
         return X
@@ -653,10 +677,10 @@ class Hy4Model:
         assert p0 + Tp <= self.max_ctx + 64 or Tp == -(-T // align) * align, "bucket padding past the cache"
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         tok[0, :T] = ids.reshape(-1).to(torch.int32)
-        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1) if split else "rep")
-        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
+        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT,
+                       mapper=("shard", 1) if split and not self.emb_shard else "rep")
+        x = self.embed(tok_t, Tp, mem, split=split)
         ttnn.deallocate(tok_t)
-        x = ttnn.reshape(x, (1, 1, Tp // self.N if split else Tp, cfg.hidden))
         x = self._inject_images(x, p0, T, Tp, split)
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))  # the 4 streams start equal
         ttnn.deallocate(x)
@@ -736,10 +760,9 @@ class Hy4Model:
             self._hiw[slot] = Tb
             segs.append((slot, T))
         segs += [(None, 0)] * (B - len(segs))
-        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper=("shard", 1))
-        x = ttnn.embedding(tok_t, self.emb, layout=ttnn.TILE_LAYOUT, memory_config=mem or ttnn.DRAM_MEMORY_CONFIG)
+        tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, mapper="rep" if self.emb_shard else ("shard", 1))
+        x = self.embed(tok_t, Tp, mem, split=True)
         ttnn.deallocate(tok_t)
-        x = ttnn.reshape(x, (1, 1, Tp // self.N, cfg.hidden))
         X = ttnn.repeat(x, ttnn.Shape((1, cfg.hc_mult, 1, 1)))
         ttnn.deallocate(x)
         pos = torch.arange(Tb).repeat(B)
@@ -784,7 +807,7 @@ class Hy4Model:
             ttnn.deallocate(xs)
             h, _ = self.head_hc.pre(xg, mem)
             ttnn.deallocate(xg)
-            lg = self._logits(h, mem)  # [32 N, V]: die d's rows at d * 32
+            lg = self._logits(h, mem, blocks=[g // loc for g in gs])  # [32 N, V]: die d's rows at d * 32
             ttnn.deallocate(h)
             for g in gs:
                 rows[g] = lg[(g // loc) * 32 + (g % loc) - b]
@@ -799,13 +822,78 @@ class Hy4Model:
 
         return HCFusedOp.get(self.mesh, self.cfg.hidden)
 
-    def _logits(self, h, mem):
+    def _logits(self, h, mem, blocks=None):
+        """h [1, 1, n, H] -> logits [n, V] fp32 (blocks: the 32-row blocks needed; the others' rows left undefined)."""
         hn = self.norm(h, mem)
+        if self.lm is None:  # HY4_LM_ONE_COPY: the streamed copy, 32 rows a call
+            from models.autoports.tencent_hy4_flash.tt.common import real_rows
+
+            n = int(hn.shape[-2])
+            out = torch.empty(n, self.cfg.vocab, dtype=torch.float32)
+            for i in sorted(set(blocks)) if blocks is not None else range(n // 32):
+                hb = ttnn.slice(hn, (0, 0, 32 * i, 0), (1, 1, 32 * i + 32, int(hn.shape[-1])),
+                                memory_config=ttnn.L1_MEMORY_CONFIG)
+                with real_rows(32):
+                    lg = self.lm_dec(hb, ttnn.DRAM_MEMORY_CONFIG)
+                out[32 * i : 32 * i + 32] = to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:, : self.cfg.vocab].float()
+                ttnn.deallocate(lg)
+                ttnn.deallocate(hb)
+            ttnn.deallocate(hn)
+            return out
         lg = ttnn.matmul(hn, self.lm, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         out = to_torch_cat(lg, dim=-1).reshape(-1, self.Vp)[:, : self.cfg.vocab].float()
         ttnn.deallocate(lg)
         ttnn.deallocate(hn)
         return out
+
+    def warm_long(self, rnd, slot: int = 0):
+        """Compile the programs of every later chunk a prompt up to the slot's context runs, without prefilling each
+        prompt length: a chunk past the dense regime runs the programs of (its indexer score-width bucket, its row
+        bucket); a 128K slot has 6 score buckets x 5 row buckets. One prefill to the start of the last chunk needed
+        compiles the full chunks of every bucket; each missing (bucket, rows) pair then runs as one chunk continued
+        from a chunk boundary in its bucket (rewind: the KV / group keys before it stay). Before: every chunk start x
+        row bucket prefilled from position 0 (O(n^2) tokens: ~16M at 128K). rnd(n) -> n random token ids."""
+        ix = next((l.attn.indexer for l in self.layers if l.attn.indexer is not None), None)
+        if ix is None or self.N == 1 or os.environ.get("HY4_PF_KV_BUCKETS", "1") != "1":
+            return 0
+        t0 = time.time()
+        dense, big, r = int(self.cfg.idx_candidate_topk), int(self.chunk), int(self.cfg.idx_ratio)
+        lim = self.max_ctx - 64  # the longest prompt a slot takes (engine: n + 64 <= max_ctx)
+
+        def key(p, T):
+            n = (p + T - 1) // r
+            rows = next((b for b in self.PF_BUCKETS if b >= T and p + b <= self.max_ctx), 0)
+            return ix._kv_bucket(-(-n // 32) * 32), rows
+
+        need = {}
+        p = dense
+        while p < lim:
+            for b in self.PF_BUCKETS:
+                if b <= big and p + b - 1 <= lim:
+                    need.setdefault(key(p, b - 1), p)
+            p += big
+        if not need:
+            return 0
+        L = max(need.values())  # one prompt of L tokens: its chunks [p, p + big) for every p < L
+        ids = rnd(L + big)
+        have = {key(q, min(big, L - q)) for q in range(dense, L, big)}
+        self.set_slot(slot)
+        self.reset()
+        n = 0
+        if L > dense:
+            self.prefill(torch.as_tensor(ids[:L]))
+            n += 1
+        for k, q in sorted(need.items(), key=lambda kv: kv[1]):
+            if k in have:
+                continue
+            self.rewind(q, ids[:q])
+            self.prefill(torch.as_tensor(ids[q : q + k[1] - 1]))
+            have.add(k)
+            n += 1
+        self.reset()
+        logger.info(f"warm_long: {len(need)} (score bucket, rows) chunk kinds up to {lim} tokens in {n} prefills "
+                    f"(longest {L}) in {time.time() - t0:.0f} s; {self.dram_report()}")
+        return n
 
     def warm_head_blocks(self, Tp):
         """Compile the head's block slices of a Tp-row bucket (the last row's 32-row block offset depends on the prompt
@@ -817,6 +905,14 @@ class Hy4Model:
             xs = ttnn.slice(X, (0, 0, b, 0), (1, self.cfg.hc_mult, b + 32, self.cfg.hidden))
             ttnn.deallocate(xs)
         ttnn.deallocate(X)
+        if self.lm is None:  # (the streamed LM head's 32-row block slices of the gathered head rows, tt _logits)
+            h = ttnn.zeros((1, 1, 32 * self.N, self.cfg.hidden), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                           device=self.mesh)
+            for i in range(self.N):
+                hb = ttnn.slice(h, (0, 0, 32 * i, 0), (1, 1, 32 * i + 32, self.cfg.hidden),
+                                memory_config=ttnn.L1_MEMORY_CONFIG)
+                ttnn.deallocate(hb)
+            ttnn.deallocate(h)
 
     def _head_split(self, X, T, Tp, logits_rows, mem):
         """Head of a row-split chunk: X [1, hc, Tp/N, H] per die. Each die takes the same local 32-row block, the blocks
@@ -835,7 +931,7 @@ class Hy4Model:
             ttnn.deallocate(xs)
             h, _ = self.head_hc.pre(xg, mem)
             ttnn.deallocate(xg)
-            lg = self._logits(h, mem)  # [32 N, V]: die d's rows at d * 32
+            lg = self._logits(h, mem, blocks=None if d_ is None else [d_])  # [32 N, V]: die d's rows at d * 32
             ttnn.deallocate(h)
             for dd in range(N) if d_ is None else [d_]:
                 for j in range(32):

@@ -108,8 +108,13 @@ class Hy4Engine:
                     self.model.warm_head_blocks(b)
             # later chunks (p0 >= the first chunk) run other programs: the sparse layers' selecting regime (its score
             # width bucket grows with the context: 1024 groups to 4K tokens, 2048 to 8K, ...) and the SWA flash over the
-            # window; HY4_WARM_LONG (default 2): prompts whose last chunk (every bucket) starts at 2048 * m, m <= 2
-            m_max = int(os.environ.get("HY4_WARM_LONG", "2"))
+            # window. HY4_WARM_LONG=auto (default): every (score bucket, row bucket) the context allows
+            # (tt/model.py warm_long; before: m <= 2 only, so a longer prompt compiled at serve time and released the
+            # traces); a number m: prompts whose last chunk (every bucket) starts at 2048 * m' for m' <= m
+            wl = os.environ.get("HY4_WARM_LONG", "auto")
+            if wl == "auto":
+                self.model.warm_long(lambda n: torch.randint(1000, 100000, (n,), generator=g).tolist())
+            m_max = 0 if wl == "auto" else int(wl)
             for m in range(1, m_max + 1):
                 for b in self.model.PF_BUCKETS:
                     L = self.chunk * m + b - 1
@@ -123,13 +128,20 @@ class Hy4Engine:
         # verify rows (every accepted-row draft trace is captured on first use)
         for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
             self.step()
-        if os.environ.get("HY4_PF_BUCKETS", "1") == "1" and int(os.environ.get("HY4_WARM_LONG", "2")) > 0:
+        if os.environ.get("HY4_PF_BUCKETS", "1") == "1" and os.environ.get("HY4_WARM_LONG", "auto") != "0":
             # decode past the dense regime (context > 2048: the indexer selects, other programs and traces)
             L = self.chunk + 1000
             if L + 64 < self.model.max_ctx:
                 self.prefill(torch.randint(1000, 100000, (L,), generator=g).tolist())
                 for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
                     self.step()
+                # every larger score bucket (forced: a longer context's passes), plain and spec (a 1-row pass first)
+                for b in self.dec.buckets[1:]:
+                    self.dec.min_bucket = b
+                    self._n = None
+                    for _ in range(int(os.environ.get("HY4_WARM_STEPS", "8"))):
+                        self.step()
+                self.dec.min_bucket = 0
         self.model.reset()
         self._pos = None
         self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}

@@ -83,6 +83,55 @@ except ImportError as _e:  # dev env without vllm (engine smokes): no multimodal
 _VISION = _hy4_mm is not None and _hy4_mm.enabled()
 
 
+def cache_gib(users: int, ctx: int, chunk: int = 2048) -> float:
+    """Per-die DRAM of the slots' caches (tt/attention.py, tt/indexer.py, tt/decode_batch.py): the 12 sparse layers'
+    latent rows (608 bf16 + lookahead), the 30 SWA layers' rings (chunk + window + 32 rows), the indexer group keys per
+    slot (+ the batched decoder's lane copy)."""
+    S, m = int(users), int(ctx) + 64
+    rows = -(-m // 32) * 32 + 64
+    gcap = -(-(m // 4 + 96) // 2048) * 2048
+    ring = -(-(chunk + 512 + 32) // 32) * 32
+    b = S * rows * 1216 * 12 + S * ring * 1216 * 30 + 12 * gcap * 256 * S
+    if S > 1:
+        b += 12 * (S * gcap + 64) * 256
+    return b / 2**30
+
+
+def cache_budget_gib(users: int) -> float:
+    """The slots' cache budget per die (HY4_CACHE_GIB overrides): the DRAM the caches + free space take after warm-up
+    and a long prefill, measured 2026-11-21 (tools/dram_budget.py, probe_compile.py: 1 slot, spec 0, no ViT, 400 MiB
+    trace region: 1 x 262144 cached 3.85 GiB with 1.00 GiB free), less the DFly2 drafter (HY4_SPEC_K > 0), the ViT
+    (HY4_VISION), the batched engine's lanes / traces (users > 1), a long prefill's scratch peak (~0.5 GiB at 128K) and a
+    margin; plus whatever the trace region (HY4_TRACE_REGION) leaves of 400 MiB."""
+    env = os.environ.get("HY4_CACHE_GIB")
+    if env:
+        return float(env)
+    g = BUDGET_BASE_GIB - BUDGET_RESERVE_GIB
+    if int(os.environ.get("HY4_SPEC_K", "0") or 0) > 0:
+        g -= BUDGET_SPEC_GIB
+    if os.environ.get("HY4_VISION", "1") == "1":
+        g -= BUDGET_VISION_GIB
+    if int(users) > 1:
+        g -= BUDGET_MULTI_GIB
+    g += (400 * 2**20 - int(os.environ.get("HY4_TRACE_REGION", str(400 * 2**20)))) / 2**30
+    return g
+
+
+BUDGET_BASE_GIB = 4.85  # 1 x 262144 (3.85 GiB of caches) + 1.00 GiB free after a 262000-token prefill
+BUDGET_RESERVE_GIB = 0.75  # a long prefill's scratch peak (+0.51 GiB at 131K) + margin
+BUDGET_SPEC_GIB = 0.56  # DFly2 drafter layers + its traces (1 x 128K: 2.85 -> 2.29 GiB free)
+BUDGET_VISION_GIB = 0.25  # the ViT's weights
+BUDGET_MULTI_GIB = 0.0  # (calibrated below from the 8-slot run)
+
+
+def max_ctx_for(users: int) -> int:
+    """The largest max_model_len (a multiple of 2048) the budget allows for `users` slots."""
+    c = 2048
+    while cache_gib(users, c + 2048) <= cache_budget_gib(users):
+        c += 2048
+    return c
+
+
 class HYV4FlashForConditionalGeneration:
     """vLLM bridge (HF arch HYV4FlashForConditionalGeneration; text + images with HY4_VISION=1)."""
 
@@ -111,12 +160,13 @@ class HYV4FlashForConditionalGeneration:
         if int(tt_data_parallel) != 1 or not 1 <= B <= 8:
             raise ValueError(f"{cls.__name__} serves 1..8 users on one (1,4) mesh (--max-num-seqs <= 8, data parallel 1)")
         max_seq_len = int(max_seq_len or 131072)
-        # multi-user: every slot holds max_model_len tokens; the DRAM left after warm-up must fit a prefill chunk's
-        # MoE buffers (8 x 12K: 0.9 GiB free, a 12K prompt with 7 live users ok; 8 x 16K: out of memory, 2026-11-19)
-        budget = int(os.environ.get("HY4_SLOT_TOKENS_MAX", "98304"))
-        if B > 1 and B * max_seq_len > budget:
-            raise ValueError(f"{B} users x max_model_len {max_seq_len} = {B * max_seq_len} tokens exceed the "
-                             f"{budget}-token cache budget (HY4_SLOT_TOKENS_MAX): use --max-model-len <= {budget // B}")
+        # every slot holds max_model_len tokens: the slots' caches (cache_gib) must leave the DRAM a long prefill's
+        # scratch needs after warm-up (tools/dram_budget.py; HY4_SLOT_TOKENS_MAX: the old users x ctx token cap)
+        need, cap = cache_gib(B, max_seq_len), cache_budget_gib(B)
+        legacy = os.environ.get("HY4_SLOT_TOKENS_MAX")
+        if (legacy and B > 1 and B * max_seq_len > int(legacy)) or (not legacy and need > cap):
+            raise ValueError(f"{B} users x max_model_len {max_seq_len}: caches {need:.2f} GiB per die exceed the "
+                             f"{cap:.2f} GiB budget (HY4_CACHE_GIB): use --max-model-len <= {max_ctx_for(B)}")
         from models.autoports.tencent_hy4_flash.tt.config import Hy4Config, checkpoint_dir
         from models.autoports.tencent_hy4_flash.tt.engine import Hy4Engine
         from models.autoports.tencent_hy4_flash.tt.engine_batch import Hy4BatchEngine

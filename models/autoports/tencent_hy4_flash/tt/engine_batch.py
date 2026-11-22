@@ -438,8 +438,14 @@ class Hy4BatchEngine:
                     m.warm_head_blocks(b)
             # later chunks at every start the slot context allows (their programs change with the indexer's score width
             # bucket; a 12K prompt after a 6K warm compiled 24 programs at serve time and released every trace)
+            # HY4_WARM_LONG=auto (default): every (score bucket, row bucket) pair once (tt/model.py warm_long: one long
+            # prefill + rewinds; before: every chunk start x row bucket from position 0, O(n^2) at long slots)
             m_fit = max(0, (m.max_ctx - 64 - self.chunk) // self.chunk)
-            for k in range(1, int(os.environ.get("HY4_WARM_LONG", str(m_fit))) + 1):
+            wl = os.environ.get("HY4_WARM_LONG", "auto")
+            if wl == "auto":
+                self.finish(0)
+                m.warm_long(rnd, slot=0)
+            for k in range(1, (0 if wl == "auto" else int(wl)) + 1):
                 for b in m.PF_BUCKETS:
                     L = self.chunk * k + b - 1
                     if b <= self.chunk and L + 64 < m.max_ctx:

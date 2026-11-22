@@ -165,8 +165,7 @@ class Hy4DFly:
 
     # ------------------------------------------------------------------ pieces
     def _embed(self, tok_rm, rows):
-        x = ttnn.embedding(tok_rm, self.model.emb, layout=ttnn.TILE_LAYOUT)
-        return ttnn.reshape(x, (1, 1, rows, self.cfg.hidden))
+        return self.model.embed(tok_rm, rows)
 
     def _argmax_rm(self, c, mem):
         """c [1, 1, 1, H] corrected hidden -> the greedy token [1, 1] uint32 RM (bf16 argmax over the full vocab: the
