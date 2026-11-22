@@ -58,6 +58,11 @@ class StepInputs:
     vis: object = None
     base_f: object = None  # [1, 1, 32, 1] fp32: the active slot's sparse cache base (added to the selected rows)
     row_offs: dict = field(default_factory=dict)  # HY4_SOLO_ROWS: per row, its KV cache row (sparse / swa)
+    vlen: object = None  # [1, 1, 1, 1] uint32 RM (DRAM): the rows' largest visible group count (HY4_IDX_VLEN)
+    vcol: object = None  # [1, 1, 32, 1] uint32 RM: per row, a score column to hide (group vlen - 1 for a row that
+    # cannot see it, else the score row's last column, past every score width)
+    idx_tail_fd: object = None  # HY4_SPARSE_FD: idx_tail with the sentinels -> the sink row (a gather list)
+    fd_cur: dict = field(default_factory=dict)  # HY4_SPARSE_FD: R -> [R] int32, each row's last valid gathered key
     sparse: bool = False
     bucket: int = 0
 
@@ -87,6 +92,10 @@ class Hy4Decoder:
         self.min_bucket = 0  # warm-up: force a larger score bucket than the context needs (compile / capture it)
         self.si = self._alloc()
         self._alloc_outputs()
+        if self.gcap:  # (the sparse-regime selection's constants: before any capture)
+            from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
+
+            Hy4Indexer.decode_consts(self.mesh, cfg)
         self.ob = self.ogb = None  # the staging windows' bases
         self.pos = None
         self.tokens = []  # every token fed so far, by position (Engram history after a rewind)
@@ -126,6 +135,13 @@ class Hy4Decoder:
         si.gsin = self._dev(z(1, 1, 32, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
         si.vis = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
         si.base_f = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
+        si.vlen = self._dev(z(1, 1, 1, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        si.vcol = self._dev(z(1, 1, R, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        si.idx_tail_fd = self._dev(z(1, 1, R, self.K_dense - self.n_sel, dtype=torch.int32), ttnn.uint32,
+                                   ttnn.ROW_MAJOR_LAYOUT)
+        for r in range(1, 9):
+            si.fd_cur[r] = ttnn.from_torch(z(r, dtype=torch.int32), dtype=ttnn.int32, device=self.mesh,
+                                           mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
         for k in ("sparse", "swa"):
             si.row_offs[k] = self._dev(z(1, 1, 1, R, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         return si
@@ -173,7 +189,7 @@ class Hy4Decoder:
         """What the position-only host inputs of a pass depend on (HY4_HOST_PREFETCH: a prefetched set is used only if
         its key matches)."""
         return (p0, R, self.ob, self.ogb, self._bases(), self.ring, self.min_bucket,
-                os.environ.get("HY4_PAD_SINK", "1"))
+                os.environ.get("HY4_PAD_SINK", "1"), os.environ.get("HY4_SPARSE_FD", "0"))
 
     def prefetch(self, R: int = 1):
         """HY4_HOST_PREFETCH=1: build the next pass's position-only host inputs (rows R at self.pos) while the device runs
@@ -263,6 +279,13 @@ class Hy4Decoder:
         h["gsin"] = _tile(gs.float().reshape(1, 1, 32, -1), ttnn.float32)
         vis = torch.tensor([(int(pos[s])) // r for s in range(ROWS)], dtype=torch.float32)
         h["vis"] = _tile(vis.reshape(1, 1, ROWS, 1), ttnn.float32)
+        # HY4_IDX_VLEN: the top-512 searches the first vlen score columns (every row's visible groups and, for a row one
+        # group behind, that group: vcol, -inf'd on the device) instead of masking the whole row
+        vmax = int(vis.max())
+        h["vlen"] = _rm(torch.tensor([max(vmax, 1)], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)
+        # (the score row spans the group cache, gcap columns; its last is past every score width, never read)
+        vc = torch.where(vis < vmax, vis, torch.full_like(vis, float(max(self.gcap - 1, 0)))).to(torch.int32)
+        h["vcol"] = _rm(vc.reshape(1, 1, ROWS, 1), ttnn.uint32)
         dense = np.full((ROWS, self.K_dense), SENTINEL, dtype=np.uint32)
         swa = np.full((ROWS, self.K_swa), SENTINEL, dtype=np.uint32)
         tail = np.full((ROWS, self.K_dense - self.n_sel), SENTINEL, dtype=np.uint32)
@@ -279,6 +302,13 @@ class Hy4Decoder:
             tail[s, 1 : 1 + own.size] = bs + own
         u = lambda a: _rm(torch.from_numpy(a.view(np.int32)).reshape(1, 1, ROWS, -1), ttnn.uint32)  # noqa: E731
         h["idx_dense"], h["idx_swa"], h["idx_tail"] = u(dense), u(swa), u(tail)
+        if os.environ.get("HY4_SPARSE_FD", "0") == "1" and R <= 8:
+            tfd = tail.copy()
+            tfd[tfd == SENTINEL] = self.sink_sparse
+            h["idx_tail_fd"] = u(tfd)
+            # each real row: n_sel selected keys, then [sink, its own group's tokens]
+            cur = [self.n_sel + 1 + (int(pos[s]) - (int(pos[s]) // r) * r + 1) - 1 for s in range(R)]
+            h["fd_cur"] = (R, ttnn.from_torch(torch.tensor(cur, dtype=torch.int32), dtype=ttnn.int32))
         sparse = p0 >= cfg.idx_candidate_topk
         bucket = 0
         if sparse:
@@ -296,6 +326,12 @@ class Hy4Decoder:
             c(h[f"sin_{k}"], si.cos_sin[k][1])
         for name in ("A", "P", "Ag", "Pg", "idx_dense", "idx_swa", "idx_tail", "gcos", "gsin", "vis", "base_f"):
             c(h[name], getattr(si, name))
+        if "fd_cur" in h:
+            c(h["idx_tail_fd"], si.idx_tail_fd)
+            c(h["fd_cur"][1], si.fd_cur[h["fd_cur"][0]])
+        for name in ("vlen", "vcol"):
+            if name in h and getattr(si, name, None) is not None:
+                c(h[name], getattr(si, name))
         for j in range(2):
             c(h["off_sparse"][j], si.off_sparse[j])
             c(h["off_swa"][j], si.off_swa[j])
@@ -344,6 +380,7 @@ class Hy4Decoder:
         self._copy_inputs(h)
         t2 = _t.perf_counter()
         self.si.sparse, self.si.bucket = sparse, bucket
+        self.si.rows = R  # (static per trace: part of its key)
         key = (R, sparse, bucket)
         if not self.trace:
             lg = self.model.step(self.si, R, mem=self.mem)

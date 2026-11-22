@@ -465,6 +465,53 @@ class Hy4Attention:
         ttnn.deallocate(o2)
         return self._attend_out(x, o, mem, dec, R)
 
+    def _attend_fd(self, x, q_lat, q_rope, gidx, si, mem):
+        """Sparse-regime decode attention as the sibling ports' decode attention (HY4_SPARSE_FD): the R real rows'
+        selected keys (2044 + sink + own group, gidx [1, R * N] uint32: tt/indexer.step) gathered into a contiguous
+        [R, 1, N, 608] buffer (ttnn.embedding, multi-core), then flash-decode MLA (the key sequence split across cores,
+        the partial softmax reduced on device) with cur_pos = each row's last valid key. sparse_sdpa ran one core per
+        query row over 2176 per-key gathers (~0.2 ms per sparse layer at any context past 2048)."""
+        R = int(si.R)
+        N = int(gidx.shape[-1]) // R
+        cache2d = self.__dict__.get("_cache2d")
+        if cache2d is None:
+            cache2d = self._cache2d = ttnn.reshape(self.cache, (int(self.cache.shape[-2]), self.width))
+        kk = ttnn.embedding(gidx, cache2d, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16,
+                            memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        kb = ttnn.reshape(kk, (R, 1, N, self.width))
+        qcat = ttnn.concat([q_lat, q_rope, self._qs32], dim=-1, memory_config=mem)  # [1, Hd, 32, 608]
+        qp = ttnn.permute(qcat, (0, 2, 1, 3), memory_config=mem)  # [1, 32, Hd, 608]
+        ttnn.deallocate(qcat)
+        # flash MLA decode: an interleaved Q must be in DRAM (sdpa_decode validate; L1 only height-sharded)
+        q_fd = ttnn.slice(qp, (0, 0, 0, 0), (1, R, self.Hd, self.width), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(qp)
+        pc = ttnn.SDPAProgramConfig(compute_with_storage_grid_size=self.mesh.compute_with_storage_grid_size(),
+                                    q_chunk_size=0, k_chunk_size=int(os.environ.get("HY4_FD_KC", "128")),
+                                    exp_approx_mode=False)
+        o = ttnn.transformer.flash_multi_latent_attention_decode(
+            q_fd, kb, None, self.kvl, is_causal=True, cur_pos_tensor=si.fd_cur[R], scale=self.scale,
+            program_config=pc, compute_kernel_config=self._sdpa_ckc(), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        for t_ in (q_fd, kb):
+            ttnn.deallocate(t_)
+        if kk is not kb:
+            try:
+                ttnn.deallocate(kk)
+            except Exception:  # noqa: BLE001
+                pass
+        o2 = ttnn.slice(o, (0, 0, 0, 0), (1, R, self.Hd, self.kvl), memory_config=mem)  # [1, R, Hd, 512]
+        ttnn.deallocate(o)
+        o3 = ttnn.permute(o2, (0, 2, 1, 3), memory_config=mem)  # [1, Hd, R, 512]
+        ttnn.deallocate(o2)
+        if R < TILE:
+            o4 = ttnn.pad(o3, [(0, 0), (0, 0), (0, TILE - R), (0, 0)], 0.0, memory_config=mem)
+            ttnn.deallocate(o3)
+            o3 = o4
+        if o3.layout != ttnn.TILE_LAYOUT:
+            o4 = ttnn.to_layout(o3, ttnn.TILE_LAYOUT, memory_config=mem)
+            ttnn.deallocate(o3)
+            o3 = o4
+        return self._attend_out(x, o3, mem, True, R)
+
     def _attend_out(self, x, o, mem, dec, R):
         """o [1, Hd, Tp, 512] TILE (the attention's latent output) -> V-up, output gate, o_proj, all-reduce, post norm."""
         Tp = int(x.shape[-2])
@@ -1009,6 +1056,13 @@ class Hy4Attention:
         else:
             idx = si.idx_dense
         ttnn.deallocate(q_resid)
+        if self.indexer is not None and getattr(self.indexer, "fd_gather", False):
+            self.indexer.fd_gather = False  # (idx: the gather list of the real rows)
+            out = self._attend_fd(x, q_lat, q_rope, idx, si, mem)
+            ttnn.deallocate(q_lat)
+            ttnn.deallocate(q_rope)
+            ttnn.deallocate(idx)
+            return out
         out = self._attend(x, q_lat, q_rope, idx, mem, dec=dec, R=getattr(si, "R", None))
         ttnn.deallocate(q_lat)
         ttnn.deallocate(q_rope)

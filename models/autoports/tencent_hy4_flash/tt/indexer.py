@@ -475,6 +475,67 @@ class Hy4Indexer:
         ttnn.deallocate(rm)
         return ids
 
+    _SENT = {}
+    _NEGINF = {}
+
+    @staticmethod
+    def decode_consts(mesh, cfg, rows_max: int = 8):
+        """The decode selection's cached constants, created before any trace capture (Hy4Decoder.__init__): a tensor
+        first allocated after a capture can sit in that trace's freed intermediates and be overwritten by its replays."""
+        n = (cfg.idx_group_topk - 1) * cfg.idx_ratio
+        for R in range(1, rows_max + 1):
+            key = (id(mesh), R, n)
+            if key not in Hy4Indexer._SENT:  # HY4_IDX_PADSENT: padding rows' index lists
+                Hy4Indexer._SENT[key] = ttnn.from_torch(
+                    torch.full((1, 1, 32 - R, n), -1, dtype=torch.int32), dtype=ttnn.uint32,
+                    layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh))
+        if id(mesh) not in Hy4Indexer._NEGINF:  # HY4_IDX_VLEN: the score scattered over a row's hidden group
+            Hy4Indexer._NEGINF[id(mesh)] = ttnn.from_torch(
+                torch.full((1, 1, 32, 1), float("-inf"), dtype=torch.bfloat16), dtype=ttnn.bfloat16,
+                layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(mesh))
+
+    def _pad_sentinel(self, urm, R):
+        """urm [1, 1, 32, n] uint32 RM -> rows R.. replaced by SENTINEL (0xFFFFFFFF) rows (a cached constant)."""
+        n = int(urm.shape[-1])
+        s = Hy4Indexer._SENT[(id(self.mesh), R, n)]
+        top = ttnn.slice(urm, (0, 0, 0, 0), (1, 1, R, n), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(urm)
+        out = ttnn.concat([top, s], dim=-2, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(top)
+        return out
+
+    def _topk_vlen(self, q, w, si, mem, R, n_sel):
+        """Decode selection without the full-width visibility mask (HY4_IDX_VLEN): the top-512 of the raw score row's
+        first si.vlen columns (topk_large_indices' valid_length_tensor; vlen = the rows' largest visible group count)
+        -> fp32 TILE group ids [1, 1, 32, n_sel]. A pass of R <= ratio + 1 rows spans at most two visibilities (vlen,
+        vlen - 1): a row one group behind gets -inf scattered over group vlen - 1 (si.vcol; the other rows scatter into
+        a column no score width reaches). Replaces 7 full-width ops (slice, tilize, 2 typecasts, ge, where, untilize)
+        over [32, bucket + 32] per sparse layer. Same scores at every rank; only the order of equal scores can differ
+        (the masked row runs another top-k body at widths < 16K groups)."""
+        kw = {}
+        hg = os.environ.get("HY4_IDX_DEC_HG")
+        if hg is not None:  # the score op's heads resident per pass (0: all; default 1): another head summation order
+            kw["program_config"] = ttnn.IndexerScoreProgramConfig(q_chunk_size=32, k_chunk_size=64, head_group_size=int(hg))
+        sc = ttnn.experimental.indexer_score_dsa(q, self.gkeys, w, chunk_start_idx=si.bucket, kv_len=si.bucket + 32,
+                                                 **kw)
+        if sc.layout != ttnn.ROW_MAJOR_LAYOUT or sc.dtype != ttnn.bfloat16:  # (the op writes bf16 row-major)
+            s2 = ttnn.to_layout(ttnn.typecast(sc, ttnn.bfloat16), ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(sc)
+            sc = s2
+        if R > 1:
+            s2 = ttnn.scatter(sc, -1, si.vcol, Hy4Indexer._NEGINF[id(self.mesh)], memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(sc)
+            sc = s2
+        ids = ttnn.experimental.topk_large_indices(sc, k=TOPK, valid_length_tensor=si.vlen)
+        ttnn.deallocate(sc)
+        it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(ids)
+        f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(it)
+        f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
+        ttnn.deallocate(f)
+        return f511
+
     _OFFS = {}
 
     def _expand_rows(self, f511, rows, mem):
@@ -957,17 +1018,24 @@ class Hy4Indexer:
             return si.idx_dense
         cos, sin = si.cos_sin["sparse"]
         q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
-        ids = self._topk(q, w, si.bucket, si.vis, mem)
-        ttnn.deallocate(q)
-        ttnn.deallocate(w)
-        # group ids -> token rows: the first 511 groups x 4 (+ the tail: sink, own group up to p, sentinels)
-        it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
-        ttnn.deallocate(ids)
-        f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
-        ttnn.deallocate(it)
         n_sel = self.cfg.idx_group_topk - 1
-        f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
-        ttnn.deallocate(f)
+        R = int(getattr(si, "rows", 0) or 32)
+        if (os.environ.get("HY4_IDX_VLEN", "1") == "1" and getattr(si, "vlen", None) is not None
+                and R <= self.r + 1):
+            f511 = self._topk_vlen(q, w, si, mem, R, n_sel)
+            ttnn.deallocate(q)
+            ttnn.deallocate(w)
+        else:
+            ids = self._topk(q, w, si.bucket, si.vis, mem)
+            ttnn.deallocate(q)
+            ttnn.deallocate(w)
+            # group ids -> token rows: the first 511 groups x 4 (+ the tail: sink, own group up to p, sentinels)
+            it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
+            ttnn.deallocate(ids)
+            f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
+            ttnn.deallocate(it)
+            f511 = ttnn.slice(f, (0, 0, 0, 0), (1, 1, 32, n_sel), memory_config=mem)
+            ttnn.deallocate(f)
         e = self._expand_rows(f511, 32, mem)
         ttnn.deallocate(f511)
         if getattr(si, "base_f", None) is not None:  # + the active slot's cache base
@@ -978,6 +1046,28 @@ class Hy4Indexer:
         ttnn.deallocate(e)
         urm = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         ttnn.deallocate(u)
+        if (os.environ.get("HY4_SPARSE_FD", "0") == "1" and R <= 8 and getattr(si, "idx_tail_fd", None) is not None
+                and getattr(si, "fd_cur", None)):
+            # flash-decode attention (Hy4Attention._attend_fd): the real rows' gather list [1, R * N], sentinel-free
+            top = ttnn.slice(urm, (0, 0, 0, 0), (1, 1, R, int(urm.shape[-1])), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            tl = ttnn.slice(si.idx_tail_fd, (0, 0, 0, 0), (1, 1, R, int(si.idx_tail_fd.shape[-1])),
+                            memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            g = ttnn.concat([top, tl], dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(top)
+            ttnn.deallocate(tl)
+            gidx = ttnn.reshape(g, (1, R * int(g.shape[-1])))
+            sel_buf = getattr(self, "sel_buf", None)
+            if sel_buf is not None:
+                ttnn.copy(urm, sel_buf)
+                ttnn.deallocate(urm)
+                urm = sel_buf
+            self.sel = urm
+            self.fd_gather = True
+            return gidx
+        if os.environ.get("HY4_IDX_PADSENT", "1") == "1" and R <= 8:
+            # the padding rows (R..31) select nothing (sentinels): their index lists are the sink only (HY4_PAD_SINK's
+            # idx_tail), so sparse_sdpa skips them, as in the dense regime (before: 32 rows x 2048 gathered keys)
+            urm = self._pad_sentinel(urm, R)
         idx = ttnn.concat([urm, si.idx_tail], dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         sel_buf = getattr(self, "sel_buf", None)
         if sel_buf is not None:  # persistent (see Hy4Model.step)
