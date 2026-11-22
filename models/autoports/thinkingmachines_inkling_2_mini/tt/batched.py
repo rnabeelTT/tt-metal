@@ -415,14 +415,18 @@ class TracedDecoder:
     def set_inputs(self, tokens, positions):
         self.dec.set_inputs(tokens, positions)
 
-    def capture(self, compile=True):
+    def capture(self, compile=True, post=None):
         """compile=False: the step's programs are already compiled (several widths: compile every width, THEN capture
-        every trace; a program first compiled after a capture can be overwritten by that trace's replays)."""
+        every trace; a program first compiled after a capture can be overwritten by that trace's replays).
+        post(logits): more device work captured into the same trace (its result: self.extra)."""
         if compile:
-            self.dec.step()
+            out = self.dec.step()
+            if post is not None:
+                post(out)
         ttnn.synchronize_device(self.mesh)
         self.tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.out = self.dec.step()
+        self.extra = post(self.out) if post is not None else None
         ttnn.end_trace_capture(self.mesh, self.tid, cq_id=0)
         ttnn.synchronize_device(self.mesh)
 

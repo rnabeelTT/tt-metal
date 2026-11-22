@@ -112,7 +112,19 @@ on 8 cores incl. both reshards (tools/bench_norm.py).
 | 4 | 5.47 s | 16.8 | 49.1 |
 | 8 | 11.97 s | 13.4 | 65.0 |
 
-(before the prefill MoE fix below.) Decode width buckets (one trace per width, the narrowest covering the highest live
+(before the prefill MoE fix below.) After it, with decode sampling on device (SAMPLE_DEVICE=1: the qwen36 RowsTopK fused
+top-32 twice inside the decode trace, the second pass on the rows shifted by the first's max so bf16 resolves the
+candidates; host draw with vLLM semantics over the 32, tt/sampling.py; 0.5 ms at 1 row, 1.3 ms at 8):
+
+| concurrency | TTFT mean | decode tok/s / user | total tok/s |
+|---|---|---|---|
+| 1 | 0.79 s | 20.9 (24.7 at temperature 1) | 19.7 |
+| 2 | 1.18 s | 21.2 | 38.7 |
+| 4 | 2.56 s | 18.2 | 61.6 |
+| 8 | 5.63 s | 14.1 | 85.7 |
+
+Single-user device time depends on the text (greedy repetitive text 47 ms / step, sampled 40 ms): expert placement?
+(open). Decode width buckets (one trace per width, the narrowest covering the highest live
 slot), logits untilized on device (readback 8.3 -> 1.1 ms). Prefill: the MoE's masked union path was 84 % of a chunk;
 the sorted dispatch (MiniMax / Qwen3.5 moe_dispatch, grouped sparse matmuls) takes a 128-row chunk 1832 -> 733 ms,
 256 rows 1031 ms (prefill quality 0.969 / 0.996 / 0.016). Next for prefill: the multi-row block mix / message sums

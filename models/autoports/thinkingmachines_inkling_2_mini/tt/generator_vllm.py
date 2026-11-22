@@ -42,6 +42,12 @@ TIMING = os.environ.get("I2M_TIMING", "0") == "1"
 WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").split(",")]  # per-100-step decode timing breakdown in the server log
 
 
+def _host_tensor(t):
+    if t is None:
+        return None
+    return t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
+
+
 class Inkling2ForCausalLM:
     """vLLM bridge (HF arch Inkling2LoopForConditionalGeneration, text only)."""
 
@@ -49,7 +55,7 @@ class Inkling2ForCausalLM:
     model_capabilities = {
         "supports_prefix_caching": False,
         "supports_async_decode": False,
-        "supports_sample_on_device": False,
+        "supports_sample_on_device": True,  # decode: device top-32 + host draw (tt/sampling.py)
         "supports_chunked_prefill": False,
     }
 
@@ -64,6 +70,10 @@ class Inkling2ForCausalLM:
         self.trs = {w: TracedDecoder(d) for w, d in self.decs.items()} if TRACE else {}
         self.tr = self.trs.get(B)
         self.row2slot = {}  # live vLLM row -> physical slot (slots stay put; new requests take the lowest free one)
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceTopK, HostSampler
+
+        self.topk = DeviceTopK(mesh, int(model.lm_head.shape[-1]), model.V)
+        self.hs = HostSampler(model.V)
         self.V = model.V
         self.vocab = int(model.cfg.vocab_size)
         self.N = mesh.get_num_devices()
@@ -130,11 +140,13 @@ class Inkling2ForCausalLM:
             t0 = time.time()
             for w in self.trs:  # every width's programs first (eager), then the captures
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
-                self._host_logits(self.decs[w].step(), w)  # (the readback untilize is a program too)
+                out = self.decs[w].step()
+                self._host_logits(out, w)  # (the readback untilize is a program too)
+                self.topk(out, w)  # the device-sampling programs of this width
             ttnn.synchronize_device(self.mesh)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
-                tr.capture(compile=False)
+                tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
             self._captured = True
             logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
 
@@ -164,6 +176,7 @@ class Inkling2ForCausalLM:
     def _slot_for(self, row):
         """A new request in vLLM row `row`: the lowest slot no other live row holds."""
         self.row2slot.pop(row, None)
+        self.hs.forget(row)
         used = set(self.row2slot.values())
         slot = next(s for s in range(self.B) if s not in used)
         self.row2slot[row] = slot
@@ -205,9 +218,10 @@ class Inkling2ForCausalLM:
         tok = torch.as_tensor(tokens).reshape(-1).to(torch.long)
         pos = torch.as_tensor(start_pos).reshape(-1).to(torch.long)
         R = int(pos.numel())
-        for r in range(R):  # rows the plugin no longer decodes have finished: their slots are free
-            if int(pos[r]) < 0:
-                self.row2slot.pop(r, None)
+        # rows the plugin no longer decodes have finished (pos -1, or past the batch it sends): their slots are free
+        for r in list(self.row2slot):
+            if r >= R or int(pos[r]) < 0:
+                self.row2slot.pop(r)
         live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
@@ -224,11 +238,24 @@ class Inkling2ForCausalLM:
         if TIMING:
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
-        lg = self._host_logits(dev, W)  # [W, V] by physical slot
+        sp = kwargs.get("sampling_params")
+        if sp is not None:  # [W, 32] candidates by physical slot (the traced step computed them too)
+            extra = getattr(d, "extra", None)
+            idx, vals = self.topk.host(extra) if extra is not None else self.topk(dev, W)
+        else:
+            lg = self._host_logits(dev, W)  # [W, V] by physical slot
         t3 = time.perf_counter()
-        out = torch.full((R, 1, self.vocab), float("-inf"))
-        for r in live:
-            out[r, 0, : self.V] = lg[self.row2slot[r]]
+        if sp is not None:  # device sampling: the tokens [R, 1]
+            toks = self.hs.sample(idx, vals, [(r, self.row2slot[r]) for r in live], sp,
+                                  output_tokens=_host_tensor(kwargs.get("output_tokens")),
+                                  prompt_tokens=_host_tensor(kwargs.get("prompt_tokens")))
+            out = torch.zeros((R, 1), dtype=torch.int32)
+            for r, t in toks.items():
+                out[r, 0] = t
+        else:
+            out = torch.full((R, 1, self.vocab), float("-inf"))
+            for r in live:
+                out[r, 0, : self.V] = lg[self.row2slot[r]]
         t4 = time.perf_counter()
         self._decode_steps += 1
         if TIMING:

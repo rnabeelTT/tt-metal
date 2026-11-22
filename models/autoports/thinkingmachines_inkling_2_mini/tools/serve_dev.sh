@@ -3,7 +3,7 @@
 # shared code it imports mounted over the image's copies). Detached container i2m-serve (not the stall watcher's i2m-dev / i2m-job prefixes: an idle server is silent).
 #
 # usage: tools/serve_dev.sh     env: MESH_DEVICE (P150 | P300 | P300x2), SEQS (max-num-seqs, 4), CTX (4096), PORT (8000),
-#        I2M_EXPERT_DT (bfp8), I2M_KV_DT (bf16), TRACE_MIB (300), I2M_IMAGE
+#        I2M_EXPERT_DT (bfp8), I2M_KV_DT (bf16), TRACE_MIB (300), I2M_IMAGE, SAMPLE_DEVICE (1: decode sampling on device)
 set -e
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 REPO=$(cd "$P/../../.." && pwd)
@@ -12,7 +12,8 @@ HF_HOST=${HF_HOST:-${HF_HOME:-/opt/tenstorrent/models}}
 CACHE=${I2M_CACHE:-$HOME/.cache/inkling2}
 MESH=${MESH_DEVICE:-P150}
 case $MESH in P150|P100) FAB=DISABLED ;; *) FAB=FABRIC_1D ;; esac
-TT_CFG='{"tt": {"trace_mode": "all", "trace_region_size": '$((${TRACE_MIB:-300} * 1048576))', "l1_small_size": 24576, "fabric_config": "'$FAB'"}}'
+SD=; [ -n "$SAMPLE_DEVICE" ] && SD=', "sample_on_device_mode": "decode_only"'
+TT_CFG='{"tt": {"trace_mode": "all", "trace_region_size": '$((${TRACE_MIB:-300} * 1048576))', "l1_small_size": 24576, "fabric_config": "'$FAB'"'"$SD"'}}'
 M=(-v "$P:/opt/tt-metal/models/autoports/thinkingmachines_inkling_2_mini")
 for d in models/demos/blackhole/qwen36 models/autoports/minimaxai_minimax_m2_7 models/common/modules/moe; do
   [ -d "$REPO/$d" ] && M+=(-v "$REPO/$d:/opt/tt-metal/$d"); done
