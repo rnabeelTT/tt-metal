@@ -24,7 +24,7 @@ import torch
 import ttnn
 
 from .dmm import dmm
-from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
+from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce, packed_rows
 from models.autoports.minimaxai_minimax_m2_7.tt.moe import sparse_matmul_program_config
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
@@ -78,6 +78,11 @@ class MoE:
         rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
         self.router_w = ttnn.from_torch(ck.L(li, "mlp.gate.weight").float().T.contiguous().reshape(1, 1, H, E),
                                         dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
+        # the router weight as bf16 hi / lo halves (the fused message gate's router round, tt/gate.py GateKernel2)
+        rw = ck.L(li, "mlp.gate.weight").float().T.contiguous().reshape(1, 1, H, E)
+        rhi = rw.bfloat16().float()
+        self.router_hl = tuple(ttnn.from_torch(t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
+                                               mesh_mapper=rep) for t in (rhi, (rw - rhi).bfloat16().float()))
         self.router_b = ttnn.from_torch(ck.L(li, "mlp.gate.bias").float().reshape(1, 1, 1, E), dtype=ttnn.float32,
                                         layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
         self.route_scale = float(cfg.route_scale)
@@ -140,11 +145,16 @@ class MoE:
         return wn, ids16
 
     # -- experts -----------------------------------------------------------------------------------------------------
-    def forward(self, x):
-        """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc)."""
+    def forward(self, x, logits=None, dup=False):
+        """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc).
+        logits: the router logits computed upstream ([1, 1, max(T, 2), E] fp32; T = 1: dup, row 1 = row 0 in x too)."""
         T = int(x.shape[2])
+        rows = None
         if self.fused and T <= self.fe.rows_max:
-            out = self.fe.forward(x)
+            # packed all-reduce: it reads the shared expert-output buffer's live rows directly (no clone / slice)
+            raw = self.N > 1 and len(self.fe.subs) == 1 and packed_rows(T)
+            out = self.fe.forward(x, logits=logits, dup=dup, raw=raw)
+            rows = T if raw else None
         elif self.fused and T <= 2 * self.fe.rows_max and SPLIT_DECODE:
             # 17 .. 32 decode rows: two fused calls of <= 16 rows (the fused kernels' row limit) instead of the sorted
             # prefill path (32 rows: ~3.3 ms per application on TP4 vs ~2 x the 16-row fused call)
@@ -167,7 +177,7 @@ class MoE:
             else:
                 out = self._masked(x, w, ids, T)
         if self.N > 1:
-            out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp")
+            out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp", rows=rows)
         return out
 
     def _sorted(self, x, T):

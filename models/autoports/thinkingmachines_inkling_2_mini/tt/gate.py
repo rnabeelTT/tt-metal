@@ -89,3 +89,105 @@ class GateKernel:
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([h, m, wd, wfg, out], prog)
         return out
+
+
+class GateKernel2:
+    """The message gate on the post-attention core rectangle with its rounds (tt/kernels/gate2_*.cpp): live rows in /
+    out, round-1 norm statistics and round-2 partial down projections reduced exactly by 0 / 1 matmuls at the root
+    (hi / lo halves), the totals multicast back. <= 16 rows. With nw: the following RMS norm too (round 3; bf16 out);
+    with router (W hi, W lo) bf16 [1, 1, H, E] (<= 8 rows): the router logits (round 4) -> [1, 1, max(T, 2), E] fp32.
+    dup (T = 1): row 0 also into row 1 of the outputs (the MoE's two-row path)."""
+
+    ROUTER_ROWS = 8  # (the gather buffer: 2 E / 32 parts of ceil(C T / 32) tiles)
+
+    def __init__(self, post, R: int):
+        self.pk, self.R = post, R // 32
+        self.H, self.Ht, self.PER, self.eps = post.H, post.Ht, post.PER, post.eps
+
+    def __call__(self, h, m, wd, wfg, nw=None, router=None, dup=False, out_mc=ttnn.L1_MEMORY_CONFIG):
+        from .post import CX, C
+
+        pk = self.pk
+        h, m = (ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t for t in (h, m))
+        T = int(h.shape[-2])
+        norm, rt = nw is not None, router is not None
+        assert T <= 16 and h.dtype == ttnn.float32 and m.dtype == ttnn.float32 and (norm or not rt)
+        assert not rt or T <= self.ROUTER_ROWS
+        dup = dup and T == 1
+        if m.memory_config() != h.memory_config():
+            m = ttnn.to_memory_config(m, h.memory_config())
+        odt = ttnn.bfloat16 if norm else ttnn.float32
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), odt, ttnn.TILE_LAYOUT, pk.mesh, out_mc)
+        ET = int(router[0].shape[-1]) // 32 if rt else 4
+        lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
+                                            pk.mesh, out_mc) if rt else None
+        NSEL, sel = pk._sel(T)
+        PER, R = self.PER, self.R
+        GP = 2 * ET if rt else 4
+        (cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
+         cb_tot2, cb_g, cb_fa, cb_out, cb_zero, cb_o32, cb_tot3, cb_nw, cb_xb, cb_rw) = range(24)
+        f32, bf, crs = ttnn.float32, ttnn.bfloat16, pk.crs
+        nparts = 8 + (2 if norm else 0) + (2 * ET if rt else 0)  # (every round's parts contiguous: no wrap inside one)
+        ntout = 4 + (1 if norm else 0) + (ET if rt else 0)
+        cbs = [_cb(crs, cb_h, f32, F32, PER), _cb(crs, cb_m, f32, F32, PER), _cb(crs, cb_wd, bf, BF, 2 * PER * R),
+               _cb(crs, cb_wf, bf, BF, R * PER), _cb(crs, cb_wg, bf, BF, R * PER), _cb(crs, cb_ones, bf, BF, 1),
+               _cb(crs, cb_sel, bf, BF, NSEL), _cb(crs, cb_sq, f32, F32, 4 * PER), _cb(crs, cb_part, f32, F32, nparts),
+               _cb(crs, cb_gath, f32, F32, GP * NSEL), _cb(crs, cb_tout, f32, F32, ntout),
+               _cb(crs, cb_tot, f32, F32, 2), _cb(crs, cb_r, f32, F32, 2), _cb(crs, cb_hn, bf, BF, 2 * PER),
+               _cb(crs, cb_tot2, f32, F32, 2), _cb(crs, cb_g, bf, BF, R), _cb(crs, cb_fa, f32, F32, 2 * PER),
+               _cb(crs, cb_out, odt, BF if norm else F32, 2), _cb(crs, cb_zero, bf, BF, 1)]
+        if norm:
+            cbs += [_cb(crs, cb_o32, f32, F32, PER), _cb(crs, cb_tot3, f32, F32, 1), _cb(crs, cb_nw, f32, F32, PER)]
+        if rt:
+            cbs += [_cb(crs, cb_xb, bf, BF, PER), _cb(crs, cb_rw, bf, BF, 2 * PER * ET)]
+        rhi, rlo = router if rt else (wd, wd)
+        rd_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, PER, R, self.Ht, NSEL, cb_nw, cb_rw, int(norm), int(rt),
+                 ET] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(wd).get_compile_time_args()
+        rd_common = [h.buffer_address(), m.buffer_address(), wd.buffer_address(), wfg.buffer_address(),
+                     pk.ones.buffer_address(), sel.buffer_address(), (nw if norm else wd).buffer_address(),
+                     rhi.buffer_address(), rlo.buffer_address()]
+        wr_ct = [cb_part, cb_gath, cb_tout, cb_tot, cb_tot2, cb_tot3, cb_out, cb_zero, PER, C, NSEL, GP, int(norm),
+                 int(rt), ET, int(dup)] + ttnn.TensorAccessorArgs(out).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(lg if rt else out).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(pk.zeros).get_compile_time_args()
+        wr_common = [out.buffer_address(), (lg if rt else out).buffer_address()] + pk.mc + [pk.zeros.buffer_address()]
+        cp_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
+                 cb_gath, cb_tot2, cb_g, cb_fa, cb_out, PER, R, NSEL, _bits(1.0 / self.H), _bits(self.eps), GP,
+                 int(norm), int(rt), ET, cb_o32, cb_tot3, cb_nw, cb_xb, cb_rw]
+        u2d = [ttnn.UnpackToDestMode.Default] * 64
+        for i in (cb_h, cb_m, cb_tot, cb_r, cb_tot2, cb_fa, cb_o32, cb_tot3, cb_nw):
+            u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                           dst_full_sync_en=True, math_approx_mode=False)
+        cfg.unpack_to_dest_mode = u2d
+        defs = [("G2_CX", str(CX)), ("G2_ROWS", str(T))]
+
+        def dm(src, ct, common, riscv, noc):
+            kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+                                       defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
+            kd.common_runtime_args = common
+            return kd
+
+        kernels = [
+            dm("gate2_reader.cpp", rd_ct, rd_common, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_1),
+            dm("gate2_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
+            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
+                                  runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
+                                  defines=[("ROWS", str(T))]),
+        ]
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
+        key = ("i2m_gate2", T, PER, R, CX, norm, rt, ET, dup,
+               tuple(repr(t.memory_config()) for t in (h, wd, out) + ((lg,) if rt else ())))
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        io, seen = [], set()
+        for t in [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
+                + ([lg] if rt else []):
+            if id(t) not in seen:
+                seen.add(id(t))
+                io.append(t)
+        ttnn.generic_op(io, prog)
+        if norm:
+            return out, lg
+        return out

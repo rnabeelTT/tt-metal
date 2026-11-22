@@ -42,7 +42,8 @@ SQRT5 = math.sqrt(5.0)
 FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
 _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
-GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"  # the whole message gate in one program (tt/gate.py)
+GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"
+GATE2 = os.environ.get("I2M_GATE2", "1") == "1"  # the round-reduced gate on the post-attention rectangle (tt/gate.py GateKernel2)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 # I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
@@ -93,6 +94,7 @@ class Ops:
         self.mixk = None
         self.gatek = None
         self.gatefk = None
+        self.gate2k = None  # (set by the decoder when the post-attention rectangle exists: tt/gate.py GateKernel2)
         self.rms_cfg = {}
 
     def query(self, Qcols):
@@ -227,9 +229,23 @@ class MessageGate:
         if GATE_FUSED:  # the one-program gate (tt/gate.py): bf16 forget / gain weights (the checkpoint's, exact)
             self.wfg_bf = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat16)
 
+    def fused_norm(self, h, m, nw_rows, router=None, dup=False):
+        """The gate + the following RMS norm (nw_rows: [1, 1, 32, H] fp32) in one program, with the router logits
+        (router: bf16 hi / lo [1, 1, H, E]) -> (bf16 normed x, logits | None). None: not available here."""
+        o = self.ops
+        hf, mf = _f32(h), _f32(m)
+        if not (GATE2 and o.gate2k is not None and len(hf.shape) == 4 and int(hf.shape[1]) == 1
+                and int(hf.shape[-2]) <= 16):
+            return None
+        if router is not None and int(hf.shape[-2]) > o.gate2k.ROUTER_ROWS:
+            router = None
+        return o.gate2k(hf, mf, self.wd, self.wfg_bf, nw=nw_rows, router=router, dup=dup)
+
     def __call__(self, h, m):
         o, H = self.ops, self.H
         hf, mf = _f32(h), _f32(m)
+        if GATE2 and o.gate2k is not None and int(hf.shape[-2]) <= 16 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
+            return o.gate2k(hf, mf, self.wd, self.wfg_bf)
         if GATE_FUSED and int(hf.shape[-2]) <= 32 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
             if o.gatefk is None:
                 from .gate import GateKernel

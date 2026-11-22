@@ -198,6 +198,17 @@ packing).
 | LM head split over the vocab (2 / 4 dies; per-die top-k, global-max shift, host merge) | ~30.5 | | | |
 | block mix logits once per block (MixPlan; bit-identical), row-limited mix SFPU, async all-reduce | 26.9 | 32.1 | 29.8 | 37.2 |
 | gate kernel SFPU on the live rows only (bit-identical) | 26.0 | 31.2 | | |
+| post-attention section in one program (tt/post.py) | 23.9 | 30.4 | | |
+| pre-attention section in one program (tt/pre.py) | 22.7 | 30.0 | | |
+| message gate on the post / pre rounds scheme (tt/gate.py GateKernel2) | 20.9 | 29.1 | | |
+| + the MoE-input norm and the router logits in the MLP gate's program | 20.5 | 28.9 | | |
+| + the attention-side gates with their q / k / v norms | 20.1 | 28.7 | | |
+| packed all-reduce: the live rows in 3 / 9 / 18 tiles (tt/ccl.py, kernels/arpack.cpp; bit-identical sums) | 19.2 | 28.0 | | |
+| MoE output read by the all-reduce in place (no clone / slice) | 19.0 | 27.9 | | |
+
+Decode quality after the packed all-reduce row (TP4, 8 x 736 teacher-forced): 0.9720 / 0.9970 / 0.0156 (0.9689 / 0.9962 /
+0.0156 before the gate rows). The packed all-reduce's pack reads a DRAM source through an aligned staging buffer: a
+DRAM read needs its L1 destination 64 B-aligned like the source (32 B chunk slots at 32 mod 64 corrupted face 1).
 
 Decode quality (TP4, 8 x 736 teacher-forced): 0.9711 / 0.9970 / 0.0151 (noise band; the all-reduce change moved it
 from 0.9677 / 0.9954 / 0.0212, the eval's noise). Tried and dropped: one fused-MoE call for 17..32 rows (works, pcc

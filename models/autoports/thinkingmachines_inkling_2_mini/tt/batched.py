@@ -39,6 +39,10 @@ GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
 MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE")
 POST = __import__("os").environ.get("I2M_POST", "1") == "1"
 PRE = __import__("os").environ.get("I2M_PRE", "1") == "1"  # the fused pre-attention section (tt/pre.py)
+# I2M_GATE_NORM: the MoE-side message gate with the following norm (1) and the router logits (2, default) in one
+# program (tt/gate.py GateKernel2); 0: separate ops
+GATE_NORM = int(__import__("os").environ.get("I2M_GATE_NORM", "2"))
+GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1"  # likewise the attention-side gates
 
 
 class Tail:
@@ -391,6 +395,10 @@ class BatchedDecoder:
                     from .post import PostKernel
 
                     model._post = PostKernel(mesh, model.H, model.cfg.rms_norm_eps)
+                    from .gate import GateKernel2
+
+                    rk = next((int(g.wd.shape[-1]) for L in model.layers.values() if L.loop for g in L.gates.values()), 64)
+                    model.ops.gate2k = GateKernel2(model._post, rk)
                     model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
                     model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
                 self.post, self.nw_rows, self.q_rows = model._post, model._nw_rows, model._q_rows
@@ -484,6 +492,20 @@ class BatchedDecoder:
         lgs = [(D[b], self.plan.off[(b, key)]) for b in ids] + [(lg, 0)]
         return ops.mixk.multi(blocks_n + [cur], lgs, nq)
 
+    def _gate_norms(self, L, li, ins, messages):
+        """The attention side's three message gates, each with its following norm, one program each (tt/gate.py
+        GateKernel2) -> self._gn = (qn, kn, vn) bf16; False: not available (the separate ops then)."""
+        hs = ins * 3 if len(ins) == 1 else ins
+        nws = [self.norm_rows[(li, "in")]] * 3 if L.sliding else [self.norm_rows[(li, k)] for k in "qkv"]
+        out = []
+        for n, hh, mm, nw in zip(("attn", "k", "v"), hs, messages[:3], nws):
+            f = L.gates[n].fused_norm(hh, mm, nw)
+            if f is None:
+                return False
+            out.append(f[0])
+        self._gn = tuple(out)
+        return True
+
     def _layer(self, a, x, blocks_n, messages, pos, pos_wr, pos_sdpa, tau, ids=(), D=None):
         m, ops = self.m, self.m.ops
         li, _ = m.sched[a]
@@ -514,6 +536,8 @@ class BatchedDecoder:
             ins = [_f32(x)]
         if fused is not None and messages is None:  # (normed in the program)
             qn, kn, vn = (fused * 3) if L.sliding else fused
+        elif messages is not None and GATE_NORM_ATTN and self.pre is not None and self._gate_norms(L, li, ins, messages):
+            qn, kn, vn = self._gn
         elif L.sliding:
             h = ins[0]
             if messages is not None:
@@ -544,11 +568,19 @@ class BatchedDecoder:
             lgs = [(D[b], self.plan.off[(b, ("mlp", a))]) for b in ids]
             resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
                                  nw=None if messages is not None else self.nw_rows[li])
+            lg, dup = None, False
             if messages is not None:
-                mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
+                # the gate + the MoE-input norm (+ the router logits) in one program (tt/gate.py GateKernel2)
+                T = int(o.shape[-2])
+                rt = L.moe.router_hl if GATE_NORM == 2 and getattr(L.moe, "fused", False) else None
+                f = L.gates["mlp"].fused_norm(o, messages[3], self.nw_rows[li], rt, dup=T == 1) if GATE_NORM else None
+                if f is not None:
+                    (mn, lg), dup = f, T == 1
+                else:
+                    mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
             else:
                 mn = o
-            mo = L.moe.forward(mn)
+            mo = L.moe.forward(mn, logits=lg, dup=dup) if (lg is not None or dup) else L.moe.forward(mn)
             if self.pre is not None:  # the tail (MoE-output conv + residual) runs in the next application's program
                 return Tail(mo, resid, ba.mlp), blk
             out = _bf(ttnn.add(resid, _f32(ba.mlp.step(mo))))

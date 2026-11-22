@@ -109,7 +109,7 @@ class FusedExperts:
                 if w <= self.rows_max:
                     op.rows_ops(w)
 
-    def forward(self, x):
+    def forward(self, x, logits=None, dup=False, raw=False):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
         tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
         assert int(x.shape[-2]) <= self.rows_max
@@ -117,7 +117,9 @@ class FusedExperts:
         # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5);
         # I2M_MOE_ROW1=1: the rows kernels at one row instead (no concat / slice / clone)
         if M == 1 and not ROW1:
-            if DUPROW:  # row 1 of x's tiles (padding) <- row 0, in place: the 2-row path reads both
+            if dup:  # (row 1 already = row 0: written by the producer)
+                xr, m = x, 2
+            elif DUPROW:  # row 1 of x's tiles (padding) <- row 0, in place: the 2-row path reads both
                 if getattr(_SHARED, "duprow", None) is None:
                     from .duprow import DupRow
                     _SHARED.duprow = DupRow(self.mesh, self.H)
@@ -130,7 +132,8 @@ class FusedExperts:
 
         op0 = self.subs[0][0]
         route, _, _, b0 = op0.rows_ops(m)
-        logits = self._logits(xr)
+        own = logits is None
+        logits = self._logits(xr) if own else logits
         route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
         ttnn.deallocate(logits)
         acc = None
@@ -141,9 +144,11 @@ class FusedExperts:
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)
             if acc is None:  # (one sub-shard: the shared out buffer itself, consumed before the next layer's MoE)
-                acc = b.out if len(self.subs) == 1 and ROW1 else ttnn.clone(b.out)
+                acc = b.out if len(self.subs) == 1 and (ROW1 or raw) else ttnn.clone(b.out)
             else:
                 acc = ttnn.add(acc, b.out)
+        if raw and len(self.subs) == 1:  # (the shared out buffer, m rows: the caller reads its first M right away)
+            return acc
         if M == 1 and not ROW1:
             acc = ttnn.slice(acc, [0, 0, 0, 0], [1, 1, 1, self.H])
         return acc
