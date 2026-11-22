@@ -103,6 +103,21 @@ config on ~48 cores); DRAM-sharded is slower than 1D here. Small-N matmuls (mix 
 router) still run on a few cores (~20 us each): split-K next. One-row rms_norm: 29 us interleaved, 10 us width-sharded
 on 8 cores incl. both reshards (tools/bench_norm.py).
 
+## Serving (P150, vLLM, greedy, 256 output tokens, tools/bench_serve.py)
+
+| concurrency | TTFT mean | decode tok/s / user | total tok/s |
+|---|---|---|---|
+| 1 | 1.71 s | 20.8 | 18.3 |
+| 2 | 2.52 s | 20.5 | 34.1 |
+| 4 | 5.47 s | 16.8 | 49.1 |
+| 8 | 11.97 s | 13.4 | 65.0 |
+
+(before the prefill MoE fix below.) Decode width buckets (one trace per width, the narrowest covering the highest live
+slot), logits untilized on device (readback 8.3 -> 1.1 ms). Prefill: the MoE's masked union path was 84 % of a chunk;
+the sorted dispatch (MiniMax / Qwen3.5 moe_dispatch, grouped sparse matmuls) takes a 128-row chunk 1832 -> 733 ms,
+256 rows 1031 ms (prefill quality 0.969 / 0.996 / 0.016). Next for prefill: the multi-row block mix / message sums
+(~165 ms of the 128-row chunk), then batching prefills across users.
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from

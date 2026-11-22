@@ -31,6 +31,9 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 TILE = 32
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
+# I2M_MOE_SORTED (default 1): prefill rows (> the fused decode width) through the sorted dispatch (MiniMax / Qwen3.5
+# moe_dispatch: one grouped sparse matmul per projection, each 32-row group one expert) instead of the masked union
+SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
 # I2M_MOE_LAYOUT=fused (default): ONE copy of the experts in the fused decode kernels' layout (tt/moe_fused.py: per
 # sub-shard [gate | up / 25], down x 100); decode rows (<= 16) run the fused kernels, prefill / wider batches the
 # sparse_matmul union path over the same sub-shard tensors. sparse: the original layout and paths.
@@ -137,6 +140,8 @@ class MoE:
         T = int(x.shape[2])
         if self.fused and T <= self.fe.rows_max:
             out = self.fe.forward(x)
+        elif self.fused and SORTED:
+            out = self._sorted(x, T)
         elif self.fused:
             w, ids = self.route(x)
             out = None
@@ -151,6 +156,49 @@ class MoE:
                 out = self._masked(x, w, ids, T)
         if self.N > 1:
             out = all_reduce(out, self.mesh, self.tt_ccl)
+        return out
+
+    def _sorted(self, x, T):
+        """Prefill rows through the sorted dispatch: tokens' (token, expert) pairs sorted by expert into 32-row groups
+        (one expert each), one grouped sparse matmul per projection and sub-shard, routing weights on the activations,
+        a fused gather-add un-dispatch (bf16) per sub-shard; the sub-shards summed."""
+        from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
+
+        E, H, k, gs = self.E, self.H, self.k, 32
+        if getattr(self, "_dispatch", None) is None:
+            self._dispatch = SortedDispatch(self.mesh, E, k, group=gs)
+            kc = lambda W: max(H, W) // TILE  # noqa: E731  (K in one in0 block, see the masked configs)
+            self._cfg_sorted = {W: (sparse_matmul_program_config(gs, 2 * W, H, target_cores=64, in0_block_w_cap=kc(W)),
+                                    sparse_matmul_program_config(gs, H, W, target_cores=64, in0_block_w_cap=kc(W)))
+                                for _, _, W, _, _ in self.subs}
+        w, ids = self.route(x)
+        m = self._dispatch.build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
+        Rd, G = m["Rd"], m["G"]
+        x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
+        out = None
+        for ug, dn, W, _, _ in self.subs:
+            cgu, cdn = self._cfg_sorted[W]
+            alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
+                                                             ttnn.TILE_LAYOUT, self.mesh, DRAM)
+            fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,
+                                       program_config=cgu, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
+                                       optional_output_tensor=alloc(2 * W))  # compact [1, G, 32, 2W]
+            din = inkling_act_fused(ttnn.slice(fused, [0, 0, 0, 0], [1, G, gs, W]),
+                                    ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
+            ttnn.deallocate(fused)
+            din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
+            down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
+                                      is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
+                                      compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
+                                      optional_output_tensor=alloc(H))  # compact [1, G, 32, H]
+            ttnn.deallocate(din)
+            y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
+            ttnn.deallocate(down)
+            out = y if out is None else ttnn.add(out, y)
+        ttnn.deallocate(x_disp)
+        for key in ("src_tok", "weights", "group_mask", "group_ids", "undispatch", "undispatch_rm"):
+            if m.get(key) is not None:
+                ttnn.deallocate(m[key])
         return out
 
     def _gather(self, x, w, ids, T):
