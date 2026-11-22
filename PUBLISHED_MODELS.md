@@ -14,7 +14,12 @@ choices), so an older model may not serve unchanged from the tip. To rebuild a p
 Each tag is the newest commit whose files match every file in that bundle's `code/` folder (Python and the bundled
 kernel sources; the bundles do not carry the tt_metal / ttnn C++, which was not compared).
 
-Decode-speed work on any new model: `models/experimental/hybrid_moe/skills/blackhole-decode-perf/SKILL.md`.
+Agent skills (picked up from `.claude/skills/`, symlinks into `models/experimental/hybrid_moe/skills/`):
+`blackhole-decode-perf` (decode-speed review once a new model runs with reference quality) and `hybrid-moe-bringup`.
+
+The per-model branches these came from were deleted on 2026-11-22; each tip is kept as the tag `archive/<branch>`
+(e.g. `archive/ornith_opt`, `archive/raahem/inkling-small-hybrid`), so old branch names in cards and handoffs still
+resolve with `git show archive/<branch>`.
 
 | Package (Hub) | Published | Tag (exact code) | Package yaml | Source branch |
 |---|---|---|---|---|
