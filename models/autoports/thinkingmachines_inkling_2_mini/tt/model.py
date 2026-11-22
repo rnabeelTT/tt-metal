@@ -151,10 +151,10 @@ class Layer:
 class AppState:
     """Per application (layer, pass): attention caches + the two hidden-size conv states."""
 
-    def __init__(self, layer: Layer, max_seq_len, kv_dtype, prefill_chunk):
+    def __init__(self, layer: Layer, max_seq_len, kv_dtype, prefill_chunk, slots=1):
         mesh = layer.ops.mesh
         H = layer.attn_conv_w.shape[0]
-        self.cache = AttnCache(layer.attn, max_seq_len, kv_dtype=kv_dtype, prefill_chunk=prefill_chunk)
+        self.cache = AttnCache(layer.attn, max_seq_len, kv_dtype=kv_dtype, prefill_chunk=prefill_chunk, slots=slots)
         rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         self.attn_conv = ShortConv(mesh, layer.attn_conv_w, rep, H)
         self.mlp_conv = ShortConv(mesh, layer.mlp_conv_w, rep, H)
@@ -173,7 +173,7 @@ class AppState:
 
 class Inkling2Model:
     def __init__(self, mesh, max_seq_len=8192, expert_dtype=ttnn.bfloat4_b, attn_dtype=ttnn.bfloat16,
-                 kv_dtype=ttnn.bfloat8_b, prefill_chunk=1024, cache_dir=None, tt_ccl=None, layers=None):
+                 kv_dtype=ttnn.bfloat8_b, prefill_chunk=1024, cache_dir=None, tt_ccl=None, layers=None, slots=1):
         self.mesh = mesh
         self.cfg = cfg = load_config()
         self.ck = ck = Checkpoint(cfg.snap)
@@ -196,7 +196,8 @@ class Inkling2Model:
             t0 = __import__("time").time()
             self.layers[li] = Layer(ops, cfg, ck, li, expert_dtype, attn_dtype, cache_dir, tt_ccl)
             print(f"layer {li} loaded in {__import__('time').time() - t0:.0f}s", flush=True)
-        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk) if li in self.layers else None
+        self.slots = slots
+        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots) if li in self.layers else None
                      for li, p in self.sched]
         print(f"application states up ({sum(a is not None for a in self.apps)})", flush=True)
         # message queries [n_loop, 4, H] -> per loop layer [1,1,H,32] (4 query columns, pre-scaled)
@@ -233,7 +234,7 @@ class Inkling2Model:
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
         return _bf(self.ops.rms(e, self.embed_norm))
 
-    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None):
+    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0):
         """Application a on x [1,1,T,H] bf16 (block partial sum) at positions p0..; blocks_n = rms-normed fp32 blocks.
         messages: 4 fp32 [1,1,T,H] (q, k, v, mlp) on passes > 1. Returns the bf16 output."""
         li, _ = self.sched[a]
@@ -261,7 +262,7 @@ class Inkling2Model:
             if messages is not None:
                 qi, ki, vi = (L.gates[n](h, m) for n, h, m in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
             qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
-        att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl)
+        att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl, slot=slot)
         att = st.conv("attn", att, rows_mode, nvalid)
         if L.boundary:
             resid = _f32(att)
@@ -293,7 +294,7 @@ class Inkling2Model:
             if s is not None:
                 s.reset()
 
-    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None):
+    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
         capture(a, out) is called with each application's output (debug)."""
         cfg, ops = self.cfg, self.ops
@@ -315,7 +316,7 @@ class Inkling2Model:
             if L.loop and p > 0:
                 msgs = self.messages(li - cfg.loop_start, prev_src)
             xin = x
-            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid)
+            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid, slot=slot)
             if L.boundary:
                 blocks_n = blocks_n + [ops.rms(xin)]
             if capture is not None:

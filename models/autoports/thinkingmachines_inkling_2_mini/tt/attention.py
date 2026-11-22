@@ -105,53 +105,59 @@ class AttnWeights:
 
 
 class AttnCache:
-    """K / V caches and conv states of one application (layer, pass) for one sequence."""
+    """K / V caches of one application (layer, pass) for B sequence slots, plus the conv states of a single-sequence
+    "lane" (prefill / verify rows run one slot at a time on the lane; batched decode keeps its conv states in
+    tt/batched.py and copies the lane's states in after a prefill).
+
+    Global layers: a paged pool of B * max_blocks blocks, slot b owning blocks [b * mb, (b + 1) * mb). Sliding layers:
+    one ring of n_ring blocks per slot (the window + one prefill chunk + a block), slot b's logical block j at physical
+    b * n_ring + j % n_ring; writes go through an identity table per slot at position pos mod (n_ring * block)."""
 
     def __init__(self, w: AttnWeights, max_seq_len: int, block: int = 64, kv_dtype=ttnn.bfloat8_b,
-                 prefill_chunk: int = 1024):
+                 prefill_chunk: int = 1024, slots: int = 1):
         mesh, N = w.mesh, w.N
-        self.w, self.block, self.kv_dtype, self.prefill_chunk = w, block, kv_dtype, prefill_chunk
-        self.max_blocks = math.ceil(max_seq_len / block)
+        self.w, self.block, self.kv_dtype, self.prefill_chunk, self.B = w, block, kv_dtype, prefill_chunk, slots
+        self.max_blocks = mb = math.ceil(max_seq_len / block)
         kv_shard = ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None
         C = w.NKV * w.HD
         if w.sliding:
             self.k_conv = ShortConv(mesh, w.k_taps, kv_shard, C)
             self.v_conv = ShortConv(mesh, w.v_taps, kv_shard, C)
             self.n_ring = (w.W + prefill_chunk) // block + 1
-            n_phys = self.n_ring
+            per = self.n_ring
         else:
-            sh = lambda t: t  # noqa: E731
             self.k_conv = DynShortConv(mesh, w.k_static, w.k_wproj, kv_shard, C, w.NKV, w.ckc)
             self.v_conv = DynShortConv(mesh, w.v_static, w.v_wproj, kv_shard, C, w.NKV, w.ckc)
-            n_phys = self.max_blocks
-        z = torch.zeros(n_phys, w.NKV * N, block, w.HD)
+            per = mb
+        self.per_slot = per
+        z = torch.zeros(per * slots, w.NKV * N, block, w.HD)
         mk = lambda: ttnn.from_torch(z, dtype=kv_dtype, layout=ttnn.TILE_LAYOUT, device=mesh,  # noqa: E731
                                      memory_config=DRAM,
                                      mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=1) if N > 1 else None)
         self.k_cache, self.v_cache = mk(), mk()
-        rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
-        i32 = lambda t: ttnn.from_torch(t.to(torch.int32), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,  # noqa
-                                        device=mesh, memory_config=DRAM, mesh_mapper=rep)
+        self._mesh = mesh
+        j = torch.arange(mb)
         if w.sliding:
-            self.read_table = i32((torch.arange(self.max_blocks) % self.n_ring).reshape(1, -1))
             self.ring_period = self.n_ring * block
-            self.write_table = i32(torch.arange(self.n_ring).reshape(1, -1))
-            self.ring_host = torch.arange(self.max_blocks) % self.n_ring
+            read = torch.stack([b * per + j % per for b in range(slots)])  # [B, mb]
+            write = torch.stack([b * per + torch.arange(per) for b in range(slots)])  # [B, n_ring]
         else:
-            self.read_table = self.write_table = i32(torch.arange(self.max_blocks).reshape(1, -1))
-            self.ring_host = torch.arange(self.max_blocks)
+            read = write = torch.stack([b * per + j for b in range(slots)])
+        self.read_host = read
+        self.read_table, self.write_table = self._up_i32(read), self._up_i32(write)  # [B, .] (batched decode)
+        self.read_slot = [self._up_i32(read[b : b + 1]) for b in range(slots)]  # [1, .] per slot (one sequence)
+        self.write_slot = [self._up_i32(write[b : b + 1]) for b in range(slots)]
         self._kv_shard = ttnn.create_sharded_memory_config(
             shape=(ttnn.TILE_SIZE, w.HD), core_grid=ttnn.CoreGrid(x=1, y=1), strategy=ttnn.ShardStrategy.HEIGHT,
             orientation=ttnn.ShardOrientation.ROW_MAJOR, use_height_and_width_as_shard_shape=True)
-        self._mesh = mesh
 
     def reset(self):
         self.k_conv.reset()
         self.v_conv.reset()
 
     def _up_i32(self, t):
-        return ttnn.from_torch(t.to(torch.int32), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self._mesh,
-                               memory_config=DRAM,
+        return ttnn.from_torch(t.to(torch.int32).contiguous(), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                               device=self._mesh, memory_config=DRAM,
                                mesh_mapper=ttnn.ReplicateTensorToMesh(self._mesh) if self.w.N > 1 else None)
 
 
@@ -169,7 +175,7 @@ def _rms_unweighted(x, eps):
     return ttnn.multiply(x, ttnn.rsqrt(ttnn.add(ms, eps)))
 
 
-def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | None = None, tt_ccl=None):
+def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | None = None, tt_ccl=None, slot: int = 0):
     """One sequence, rows at positions p0 .. p0 + R - 1 (consecutive). xq / xk / xv [1, 1, R, H] bf16 (normed).
     R <= 32 // G: decode / verify rows (any p0); otherwise a prefill chunk (p0 % 64 == 0, R % 64 == 0; the first
     `valid` rows real). Returns [1, 1, R, H] bf16 (all-reduced over the mesh)."""
@@ -226,12 +232,12 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
                 row = t if R == 1 else ttnn.slice(t, (0, j, 0, 0), (1, j + 1, NKV, HD))
                 tp = ttnn.pad(row, [1, 1, 32, HD], [0, 0, 0, 0], 0.0)
                 tsh = ttnn.to_memory_config(tp, c._kv_shard)
-                ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=c.write_table)
+                ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=c.write_slot[slot])
                 ttnn.deallocate(tsh)
                 ttnn.deallocate(tp)
     else:
         b0, nb = p0 // c.block, R // c.block
-        fill_pt = c._up_i32(c.ring_host[b0 : b0 + nb].reshape(1, -1))
+        fill_pt = c._up_i32(c.read_host[slot, b0 : b0 + nb].reshape(1, -1))
         for cache, t in ((c.k_cache, k), (c.v_cache, v)):
             tt_ = ttnn.transpose(t, 1, 2)  # [1, NKV, R, HD]
             t8 = ttnn.typecast(tt_, c.kv_dtype) if c.kv_dtype != tt_.dtype else tt_
@@ -248,7 +254,7 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
         positions = c._up_i32(torch.arange(p0, p0 + R).reshape(1, R) if R > 1 else torch.tensor([p0]))
     else:
         positions = c._up_i32(torch.arange(p0, p0 + R).reshape(-1, R_ITEM))
-    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, c.read_table, rq, w.table, w.scale, w.W, w.E,
+    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, c.read_slot[slot], rq, w.table, w.scale, w.W, w.E,
                             sink=sk, out_memory_config=DRAM)
     for t in (q, rq, sk, positions):
         ttnn.deallocate(t)
