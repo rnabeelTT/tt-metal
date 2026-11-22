@@ -33,21 +33,24 @@ class MixKernel:
         self.crs = _range_set(self.cores)
 
     def __call__(self, S, lg, n, nq, out_mc=ttnn.L1_MEMORY_CONFIG):
-        """S [1, n, T, H] fp32 interleaved, lg [1, n, T, nq*32] fp32 interleaved -> nq fp32 [1, 1, T, H]."""
-        assert n <= MAX_N and int(S.shape[2]) <= 32
+        """S [1, n, T, H] fp32 interleaved, lg [1, n, T, nq*32] fp32 interleaved -> nq fp32 [1, 1, T, H]
+        (T <= 32, or a multiple of 32: one softmax per row tile)."""
         T, H = int(S.shape[2]), int(S.shape[3])
+        assert n <= MAX_N and (T <= 32 or T % 32 == 0)
+        RT = max(1, T // 32)
         outs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                                out_mc) for _ in range(nq)]
         cb_lg, cb_s, cb_w, cb_out = 0, 1, 2, 3
         f32 = ttnn.float32
-        cbs = [_cb(self.crs, cb_lg, f32, F32, n * nq), _cb(self.crs, cb_s, f32, F32, n * self.per),
+        nb = 2 if RT > 1 else 1  # double-buffer the row tiles
+        cbs = [_cb(self.crs, cb_lg, f32, F32, nb * n * nq), _cb(self.crs, cb_s, f32, F32, nb * n * self.per),
                _cb(self.crs, cb_w, f32, F32, n), _cb(self.crs, cb_out, f32, F32, 2)]
         nc = len(self.cores)
-        rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S).get_compile_time_args() \
+        rd_ct = [cb_lg, cb_s, n, nq, self.Ht, RT] + ttnn.TensorAccessorArgs(S).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(lg).get_compile_time_args()
         rd_rt = [[S.buffer_address(), lg.buffer_address(), i * self.per, self.per] for i in range(nc)]
         wr_ct = [cb_out, nq] + ttnn.TensorAccessorArgs(outs[0]).get_compile_time_args()
-        wr_rt = [[i * self.per, self.per] + [o.buffer_address() for o in outs] for i in range(nc)]
+        wr_rt = [[i * self.per, self.per, RT, self.Ht] + [o.buffer_address() for o in outs] for i in range(nc)]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         for i in (cb_lg, cb_s, cb_w):
             u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
@@ -62,7 +65,7 @@ class MixKernel:
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "mixw_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=[cb_lg, cb_s, cb_w, cb_out, n, nq],
-                                  runtime_args=_rt(self.cores, [[self.per]] * nc), config=cfg),
+                                  runtime_args=_rt(self.cores, [[self.per, RT]] * nc), config=cfg),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_mixw", n, nq, T, H, nc, repr(S.memory_config()), repr(lg.memory_config()), repr(out_mc))

@@ -26,8 +26,10 @@ void kernel_main() {
     constexpr uint32_t n = get_compile_time_arg_val(4);
     constexpr uint32_t nq = get_compile_time_arg_val(5);
     const uint32_t nt = get_arg_val<uint32_t>(0);
+    const uint32_t RT = get_arg_val<uint32_t>(1);
 
     compute_kernel_hw_startup(cb_lg, cb_out);
+    for (uint32_t r = 0; r < RT; ++r) {
     cb_wait_front(cb_lg, n * nq);
     cb_wait_front(cb_s, n * nt);
     for (uint32_t q = 0; q < nq; ++q) {
@@ -105,4 +107,5 @@ void kernel_main() {
     }
     cb_pop_front(cb_lg, n * nq);
     cb_pop_front(cb_s, n * nt);
+    }
 }

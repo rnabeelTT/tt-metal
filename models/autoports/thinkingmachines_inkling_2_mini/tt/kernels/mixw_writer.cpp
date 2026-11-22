@@ -14,13 +14,17 @@ void kernel_main() {
     constexpr auto o_args = TensorAccessorArgs<2>();
     const uint32_t t0 = get_arg_val<uint32_t>(0);
     const uint32_t nt = get_arg_val<uint32_t>(1);
-    for (uint32_t q = 0; q < nq; ++q) {
-        const auto ao = TensorAccessor(o_args, get_arg_val<uint32_t>(2 + q), F32);
-        for (uint32_t t = 0; t < nt; ++t) {
-            cb_wait_front(cb_out, 1);
-            noc_async_write(get_read_ptr(cb_out), ao.get_noc_addr(t0 + t), F32);
-            noc_async_write_barrier();
-            cb_pop_front(cb_out, 1);
+    const uint32_t RT = get_arg_val<uint32_t>(2);
+    const uint32_t Ht = get_arg_val<uint32_t>(3);
+    for (uint32_t r = 0; r < RT; ++r) {
+        for (uint32_t q = 0; q < nq; ++q) {
+            const auto ao = TensorAccessor(o_args, get_arg_val<uint32_t>(4 + q), F32);
+            for (uint32_t t = 0; t < nt; ++t) {
+                cb_wait_front(cb_out, 1);
+                noc_async_write(get_read_ptr(cb_out), ao.get_noc_addr(r * Ht + t0 + t), F32);
+                noc_async_write_barrier();
+                cb_pop_front(cb_out, 1);
+            }
         }
     }
 }

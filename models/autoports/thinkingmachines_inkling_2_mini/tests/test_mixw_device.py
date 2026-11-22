@@ -31,7 +31,7 @@ def main():
                 w = torch.softmax(torch.einsum("bntH,Hq->bntq", S, Qc), dim=1)
                 ref = [(S * w[..., q : q + 1]).sum(1, keepdim=True) for q in range(nq)]
                 mdl.MIX_KERNEL = True
-                ok = [ttnn.to_torch(o).float()[:, :, :T] for o in ops.mix(tt, Qk, nq)] if T <= 32 else ref
+                ok = [ttnn.to_torch(o).float()[:, :, :T] for o in ops.mix(tt, Qk, nq)]
                 mdl.MIX_KERNEL = False  # the stacked op path (prefill)
                 oo = [ttnn.to_torch(o).float()[:, :, :T] for o in ops.mix(tt, Qk, nq)]
                 dk = max((a - r).abs().max().item() for a, r in zip(ok, ref))

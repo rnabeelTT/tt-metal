@@ -34,6 +34,7 @@ PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
 # I2M_MOE_SORTED (default 1): prefill rows (> the fused decode width) through the sorted dispatch (MiniMax / Qwen3.5
 # moe_dispatch: one grouped sparse matmul per projection, each 32-row group one expert) instead of the masked union
 SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
+SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
 # I2M_MOE_LAYOUT=fused (default): ONE copy of the experts in the fused decode kernels' layout (tt/moe_fused.py: per
 # sub-shard [gate | up / 25], down x 100); decode rows (<= 16) run the fused kernels, prefill / wider batches the
 # sparse_matmul union path over the same sub-shard tensors. sparse: the original layout and paths.
@@ -140,6 +141,13 @@ class MoE:
         T = int(x.shape[2])
         if self.fused and T <= self.fe.rows_max:
             out = self.fe.forward(x)
+        elif self.fused and T <= 2 * self.fe.rows_max and SPLIT_DECODE:
+            # 17 .. 32 decode rows: two fused calls of <= 16 rows (the fused kernels' row limit) instead of the sorted
+            # prefill path (32 rows: ~3.3 ms per application on TP4 vs ~2 x the 16-row fused call)
+            R = self.fe.rows_max
+            lo = self.fe.forward(ttnn.slice(x, [0, 0, 0, 0], [1, 1, R, self.H]))
+            hi = self.fe.forward(ttnn.slice(x, [0, 0, R, 0], [1, 1, T, self.H]))
+            out = ttnn.concat([lo, hi], dim=2)
         elif self.fused and SORTED:
             out = self._sorted(x, T)
         elif self.fused:

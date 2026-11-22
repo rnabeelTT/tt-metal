@@ -298,7 +298,7 @@ class BatchedDecoder:
                      for a, (li, _) in enumerate(model.sched)]
         for L in model.layers.values():  # the fused MoE rows ops of this width, built before any trace capture
             if getattr(L.moe, "fused", False):
-                L.moe.fe.build_rows([B])
+                L.moe.fe.build_rows([B] if B <= L.moe.fe.rows_max else [L.moe.fe.rows_max, B - L.moe.fe.rows_max])
         mesh = model.mesh
         self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         any_sl = next(model.apps[a].cache for a, (li, _) in enumerate(model.sched) if model.layers[li].sliding)

@@ -117,14 +117,15 @@ class Ops:
         (nq queries in columns, pre-scaled by H^-0.5) -> nq fp32 outputs sum_i softmax_i(src_i . q) src_i."""
         T = int(srcs_normed[0].shape[2])
         n = len(srcs_normed)
-        if MIX_KERNEL and FUSED_OPS and T <= 32 and n <= 6 and id(Q) in self.qrep:
+        if MIX_KERNEL and FUSED_OPS and (T <= 32 or T % 32 == 0) and n <= 6 and id(Q) in self.qrep:
             if self.mixk is None:
                 from .mixw import MixKernel
                 self.mixk = MixKernel(self.mesh, int(srcs_normed[0].shape[3]))
-            src = [ttnn.sharded_to_interleaved(s, ttnn.L1_MEMORY_CONFIG) if s.is_sharded() else s for s in srcs_normed]
-            S = src[0] if n == 1 else ttnn.concat(src, dim=1, memory_config=ttnn.L1_MEMORY_CONFIG)
-            lg = dmm(S, self.qrep[id(Q)], self.ckc, dtype=ttnn.float32, memory_config=ttnn.L1_MEMORY_CONFIG)  # [1, n, T, nq*32]
-            return self.mixk(S, lg, n, nq)
+            mc = ttnn.L1_MEMORY_CONFIG if T <= 32 else DRAM  # (prefill chunks: the stacked sources are tens of MB)
+            src = [ttnn.sharded_to_interleaved(s, mc) if s.is_sharded() else s for s in srcs_normed]
+            S = src[0] if n == 1 else ttnn.concat(src, dim=1, memory_config=mc)
+            lg = dmm(S, self.qrep[id(Q)], self.ckc, dtype=ttnn.float32, memory_config=mc)  # [1, n, T, nq*32]
+            return self.mixk(S, lg, n, nq, out_mc=mc)
         if FUSED_OPS:
             # Qrep [H, nq*32]: query q in all 32 columns of tile q -> every slice below starts on a tile boundary
             # (a width-1 slice at an unaligned column of a [1, n, T, 32] tile tensor returns wrong weights for n > 1)

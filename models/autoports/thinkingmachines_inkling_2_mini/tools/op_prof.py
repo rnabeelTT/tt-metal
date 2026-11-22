@@ -74,7 +74,7 @@ def main():
     REC["mesh"] = mesh
     dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
     m = Inkling2Model(mesh, max_seq_len=1024, expert_dtype=dt[os.environ.get("EXPERT_DT", "bfp8")],
-                      kv_dtype=dt[os.environ.get("KV_DT", "bf16")], prefill_chunk=256, slots=B)
+                      kv_dtype=dt[os.environ.get("KV_DT", "bf16")], prefill_chunk=int(os.environ.get("CHUNK", "256")), slots=B)
     T = int(os.environ.get("PREFILL", "0"))
     if T:  # one prefill chunk of T rows (slot 0) instead of a decode step
         ids = torch.arange(1000, 1000 + T)
