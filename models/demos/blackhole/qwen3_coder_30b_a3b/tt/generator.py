@@ -1589,6 +1589,16 @@ def _resolve_snapshot(model_path: str | Path | None = None) -> Path:
         if not path.exists():
             raise FileNotFoundError(path)
         return path
+    # Another checkpoint of the same architecture (a Qwen3-30B-A3B fine-tune): HF_MODEL is a hub id or a directory,
+    # resolved from the local cache unless HF_HUB_OFFLINE=0.
+    hf_model = os.getenv("HF_MODEL")
+    if hf_model and hf_model != HF_MODEL_ID:
+        if (Path(hf_model) / "config.json").is_file():
+            return Path(hf_model)
+        from huggingface_hub import snapshot_download
+
+        offline = os.getenv("HF_HUB_OFFLINE", "1") == "1"
+        return Path(snapshot_download(hf_model, revision=os.getenv("HF_REVISION") or None, local_files_only=offline))
     hf_home = Path(os.getenv("HF_HOME", Path.home() / ".cache" / "huggingface"))
     snapshot = hf_home / "hub" / "models--Qwen--Qwen3-Coder-30B-A3B-Instruct" / "snapshots" / HF_REVISION
     if (snapshot / "model.safetensors.index.json").is_file():

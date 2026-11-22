@@ -1,0 +1,221 @@
+# tt-model container (v5.1) manifest for miromind-ai/MiroThinker-1.7-mini on Blackhole. MiroThinker-1.7-mini is a
+# Qwen3-30B-A3B fine-tune (Qwen3MoeForCausalLM: 48 layers, 128 experts top-8, the same tensor shapes as
+# Qwen3-Coder-30B-A3B-Instruct), so it is served by the fast Qwen3-Coder-30B port unchanged
+# (models/demos/blackhole/qwen3_coder_30b_a3b with QWEN3_MOE_FUSED_DECODE, published as raahemnabeel/qwen3-coder-30b-a3b)
+# with HF_MODEL pointing at this checkpoint. Differences from that manifest:
+# - a thinking model: reasoning parser qwen3 (the model opens <think> itself), hermes tool calls (<tool_call> JSON, the
+#   checkpoint's chat template);
+# - sampling defaults come from the checkpoint's generation_config.json (T 0.6 / top_p 0.95 / top_k 20), not greedy.
+# Authoring interface of `tt-model package --container models/autoports/miromind_ai_mirothinker_1_7_mini/tt-model.yaml`.
+schema: "5.1"
+
+repo: raahemnabeel/mirothinker-1.7-mini
+name: mirothinker-1.7-mini
+# weights stay a pointer: the exact HF snapshot every check of this port ran against
+weights: {repo: miromind-ai/MiroThinker-1.7-mini, revision: e371d5a8956cad89c574bc1bbe79f3866b325755}
+kind: vllm-plugin
+arch: blackhole
+
+source:
+  tt_metal: /home/raahem/tt-metal-c30   # worktree, branch mirothinker_mini (off c30_fusion)
+  code:
+    - models/common
+    - models/demos/blackhole/qwen3_coder_30b_a3b
+    - models/demos/blackhole/qwen36/__init__.py
+    - models/demos/blackhole/qwen36/tt/__init__.py
+    - models/demos/blackhole/qwen36/tt/tp_common.py
+    - models/demos/blackhole/qwen36/tt/moe_decode
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # the plugin build of the Coder-30B fast bundle
+  # the plugin scans the CHILDREN of this dir for vllm_metadata.json; it registers Qwen3MoeForCausalLM, the
+  # architecture of this checkpoint too (the bundle's hf_model field is not used for routing)
+  extra_models_dir: models/demos/blackhole/qwen3_coder_30b_a3b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+
+serve:
+  port: 8000
+  # the port's context contract (config/context_contract.json); the checkpoint advertises 262144
+  max_model_len: 256000
+  block_size: 64
+  max_num_seqs: 32
+  additional_config:
+    tt:
+      sample_on_device_mode: all
+      trace_region_size: 50331648
+      fabric_config: FABRIC_1D_RING
+  capabilities:
+    tool_parser: hermes        # the chat template asks for <tool_call>{"name": ..., "arguments": ...}</tool_call>
+    reasoning_parser: qwen3
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: miromind-ai/MiroThinker-1.7-mini
+    HF_REVISION: e371d5a8956cad89c574bc1bbe79f3866b325755
+    VLLM_CONFIGURE_LOGGING: "1"
+    VLLM_RPC_TIMEOUT: "900000"
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    TORCHDYNAMO_DISABLE: "1"
+    TT_METAL_OPERATION_TIMEOUT_SECONDS: "120.0"
+    QWEN3_DECODE_WIDTHS: "1,2,4,8,16,32"
+    QWEN3_MOE_FUSED_DECODE: "1"
+    QWEN3_WARMUP_SAMPLING: "both"
+    QWEN3_PREFILL_BUCKETS: "proportional"
+    QWEN3_PREFILL_WARMUP: "auto"
+    QWEN3_PREFILL_WARMUP_MAX: "8192"
+    QWEN3_PREFILL_WARMUP_SUFFIX_MAX: "1024"
+  args:
+    - [--max-num-batched-tokens, "256000"]
+    - [--max-log-len, "32"]
+
+default_profile: p300
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, experts 32 per die), 32 sequences, 256000 context.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2.
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: One p300 board (2 dies, experts 64 per die), 32 sequences, 256000 context.
+    hardware: p300
+    mesh_device: P300
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300.
+    hardware: p150x2
+    mesh_device: P150x2
+    additional_config: {tt: {fabric_config: FABRIC_1D}}
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: One p150 (1 die, all 128 experts), 32 sequences sharing a 98304-token context (bf16 KV is 96 KiB per token on one die).
+    hardware: p150
+    mesh_device: P150
+    max_model_len: 98304
+    additional_config: {tt: {fabric_config: DISABLED}}
+    args: [[--max-num-batched-tokens, "98304"], [--max-log-len, "32"]]
+
+verify:
+  - "from pathlib import Path; p = Path('/opt/tt-metal/models/demos/blackhole/qwen3_coder_30b_a3b'); assert (p/'config'/'selected_precision_config.json').is_file(), 'precision config missing'; assert (p/'config'/'context_contract.json').is_file(), 'context contract missing'"
+  - "from models.demos.blackhole.qwen3_coder_30b_a3b.tt.generator_vllm import Qwen3CoderForCausalLM; assert Qwen3CoderForCausalLM"
+
+card:
+  attribution: |
+    Derived from [miromind-ai/MiroThinker-1.7-mini](https://huggingface.co/miromind-ai/MiroThinker-1.7-mini) by MiroMind
+    (a fine-tune of Qwen3-30B-A3B-Thinking-2507). The checkpoint is used as published; expert weights are converted to
+    lower precision when the server loads them (see Limitations). See the original model card for training and
+    evaluation details.
+  description: |
+    MiroThinker-1.7-mini, a deep-research agent model: Qwen3-30B-A3B (30B-parameter mixture of experts, 3B active per
+    token: 128 experts, top-8, 48 layers) trained for long-horizon search, browsing and tool use (up to 300 tool calls per
+    task). Served with vLLM: a reasoning model that thinks before it answers, with tool calling and a 256,000-token
+    context, for up to 32 concurrent users. Text only.
+  intended_use: |
+    Search-and-browse research agents and multi-step tool use, plus chat and reasoning over text, through an
+    OpenAI-compatible API.
+  usage: |
+    The model thinks before every answer (`reasoning_content`); give requests a large `max_tokens` (thousands): when the
+    budget runs out inside the reasoning, `content` is empty.
+
+    A request without sampling parameters uses the checkpoint's defaults (temperature 0.6, top_p 0.95, top_k 20).
+    Sampling runs on the device; `top_k` is limited to 32.
+
+    Tools: pass them as OpenAI `tools`; the chat template asks for `<tool_call>` JSON, parsed into `tool_calls` by the
+    server. MiroMind's own agent framework ([MiroFlow](https://github.com/MiroMindAI/MiroThinker)) instead puts its tools
+    in the system prompt and parses `<use_mcp_tool>` blocks from `content` itself; both work against this server. The
+    package serves the model only, bring your own search, browse and code tools.
+  performance: |
+    ### Accuracy
+    Pending. MiroMind's own scores (BrowseComp, BrowseComp-ZH, GAIA, HLE) are on the
+    [original model card](https://huggingface.co/miromind-ai/MiroThinker-1.7-mini) and
+    [GitHub](https://github.com/MiroMindAI/MiroThinker); measurements of this package on those benchmarks will be
+    added here.
+
+    ### Performance
+
+    Served as shipped (`tt-model serve --profile <profile>`), vLLM's random-token benchmark with `ignore_eos`, medians; one request per user at a time.
+
+    #### p300x2 (four dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 95 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 164 | 10.2 | 98 | 88 |
+    | 1 | 1,024 / 256 | 410 | 10.5 | 95 | 80 |
+    | 1 | 4,096 / 256 | 837 | 11.1 | 90 | 67 |
+    | 1 | 32,768 / 256 | 3,585 | 13.1 | 76 | 37 |
+    | 8 | 128 / 128 | 543 | 14.8 | 68 | 427 |
+    | 8 | 1,024 / 256 | 1,355 | 15.6 | 64 | 391 |
+    | 32 | 1,024 / 256 | 5,802 | 29.3 | 34 | 660 |
+
+    #### p300 (two dies)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 86 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 139 | 11.3 | 89 | 82 |
+    | 1 | 1,024 / 256 | 379 | 11.7 | 85 | 73 |
+    | 1 | 4,096 / 256 | 854 | 12.7 | 78 | 59 |
+    | 1 | 32,768 / 256 | 4,685 | 16.7 | 60 | 29 |
+    | 8 | 128 / 128 | 652 | 19.3 | 52 | 331 |
+    | 8 | 1,024 / 256 | 1,620 | 20.7 | 48 | 303 |
+    | 32 | 1,024 / 256 | 7,203 | 42.0 | 24 | 488 |
+
+    #### p150 (one die)
+
+    Single user on real text (12 chat prompts x 384 output tokens, temperature 0): 77 tok/s.
+
+    | users | input / output tokens | TTFT (ms) | TPOT (ms) | tok/s per user | output tok/s, all users |
+    | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 128 / 128 | 156 | 12.9 | 77 | 71 |
+    | 1 | 1,024 / 256 | 439 | 13.6 | 74 | 64 |
+    | 1 | 4,096 / 256 | 961 | 15.1 | 66 | 50 |
+    | 1 | 32,768 / 256 | 6,657 | 22.2 | 45 | 21 |
+    | 8 | 128 / 128 | 872 | 27.5 | 36 | 238 |
+    | 8 | 1,024 / 256 | 2,099 | 29.5 | 34 | 217 |
+    | 32 | 1,024 / 256 | 9,787 | 65.0 | 15 | 331 |
+
+    ### Prefix caching
+
+    On for every profile. The same real-text prompt sent twice on a freshly started server, time to first token in
+    seconds: first send / resend with the prefix cached. The first send above 8,192 tokens also compiles that prefill
+    length once (later prompts of that length do not pay it; see the 32,768-token rows above for an uncached prompt
+    with compiled programs).
+
+    | prompt tokens | p300x2 first / cached | p300 first / cached | p150 first / cached |
+    | ---: | ---: | ---: | ---: |
+    | 1,563 | 1.07 / 1.56 | 0.74 / 1.17 | 0.86 / 1.19 |
+    | 7,239 | 2.87 / 1.32 | 2.84 / 1.06 | 3.58 / 1.09 |
+    | 22,894 | 11.78 / 1.44 | 13.53 / 1.19 | 18.73 / 1.23 |
+
+    A cache hit costs about 1.1-1.5 s whatever the prompt length. Against compiled uncached prefill (3.6 / 4.7 / 6.7 s at
+    32,768 tokens on p300x2 / p300 / p150) it pays for long shared prefixes, such as an agent's growing conversation;
+    for prompts of a few thousand tokens an uncached prefill is as fast or faster.
+  limitations: |
+    - Text only (the checkpoint has no vision tower).
+    - Routed expert weights run at bfp4 on every profile (the fused decode reads that layout), so output can differ from
+      the bf16 original where two candidate tokens are close.
+    - Context: 256,000 tokens on two and four dies (the checkpoint advertises 262,144), 98,304 on one die.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on those boards.
+    - The device sampler supports `top_k` up to 32; a larger `top_k` is clamped to 32.
+    - With prefix caching, a cached prompt can continue differently from the same prompt sent cold (greedy outputs
+      matched on 4 of 9 prompt / profile pairs in the bring-up check): the cached path computes attention in chunks, so
+      near-tied tokens can flip. Both continuations were coherent. `--no-enable-prefix-caching` makes repeats identical.
+    - Not for unattended high-stakes decisions (medical, legal, financial, safety-critical) or as a source of facts
+      without checking: the model can state wrong things confidently. Review generated code and tool calls, or run them in
+      a sandbox, before they act on real systems. No safety evaluation was run on this package beyond the original
+      model's.
+  related: |
+    - [raahemnabeel/qwen3-coder-30b-a3b](https://huggingface.co/raahemnabeel/qwen3-coder-30b-a3b): Qwen3-Coder-30B-A3B,
+      served by the same code.
+    - [raahemnabeel/quest-35b-rl](https://huggingface.co/raahemnabeel/quest-35b-rl): QUEST-35B-RL, another deep-research
+      model (Qwen3.5-35B-A3B, with image input).
+  license:
+    id: apache-2.0
