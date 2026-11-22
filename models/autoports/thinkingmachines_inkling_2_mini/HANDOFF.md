@@ -211,7 +211,10 @@ packing).
 | global layers' dynamic conv taps: one matmul + one add (4 + 4 + 1 programs before) | 17.4 | 26.6 | | |
 | the three attention-side gates in one program on three core rectangles (GateKernel2.multi), rounds in parallel | 16.6 | 25.2 | | |
 
-B = 8: 29.2 ms (274 tok/s). Decode eval 0.9706 / 0.9970 / 0.0153.
+| the MoE router's top-k split over 8 cores per row (QWEN35_ROUTE_SPLIT; bit-identical) | 16.1 | | | |
+
+B = 8: 28.8 ms (278 tok/s). Decode eval 0.9706 / 0.9970 / 0.0153. Tried: fewer SDPA cores per kv head on the sliding
+layers (4 / 8 / 16 instead of 55): 16.1 -> 16.0 ms at these positions, dropped.
 
 B = 8 at this point: 31.4 ms (255 tok/s). B = 8 trace replays hung (timing-dependent; not with the watcher): the
 middle dies sat in a decode matmul on core (9, 0), the fabric sender core all_reduce_async places right of its output

@@ -15,6 +15,9 @@ _os.environ.setdefault("QWEN35_MOE_DN_READERS_WIDE", "9")
 _os.environ.setdefault("QWEN35_MOE_GU_READERS", "2")
 _os.environ.setdefault("QWEN35_MOE_DN_OFFROW", "1")
 _os.environ.setdefault("QWEN35_MOE_DN_CHUNK", "2")
+# the sigb router's top-k split over 8 cores per row (4 at 8 rows; <= 32 cores): the same selection and weights;
+# TP4 traced B = 1 16.6 -> 16.1 ms, B = 8 29.2 -> 28.8
+_os.environ.setdefault("QWEN35_ROUTE_SPLIT", "8")
 
 # I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
 # allocated L1 address (fast runtime mode does not check CB / L1-buffer clashes: an overlap hangs or corrupts)
