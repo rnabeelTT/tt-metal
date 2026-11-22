@@ -32,7 +32,7 @@ def main():
         wf, wg = (torch.randn(H, Rk) * 0.3).bfloat16(), (torch.randn(H, Rk) * 0.3).bfloat16()
         twd = up(wd.float().T.reshape(1, 1, 2 * H, Rk), ttnn.bfloat16)
         twfg = up(torch.cat([wf.float().T, wg.float().T], 1).reshape(1, 1, Rk, 2 * H), ttnn.bfloat16)
-        for T in (1, 4, 32):
+        for T in (1, 4, 16, 32):
             for rep in range(3):
                 h, m = torch.randn(1, 1, T, H) * 3, torch.randn(1, 1, T, H) * 2
                 ref = ref_gate(h, m, wd, wf, wg, eps)

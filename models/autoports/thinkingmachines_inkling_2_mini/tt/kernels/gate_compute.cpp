@@ -35,6 +35,23 @@ inline void calculate_gate_split(const uint32_t x, const uint32_t hi, const uint
         sfpi::dst_reg++;
     }
 }
+// DST[o] = DST[a] op DST[b] (0 add, 1 sub, 2 mul) over the first ITERATIONS SFPU rows of the selected faces
+template <int OP, int ITERATIONS>
+inline void calculate_gate_bin(const uint32_t a, const uint32_t b, const uint32_t o) {
+    constexpr uint32_t tile = 32;
+    for (int d = 0; d < ITERATIONS; d++) {
+        sfpi::vFloat x = sfpi::dst_reg[a * tile];
+        sfpi::vFloat y = sfpi::dst_reg[b * tile];
+        if constexpr (OP == 0) {
+            sfpi::dst_reg[o * tile] = x + y;
+        } else if constexpr (OP == 1) {
+            sfpi::dst_reg[o * tile] = x - y;
+        } else {
+            sfpi::dst_reg[o * tile] = x * y;
+        }
+        sfpi::dst_reg++;
+    }
+}
 // DST[o] = DST[a] + DST[b] over the first ITERATIONS SFPU rows of the faces the vector mode selects
 template <int ITERATIONS>
 inline void calculate_gate_add(const uint32_t a, const uint32_t b, const uint32_t o) {
@@ -49,10 +66,51 @@ inline void calculate_gate_add(const uint32_t a, const uint32_t b, const uint32_
 }  // namespace ckernel::sfpu
 #endif
 
+#ifndef GATE_ROWS
+#define GATE_ROWS 32
+#endif
 namespace {
+// <= 16 live rows (decode): every SFPU pass on those rows only (VectorMode::R, 2 ceil(T / 4) iterations per face)
+constexpr bool GROWS = GATE_ROWS <= 16;
+constexpr int GIT = 2 * ((GATE_ROWS + 3) / 4);
 constexpr uint32_t IN0_MASK = 0xFFFFE000u;
 ALWI void split_x(uint32_t x, uint32_t hi, uint32_t lo) {
-    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_gate_split, (IN0_MASK, 8), x, hi, lo, VectorMode::RC)));
+    if constexpr (GROWS) {
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_gate_split, (IN0_MASK, GIT), x, hi, lo, VectorMode::R)));
+    } else {
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_gate_split, (IN0_MASK, 8), x, hi, lo, VectorMode::RC)));
+    }
+}
+template <int OP>
+ALWI void gbin(uint32_t a, uint32_t b, uint32_t o) {
+    if constexpr (GROWS) {
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_gate_bin, (OP, GIT), a, b, o, VectorMode::R)));
+    } else if constexpr (OP == 0) {
+        add_binary_tile(a, b, o);
+    } else if constexpr (OP == 1) {
+        sub_binary_tile(a, b, o);
+    } else {
+        mul_binary_tile(a, b, o);
+    }
+}
+template <int OP>
+ALWI void gbin_init() {
+    if constexpr (GROWS) {
+        MATH((SFPU_BINARY_INIT(unused)));
+    } else if constexpr (OP == 0) {
+        add_binary_tile_init();
+    } else if constexpr (OP == 1) {
+        sub_binary_tile_init();
+    } else {
+        mul_binary_tile_init();
+    }
+}
+ALWI void gtanh(uint32_t i) {
+    if constexpr (GROWS) {
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_tanh, (false, DST_ACCUM_MODE, GIT), i, VectorMode::R));
+    } else {
+        tanh_tile(i);
+    }
 }
 // FPU work (copy) after SFPU work on the same DST tiles in one acquire: the SFPU waits for the FPU, not the reverse
 ALWI void sfpu_drain() {
@@ -61,9 +119,6 @@ ALWI void sfpu_drain() {
 #endif
 }
 // the root's partial sums: only the live rows (T <= 16: faces 0 / 1, 2 ceil(T / 4) SFPU iterations each: two per 4 rows; else every row)
-#ifndef GATE_ROWS
-#define GATE_ROWS 32
-#endif
 ALWI void row_add(uint32_t a, uint32_t b, uint32_t o) {
     if constexpr (GATE_ROWS <= 16) {
         MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_gate_add, (2 * ((GATE_ROWS + 3) / 4)), a, b, o,
@@ -124,9 +179,9 @@ void kernel_main() {
         for (uint32_t t = 0; t < PER; ++t) {
             copy_tile(cbx, t, t);
         }
-        mul_binary_tile_init();
+        gbin_init<2>();
         for (uint32_t t = 0; t < PER; ++t) {
-            mul_binary_tile(t, t, t);
+            gbin<2>(t, t, t);
         }
         MATH((SFPU_BINARY_INIT(unused)));
         for (uint32_t t = 0; t < PER; ++t) {
@@ -216,9 +271,9 @@ void kernel_main() {
         for (uint32_t t = 0; t < PER; ++t) {
             copy_tile(cbx, t, t);
         }
-        mul_binary_tile_init();
+        gbin_init<2>();
         for (uint32_t t = 0; t < PER; ++t) {
-            mul_binary_tile(t, 7, t);
+            gbin<2>(t, 7, t);
         }
         tile_regs_commit();
         tile_regs_wait();
@@ -303,8 +358,8 @@ void kernel_main() {
     }
     tanh_tile_init();
     for (uint32_t t = 0; t < PER; ++t) {
-        tanh_tile(t);
-        tanh_tile(4 + t);
+        gtanh(t);
+        gtanh(4 + t);
     }
     tile_regs_commit();
     tile_regs_wait();
@@ -336,13 +391,13 @@ void kernel_main() {
         copy_tile(cb_h, t, 2);
         copy_from(cb_m);
         copy_tile(cb_m, t, 3);
-        mul_binary_tile_init();
-        mul_binary_tile(0, 2, 0);  // f h
-        mul_binary_tile(1, 3, 1);  // a m
-        sub_binary_tile_init();
-        sub_binary_tile(2, 0, 2);  // h - f h
-        add_binary_tile_init();
-        add_binary_tile(2, 1, 2);
+        gbin_init<2>();
+        gbin<2>(0, 2, 0);  // f h
+        gbin<2>(1, 3, 1);  // a m
+        gbin_init<1>();
+        gbin<1>(2, 0, 2);  // h - f h
+        gbin_init<0>();
+        gbin<0>(2, 1, 2);
         tile_regs_commit();
         tile_regs_wait();
         pack_reconfig_data_format(cb_out);
