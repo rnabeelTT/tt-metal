@@ -9,6 +9,30 @@ the `hy_v4` reasoning / tool parsers and the serving recipe exist only in vLLM P
 Branch `raahem/hy4-flash-hybrid` (fork rnabeelTT/tt-metal), off `hybrid-moe-starter` (a76f430eeea). Port:
 `models/autoports/tencent_hy4_flash/` (layout follows the Inkling port: own engine + vLLM adapter).
 
+## 2026-11-22: 8-user serving profile, throughput, startup (paused 23:15; resume from ~/m27-work/hy4/orch/RESUME.md)
+
+Resume point with open issues, lane handoffs (`~/m27-work/hy4/{hs,tput,fuse}/HANDOFF.md`), gates and the tradeoff
+list: `~/m27-work/hy4/orch/RESUME.md`. Quality floor (never regress; non-exact changes are opt-in): b8 0.8650 /
+0.2229, long3k prefill 0.8269 / 0.2933, long3k decode 0.8273 / 0.2930.
+
+Profiles (`serve/serve_hy4.sh`): `PROFILE=default` 8 users x 20480 ctx, SPEC=4; `PROFILE=long` 1 user x 223232, SPEC=4.
+
+| commit | change | before -> after |
+|---|---|---|
+| e7f05a41532 | long-ctx decode: indexer VLEN + PADSENT default | |
+| a8293160602 | PROFILE default / long | |
+| 4a68892999e | FAST_DRAW sampling, multi-core MoE prefill dispatch, step stats | 8u temp 0.9 148.9 -> 194.0 tok/s; 32K TTFT 13.25 -> 12.35 s |
+| 2851a7a1cee | Engram O_DIRECT load, tt/fastload.py | server ready 1265 -> 379 s |
+| 83c1274b31e | decode run-ahead, Engram mlock, input precopy | ready 379 -> 200 s; 8u 195.1 -> 209.4 tok/s |
+| 087d1418749 | fast top-p + batched sampling | 8u top-p 0.9 87 -> 187 tok/s |
+| 2adc9c99500 | exact fusions Q_SHARD / ROPE_TAIL / IDX_SELX | 8u @2.9K step 44.5 -> 39.4 ms; 1u @18.7K 53.6 -> 54.8 tok/s |
+
+Served (default, greedy): 58.7 / 72.0 / 126.5 / 211.0 tok/s at 1/2/4/8 users, TTFT 0.21-0.8 s.
+
+**Known issue:** run-ahead (83c1274b31e) is not bit-exact when a request finishes (the remaining row is taken from the
+batched pass instead of the solo path). Until `~/m27-work/hy4/hs/patches/06-runahead-strict.patch` passes ra_t, serve
+with `HY4_RUNAHEAD=0` for exact greedy output.
+
 ## Prefix reuse (2026-11-20): multi-turn / repeated prefixes skip their prefill (tt/engine_batch.py)
 
 Engine-internal, vLLM's prefix caching stays off (the adapter sends the full prompt; `alloc(ids=...)` picks the slot).
