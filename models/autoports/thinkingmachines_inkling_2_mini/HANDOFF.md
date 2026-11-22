@@ -50,9 +50,43 @@ test (bf16 experts): worst pcc 0.99888 (prefill and decode), head logits pcc 1.0
 - transformers' last `hidden_states` entry is not the last layer's output: fixtures hook the layers.
 - Dev runner mounts the prefetcher fix (`cq_prefetch.cpp`) like the other ports' scripts.
 
+## Serving (vLLM, dev)
+
+`tools/serve_dev.sh` (MESH_DEVICE, SEQS, CTX): vLLM 0.26 + the TT plugin in the dev image, the port's bundle via
+EXTRA_MODELS_DIR, `--hf-config-path hf_config --trust-remote-code` (vLLM 0.26 / transformers 5.12 do not know
+inkling2_loop; the shim's arch is `TTInkling2LoopForConditionalGeneration`), `--reasoning-parser inkling
+--tool-call-parser inkling` (same message tokens as Inkling v1; tool calls parse). `tt/generator_vllm.py`: engine-owned
+slot caches, a row -> slot map for the plugin's condense remaps, host sampling (v0). `tools/smoke_serve.py`.
+
+## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
+
+| change | B=1 | B=4 | quality (prefill path) |
+|---|---|---|---|
+| first batched decode | 126 ms | 197 ms | 0.970 / 0.996 / 0.010 |
+| fused rms_norm, stacked block mix, merged gates, folded q/r scales | 113 ms | | 0.969 / 0.996 / 0.012 |
+| bfp8 attention + lm_head, tile-layout conv states | 103 ms | 171 ms | 0.971 / 0.997 / 0.014 |
+| fused MoE decode kernels (qwen36 moe_decode + ACT_INKLING), one fused-layout weight copy | 102 ms | 133 ms | 0.968 / 0.996 / 0.014 |
+| route once per layer | 97 ms | 126 ms | decode path: 0.967 / 0.994 / 0.018 (sparse 0.970 / 0.997 / 0.023) |
+
+At one row most ops are bound by the 32-row tile, not by bytes (attention projections ~60 us each vs a 32 us
+bandwidth floor; DRAM-sharded only wins at LoFi): wider batches are nearly free, single-user latency needs fused
+kernels (layer glue: norms / mixes / gates / convs ~50 ms of the 97).
+
+Fused MoE notes: the kernels' single-row sigb path routes wrongly (pcc 0.5): one row runs the 2-row path. Expert slices
+must be 128..768 columns: sub-shards 3 x 384 (1 die), 384 + 256 (2), 384 padded (4). Down rows op: 3 readers per bank
+(H = 2304 is 9 columns per bank) -> 16 rows max; wider batches use the sparse union path.
+
+## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
+
+Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from
+PR #51926 (`--speculative-algorithm DSPARK`, 8 drafts verified). Reference code (SGLang PR head
+zcnrex/sglang@chunan/inkling-2-mini-day0) saved under ~/inkling2-work/ref/sglang: srt/models/dspark.py (RNNHead Markov
+head = markov_head_type rnn_hidden; context KV from the target's hidden states), srt/models/dflash.py (DFlash base),
+kernels/ops/speculative/dspark/markov_walk.py / markov_sample.py, srt/models/inkling2.py (taps at visits 5, 23, 41 +
+the final normed state, 48).
+
 ## Next
 
-1. p150 memory plan at bfp8 experts (~26 GB): embedding on host, lm_head / attention bfp8 (each gated by the eval),
-   bfp4 only in the most tolerant expert layers if KV room is still short.
-2. Serving engine: multi-user decode (per-item SDPA, batched conv states), traced decode, device sampling, MTP drafter
-   (`mtp.safetensors`), vLLM generator + plugin bundle, profiles, packaging, publish.
+1. TP2 / TP4 validation of the fused MoE + batched decode; then per-profile step times at B = 1 .. 32.
+2. Fused glue kernels for single-user latency; DSpark speculative decoding (CPU reference + acceptance first).
+3. p150 memory plan at bfp8 experts; device sampling; profiles, card, package, publish.
