@@ -30,6 +30,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa impor
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import DynShortConv, ShortConv
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
+FUSED_OPS = __import__("os").environ.get("I2M_OPS", "fused") == "fused"
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 
@@ -64,6 +65,9 @@ class AttnWeights:
         # fused q-input projection per die: [q_d | r_d | s_d (padded to 32) | g_d], die-major columns
         self.qd, self.rd, self.sd, self.gd = NH * HD, NH * DR, 32, NH * HD
         self.fq = self.qd + self.rd + self.sd + self.gd
+        if FUSED_OPS:  # the per-(head, dim) q / r scales folded into the projection rows (exact up to weight rounding)
+            wq = wq.float() * L("q_l2_clip.scale").float().reshape(-1, 1)
+            wr = wr.float() * L("rel_l2_clip.scale").float().reshape(-1, 1)
         cols = []
         for d in range(N):
             s_d = torch.zeros(32, wq.shape[1])
@@ -84,8 +88,8 @@ class AttnWeights:
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
                                           layout=ttnn.TILE_LAYOUT, device=mesh,
                                           mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=2) if N > 1 else None)
-        self.q_scale = hs(L("q_l2_clip.scale"), NH)
-        self.r_scale = hs(L("rel_l2_clip.scale"), NH)
+        self.q_scale = None if FUSED_OPS else hs(L("q_l2_clip.scale"), NH)
+        self.r_scale = None if FUSED_OPS else hs(L("rel_l2_clip.scale"), NH)
         T = relbias.build_tables(L("rel_logits_proj.proj").float(), self.scale)
         self.table = ttnn.as_tensor(T.reshape(1, 32, 32, -1), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                     device=mesh, memory_config=DRAM, mesh_mapper=rep)
@@ -162,10 +166,13 @@ class AttnCache:
 
 
 def _l2clip(x, thr, scale=None):
-    """fp32 [.., HD]: x * scale (optional), then scaled down to L2 norm thr per row where longer."""
+    """fp32 [.., HD]: x * scale (optional), then scaled down to L2 norm thr per row where longer:
+    x * min(1, thr / ||x||) (transformers adds 1e-6 to the norm; immaterial at these norms)."""
     if scale is not None:
         x = ttnn.multiply(x, scale)
     ss = ttnn.sum(ttnn.multiply(x, x), dim=-1, keepdim=True)
+    if FUSED_OPS:
+        return ttnn.multiply(x, ttnn.clamp(ttnn.multiply(ttnn.rsqrt(ss), thr), max=1.0))
     f = ttnn.clamp(ttnn.reciprocal(ttnn.add(ttnn.sqrt(ss), 1e-6)), max=1.0 / thr)  # min(1, thr/(n+eps)) / thr
     return ttnn.multiply(x, ttnn.multiply(f, thr))
 
@@ -187,7 +194,8 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
         assert p0 % c.block == 0 and R % 64 == 0 and R <= c.prefill_chunk, (p0, R)
     nvalid = R if valid is None else valid
     ckc = w.ckc
-    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM)  # [1, 1, R, fq]
+    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM,
+                     dtype=ttnn.float32 if FUSED_OPS else None)  # [1, 1, R, fq]
     pk = ttnn.linear(xk, w.w_k, compute_kernel_config=ckc, memory_config=DRAM)
     pv = ttnn.linear(xv, w.w_v, compute_kernel_config=ckc, memory_config=DRAM)
     o0 = 0

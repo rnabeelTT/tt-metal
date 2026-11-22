@@ -35,6 +35,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.weights import Checkpoi
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 SQRT5 = math.sqrt(5.0)
+FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
 
 
 def _f32(t):
@@ -61,8 +62,11 @@ class Ops:
                                mesh_mapper=self.rep)
 
     def rms(self, x, w=None):
-        """fp32 RMS norm over the last dim (transformers Inkling2RMSNorm / UnweightedRMSNorm), w [1,1,1,H] fp32."""
+        """fp32 RMS norm over the last dim (transformers Inkling2RMSNorm / UnweightedRMSNorm), w [1,1,1,H] fp32.
+        I2M_OPS=fused (default): one ttnn.rms_norm; ref: the explicit fp32 ops."""
         x = _f32(x)
+        if FUSED_OPS:
+            return ttnn.rms_norm(x, epsilon=self.eps, weight=w, compute_kernel_config=self.ckc)
         ms = ttnn.mean(ttnn.multiply(x, x), dim=-1, keepdim=True)
         y = ttnn.multiply(x, ttnn.rsqrt(ttnn.add(ms, self.eps)))
         return ttnn.multiply(y, w) if w is not None else y
@@ -70,6 +74,18 @@ class Ops:
     def mix(self, srcs_normed, Q, nq):
         """Block attention residual: srcs_normed list of n fp32 [1,1,T,H] (rms-normed sources), Q [1,1,H,32] fp32
         (nq queries in columns, pre-scaled by H^-0.5) -> nq fp32 outputs sum_i softmax_i(src_i . q) src_i."""
+        if FUSED_OPS:
+            S = srcs_normed[0] if len(srcs_normed) == 1 else ttnn.concat(srcs_normed, dim=1)  # [1, n, T, H]
+            lg = ttnn.matmul(S, Q, compute_kernel_config=self.ckc, dtype=ttnn.float32)  # [1, n, T, 32]
+            m = ttnn.max(lg, dim=1, keepdim=True)
+            e = ttnn.exp(ttnn.subtract(lg, m))
+            w = ttnn.multiply(e, ttnn.reciprocal(ttnn.sum(e, dim=1, keepdim=True)))  # [1, n, T, 32]
+            T = int(S.shape[2])
+            outs = []
+            for qi in range(nq):
+                wq = ttnn.slice(w, [0, 0, 0, qi], [1, int(S.shape[1]), T, qi + 1])  # [1, n, T, 1]
+                outs.append(ttnn.sum(ttnn.multiply(S, wq), dim=1, keepdim=True))  # [1, 1, T, H]
+            return outs
         logits = [ttnn.matmul(s, Q, compute_kernel_config=self.ckc, dtype=ttnn.float32) for s in srcs_normed]
         m = logits[0]
         for l in logits[1:]:
@@ -98,20 +114,22 @@ class MessageGate:
         L = lambda n: ck.L(li, f"controllers.{name}.{n}")  # noqa: E731
         d = L("down_weight").float()  # [r, 2H]
         H = d.shape[1] // 2
-        self.ops = ops
-        self.wd_h = ops.up(d[:, :H].T.reshape(1, 1, H, -1), ttnn.bfloat16)
-        self.wd_m = ops.up(d[:, H:].T.reshape(1, 1, H, -1), ttnn.bfloat16)
-        self.wf = ops.up(L("forget_weight").float().T.reshape(1, 1, d.shape[0], H), ttnn.float32)
-        self.wg = ops.up(L("gain_weight").float().T.reshape(1, 1, d.shape[0], H), ttnn.float32)
+        self.ops, self.H = ops, H
+        self.wd = ops.up(d.T.reshape(1, 1, 2 * H, -1), ttnn.bfloat16)  # [2H, r]
+        # [forget | gain] in one fp32 matmul
+        wfg = torch.cat([L("forget_weight").float().T, L("gain_weight").float().T], dim=1)  # [r, 2H]
+        self.wfg = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.float32)
 
     def __call__(self, h, m):
-        o = self.ops
+        o, H = self.ops, self.H
         hf, mf = _f32(h), _f32(m)
-        g = ttnn.add(ttnn.matmul(_bf(o.rms(hf)), self.wd_h, compute_kernel_config=o.ckc, dtype=ttnn.float32),
-                     ttnn.matmul(_bf(o.rms(mf)), self.wd_m, compute_kernel_config=o.ckc, dtype=ttnn.float32))
-        g = _f32(_bf(g))  # the bf16 Linear's output rounding
-        f = ttnn.tanh(ttnn.matmul(g, self.wf, compute_kernel_config=o.ckc, dtype=ttnn.float32))
-        a = ttnn.tanh(ttnn.matmul(g, self.wg, compute_kernel_config=o.ckc, dtype=ttnn.float32))
+        hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
+        g = ttnn.matmul(hm, self.wd, compute_kernel_config=o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
+        fg = ttnn.tanh(ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32))  # [.., 2H]
+        T = int(hf.shape[-2])
+        lead = [int(d) for d in hf.shape][:-1]
+        f = ttnn.slice(fg, [0] * (len(lead)) + [0], lead + [H])
+        a = ttnn.slice(fg, [0] * (len(lead)) + [H], lead + [2 * H])
         return ttnn.add(ttnn.subtract(hf, ttnn.multiply(f, hf)), ttnn.multiply(a, mf))
 
 

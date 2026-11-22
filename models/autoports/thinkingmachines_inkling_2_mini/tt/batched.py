@@ -151,7 +151,7 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM)
+    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM, dtype=ttnn.float32)
     pk = ttnn.linear(xk, w.w_k, compute_kernel_config=ckc, memory_config=DRAM)
     pv = ttnn.linear(xv, w.w_v, compute_kernel_config=ckc, memory_config=DRAM)
     o0 = 0
