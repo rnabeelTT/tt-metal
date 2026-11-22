@@ -19,6 +19,8 @@ ASYNC = os.environ.get("I2M_AR_ASYNC", "1") == "1"
 # I2M_AR_PACK: <= 8 live rows packed into K = 3 / 9 / 18 tiles around the all-reduce (tt/kernels/arpack.cpp; traced,
 # 4 dies: 9.6 vs 20.1 us at 1 row, 12.3 vs 20.1 at 4, 16.1 vs 20.1 at 8, none at 16: tests/test_arpack_device.py)
 PACK = os.environ.get("I2M_AR_PACK", "1") == "1"
+# I2M_AR_LINKS: fabric links per packed all-reduce (default 2 on 4 dies: B = 8 28.3 -> 28.0 ms, bit-identical; 1 else)
+LINKS = int(os.environ.get("I2M_AR_LINKS", "0"))
 PACK_SITES = os.environ.get("I2M_AR_PACK_SITES", "mixer,mlp").split(",")
 PACK_K = ((1, 3, (3, 1)), (4, 9, (9, 1)), (8, 18, (9, 2)))  # (rows <=, tiles, shard grid)
 CORES = (9, 2)  # 18 cores: H 2304 = 72 tiles -> 4 per core
@@ -102,7 +104,8 @@ class _Packed:
         scratch, sem = self.sites[site]
         r = ttnn.experimental.all_reduce_async(p, scratch, cluster_axis=1, mesh_device=self.mesh,
                                                multi_device_global_semaphore=sem, memory_config=self.mc,
-                                               dtype=ttnn.bfloat16, topology=ttnn.Topology.Linear, num_links=1)
+                                               dtype=ttnn.bfloat16, topology=ttnn.Topology.Linear,
+                                               num_links=LINKS or (2 if self.mesh.get_num_devices() == 4 else 1))
         ttnn.deallocate(p)
         if packed_out:  # (the consumer reads the packed rows: tt/post.py, tt/pre.py)
             return PackedAR(r, T, H, self)

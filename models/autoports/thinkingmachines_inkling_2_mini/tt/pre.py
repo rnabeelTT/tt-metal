@@ -56,7 +56,7 @@ class PreKernel:
                _cb(crs, cb_gath, f32, F32, 2 * K1 * NSEL), _cb(crs, cb_tout, f32, F32, K1),
                _cb(crs, cb_tot, f32, F32, K1), _cb(crs, cb_red, f32, F32, K1), _cb(crs, cb_wt, f32, F32, NQ * n),
                _cb(crs, cb_h, f32, F32, NQ * PER), _cb(crs, cb_xn, f32, F32, PER),
-               _cb(crs, cb_part2, f32, F32, 2 * NQ), _cb(crs, cb_gath2, f32, F32, 2 * NQ * NSEL),
+               _cb(crs, cb_part2, f32, F32, 2 * NQ),  # (round 2 gathers into cb_gath too)
                _cb(crs, cb_tot2, f32, F32, NQ), _cb(crs, cb_out, odt, BF if norm else F32, 2),
                _cb(crs, cb_zero, bf, BF, 1)]
         mo, resid, conv = tail if tail is not None else (x, x, None)

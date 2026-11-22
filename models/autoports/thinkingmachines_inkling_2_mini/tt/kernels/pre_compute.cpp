@@ -448,13 +448,13 @@ void kernel_main() {
             cb_pop_front(cb_sq, 2 * PER);
         }
         if (root) {
-            cb_wait_front(cb_gath2, 2 * NQ * NSEL);
+            cb_wait_front(cb_gath, 2 * K1 * NSEL);  // (the shared gather buffer, pushed whole)
             tile_regs_acquire();
-            mm_begin(cb_sel, cb_gath2);
+            mm_begin(cb_sel, cb_gath);
             for (uint32_t q = 0; q < NQ; ++q) {
                 for (uint32_t s = 0; s < NSEL; ++s) {
-                    matmul_tiles(cb_sel, cb_gath2, s, (2 * q) * NSEL + s, q);
-                    matmul_tiles(cb_sel, cb_gath2, s, (2 * q + 1) * NSEL + s, q);
+                    matmul_tiles(cb_sel, cb_gath, s, (2 * q) * NSEL + s, q);
+                    matmul_tiles(cb_sel, cb_gath, s, (2 * q + 1) * NSEL + s, q);
                 }
             }
             tile_regs_commit();
@@ -466,7 +466,7 @@ void kernel_main() {
             }
             tile_regs_release();
             cb_push_back(cb_tout, NQ);
-            cb_pop_front(cb_gath2, 2 * NQ * NSEL);
+            cb_pop_front(cb_gath, 2 * K1 * NSEL);
         }
         cb_wait_front(cb_tot2, NQ);
         cb_wait_front(cb_nw, NQ * PER);

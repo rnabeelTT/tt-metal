@@ -214,7 +214,11 @@ packing).
 | the MoE router's top-k split over 8 cores per row (QWEN35_ROUTE_SPLIT; bit-identical) | 16.1 | | | |
 | k / v cache rows written by the attention prep program (no paged_update_cache; bit-identical) | 15.7 | 24.3 | | |
 
-B = 8: 28.3 ms (282 tok/s). Decode eval 0.9706 / 0.9970 / 0.0153. Tried: fewer SDPA cores per kv head on the sliding
+B = 8: 28.0 ms (286 tok/s) with 2 fabric links per packed all-reduce. B = 16: 47.7 ms (335 tok/s; the pre program's
+two rounds now share one gather buffer: at 16 rows its CBs reached 1.4 MB and clashed with L1 buffers); B = 32: 70.5 ms
+(454 tok/s). Decode eval B = 8: 0.9706 / 0.9970 / 0.0153; B = 16 (8 texts, 8 idle slots): 0.9671 / 0.9960 / 0.0185
+(message-gate programs off: 0.9684 / 0.9949 / 0.0178). tests/test_batched_device.py's per-slot pcc at 16 / 32 slots
+is below its bar with or without this round's changes (0.987 with them all off). Tried: fewer SDPA cores per kv head on the sliding
 layers (4 / 8 / 16 instead of 55): 16.1 -> 16.0 ms at these positions, dropped.
 
 B = 8 at this point: 31.4 ms (255 tok/s). B = 8 trace replays hung (timing-dependent; not with the watcher): the

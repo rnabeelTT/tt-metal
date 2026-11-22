@@ -51,23 +51,25 @@ def main():
                 worst = max(worst, d)
                 if rep == 0:
                     print(f"weights {wi} T={T}: max rel err {d:.2e}", flush=True)
-                if G2 and T <= GateKernel2.ROUTER_ROWS:  # + the RMS norm and the router logits (vs this gate's out)
+                if G2:  # + the RMS norm (and at <= 8 rows the router logits) vs this gate's out
                     nw = 1 + 0.1 * torch.randn(H)
                     W = torch.randn(H, 128) * 0.02
                     hi = W.bfloat16()
                     rw = (wup(hi.float().reshape(1, 1, H, 128), ttnn.bfloat16),
                           wup((W - hi.float()).bfloat16().float().reshape(1, 1, H, 128), ttnn.bfloat16))
                     tnw = wup(nw.reshape(1, 1, 1, H).expand(1, 1, 32, H).contiguous(), ttnn.float32)
-                    xo, lg = k(up(h, ttnn.float32), up(m, ttnn.float32), twd, twfg, nw=tnw, router=rw, dup=True)
+                    rt = T <= GateKernel2.ROUTER_ROWS
+                    xo, lg = k(up(h, ttnn.float32), up(m, ttnn.float32), twd, twfg, nw=tnw, router=rw if rt else None,
+                               dup=True)
                     xo = ttnn.to_torch(xo).float()[:, :, :T]
-                    lg = ttnn.to_torch(lg).float()
+                    lg = ttnn.to_torch(lg).float() if rt else None
                     o = got.double()
                     xr = (o * torch.rsqrt(o.pow(2).mean(-1, keepdim=True) + eps) * nw.double()).bfloat16().float()
                     dx = ((xo - xr).abs().max() / xr.abs().max()).item()
                     lr = xo.double() @ W.double()
-                    dl = ((lg[:, :, :T].double() - lr).abs().max() / lr.abs().max()).item()
+                    dl = ((lg[:, :, :T].double() - lr).abs().max() / lr.abs().max()).item() if rt else 0.0
                     dd = (lg[:, :, 1] - lg[:, :, 0]).abs().max().item() if T == 1 else 0.0
-                    if rep == 0:  # the op path's router (tt/moe_fused.py _logits) on the same bf16 input
+                    if rep == 0 and rt:  # the op path's router (tt/moe_fused.py _logits) on the same bf16 input
                         ckc = ttnn.init_device_compute_kernel_config(mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4,
                                                                      math_approx_mode=False, fp32_dest_acc_en=True,
                                                                      packer_l1_acc=False)

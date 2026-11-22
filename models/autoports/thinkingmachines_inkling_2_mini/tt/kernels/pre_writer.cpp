@@ -71,14 +71,10 @@ void kernel_main() {
         cb_reserve_back(cb_tot2, NQ);
         tot2 = get_write_ptr(cb_tot2);
     }
-    if (root) {
-        cb_reserve_back(cb_gath, 2 * K1 * NSEL);
-        if constexpr (NORM) {
-            cb_reserve_back(cb_gath2, 2 * NQ * NSEL);
-        }
-    }
+    // one gather buffer for both rounds (2 K1 parts of NSEL tiles; round 2's 2 NQ parts are its first ones): each
+    // round's root reserves / pushes it whole, its compute pops it whole, so every round starts at the base
+    constexpr uint32_t GT = 2 * K1 * NSEL;
     const uint32_t g1 = get_write_ptr(cb_gath);
-    const uint32_t g2 = NORM ? get_write_ptr(cb_gath2) : 0;
     noc_semaphore_inc(get_noc_addr(rx, ry, s_ready), 1);
     if (root) {
         noc_semaphore_wait(sem(s_ready), C);
@@ -93,9 +89,8 @@ void kernel_main() {
             const uint32_t z = get_write_ptr(cb_zero);
             noc_async_read(zz.get_noc_addr(0), z, 2048);
             noc_async_read_barrier();
-            constexpr uint32_t P1 = 2 * K1, P2 = NORM ? 2 * NQ : 0;
-            for (uint32_t p = 0; p < P1 + P2; ++p) {
-                const uint32_t tile = (p < P1 ? g1 + p * NSEL * F32 : g2 + (p - P1) * NSEL * F32) + (NSEL - 1) * F32;
+            for (uint32_t p = 0; p < 2 * K1; ++p) {
+                const uint32_t tile = g1 + (p * NSEL + NSEL - 1) * F32;
                 if (r0 < 16) {
                     const uint32_t nb = (16 - r0) * 64;
                     noc_async_write(z, get_noc_addr(tile + r0 * 64), nb);
@@ -147,8 +142,9 @@ void kernel_main() {
         cb_pop_front(cb_p, parts);
         const uint32_t ntot = parts / 2;
         if (root) {
+            cb_reserve_back(cb_g, GT);
             noc_semaphore_wait(sem(s_g), C * done_val);
-            cb_push_back(cb_g, parts * NSEL);
+            cb_push_back(cb_g, GT);
             cb_wait_front(cb_tout, ntot);
             const uint32_t ts = get_read_ptr(cb_tout);
             for (uint32_t k = 0; k < ntot; ++k) {
@@ -169,7 +165,7 @@ void kernel_main() {
     round(cb_part, 2 * K1, cb_gath, g1, cb_tot, tot, 1);
 
     if constexpr (NORM) {
-        round(cb_part2, 2 * NQ, cb_gath2, g2, cb_tot2, tot2, 2);
+        round(cb_part2, 2 * NQ, cb_gath, g1, cb_tot2, tot2, 2);
     } else {
         for (uint32_t q = 0; q < NQ; ++q) {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);
