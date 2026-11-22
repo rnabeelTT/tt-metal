@@ -27,9 +27,19 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=300 << 20)
     stats(mesh, "empty")
     S, C = int(os.environ.get("SLOTS", "8")), int(os.environ.get("CTX", "8192"))
-    m = Inkling2Model(mesh, max_seq_len=C + 64, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16, prefill_chunk=256,
+    m = Inkling2Model(mesh, max_seq_len=C + 256, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16, prefill_chunk=256,
                       slots=S)
     stats(mesh, f"model {S} slots x {C}")
+    if os.environ.get("ADAPTER", "1") == "1":  # + the vLLM adapter: decoders (MixPlan), prefix pools, warm-ups, traces
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.generator_vllm import Inkling2ForCausalLM
+
+        ad = Inkling2ForCausalLM(m, mesh, S, C)
+        stats(mesh, "adapter (decoders, prefix pools)")
+        ad.allocate_kv_cache((S * C // 64, 1, 64, 128), None, 24)
+        ad.warmup_model_prefill()
+        stats(mesh, "after the prefill warm-up")
+        ad.warmup_model_decode()
+        stats(mesh, "after the decode trace captures")
     ttnn.close_mesh_device(mesh)
     print("== probe done")
 

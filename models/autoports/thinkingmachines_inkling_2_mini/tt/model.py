@@ -50,7 +50,8 @@ RMS_CAST = os.environ.get("I2M_RMS_CAST", "1") == "1"
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 # packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
-LANES = int(os.environ.get("I2M_PREFILL_LANES", "8"))
+# (default 8; 4 on one die: each lane's conv states take ~32 MB of DRAM over the 48 applications)
+LANES = int(os.environ.get("I2M_PREFILL_LANES", "0"))
 
 
 def _lane_bufs(cv):
@@ -341,8 +342,8 @@ class Inkling2Model:
         self.slots = slots
         # the global layers' block tables (shared; vLLM's block ids when vLLM pages the global KV)
         self.pages = GlobalPages(mesh, slots, math.ceil(max_seq_len / 64))
-        self.lanes = LANES
-        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots, self.pages, LANES)
+        self.lanes = LANES or (4 if mesh.get_num_devices() == 1 else 8)
+        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots, self.pages, self.lanes)
                      if li in self.layers else None
                      for li, p in self.sched]
         print(f"application states up ({sum(a is not None for a in self.apps)})", flush=True)

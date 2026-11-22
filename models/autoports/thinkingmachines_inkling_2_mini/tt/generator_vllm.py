@@ -45,7 +45,7 @@ WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").s
 # I2M_PREFIX (default 1): vLLM's prefix cache. vLLM pages the global layers' KV (tt/attention.GlobalPages) and keeps the
 # cached prefixes; the rest of a sequence's state at a cached prefix's end (conv states, sliding-window KV) lives in the
 # plugin's prefix-state slots: one snapshot per prompt at its last 64-token boundary (tt/prefix.py, device pools).
-# I2M_PREFIX_SLOTS: snapshots kept (LRU; default 4 on one die, 16 on 2 / 4 dies: ~168 MB / dies each),
+# I2M_PREFIX_SLOTS: snapshots kept (LRU; default 1 on one die, 16 on 2 / 4 dies: ~168 MB / dies each),
 # I2M_PREFIX_MIN: the shortest prompt snapshotted.
 PREFIX = os.environ.get("I2M_PREFIX", "1") == "1"
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
@@ -58,7 +58,7 @@ def _prefix_slots():
     tv = os.environ.get("TT_VISIBLE_DEVICES", "")
     md = os.environ.get("MESH_DEVICE", "")
     one_die = md in ("P150", "N150") or (tv != "" and "," not in tv)
-    return 4 if one_die else 16
+    return 1 if one_die else 16
 
 
 PREFIX_SLOTS = _prefix_slots()

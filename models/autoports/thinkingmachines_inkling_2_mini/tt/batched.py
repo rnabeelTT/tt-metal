@@ -35,7 +35,8 @@ GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
 # I2M_MIX_CACHE (default 1): a block's mix logits against every later query that reads it, in one matmul when the block
 # is made (MixPlan); each mix then computes only its current source's logits and the mix kernel reads every source and
 # logit tile in place (no stacked copy): per mix ~1 small matmul + 1 program instead of concat + an n-row matmul + 1
-MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE", "1") == "1"
+# (default on 2 / 4 dies; off on one die, whose DRAM has no room for the ~184 MB of concatenated queries)
+MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE")
 
 
 class MixPlan:
@@ -369,7 +370,7 @@ class BatchedDecoder:
         self.tau = ttnn.from_torch(torch.ones(1, B, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
                                    mesh_mapper=self.rep)
         self.plan = None
-        if MIX_CACHE:
+        if (MIX_CACHE == "1") if MIX_CACHE is not None else mesh.get_num_devices() > 1:
             if getattr(model, "_mixplan", None) is None:
                 model._mixplan = MixPlan(model)
             self.plan = model._mixplan

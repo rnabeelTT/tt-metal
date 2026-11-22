@@ -137,22 +137,19 @@ Capacity (tools/mem_probe.py, DRAM per die after the build): one die 26.7 GiB of
 found at depths 0.1 / 0.5 / 0.9 of 17K, 34K and 63K-token prompts (tools/needle_serve.py). 32-wide decode (TP4)
 quality 0.969 / 0.995 top-1 (the 17-32 rows run as two 16-row fused MoE calls).
 
-p300x2 (4 dies, 32 x 64K, 1024-row prefill chunks):
+Served 2026-11-22 (evening; tools/bench_card.py, every request a distinct prompt): decode tok/s/user at 1 user,
+total tok/s and TTFT at 16 / 32 users (128-token prompts), before -> after this round:
 
-| Input | Output | Users | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s |
-|---:|---:|---:|---:|---:|---:|---:|
-| 128 | 128 | 1 | 427 | 33.0 | 30.3 | 27.7 |
-| 1,024 | 256 | 1 | 951 | 33.5 | 29.9 | 27.0 |
-| 4,096 | 256 | 1 | 3,701 | 33.6 | 29.8 | 20.9 |
-| 16,384 | 256 | 1 | 14,963 | 33.9 | 29.5 | 10.8 |
-| 128 | 128 | 8 | 2,977 | 47.8 | 20.9 | 113.1 |
-| 128 | 128 | 16 | 6,591 | 58.9 | 17.0 | 145.5 |
-| 128 | 128 | 32 | 13,369 | 92.5 | 10.8 | 163.1 |
-| 1,024 | 256 | 32 | 29,817 | 79.3 | 12.6 | 163.7 |
+| profile | 1 user | 16 users x 128: total, TTFT | 32 users x 128: total, TTFT | 1K x 16: total, TTFT |
+|---|---|---|---|---|
+| p300x2 (4 dies, 32 x 64K) | 30.3 -> 34.6-36.2 | 146 -> 207, 6.6 -> 3.2 s | 163 -> 236, 13.4 -> 6.5 s | 146 -> 154, 14.5 -> 14.7 s |
+| p300 (2 dies, 16 x 32K) | 28.7 -> 33.3-34.0 | 116 -> 170, 9.0 -> 3.9 s | | 114 -> 118, 19.8 -> 19.8 s |
+| p150 (1 die, 8 x 8K) | 24.7 -> 25.7-26.3 | (8 users) 65 -> 76, 6.0 -> 4.0 s | | (8 users) 50 -> 50 |
 
-Gaps: prefill ~1,100 tok/s on 4 dies and prefills run one request at a time (TTFT at concurrency grows linearly);
-single-user decode is bound by the per-layer glue (TP4 B=1 device 35 ms of which ~25 ms replicated glue, 96
-all-reduces at 39 us, the replicated LM head).
+Full tables: tt-model.yaml card.performance. One-die DRAM (tools/mem_probe.py): model 30.51 GiB (1.03 free), the
+adapter's decode widths 0.42 GiB, one prefix snapshot 0.16 GiB; so one die keeps 1 snapshot, 4 prefill lanes and no
+MixPlan (its ~184 MB of concatenated queries). Gaps: prefill ~1,100 tok/s on 4 dies (long prompts queue); host time
+per served decode step ~2 ms above the device step (8 small top-k readbacks on 4 dies).
 
 ## Prefix caching (vLLM prefix cache + state snapshots)
 

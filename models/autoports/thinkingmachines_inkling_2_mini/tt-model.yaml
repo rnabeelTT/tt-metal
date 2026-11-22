@@ -116,7 +116,8 @@ card:
     token; 128 routed experts top-8, sliding-window and global attention with relative position bias, block attention
     residuals, message gates between passes) served on Blackhole through vLLM and the Tenstorrent plugin on four, two or
     one dies: tensor-parallel attention and experts, fused decode kernels for the model's per-layer glue, expert-sorted
-    prefill, on-device sampling, decode traces for 1-32 users, reasoning and tool calling.
+    prefill with several requests packed per chunk, prefix caching (vLLM's prefix cache plus snapshots of the
+    sliding-window and convolution state), on-device sampling, decode traces for 1-32 users, reasoning and tool calling.
   quickstart: |
     ### Use with your client
     Point an OpenAI-compatible client at `http://127.0.0.1:20000` (or the port `tt-model serve` printed) with model
@@ -132,7 +133,10 @@ card:
     - `p150` - one die, 8 sequences, 8,192-token context (the experts take 27 of the die's 31.5 GiB).
 
     Every profile: routed experts at bfp8 (dequantized from the checkpoint's NVFP4 / MXFP8), bf16 KV cache, on-device
-    sampling (top-k up to 32), decode traces for every batch width.
+    sampling (top-k up to 32), decode traces for every batch width, prefix caching on: a prompt of 512 tokens or more
+    leaves a snapshot at its last 64-token boundary, and a later request that starts with the same tokens (the same
+    prompt again, the next turn of a chat, another question about the same document) resumes from it instead of
+    prefilling the prefix again (16 snapshots kept on 2 and 4 dies, 1 on one die; least recently used first out).
 
     ### Accuracy
     Teacher forcing against the Hugging Face model (transformers 5.24, CPU) on 8 held-out texts (chat in three
@@ -144,6 +148,8 @@ card:
     | reference noise floor: fp32 vs bf16 CPU model | 0.975 | 0.998 | 0.010 |
     | prefill (1 die, 8 x 1000 tokens) | 0.970 | 0.997 | 0.014 |
     | decode (1 die, 8 x 736 steps) | 0.967 | 0.997 | 0.019 |
+    | prefill (4 dies, 1024-token chunks) | 0.967 | 0.996 | 0.016 |
+    | decode (4 dies, 8 x 736 steps) | 0.971 | 0.997 | 0.015 |
     | decode, 32-wide batch (4 dies, 8 x 256 steps) | 0.969 | 0.995 | 0.025 |
 
     The KL spread between numerically equivalent variants is dominated by one text (code_mbpp, 0.03 - 0.16); on the
@@ -152,50 +158,61 @@ card:
   performance: |
     Measured 2026-11-22 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
     with the code this package ships, served from the source tree. Random-token prompts of exactly the input length (ISL),
-    output pinned with ignore_eos (OSL), greedy, streamed; `concurrency` users in a closed loop, N requests in all;
+    output pinned with ignore_eos (OSL), greedy, streamed; every request a distinct prompt (no prefix-cache hits);
+    `concurrency` users in a closed loop, N requests in all;
     TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per user, TPOT = (E2EL - TTFT) /
     (OSL - 1); total = output tokens / wall time.
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill (tok/s) | Decode (tok/s/u) | Total (tok/s) | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | 128 | 128 | 1 | 2 | 427 | 300 | 30.3 | 27.7 | 4.62 |
-    | p300x2 | 1,024 | 256 | 1 | 2 | 951 | 1,077 | 29.9 | 27.0 | 9.49 |
-    | p300x2 | 4,096 | 256 | 1 | 2 | 3,701 | 1,107 | 29.8 | 20.9 | 12.27 |
-    | p300x2 | 16,384 | 256 | 1 | 2 | 14,963 | 1,095 | 29.5 | 10.8 | 23.60 |
-    | p300x2 | 128 | 128 | 2 | 4 | 653 | 196 | 28.2 | 49.6 | 5.16 |
-    | p300x2 | 128 | 128 | 4 | 8 | 1,417 | 90 | 24.7 | 78.1 | 6.55 |
-    | p300x2 | 128 | 128 | 8 | 16 | 2,977 | 43 | 20.9 | 113.1 | 9.05 |
-    | p300x2 | 128 | 128 | 16 | 32 | 6,591 | 19 | 17.0 | 145.5 | 14.07 |
-    | p300x2 | 128 | 128 | 32 | 64 | 13,369 | 10 | 10.8 | 163.1 | 25.11 |
-    | p300x2 | 1,024 | 256 | 2 | 4 | 1,681 | 609 | 26.3 | 45.0 | 11.38 |
-    | p300x2 | 1,024 | 256 | 4 | 8 | 3,116 | 329 | 24.5 | 75.6 | 13.54 |
-    | p300x2 | 1,024 | 256 | 8 | 16 | 6,844 | 150 | 22.6 | 112.9 | 18.13 |
-    | p300x2 | 1,024 | 256 | 16 | 32 | 14,474 | 71 | 18.8 | 146.2 | 28.02 |
-    | p300x2 | 1,024 | 256 | 32 | 64 | 29,817 | 34 | 12.6 | 163.7 | 50.04 |
-    | p300 | 128 | 128 | 1 | 2 | 593 | 216 | 28.7 | 25.5 | 5.02 |
-    | p300 | 1,024 | 256 | 1 | 2 | 1,309 | 782 | 28.2 | 24.7 | 10.35 |
-    | p300 | 4,096 | 256 | 1 | 2 | 5,186 | 790 | 28.1 | 18.0 | 14.25 |
-    | p300 | 16,384 | 256 | 1 | 2 | 21,174 | 774 | 27.7 | 8.4 | 30.39 |
-    | p300 | 128 | 128 | 2 | 4 | 894 | 143 | 25.5 | 43.6 | 5.88 |
-    | p300 | 128 | 128 | 4 | 8 | 1,938 | 66 | 22.3 | 67.0 | 7.65 |
-    | p300 | 128 | 128 | 8 | 16 | 4,252 | 30 | 18.2 | 91.3 | 11.22 |
-    | p300 | 128 | 128 | 16 | 32 | 8,981 | 14 | 14.5 | 115.5 | 17.73 |
-    | p300 | 1,024 | 256 | 2 | 4 | 2,299 | 445 | 20.6 | 34.8 | 14.70 |
-    | p300 | 1,024 | 256 | 4 | 8 | 4,103 | 250 | 21.7 | 64.6 | 15.85 |
-    | p300 | 1,024 | 256 | 8 | 16 | 8,537 | 120 | 18.3 | 91.3 | 22.43 |
-    | p300 | 1,024 | 256 | 16 | 32 | 19,779 | 52 | 15.8 | 114.1 | 35.90 |
-    | p150 | 128 | 128 | 1 | 2 | 838 | 153 | 24.7 | 21.4 | 5.97 |
-    | p150 | 1,024 | 256 | 1 | 2 | 3,099 | 330 | 24.3 | 18.9 | 13.58 |
-    | p150 | 4,096 | 256 | 1 | 2 | 12,377 | 331 | 24.2 | 11.2 | 22.93 |
-    | p150 | 128 | 128 | 2 | 4 | 1,262 | 101 | 20.5 | 34.3 | 7.47 |
-    | p150 | 128 | 128 | 4 | 8 | 2,739 | 47 | 16.9 | 49.8 | 10.27 |
-    | p150 | 128 | 128 | 8 | 16 | 5,981 | 21 | 12.9 | 64.8 | 15.81 |
-    | p150 | 1,024 | 256 | 2 | 4 | 5,426 | 189 | 20.4 | 28.6 | 17.91 |
-    | p150 | 1,024 | 256 | 4 | 8 | 9,699 | 106 | 15.4 | 39.1 | 26.21 |
-    | p150 | 1,024 | 256 | 8 | 16 | 22,089 | 46 | 13.4 | 49.9 | 41.05 |
+    | p300x2 | 128 | 128 | 1 | 2 | 470 | 272 | 34.6 | 30.9 | 4.14 |
+    | p300x2 | 1,024 | 256 | 1 | 2 | 965 | 1,061 | 36.2 | 32.0 | 8.00 |
+    | p300x2 | 4,096 | 256 | 1 | 2 | 3,704 | 1,106 | 36.1 | 23.8 | 10.76 |
+    | p300x2 | 16,384 | 256 | 1 | 2 | 14,915 | 1,098 | 35.7 | 11.6 | 22.06 |
+    | p300x2 | 128 | 128 | 2 | 4 | 611 | 209 | 34.3 | 59.3 | 4.31 |
+    | p300x2 | 128 | 128 | 4 | 8 | 1,052 | 122 | 29.2 | 94.9 | 5.39 |
+    | p300x2 | 128 | 128 | 8 | 16 | 1,631 | 78 | 24.3 | 149.4 | 6.85 |
+    | p300x2 | 128 | 128 | 16 | 32 | 3,213 | 40 | 19.0 | 206.7 | 9.91 |
+    | p300x2 | 128 | 128 | 32 | 64 | 6,501 | 20 | 11.7 | 236.1 | 17.35 |
+    | p300x2 | 1,024 | 256 | 2 | 4 | 1,467 | 698 | 29.4 | 50.5 | 10.14 |
+    | p300x2 | 1,024 | 256 | 4 | 8 | 3,175 | 323 | 28.2 | 83.7 | 12.23 |
+    | p300x2 | 1,024 | 256 | 8 | 16 | 6,970 | 147 | 24.8 | 118.6 | 17.27 |
+    | p300x2 | 1,024 | 256 | 16 | 32 | 14,725 | 70 | 21.4 | 153.8 | 26.62 |
+    | p300x2 | 1,024 | 256 | 32 | 64 | 30,297 | 34 | 13.9 | 168.5 | 48.60 |
+    | p300 | 128 | 128 | 1 | 2 | 593 | 216 | 34.0 | 29.6 | 4.33 |
+    | p300 | 1,024 | 256 | 1 | 2 | 1,304 | 785 | 33.3 | 28.6 | 8.96 |
+    | p300 | 4,096 | 256 | 1 | 2 | 5,162 | 793 | 33.3 | 20.0 | 12.82 |
+    | p300 | 16,384 | 256 | 1 | 2 | 21,060 | 778 | 32.6 | 8.9 | 28.88 |
+    | p300 | 128 | 128 | 2 | 4 | 907 | 141 | 29.0 | 48.4 | 5.29 |
+    | p300 | 128 | 128 | 4 | 8 | 1,319 | 97 | 26.6 | 84.1 | 6.09 |
+    | p300 | 128 | 128 | 8 | 16 | 2,128 | 60 | 19.9 | 120.1 | 8.53 |
+    | p300 | 128 | 128 | 16 | 32 | 3,852 | 33 | 15.5 | 169.8 | 12.06 |
+    | p300 | 1,024 | 256 | 2 | 4 | 2,300 | 445 | 23.1 | 38.3 | 13.36 |
+    | p300 | 1,024 | 256 | 4 | 8 | 4,269 | 240 | 24.6 | 70.0 | 14.63 |
+    | p300 | 1,024 | 256 | 8 | 16 | 8,712 | 118 | 20.8 | 97.7 | 20.97 |
+    | p300 | 1,024 | 256 | 16 | 32 | 19,802 | 52 | 17.0 | 117.7 | 34.79 |
+    | p150 | 128 | 128 | 1 | 2 | 815 | 157 | 26.3 | 22.7 | 5.64 |
+    | p150 | 1,024 | 256 | 1 | 2 | 3,077 | 333 | 25.9 | 19.8 | 12.94 |
+    | p150 | 4,096 | 256 | 1 | 2 | 12,353 | 332 | 25.7 | 11.5 | 22.28 |
+    | p150 | 128 | 128 | 2 | 4 | 1,079 | 119 | 22.3 | 37.7 | 6.79 |
+    | p150 | 128 | 128 | 4 | 8 | 2,159 | 59 | 16.3 | 51.5 | 9.94 |
+    | p150 | 128 | 128 | 8 | 16 | 4,014 | 32 | 13.4 | 76.1 | 13.46 |
+    | p150 | 1,024 | 256 | 2 | 4 | 4,634 | 221 | 19.6 | 29.0 | 17.63 |
+    | p150 | 1,024 | 256 | 4 | 8 | 9,678 | 106 | 16.5 | 40.7 | 25.14 |
+    | p150 | 1,024 | 256 | 8 | 16 | 21,092 | 49 | 12.9 | 50.2 | 40.84 |
+
+    Prefix cache (same server, `tools/prefix_serve.py`, greedy): a 4,438-token prompt (a document plus a question) cold,
+    then resent, then the next chat turn on it, then 4 users asking about the same document at once:
+
+    | Profile | Cold TTFT (s) | Resent (s) | Next turn (s) | 4 users, shared document (s each) |
+    | --- | ---: | ---: | ---: | ---: |
+    | p300x2 | 4.39 | 0.52 | 0.53 | 0.86 |
+    | p300 | 6.06 | 0.68 | 0.68 | 1.47 |
+    | p150 | 14.09 | 0.96 | 0.96 | 2.07 |
   limitations: |
-    - Prefills run one request at a time (about 1,100 prompt tokens/s on 4 dies, 800 on 2, 330 on 1): time to first
-      token grows with the number of requests arriving together.
+    - Prefill runs about 1,100 prompt tokens/s on 4 dies, 800 on 2 and 330 on 1. Up to 8 requests share each prefill
+      chunk, so short prompts arriving together are prefilled together; long prompts (1K tokens and up) still queue
+      behind each other. Prefix caching skips the cached part of a prompt.
     - No speculative decoding (the checkpoint's DSpark drafter is not served yet).
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Text only. The device sampler supports `top_k` up to 32; logprobs fall back to host sampling.
