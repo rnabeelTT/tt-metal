@@ -423,3 +423,100 @@ class ShortConv:
                 kernels=[k], semaphores=[], cbs=[_cb(_range_set([core]), 0, ttnn.float32, rowb, K - 1)]
             ),
         )
+
+
+class DynShortConv:
+    """Inkling-2's dynamic short convolution on K / V of the global-attention layers (transformers
+    `Inkling2DynamicShortConvolution`), one sequence, fp32 like the reference:
+
+        y_t = (x_t + sum_{L=0..K-1} (static[L, c] + dyn_t[head(c), L]) * x_{t-L}) / 3
+
+    with dyn_t = weight_proj(h_t) [heads * K] (h = the projection's input). The 1/3 is folded into the projection
+    weights by the caller (the conv is linear in x for fixed taps), so this computes y_t * 3. ``static`` [K, C_local],
+    ``wproj`` [heads_local * K, H] (this die's heads). State: the last K-1 inputs, row-major fp32 [1, 1, K-1, C] like
+    ShortConv (zero at a sequence start)."""
+
+    def __init__(self, mesh, static: torch.Tensor, wproj: torch.Tensor, mesh_mapper, c_local: int, heads_local: int,
+                 ckc=None):
+        self.mesh = mesh
+        self.C, self.nh = c_local, heads_local
+        hd = c_local // heads_local
+        rep = ttnn.ReplicateTensorToMesh(mesh) if mesh_mapper is None else mesh_mapper
+        # static taps as [1, 1, 1, C] fp32 row-major rows (sharded like the activations)
+        self.static = [
+            ttnn.from_torch(static[L].float().reshape(1, 1, 1, -1), dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                            device=mesh, mesh_mapper=mesh_mapper)
+            for L in range(K)
+        ]
+        # weight_proj [nh_total * K, H] -> per die [H, nh_local * K] (column shard by head); expansion matrices X_L
+        # [nh_local * K, C_local] with X_L[h * K + L, h * hd + c] = 1, so dyn @ X_L broadcasts head h's lag-L weight
+        # over its hd channels (exact: one nonzero per column)
+        self.wproj = ttnn.from_torch(wproj.to(torch.bfloat16).T.contiguous().reshape(1, 1, wproj.shape[1], -1),
+                                     dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
+                                     mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1) if mesh.get_num_devices() > 1
+                                     else None)
+        X = torch.zeros(K, heads_local * K, c_local)
+        for L in range(K):
+            for h in range(heads_local):
+                X[L, h * K + L, h * hd : (h + 1) * hd] = 1.0
+        self.expand = [ttnn.from_torch(X[L].reshape(1, 1, heads_local * K, c_local), dtype=ttnn.bfloat16,
+                                       layout=ttnn.TILE_LAYOUT, device=mesh,
+                                       mesh_mapper=ttnn.ReplicateTensorToMesh(mesh)) for L in range(K)]
+        self.ckc = ckc or ttnn.init_device_compute_kernel_config(
+            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
+            packer_l1_acc=False)
+        z = torch.zeros(1, 1, K - 1, c_local * mesh.get_num_devices())
+        mk = lambda: ttnn.from_torch(z, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,  # noqa: E731
+                                     mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=3))
+        self.st, self._zero = mk(), mk()
+        self.state = [self.st]
+        self._last_seq = None
+
+    def reset(self):
+        ttnn.copy(self._zero, self.st)
+
+    def rows(self, x, h, commit_n=None):
+        """x [1, 1, R, C] (the projection output, any float dtype), h [1, 1, R, H] (the projection input, bf16 tile) ->
+        y [1, 1, R, C] bf16 (times 3, see the class doc). The state advances past the first commit_n rows (default R;
+        0: no advance, commit_rows(n) later)."""
+        R = int(x.shape[2])
+        # transformers: weight_proj is a bf16 Linear (its output bf16-rounded, then .float()): bf16 in, bf16 out
+        hb = ttnn.typecast(h, ttnn.bfloat16) if h.dtype != ttnn.bfloat16 else h
+        dyn_b = ttnn.matmul(hb, self.wproj, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16)  # [1, 1, R, nh*K]
+        xf = ttnn.typecast(x, ttnn.float32) if x.dtype != ttnn.float32 else x
+        xr = ttnn.to_layout(xf, ttnn.ROW_MAJOR_LAYOUT)
+        seq = ttnn.concat([self.st, xr], dim=2)  # [1, 1, K-1+R, C]: rows t-3, t-2, t-1, then x
+        y = xr
+        for L in range(K):
+            # per-token taps for lag L: static[L] + dyn expanded over the head's channels (exact), in fp32
+            wl = ttnn.matmul(dyn_b, self.expand[L], compute_kernel_config=self.ckc, dtype=ttnn.float32)
+            wl = ttnn.add(ttnn.to_layout(wl, ttnn.ROW_MAJOR_LAYOUT), self.static[L])
+            xs = ttnn.slice(seq, [0, 0, K - 1 - L, 0], [1, 1, K - 1 - L + R, self.C])  # x_{t-L}
+            y = ttnn.add(y, ttnn.multiply(xs, wl))
+        ttnn.deallocate(dyn_b)
+        n = R if commit_n is None else int(commit_n)
+        if n:
+            ttnn.copy(ttnn.slice(seq, [0, 0, n, 0], [1, 1, n + K - 1, self.C]), self.st)
+            self._last_seq = None
+        else:
+            self._last_seq = seq
+        y = ttnn.typecast(y, ttnn.bfloat16)
+        return ttnn.to_layout(y, ttnn.TILE_LAYOUT)
+
+    def commit_rows(self, n: int):
+        ttnn.copy(ttnn.slice(self._last_seq, [0, 0, n, 0], [1, 1, n + K - 1, self.C]), self.st)
+
+
+def dyn_host_reference(x, h, static, wproj, state=None):
+    """fp32 reference of DynShortConv.rows (times 3): x [T, C], h [T, H], static [K, C], wproj [nh*K, H]."""
+    T, C = x.shape
+    nh = wproj.shape[0] // K
+    hd = C // nh
+    s = torch.zeros(K - 1, C) if state is None else state.float()
+    seq = torch.cat([s, x.float()], 0)
+    dyn = (h.bfloat16() @ wproj.bfloat16().T).float().view(T, nh, K)  # [T, nh, K] (bf16 Linear, as transformers)
+    y = x.float().clone()
+    for L in range(K):
+        w = static[L].float()[None, :] + dyn[:, :, L].repeat_interleave(hd, dim=1)
+        y += w * seq[K - 1 - L : K - 1 - L + T]
+    return y, seq[-(K - 1):].clone()

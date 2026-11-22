@@ -71,7 +71,9 @@ class Checkpoint:
         self.keys = set(self.f.keys())
 
     def get(self, key: str) -> torch.Tensor:
-        return self.f.get_tensor(key)
+        # clone: never hand out views of the file mapping (host -> device writes from file-backed memory crawl on this
+        # host, see tt/wload.py)
+        return self.f.get_tensor(key).clone()
 
     def has(self, key: str) -> bool:
         return key in self.keys

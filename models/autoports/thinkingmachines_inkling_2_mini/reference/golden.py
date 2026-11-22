@@ -62,13 +62,26 @@ def main():
                 m.register_forward_hook(hook(f"layers.{li}.{n}"), with_kwargs=True)
         layer.register_forward_hook(hook(f"layers.{li}"), with_kwargs=True)
     lm.message_input.register_forward_hook(hook("message_input"), with_kwargs=True)
+    # every layer call's output, in call order = the 48 applications (unambiguous vs output_hidden_states, whose last
+    # entry may be the final normed state)
+    app_out = []
+    for layer in lm.layers:
+        layer.register_forward_hook(lambda mod, a, k, o: app_out.append((o[0] if isinstance(o, tuple) else o)[0]
+                                                                        .detach().to(torch.bfloat16).clone()),
+                                    with_kwargs=True)
+    final_h = []
+    lm.norm.register_forward_hook(lambda mod, a, o: final_h.append(o[0].detach().float().clone()))
     t0 = time.time()
     with torch.no_grad():
         o = model(input_ids=ids[None], output_hidden_states=True, use_cache=False)
     print(f"T={T} forward {time.time() - t0:.1f}s, hidden states {len(o.hidden_states)}")
-    hidden = torch.stack([h[0].to(torch.bfloat16) for h in o.hidden_states])
+    hs = [h[0].to(torch.bfloat16) for h in o.hidden_states]
+    assert len(app_out) == 48, len(app_out)
+    hidden = torch.stack([hs[0]] + app_out)  # embeddings + the 48 application outputs
+    print("hidden_states[-1] == app 47 output:", torch.equal(hs[-1], app_out[-1]),
+          " == final norm:", torch.allclose(hs[-1].float(), final_h[0], atol=1e-2))
     torch.save(
-        {"ids": ids, "hidden": hidden, "logits": o.logits[0].float(), "internals": internals, "prompt_len": None},
+        {"ids": ids, "hidden": hidden, "logits": o.logits[0].float(), "internals": internals, "final_norm": final_h[0]},
         out,
     )
     print("saved", out, {k: len(v) for k, v in list(internals.items())[:8]})

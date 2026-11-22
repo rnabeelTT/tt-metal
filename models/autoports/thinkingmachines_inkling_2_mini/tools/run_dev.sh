@@ -17,6 +17,9 @@ if [ "${MOUNT_SHARED:-1}" = 1 ]; then
     [ -d "$REPO/$d" ] && M+=(-v "$REPO/$d:/opt/tt-metal/$d")
   done
 fi
+# the prefetcher fix (retire exec_buf read-ahead before host fetches resume): large host -> device writes stall without
+# it; not yet in the images (same mount as the inkling_small / hybrid_moe dev scripts)
+M+=(-v "$REPO/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:/opt/tt-metal/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:ro")
 if [ -z "${TT_LOCK_HELD:-}" ]; then exec 9>"$HOME/.cache/hybrid-moe/ttdev.lock"; flock 9; fi
 TTY=(); [ -t 0 ] && TTY=(-it)
 exec docker run --rm "${TTY[@]}" --name "${NAME:-i2m-dev-$$}" \
