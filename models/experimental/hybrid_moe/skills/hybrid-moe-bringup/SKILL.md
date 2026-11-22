@@ -26,4 +26,8 @@ Rules that cost hours when skipped:
 6. **Host RAM**: compare `MemAvailable` with the `[hybrid] host RAM` line before long-context runs; leaked pinned memory
    returns only on a reboot.
 
+7. **Once the model serves with reference-matching quality, run the decode review** in
+   `skills/blackhole-decode-perf/SKILL.md` (bandwidth floor, per-layer op budget, host-turn split) before packaging,
+   and before any decode-speed work.
+
 Report each measured number with its command, profile and context length; say what was not measured.

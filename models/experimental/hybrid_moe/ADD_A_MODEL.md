@@ -110,6 +110,10 @@ M2.7 for comparison (v1.4): short ~59-62 tok/s; 45K prompt ~19-22 s TTFT, ~40 to
 line in the log against the container's real use (`docker stats`). Judge quality against the CPU reference
 (`compare_m27.py`, teacher forced), not against an earlier run.
 
+Once quality matches the reference, review decode speed with `skills/blackhole-decode-perf/SKILL.md` (link it into
+`~/.claude/skills/` too): floor arithmetic, a per-layer op budget from a traced profile, and the host-blocked /
+host-work / device split of a decode pass, before packaging.
+
 ## 6. Package and publish
 
 1. Upload the expert copies + plans as a public model repo (`int4_s<S>/`, `dev_s<S>/`, `plans/`, the base model's
