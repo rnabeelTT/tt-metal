@@ -34,6 +34,10 @@ PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
 # I2M_MOE_SORTED (default 1): prefill rows (> the fused decode width) through the sorted dispatch (MiniMax / Qwen3.5
 # moe_dispatch: one grouped sparse matmul per projection, each 32-row group one expert) instead of the masked union
 SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
+# rows per expert group in the sorted dispatch (32 | 64 | 128): larger groups re-read each expert's weights fewer
+# times (one weight read per group) at more padding; long prefill chunks favour larger groups
+GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
+assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
 # I2M_MOE_LAYOUT=fused (default): ONE copy of the experts in the fused decode kernels' layout (tt/moe_fused.py: per
 # sub-shard [gate | up / 25], down x 100); decode rows (<= 16) run the fused kernels, prefill / wider batches the
@@ -172,20 +176,25 @@ class MoE:
         a fused gather-add un-dispatch (bf16) per sub-shard; the sub-shards summed."""
         from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
 
-        E, H, k, gs = self.E, self.H, self.k, 32
-        if getattr(self, "_dispatch", None) is None:
-            self._dispatch = SortedDispatch(self.mesh, E, k, group=gs)
+        E, H, k = self.E, self.H, self.k
+        gs = GROUP_ROWS if T >= 4 * GROUP_ROWS else 32
+        self._dispatches = getattr(self, "_dispatches", {})
+        if gs not in self._dispatches:
+            self._dispatches[gs] = SortedDispatch(self.mesh, E, k, group=gs)
+        if getattr(self, "_cfg_sorted", {}).get(("gs", gs)) is None:
             kc = lambda W: max(H, W) // TILE  # noqa: E731  (K in one in0 block, see the masked configs)
-            self._cfg_sorted = {W: (sparse_matmul_program_config(gs, 2 * W, H, target_cores=64, in0_block_w_cap=kc(W)),
-                                    sparse_matmul_program_config(gs, H, W, target_cores=64, in0_block_w_cap=kc(W)))
-                                for _, _, W, _, _ in self.subs}
+            self._cfg_sorted = getattr(self, "_cfg_sorted", {})
+            self._cfg_sorted[("gs", gs)] = {
+                W: (sparse_matmul_program_config(gs, 2 * W, H, target_cores=64, in0_block_w_cap=kc(W)),
+                    sparse_matmul_program_config(gs, H, W, target_cores=64, in0_block_w_cap=kc(W)))
+                for _, _, W, _, _ in self.subs}
         w, ids = self.route(x)
-        m = self._dispatch.build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
+        m = self._dispatches[gs].build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
         Rd, G = m["Rd"], m["G"]
         x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
         out = None
         for ug, dn, W, _, _ in self.subs:
-            cgu, cdn = self._cfg_sorted[W]
+            cgu, cdn = self._cfg_sorted[("gs", gs)][W]
             alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
                                                              ttnn.TILE_LAYOUT, self.mesh, DRAM)
             fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,

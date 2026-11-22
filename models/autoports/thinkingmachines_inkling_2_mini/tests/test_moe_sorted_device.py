@@ -33,7 +33,8 @@ def main():
     for li in (0, 23):
         moe = MoE(mesh, cfg, ck, li, expert_dtype=ttnn.bfloat8_b, cache_dir="/cache/wcache")
         for T in [int(t) for t in os.environ.get("TS", "64,128,256").split(",")]:
-            x = ttnn.from_torch(xs[:T].reshape(1, 1, T, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
+            xt = xs.repeat(-(-T // xs.shape[0]), 1)[:T]  # (the fixture has 256 rows)
+            x = ttnn.from_torch(xt.reshape(1, 1, T, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
                                 layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
             res, tm = {}, {}
             for mode in (False, True):
