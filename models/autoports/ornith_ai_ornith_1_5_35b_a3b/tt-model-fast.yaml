@@ -76,7 +76,7 @@ serve:
     QWEN35_VISION: "1"
     QWEN35_VISION_MAX_IMAGES: "4"
     QWEN35_VISION_MAX_PIXELS: "4194304"
-    QWEN35_BATCHED_PREFILL: "0"
+    QWEN35_BATCHED_PREFILL: "0"  # ON in the four-die profiles below (validated there only)
     VLLM_ENGINE_READY_TIMEOUT_S: "3600"
     # the fused decode path (fusion/HANDOFF.md steps 1-3)
     QWEN35_MOE_FUSED_DECODE: "1"
@@ -100,29 +100,31 @@ serve_profiles:
     description: 'Fastest profile: four dies, text and images.'
     hardware: p300x2
     mesh_device: P300x2
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch (served A/B 2026-11-07: greedy identical, conformance unchanged, TTFT 32x128 2726->1785 ms, 2048x1 296->248); step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p150x4
     description: '`p300x2` on four p150 boards.'
     hardware: p150x4
     mesh_device: P150x4
-    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1"}   # step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
+    env: {QWEN35_FABRIC_BOUNDARY: "1", QWEN35_FB_MAX_ROWS: "4", QWEN35_FB_CONSUMER: "1", QWEN35_FB_ROUTER: "1", QWEN35_MOE_SPLIT_PAIR: "1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # batched prefill + multi-core MoE dispatch (served A/B 2026-11-07: greedy identical, conformance unchanged, TTFT 32x128 2726->1785 ms, 2048x1 296->248); step 7 (4 dies only: the boundary's persistent L1 receive buffers do not fit the 2-die prefill)
   - name: p300
     description: 'Default: two dies, text and images, at about 60 % of the four-die single-user speed.'
     hardware: p300
     mesh_device: P300
-    env: {TT_VISIBLE_DEVICES: "0,1"}   # the first two chips: fabric init needs every visible chip in the mesh
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}   # the first two chips: fabric init needs every visible chip in the mesh; batched prefill + dispatch_mc: served A/B 2026-11-07 greedy identical, conformance 74/74, TTFT 32x128 3506->2145 ms
   - name: p150x2
     description: '`p300` on two p150 boards.'
     hardware: p150x2
     mesh_device: P150x2
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    env: {TT_VISIBLE_DEVICES: "0,1", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
   - name: p150
     description: 'One die: text only, routed experts at bfp4, MTP speculative decoding on.'
     hardware: p150
     mesh_device: P150
     additional_config: {tt: {fabric_config: DISABLED}}
-    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there
-    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3"}
+    # one die: the blackhole-fast decode path unchanged (the new decode ops have not run on one die), MTP as there;
+    # batched prefill (groups of 3 up to 256 tokens) + multi-core dispatch: served A/B 2026-11-08 greedy identical,
+    # conformance 74/74, real-text MTP decode unchanged, TTFT 128 x 32 users 4719 -> 3282 ms, 8 users 1323 -> 1033 ms
+    env: {QWEN35_VISION: "0", QWEN35_GDN_DECODE_OPS: "0", QWEN35_ATTN_DECODE_OPS: "0", QWEN35_MTP: "3", QWEN35_BATCHED_PREFILL: "1", QWEN35_DISPATCH_MC: "1"}
     args: [--enable-auto-tool-choice, --enable-prefix-caching, --default-chat-template-kwargs, '{"enable_thinking": true}', --limit-mm-per-prompt, '{"image": 0, "video": 0}']
   - name: p100
     description: '`p150` on one p100.'
@@ -180,6 +182,18 @@ card:
     | IFEval prompt-level strict | 0.76 | 0.82 ±0.038 | not reported | 100 |
     | LiveCodeBench v6 | 0.36 | 0.40 ±0.069 | not reported | 50 |
 
+    With thinking on, at the card's sampling (temperature 1.0 / top_p 0.95 / top_k 20) and 81,920-token answers, on fixed
+    random subsets (seed 1234), one run each (the card averages 5), unfinished answers counted wrong. p300x2 profile, on
+    the previous revision (image 5cb20a8f1905), which differs from this one only in mixed image / text prefill:
+
+    | Eval | this package | reference (Ornith card) | prompts | answers cut at 81,920 |
+    | --- | ---: | ---: | ---: | ---: |
+    | GPQA-Diamond | 0.859 ±0.035 | 0.892 | 99 of 198 | 7 (7%) |
+    | HLE, no tools (images included) | 0.188 ±0.096 | 0.256 | 64 of 2,500 | 20 (31%) |
+
+    Both are within one standard error of the card. HLE answers were judged by Claude agents (the card used Claude 4.6
+    Opus as judge).
+
     Top-1 / top-5 / top-100 token agreement with the Hugging Face bf16 model under teacher forcing (100 greedy tokens;
     measured on v1, whose expert precision this package keeps):
 
@@ -205,6 +219,33 @@ card:
     | p300 | 128 | 128 | 1 | 4 | 133 | 962 | 126.3 | 1.14 |
     | p300 | 1024 | 256 | 32 | 128 | 8,628 | 119 | 25.4 | 18.69 |
     | p150 | 1024 | 256 | 32 | 128 | 11,879 | 86 | 8.4 | 42.06 |
+
+    #### Prefill update (2026-11-07)
+
+    This revision prefills short prompts (up to 512 tokens) four at a time in one batched pass and spreads the MoE
+    expert dispatch over more cores (p300x2, p150x4, p300 and p150x2 profiles; since 2026-11-08 also p150, three prompts per pass up to 256 tokens; p100 is unchanged). Output is unchanged: greedy output matched token for token, one request
+    at a time and with eight concurrent requests, and the vLLM sampling conformance suite (74 tests) gives the same
+    results. Decode speed is unchanged. Measured 2026-11-07 on the published image, served as shipped; before = the same
+    build with both changes off. Random-token prompts, 128 output tokens, median TTFT over N requests. The tables below
+    were measured before this change; prompts over 512 tokens gain only from the dispatch change (the 2,048-token rows).
+
+    | Profile | Input tokens | Users | N | TTFT before -> after (ms) | Change |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 1 | 8 | 88 -> 84 | -4 % |
+    | p300x2 | 2,048 | 1 | 4 | 296 -> 249 | **-16 %** |
+    | p300x2 | 128 | 8 | 32 | 837 -> 649 | **-22 %** |
+    | p300x2 | 128 | 32 | 64 | 2,726 -> 1,817 | **-33 %** |
+    | p300 | 128 | 1 | 8 | 114 -> 109 | -4 % |
+    | p300 | 2,048 | 1 | 4 | 386 -> 338 | **-12 %** |
+    | p300 | 128 | 8 | 32 | 1,012 -> 737 | **-27 %** |
+    | p300 | 128 | 32 | 64 | 3,506 -> 2,152 | **-39 %** |
+    | p150 | 128 | 1 | 8 | 215 -> 210 | -2 % |
+    | p150 | 2,048 | 1 | 4 | 728 -> 686 | -6 % |
+    | p150 | 128 | 8 | 32 | 1,323 -> 1,033 | **-22 %** |
+    | p150 | 128 | 32 | 64 | 4,719 -> 3,282 | **-30 %** |
+
+    p150 rows measured 2026-11-08 the same way (greedy identical one at a time and concurrent, conformance 74 passed /
+    4 skipped in both arms, real-text MTP decode 56.6 -> 56.5 tok/s).
 
     #### p300x2
 
@@ -326,7 +367,7 @@ card:
     - Expert weights run at reduced precision (bfp8 routed experts on two and four dies, bfp4 on one die), so output
       can differ from the bf16 original where two candidate tokens are close; see Accuracy.
     - One die (`p150`, `p100`): text only, no prefix caching.
-    - Evals ran with thinking off on the p300 profile only, IFEval and LiveCodeBench on subsets (100 / 50 questions).
+    - Thinking-off evals ran on the p300 profile only, IFEval and LiveCodeBench on subsets (100 / 50 questions); thinking-on evals on p300x2, GPQA-Diamond and HLE on subsets (99 / 64 questions).
       Ornith's own benchmarks (agentic coding and tool use) were not reproduced.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Prefix caching resumes only at 2,048-token boundaries: a prompt sharing fewer than 2,048 tokens with an earlier one

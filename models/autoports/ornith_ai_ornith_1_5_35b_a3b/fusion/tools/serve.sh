@@ -4,7 +4,7 @@
 # ~/.cache/huggingface and thinking off by default (the scorecard's eval setting).
 # PORT (default 20000) / DEVS (TT_VISIBLE_DEVICES, default 0,1 for p300): two p300 servers side by side on the two chip
 # pairs, e.g. the published reference on 0,1 :20000 and a development build on DEVS=2,3 PORT=20001.
-# MAXSEQS overrides --max-num-seqs (32). MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
+# KERNELS (see below) mounts edited device-kernel sources. MAXSEQS overrides --max-num-seqs (32). MODELS=1 mounts this checkout's models/ over the image's (Python + generic_op kernel changes without a rebuild).
 # MODEL_ID (default Ornith) picks the serving recipe (Qwen/Qwen3-Coder-Next, Qwen/Qwen3.5-122B-A10B,
 # zai-org/GLM-4.5-Air too); CACHE_NAME the host cache dir.
 set -e
@@ -33,11 +33,21 @@ case $MODEL_ID in  # each bundle's serving recipe (its tt-model.yaml)
   zai-org/GLM-4.5-Air) MENV="--env QWEN35_BATCHED_PREFILL=0"; MAXLEN=131072
     MARGS=(--enable-auto-tool-choice --tool-call-parser glm45 --reasoning-parser glm45
            --default-chat-template-kwargs '{"enable_thinking": false}');;
+  Qwen/Qwen3-Coder-30B-A3B-Instruct)  # the qwen3-coder-30b-a3b fast bundle (tt-model-fast.yaml): ring fabric, 48 MB trace
+    MENV="--env QWEN3_DECODE_WIDTHS=1,2,4,8,16,32 --env QWEN3_MOE_FUSED_DECODE=1 --env QWEN3_PREFILL_BUCKETS=proportional"
+    MENV+=" --env QWEN3_PREFILL_WARMUP=auto --env QWEN3_PREFILL_WARMUP_MAX=8192 --env QWEN3_PREFILL_WARMUP_SUFFIX_MAX=1024"
+    MENV+=" --env QWEN3_WARMUP_SAMPLING=both --env TORCHDYNAMO_DISABLE=1 --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"
+    MAXLEN=256000; [ "$PROFILE" = p300x2 ] && FAB=FABRIC_1D_RING; TT_CFG='"trace_region_size": 50331648'
+    MARGS=(--revision b2cff646eb4bb1d68355c01b18ae02e7cf42d120 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+           --max-num-batched-tokens 256000 --generation-config vllm --override-generation-config '{"temperature": 0}');;
   *) echo "serve.sh: no recipe for $MODEL_ID"; exit 1;;
 esac
 KCACHE=${KCACHE:-$CACHE/cache}
 METAL=${METAL:-$(cd "$(dirname "$0")/../../../../.." && pwd)}
 MNT=""; [ "${MODELS:-0}" = 1 ] && MNT="--volume $METAL/models:/opt/tt-metal/models:ro"
+# KERNELS="rel/path.cpp ..." mounts those device-kernel sources (JIT-compiled) from this checkout; give them their own
+# KCACHE, since the kernel cache is not keyed by source contents
+for k in ${KERNELS:-}; do MNT+=" --volume $METAL/$k:/opt/tt-metal/$k:ro"; done
 mkdir -p $KCACHE $CACHE/weights $CACHE/tensors
 docker rm -f $NAME >/dev/null 2>&1 || true
 docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --ipc host \
@@ -49,5 +59,5 @@ docker run -d --name $NAME --user $(id -u):$(id -g) --device /dev/tenstorrent --
   $MNT --publish ${PORT:-20000}:20000 --env ARCH_NAME=blackhole --env HF_MODEL=$MODEL_ID --env MESH_DEVICE=$MESH \
   --env QWEN35_PROGRAM_GUARD=1 --env QWEN35_TRACE_REGION_MIB=768 $VIS --env VLLM_ENGINE_READY_TIMEOUT_S=3600 $MENV \
   "$@" $IMAGE vllm serve $MODEL_ID --max-model-len ${MAXLEN:-262144} --max-num-seqs ${MAXSEQS:-32} --block-size 64 \
-  --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", \"trace_region_size\": 805306368, \"l1_small_size\": 24576, \"fabric_config\": \"$FAB\"}}" \
+  --additional-config "{\"tt\": {\"sample_on_device_mode\": \"all\", ${TT_CFG:-\"trace_region_size\": 805306368, \"l1_small_size\": 24576}, \"fabric_config\": \"$FAB\"}}" \
   "${MARGS[@]}" --port 20000

@@ -56,6 +56,12 @@ _GQA_EXPAND_CKC = ttnn.WormholeComputeKernelConfig(
 )
 
 
+BATCHED_EXACT_TAIL = os.environ.get("QWEN36_GDN_BATCHED_EXACT_TAIL", "1") == "1"
+# fp32 final state -> bf16 rec_state with ttnn.copy, as the single-user path does: typecast rounds differently
+# (served batched-vs-single rec_state differed by 1 bf16 ulp in every GDN layer -> greedy decode diverged)
+BATCHED_STATE_COPY = os.environ.get("QWEN36_GDN_BATCHED_STATE_COPY", "1") == "1"
+
+
 def _silu_mul(x, z, memory_config):
     """out-gate: x * silu(z). NOT fused into one op: fusing silu via input_tensor_b_activations
     overflows to NaN in the real layer for large-magnitude z (op-level PCC hid it — small inputs)."""
@@ -1215,7 +1221,7 @@ class TPGatedDeltaNet:
             ttnn.copy(cs, self.conv_states[m])
             ttnn.deallocate(cs)
 
-    def forward_prefill_batched(self, x, chunk_size=128, valid_lens=None, carry=False, scan_sink=None):
+    def forward_prefill_batched(self, x, chunk_size=128, valid_lens=None, carry=False, scan_sink=None, exact_tail=False):
         """Batched prefill: all B users in one pass (no per-user Python loop).
 
         The chunk-seq GDN kernel scans a leading BH = B*H batch dim, each (user, head) row an
@@ -1224,6 +1230,8 @@ class TPGatedDeltaNet:
         decode buffers (rec_state[B,Nv,Dk,Dv], conv_states[*][1,B,D]); row u == user u.
 
         x:          [B, T, dim] replicated (all users padded to a common bucket length T).
+        exact_tail: run the single-user forward_prefill's output ops over the B*T rows (returns [1, 1, B*T, dim/TP]
+                    fp32, reduce-scattered) so each user's rows are bit-identical to its own single prefill.
         valid_lens: optional list of B real token counts (< T => right-padding masked per row);
                     None => every row is full length T.
         carry:      False (default) => from scratch (single-shot). True => CHUNK-OUTER carry: read
@@ -1314,6 +1322,11 @@ class TPGatedDeltaNet:
         _use_fused = fused_chunk_enabled()
         _delta_fn = chunk_gated_delta_rule_fused_adapter if _use_fused else chunk_gated_delta_rule_seq_adapter
         _extra = {"const_tiles": self._fused_const_tiles} if _use_fused else {}
+        # Exact tail: the single-user forward_prefill's output ops (head-major norm + concat heads, fp32 fused
+        # out-proj reduce-scatter) over the B*T rows, so a user's rows are bit-identical to its single admission.
+        # (both out-proj forms: the fused matmul + reduce-scatter where the ring allows it, else - 2 dies - the
+        # single path's row projection + all-reduce; the batched fallback below differs from both)
+        _exact_tail = exact_tail and BATCHED_EXACT_TAIL and self._gdn_fuse_out
         o, final_state = _delta_fn(
             q,
             k,
@@ -1327,6 +1340,7 @@ class TPGatedDeltaNet:
             cached_masks=self.chunk_seq_masks,
             valid_len=valid_lens,
             qkv_head_dims=(Nk, Dk, Nv, Dv),
+            return_o_bh=_exact_tail,
             **_extra,
         )
 
@@ -1334,7 +1348,7 @@ class TPGatedDeltaNet:
         if self._stable_state and self.rec_state is not None:
             rec_src = (
                 final_state
-                if final_state.dtype == self.rec_state.dtype
+                if final_state.dtype == self.rec_state.dtype or BATCHED_STATE_COPY
                 else ttnn.typecast(final_state, self.rec_state.dtype)
             )
             ttnn.copy(rec_src, self.rec_state)
@@ -1382,6 +1396,37 @@ class TPGatedDeltaNet:
             self.conv_states = new_conv
 
         # ---- output (gated RMSNorm + SiLU(z) gate + row-parallel out proj + all-reduce) ----
+        if _exact_tail:
+            _dram = ttnn.DRAM_MEMORY_CONFIG
+            n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6, memory_config=_dram)  # o: [B*Nv, T, Dv]
+            ttnn.deallocate(o)
+            n = ttnn.reshape(n, (B, Nv, T, Dv))
+            n = ttnn.experimental.nlp_concat_heads(n, memory_config=_dram)  # [B, 1, T, Nv*Dv]
+            out_f = ttnn.reshape(n, (1, B * T, self.value_dim_tp))
+            zf = ttnn.reshape(z, (1, B * T, z.shape[-1]))
+            gated = _silu_mul(out_f, zf, _dram)
+            ttnn.deallocate(out_f)
+            ttnn.deallocate(z)
+            if self._fuse_out_mmrs_prefill:
+                x_out = ttnn.reshape(gated, (1, 1, B * T, gated.shape[-1]))
+                out = tpc.matmul_reduce_scatter_prefill(
+                    x_out, tw["out"], self.tt_ccl, self.cfg, self.args.ccl_topology(), self.args.num_devices, ttnn.float32
+                )
+                ttnn.deallocate(gated)
+                return out
+            # the single forward_prefill's unfused out-proj (no ring, e.g. 2 dies): row projection + all-reduce
+            partial = self._row_proj(gated, tw["out"])
+            ttnn.deallocate(gated)
+            partial = ttnn.reshape(partial, (1, 1, B * T, partial.shape[-1]))
+            return tt_all_reduce(
+                partial,
+                self.mesh,
+                self.tt_ccl,
+                cluster_axis=0,
+                dim=3,
+                topology=self.args.ccl_topology(),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
         out_n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6)
         ttnn.deallocate(o)
         out_f = ttnn.reshape(out_n, (B, T, self.value_dim_tp))

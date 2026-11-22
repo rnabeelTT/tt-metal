@@ -34,10 +34,12 @@ from .experts import (
     _kernels,
     _page_bytes,
     _range_set,
+    bank_columns,
     bank_workers,
     gu_layout,
     gu_ring,
     logits_row_bytes,
+    offrow_candidates,
     place_along_rows,
     place_banks_offrow,
 )
@@ -339,7 +341,7 @@ class ExpertGateUpRows:
         if self.split:
             # banks whose optimal reader shares a row with an earlier bank's (banks 0 / 4 on row 9 here): readers on the
             # next row inward, reading on NOC1 (QWEN35_MOE_SPLIT_OFFROW=1)
-            workers = bank_workers(mesh_device)
+            workers = bank_workers(mesh_device, rows=True)
             self.noc1_banks = set()
             if os.environ.get("QWEN35_MOE_SPLIT_OFFROW", "1") == "1":
                 seen = set()
@@ -353,8 +355,7 @@ class ExpertGateUpRows:
             for b in range(self.banks):
                 if b in self.noc1_banks:
                     w = workers[b]
-                    y = w.y - 1 if w.y > 0 else w.y + 1
-                    cand = [(w.x + dx, y) for d in range(grid.x) for dx in ((d, -d) if d else (0,))]
+                    cand = offrow_candidates(mesh_device, w, rows=True)
                     cores = []
                     for x, yy in cand:
                         if len(cores) == readers:
@@ -362,12 +363,10 @@ class ExpertGateUpRows:
                         if 0 <= x < grid.x and (x, yy) not in used:
                             used.add((x, yy))
                             cores.append(ttnn.CoreCoord(x, yy))
+                    assert len(cores) == readers, f"no room for {readers} cores near bank {b}"
                     placed[b] = cores
-            placed.update(
-                place_along_rows(
-                    mesh_device, {b: readers for b in range(self.banks) if b not in self.noc1_banks}, used=used
-                )
-            )
+            placed.update(place_along_rows(mesh_device, {b: readers for b in range(self.banks) if b not in self.noc1_banks},
+                                           used=used, rows=True))
             self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
             half = self.banks // 2
             self.partner = {
@@ -420,7 +419,7 @@ class ExpertGateUpRows:
                     placed[q] = cores
                     self.offrow.add(q)
             placed.update(
-                place_along_rows(mesh_device, {q: readers for q in range(self.ngroups) if q not in placed}, used=used)
+                place_along_rows(mesh_device, {q: readers for q in range(self.ngroups) if q not in placed}, used=used, rows=True)
             )
             self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
@@ -603,7 +602,7 @@ class ExpertDownRows:
         if os.environ.get("QWEN35_MOE_DN_OFFROW", "0") == "1":
             placed, self.noc1_banks = place_banks_offrow(mesh_device, {b: readers for b in range(self.banks)})
         else:
-            placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+            placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)}, rows=True)
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 

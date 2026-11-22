@@ -3,7 +3,7 @@ temperature 0 with a fixed max_tokens; decode tok/s = (tokens - 1) / (last - fir
 on how predictable the text is, which random-token benchmarks understate.
 
     URL=http://localhost:20000 python realtext.py [max_tokens]
-SAMPLE=temperature,top_k,top_p (e.g. 1.0,20,0.95): sampled instead of greedy.
+SAMPLE=temperature,top_k,top_p (e.g. 1.0,20,0.95): sampled instead of greedy. PRESENCE=p: presence_penalty p.
 CONC=U: U streams at once (rounds of U prompts, the list cycled, at least 2 rounds covering it): per-user decode tok/s
 (median over streams) and aggregate decode tok/s (a round's tokens over its first-to-last token span, mean).
 """
@@ -50,7 +50,11 @@ def run(prompt, max_tokens):
     if os.environ.get("SAMPLE"):
         t, k, p = os.environ["SAMPLE"].split(",")
         body.update(temperature=float(t), top_k=int(k), top_p=float(p))
-    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"})
+    if os.environ.get("PRESENCE"):
+        body["presence_penalty"] = float(os.environ["PRESENCE"])
+    req = urllib.request.Request(
+        URL + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"}
+    )
     times, t0, n = [], time.perf_counter(), 0
     with urllib.request.urlopen(req, timeout=600) as r:
         for line in r:
@@ -77,8 +81,10 @@ def concurrent(mt, u):
             last = max(ts[-1] for _, ts, _ in res)
             agg.append(sum(n - 1 for _, _, n in res) / (last - first))
             per += [(n - 1) / (ts[-1] - ts[0]) for _, ts, n in res]
-    print(f"REALTEXT CONC={u} {rounds} rounds x {mt} tokens: per user median {statistics.median(per):.1f} tok/s "
-          f"({min(per):.1f}..{max(per):.1f}), aggregate {statistics.mean(agg):.1f} tok/s")
+    print(
+        f"REALTEXT CONC={u} {rounds} rounds x {mt} tokens: per user median {statistics.median(per):.1f} tok/s "
+        f"({min(per):.1f}..{max(per):.1f}), aggregate {statistics.mean(agg):.1f} tok/s"
+    )
 
 
 def main():
@@ -93,8 +99,10 @@ def main():
         secs += ts[-1] - ts[0]
         per.append((n - 1) / (ts[-1] - ts[0]))
     tag = f" SAMPLE={os.environ['SAMPLE']}" if os.environ.get("SAMPLE") else ""
-    print(f"REALTEXT{tag} {len(per)} prompts x {mt} tokens: decode {toks / secs:.1f} tok/s ({1e3 * secs / toks:.2f} ms/token), "
-          f"per prompt {min(per):.1f}..{max(per):.1f} tok/s, median {statistics.median(per):.1f}")
+    print(
+        f"REALTEXT{tag} {len(per)} prompts x {mt} tokens: decode {toks / secs:.1f} tok/s ({1e3 * secs / toks:.2f} ms/token), "
+        f"per prompt {min(per):.1f}..{max(per):.1f} tok/s, median {statistics.median(per):.1f}"
+    )
 
 
 if __name__ == "__main__":
