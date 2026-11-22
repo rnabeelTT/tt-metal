@@ -38,6 +38,14 @@ GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
 # (default on 2 / 4 dies; off on one die, whose DRAM has no room for the ~184 MB of concatenated queries)
 MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE")
 POST = __import__("os").environ.get("I2M_POST", "1") == "1"
+PRE = __import__("os").environ.get("I2M_PRE", "1") == "1"  # the fused pre-attention section (tt/pre.py)
+
+
+class Tail:
+    """An application's deferred tail: its output is bf16(resid + conv(mo)) (computed by the next pre program)."""
+
+    def __init__(self, mo, resid, conv):
+        self.mo, self.resid, self.conv = mo, resid, conv
 
 
 class MixPlan:
@@ -372,6 +380,7 @@ class BatchedDecoder:
                                    mesh_mapper=self.rep)
         self.plan = None
         self.post = None
+        self.pre = None
         if (MIX_CACHE == "1") if MIX_CACHE is not None else mesh.get_num_devices() > 1:
             if getattr(model, "_mixplan", None) is None:
                 model._mixplan = MixPlan(model)
@@ -385,6 +394,23 @@ class BatchedDecoder:
                     model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
                     model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
                 self.post, self.nw_rows, self.q_rows = model._post, model._nw_rows, model._q_rows
+                if PRE:
+                    if getattr(model, "_pre", None) is None:
+                        from .pre import PreKernel
+
+                        model._pre = PreKernel(model._post)
+                        rw = model._post.rows_weight
+                        model._aq_rows = {li: [rw(L.attn_Q, col=j) for j in range(L.nq)]
+                                          for li, L in model.layers.items() if L.nq}
+                        nr = {}
+                        for li, L in model.layers.items():
+                            if L.sliding:
+                                nr[(li, "in")] = rw(L.in_norm)
+                            else:
+                                for k in "qkv":
+                                    nr[(li, k)] = rw(getattr(L, f"{k}_norm"))
+                        model._norm_rows = nr
+                    self.pre, self.aq_rows, self.norm_rows = model._pre, model._aq_rows, model._norm_rows
 
     def load_slot(self, b, lane=0):
         if self.shared is not None:
@@ -422,6 +448,7 @@ class BatchedDecoder:
         for a, (li, p) in enumerate(m.sched):
             L = m.layers[li]
             if li == cfg.loop_start:
+                x = self.materialize(x)
                 if p == 0:
                     pre_x, pre_blocks, pre_ids = x, list(blocks_n), list(ids)
                 else:
@@ -431,11 +458,21 @@ class BatchedDecoder:
             if L.boundary:  # (the block: the layer's normed input, made once in _layer)
                 blocks_n, ids = blocks_n + [blk], ids + [a]
             if L.loop and li == cfg.loop_end - 1:
+                x = self.materialize(x)
                 prev_src = [blocks_n[len(pre_blocks) + 1], ops.rms(x)]
+        x = self.materialize(x)
         if self.plan is None:
             return m.head(x, blocks_n)
         h = self._mix(("head", -1), blocks_n, ids, D, ops.rms(x), m.final_Q, 1)[0]
         return m.head_tail(h)
+
+    @staticmethod
+    def materialize(x):
+        """A deferred tail -> the layer output x = bf16(resid + conv(mo)) (the ops path)."""
+        if not isinstance(x, Tail):
+            return x
+        out = _bf(ttnn.add(x.resid, _f32(x.conv.step(x.mo))))
+        return ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out
 
     def _mix(self, key, blocks_n, ids, D, cur, Q, nq):
         """mix(blocks_n + [cur], Q, nq): the blocks' logits from their MixPlan matmuls, the current source's here."""
@@ -452,12 +489,32 @@ class BatchedDecoder:
         li, _ = m.sched[a]
         L, ba, c = m.layers[li], self.apps[a], m.apps[a].cache
         xn = None
-        if L.nq:
+        fused = None
+        if self.pre is not None and L.nq and ids:
+            # tail of the previous application + input norm + block mix (+ q / k / v norms) in one program (tt/pre.py)
+            if messages is None:
+                nws = [self.norm_rows[(li, "in")]] if L.sliding else [self.norm_rows[(li, k)] for k in "qkv"]
+            else:
+                nws = None
+            lgs = [(D[b], self.plan.off[(b, ("attn", a))]) for b in ids]
+            if isinstance(x, Tail):
+                xin = x.mo if x.mo.memory_config() == L1 else ttnn.to_memory_config(x.mo, L1)
+                x, xn, outs = self.pre(xin, blocks_n, lgs, self.aq_rows[li], nws, tail=(xin, x.resid, x.conv),
+                                       bound=L.boundary)
+            else:
+                x, xn, outs = self.pre(x, blocks_n, lgs, self.aq_rows[li], nws, bound=L.boundary)
+            fused = outs
+        x = self.materialize(x)
+        if fused is not None:
+            ins = fused
+        elif L.nq:
             xn = ops.rms(x)
             ins = self._mix(("attn", a), blocks_n, ids, D, xn, L.attn_Q, L.nq)
         else:
             ins = [_f32(x)]
-        if L.sliding:
+        if fused is not None and messages is None:  # (normed in the program)
+            qn, kn, vn = (fused * 3) if L.sliding else fused
+        elif L.sliding:
             h = ins[0]
             if messages is not None:
                 qi, ki, vi = (L.gates[n](h, mm) for n, mm in zip(("attn", "k", "v"), messages[:3]))
@@ -491,8 +548,10 @@ class BatchedDecoder:
                 mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
             else:
                 mn = o
-            mo = ba.mlp.step(L.moe.forward(mn))
-            out = _bf(ttnn.add(resid, _f32(mo)))
+            mo = L.moe.forward(mn)
+            if self.pre is not None:  # the tail (MoE-output conv + residual) runs in the next application's program
+                return Tail(mo, resid, ba.mlp), blk
+            out = _bf(ttnn.add(resid, _f32(ba.mlp.step(mo))))
             return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
         att = ba.attn.step(att)
         resid = _f32(att) if L.boundary else ttnn.add(_f32(x), _f32(att))
