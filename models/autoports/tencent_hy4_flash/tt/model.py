@@ -273,6 +273,9 @@ class Hy4Model:
         if cache_dir:  # the attention / dense modules' decode copies cache next to the other tensors
             os.environ.setdefault("HY4_TENSOR_CACHE", cache_dir)
         self.ag = AllGather(mesh)
+        from models.autoports.tencent_hy4_flash.tt import fastload
+
+        fastload.install()  # tensor-cache files via O_DIRECT staging (HY4_FAST_LOAD; this host's page cache is slow)
         t0 = time.time()
         # embedding (bf16 table, row-major for ttnn.embedding; tensor-cached: a plain upload of the 742 MB table took
         # minutes). HY4_EMB_SHARD=1 (default): the table's columns sharded over the dies (185 MB per die instead of 742 MB
@@ -313,7 +316,8 @@ class Hy4Model:
         set_active(0)
         self._img = None  # (slot, image embeddings, their slot indices): set_images
         self._slot_state = {}  # parked slots: (pos, Engram history / positions)
-        logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}")
+        logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}; "
+                    f"{fastload.summary()}")
         store = getattr(self.engram, "store", None)
         if store is not None and hasattr(store, "rewarm") and store.loaders:
             store.rewarm()  # the tensor-cache load (~90 GB through the page cache) evicted the Engram tables

@@ -188,18 +188,30 @@ def convert(layers=LAYERS, chunk=1 << 21):
         print(f"layer {li}: {R} rows in {time.time() - t0:.0f}s", flush=True)
 
 
-def _psi_wait(limit=None, max_wait=30.0):
+def _psi_avg10():
+    try:
+        return float(open("/proc/pressure/memory").readline().split()[1].split("=")[1])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _mem_available():
+    try:
+        return int(next(l for l in open("/proc/meminfo") if l.startswith("MemAvailable")).split()[1]) * 1024
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _psi_wait(limit=None, max_wait=30.0, floor=0):
     """Throttle a bulk host-memory load on the kernel's memory pressure (PSI some avg10): systemd-oomd kills the user
-    scope above 50 % sustained for 30 s; wait while avg10 > HY4_ENGRAM_PSI_MAX (15 %), at most max_wait s per chunk."""
+    scope above 50 % sustained for 30 s; wait while avg10 > limit (default HY4_ENGRAM_PSI_MAX, 15 %) or MemAvailable <
+    floor bytes, at most max_wait s per call."""
     limit = float(os.environ.get("HY4_ENGRAM_PSI_MAX", "15")) if limit is None else limit
     t0 = time.time()
     while time.time() - t0 < max_wait:
-        try:
-            line = open("/proc/pressure/memory").readline()
-            avg10 = float(line.split()[1].split("=")[1])
-        except Exception:  # noqa: BLE001
-            return
-        if avg10 <= limit:
+        avg10 = _psi_avg10()
+        avail = _mem_available()
+        if (avg10 is None or avg10 <= limit) and (avail is None or avail >= floor):
             return
         time.sleep(0.5)
 
@@ -262,43 +274,80 @@ class EngramStore:
                     pass
         print(f"engram tables in the page cache ({need / 2**30:.0f} GiB, {time.time() - t0:.0f} s)", flush=True)
 
-    def _load_anon(self, chunk=1 << 28):
-        """One thread, sequential: each table into an anonymous array, chunk by chunk, dropping the chunk's page-cache
-        pages after the copy (POSIX_FADV_DONTNEED), so memory holds one copy (~60 GB), never page cache + copy (that
-        doubled footprint made systemd-oomd kill the user scope, 2026-11-19). Lookups use the memory map until a table's
-        copy is complete. Skipped (memory map only) without MemAvailable >= tables + HY4_ENGRAM_WARM_MARGIN_GB (48)."""
+    def _load_anon(self, chunk=1 << 26):
+        """Each table into an anonymous page-aligned buffer with O_DIRECT reads by parallel readers (tt/fastload.py
+        read_direct; HY4_ENGRAM_THREADS, default 4): no page cache at all, so memory holds one copy (~61 GB), never page
+        cache + copy (that doubled footprint made systemd-oomd kill the user scope, 2026-11-19), and the NVMe's ~4 GB/s
+        instead of this host's ~0.2-1 GB/s buffered reads. Lookups use the memory map until a table's copy is complete.
+        Throttle (per 64 MiB piece): memory pressure (PSI some avg10) above max(HY4_ENGRAM_PSI_MAX (15), the avg10
+        measured at the start + HY4_ENGRAM_PSI_DELTA (15)), capped at HY4_ENGRAM_PSI_CAP (40, below oomd's 50; at least start + 5), or
+        MemAvailable under HY4_ENGRAM_MIN_FREE_GB (24). Skipped (memory map only) without MemAvailable >= tables +
+        HY4_ENGRAM_WARM_MARGIN_GB (48). HY4_ENGRAM_DIRECT=0: the old buffered single-thread copy."""
         files = [(li, n) for li in self.layers for n in ("scale", "fp8")]
         need = sum(os.path.getsize(os.path.join(OUT, f"L{li}_{n}.npy")) for li, n in files)
         margin = int(float(os.environ.get("HY4_ENGRAM_WARM_MARGIN_GB", "48")) * 2**30)
-        try:
-            avail = int(next(l for l in open("/proc/meminfo") if l.startswith("MemAvailable")).split()[1]) * 1024
-        except Exception:  # noqa: BLE001
-            avail = 0
+        avail = _mem_available() or 0
         if avail < need + margin:
             print(f"engram: RAM copy skipped (MemAvailable {avail / 2**30:.0f} GiB < tables {need / 2**30:.0f} + margin "
                   f"{margin / 2**30:.0f} GiB): lookups read the memory map", flush=True)
             return
+        base = _psi_avg10() or 0.0
+        limit = min(max(float(os.environ.get("HY4_ENGRAM_PSI_MAX", "15")), base + float(os.environ.get("HY4_ENGRAM_PSI_DELTA", "15"))),
+                    float(os.environ.get("HY4_ENGRAM_PSI_CAP", "40")))
+        limit = max(limit, base + 5)  # a baseline already at the cap is the host's, not this load's: don't stall on it
+        floor = int(float(os.environ.get("HY4_ENGRAM_MIN_FREE_GB", "24")) * 2**30)
+        waited = [0.0]
+
+        def wait():
+            t = time.time()
+            _psi_wait(limit, floor=floor)
+            waited[0] += time.time() - t
+
+        direct = os.environ.get("HY4_ENGRAM_DIRECT", "1") == "1"
+        rd = None
+        if direct:
+            import mmap
+            from concurrent.futures import ThreadPoolExecutor
+
+            try:
+                from models.autoports.tencent_hy4_flash.tt import fastload
+            except ImportError:  # run from this directory
+                sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../autoports/tencent_hy4_flash/tt"))
+                import fastload
+            rd = ThreadPoolExecutor(int(os.environ.get("HY4_ENGRAM_THREADS", "4")), thread_name_prefix="engram-direct")
         t0 = time.time()
         for li, n in files:
             d = self.s if n == "scale" else self.q
             src = d[li]
-            dst = np.empty(src.shape, src.dtype)
-            buf = memoryview(dst.reshape(-1).view(np.uint8))
             path = os.path.join(OUT, f"L{li}_{n}.npy")
-            with open(path, "rb", buffering=0) as fh:
-                fd = fh.fileno()
-                off = src.offset
-                fh.seek(off)
-                done = 0
-                while done < len(buf):
-                    _psi_wait()
-                    k = fh.readinto(buf[done : done + chunk])
-                    if not k:
-                        raise IOError(f"short read {path}")
-                    os.posix_fadvise(fd, off + done, k, os.POSIX_FADV_DONTNEED)
-                    done += k
+            if direct:
+                # the whole file (its .npy header too) into one page-aligned anonymous mapping; the array is a view
+                # at the header offset (no second copy)
+                size = os.path.getsize(path)
+                mm = mmap.mmap(-1, -(-size // fastload.ALIGN) * fastload.ALIGN)
+                fastload.read_direct(path, mm, 0, size, chunk=chunk, wait=wait, pool=rd)
+                dst = np.frombuffer(mm, src.dtype, count=src.size, offset=src.offset).reshape(src.shape)
+            else:
+                dst = np.empty(src.shape, src.dtype)
+                buf = memoryview(dst.reshape(-1).view(np.uint8))
+                with open(path, "rb", buffering=0) as fh:
+                    fd = fh.fileno()
+                    off = src.offset
+                    fh.seek(off)
+                    done = 0
+                    while done < len(buf):
+                        wait()
+                        k = fh.readinto(buf[done : done + (1 << 28)])
+                        if not k:
+                            raise IOError(f"short read {path}")
+                        os.posix_fadvise(fd, off + done, k, os.POSIX_FADV_DONTNEED)
+                        done += k
             d[li] = dst
-        print(f"engram tables in RAM ({need / 2**30:.0f} GiB, {time.time() - t0:.0f} s)", flush=True)
+        if rd is not None:
+            rd.shutdown()
+        self.load_s = time.time() - t0
+        print(f"engram tables in RAM ({need / 2**30:.0f} GiB, {self.load_s:.0f} s; throttled {waited[0]:.0f} s, PSI limit "
+              f"{limit:.0f} (start {base:.0f}){', O_DIRECT' if direct else ''})", flush=True)
 
     def rewarm(self):
         if self.mode != "warm":
