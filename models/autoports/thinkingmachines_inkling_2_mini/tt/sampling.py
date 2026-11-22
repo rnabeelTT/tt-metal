@@ -18,6 +18,8 @@ import ttnn
 
 K = 32
 GROUP = 8  # RowsTopK's live-row limit
+# I2M_TOPK_GATHER (default 1): a sharded head's per-die candidates all-gathered on device (one die read back)
+GATHER = __import__("os").environ.get("I2M_TOPK_GATHER", "1") == "1"
 
 
 class DeviceTopK:
@@ -52,8 +54,11 @@ class DeviceTopK:
                 part_f = ttnn.slice(part_f, [0, 0, 0, 0], [1, 1, rows, self.Vp])
             shifted = ttnn.typecast(ttnn.subtract(part_f, top), ttnn.bfloat16)
             v2, i2 = self.rtk(shifted, rows)
-            parts.append((ttnn.slice(i2, [0, 0, 0, 0], [1, 1, rows, K]), ttnn.slice(v2, [0, 0, 0, 0], [1, 1, rows, K]),
-                          rows))
+            i2, v2 = ttnn.slice(i2, [0, 0, 0, 0], [1, 1, rows, K]), ttnn.slice(v2, [0, 0, 0, 0], [1, 1, rows, K])
+            if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
+                i2 = ttnn.all_gather(i2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N K]
+                v2 = ttnn.all_gather(v2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
+            parts.append((i2, v2, rows))
         return parts
 
     def host(self, parts):
@@ -63,9 +68,14 @@ class DeviceTopK:
         nd = self.N if self.sharded else 1
         idx, val = [], []
         for i, v, r in parts:
-            ii = [ttnn.to_torch(t).reshape(r, K).to(torch.int64) + d * self.Vp for d, t in enumerate(devs(i)[:nd])]
-            vv = [ttnn.to_torch(t).float().reshape(r, K) for t in devs(v)[:nd]]
-            ii, vv = torch.cat(ii, -1), torch.cat(vv, -1)
+            if self.sharded and GATHER:  # die 0 holds every die's K candidates, die by die
+                ii = ttnn.to_torch(devs(i)[0]).reshape(r, nd, K).to(torch.int64)
+                ii = (ii + self.Vp * torch.arange(nd).reshape(1, nd, 1)).reshape(r, nd * K)
+                vv = ttnn.to_torch(devs(v)[0]).float().reshape(r, nd * K)
+            else:
+                ii = [ttnn.to_torch(t).reshape(r, K).to(torch.int64) + d * self.Vp for d, t in enumerate(devs(i)[:nd])]
+                vv = [ttnn.to_torch(t).float().reshape(r, K) for t in devs(v)[:nd]]
+                ii, vv = torch.cat(ii, -1), torch.cat(vv, -1)
             if nd > 1:
                 # by value descending, then by index ascending (stable sort on the index order first)
                 o = torch.argsort(ii, dim=-1, stable=True)
