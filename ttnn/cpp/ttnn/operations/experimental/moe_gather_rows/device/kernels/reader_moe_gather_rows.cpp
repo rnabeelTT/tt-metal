@@ -63,12 +63,26 @@ void kernel_main() {
             noc.async_read(
                 s_src, CoreLocalMem<uint32_t>(src_l1), 32 * 4, {.page_id = 0, .offset_bytes = g * 32 * 4}, {});
             noc.async_read_barrier();
+            // Row 0 of a real group is always a real row (an expert's rows come first, its padding last, and a group is
+            // only allocated for >= 1 row), so a later src 0 is a padding row (the dispatch writes token 0 there). Its
+            // values are never read back (zero routing weight, skipped by the undispatch), so it is filled from the
+            // core's local zero region instead of re-reading token 0's row: at short prompts ~7 of every 8 gathered
+            // rows are padding, and every core then hammers the one DRAM page (bank) holding token 0's row.
+            const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
             for (uint32_t r = 0; r < 32; ++r) {
+                const uint32_t t = src[r];
+                if (r > 0 && t == 0) {
+                    for (uint32_t z = 0; z < row_bytes; z += MEM_ZEROS_SIZE) {
+                        const uint32_t nb = row_bytes - z < MEM_ZEROS_SIZE ? row_bytes - z : MEM_ZEROS_SIZE;
+                        noc_async_read(zeros, base + r * row_bytes + z, nb);
+                    }
+                    continue;
+                }
                 noc.async_read(
                     s_rows,
                     CoreLocalMem<uint32_t>(base + r * row_bytes),
                     row_bytes,
-                    {.page_id = src[r], .offset_bytes = cs * row_bytes},
+                    {.page_id = t, .offset_bytes = cs * row_bytes},
                     {});
             }
             noc.async_read_barrier();

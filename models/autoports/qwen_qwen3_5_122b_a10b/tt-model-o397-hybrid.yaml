@@ -1,0 +1,286 @@
+# tt-model container (v5.1) manifest for Ornith-1.5-397B (Qwen3.5-MoE, 60 layers x 512 experts top-10, FP8 checkpoint)
+# on one QB2 (2 x p300 = 4 Blackhole dies) through the hybrid-MoE overlay (models/experimental/hybrid_moe): each layer's
+# most-used experts stay on the device, the rest are computed on the host CPU from int4 copies (or streamed over PCIe),
+# DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash). Single user, greedy. Built from the M2.7 package
+# (minimaxai_minimax_m2_7/tt-model-hybrid.yaml); the port is the Qwen3.5 one (q122_opt + ornith122_dflash merged).
+# Build: tt-model package --container models/autoports/qwen_qwen3_5_122b_a10b/tt-model-o397-hybrid.yaml
+schema: "5.1"
+
+repo: raahemnabeel/ornith-1.5-397b-hybrid-qb2
+name: ornith-1.5-397b-hybrid-qb2
+weights: {repo: ornith-ai/Ornith-1.5-397B-FP8, revision: a5445ea43d2733470400bd7cf341582cdcd68152}
+auxiliary_weights:
+  - {repo: ornith-ai/Ornith-1.5-397B-DFlash, revision: db9c35a091e89f942c609880f98bb385019dc4f8}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/o397-hybrid   # worktree, branch ornith397-hybrid
+  code:
+    - models/autoports/qwen_qwen3_5_122b_a10b/__init__.py
+    - models/autoports/qwen_qwen3_5_122b_a10b/tt
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_metadata.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/context_contract.json
+    - models/autoports/qwen_qwen3_5_122b_a10b/doc/datatype_sweep/selected_precision_config.json
+    # the hybrid overlay: runtime modules only (no runs/, benchmarks or debug scripts)
+    - models/experimental/hybrid_moe/hybrid
+    - models/experimental/hybrid_moe/serve/sitecustomize.py
+    - models/experimental/hybrid_moe/dflash_serve.py
+    - models/experimental/hybrid_moe/dflash_tt.py
+    - models/experimental/hybrid_moe/ref_o397.py
+    - models/experimental/hybrid_moe/build_int4_library.py
+    - models/experimental/hybrid_moe/build_dev_experts.py
+    - models/experimental/hybrid_moe/plans
+    - models/demos/blackhole/qwen36
+    - models/demos/qwen3_vl
+    - models/experimental/gated_attention_gated_deltanet
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # e0e2952 (rnabeelTT/vllm-tt-plugin, branch dflash: M2.7's 8b1f8b1 + the prefix-state decode-row fix)
+  extra_models_dir: models/autoports/qwen_qwen3_5_122b_a10b/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2"]
+  lock: requirements.lock
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 1
+  capabilities:
+    tool_parser: qwen3_xml
+    reasoning_parser: qwen3
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: all
+      trace_region_size: 100663296
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: ornith-ai/Ornith-1.5-397B-FP8
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    PYTHONPATH: /opt/tt-metal/models/experimental/hybrid_moe/serve:/opt/tt-metal:/opt/tt-metal/models/experimental/hybrid_moe
+    HYB_POC_DIR: /opt/tt-metal/models/experimental/hybrid_moe
+    QWEN35_TRACE_REGION_MIB: "96"
+    # vLLM prefix caching (--enable-prefix-caching below): 24 GDN state snapshots kept in host RAM (225 MB each, ~5.4 GB;
+    # QWEN35_PREFIX_STATE_HOST: no device pool), saved at the 2048-token segment boundaries a prefill crosses anyway;
+    # DFlash keeps the drafter context of the last 8 requests (DFLASH_FEAT_CACHE), so interleaved conversations
+    # resume too. PROMPT_END snapshots stay off: the extra cut changed a cold prompt's answers (3K retrieval 7/8 -> 5/8).
+    # Measured 2026-11-16: 18K resend 14.5 -> 1.1 s, chat turn 2 on a 17K context 1.4-4.1 s; cold TTFT unchanged;
+    # recall on hits 8/8; a 125K prompt still fits
+    QWEN35_PREFIX_STATE_SLOTS: "24"
+    QWEN35_PREFIX_STATE_HOST: "1"
+    QWEN35_PREFIX_SLOT_MIB: "0"
+    QWEN35_PREFIX_STATE_PROMPT_END: "0"
+    QWEN35_PREFIX_CACHING: "1"
+    QWEN35_VISION: "0"
+    QWEN35_BATCHED_PREFILL: "0"
+    QWEN35_DISPATCH_MC: "1"     # multi-core MoE dispatch: same outputs bit for bit, 1.41 -> 0.56 ms per 2048-row MoE call; in-boot A/B TTFT 18K 15.07 -> 14.73 s (2026-11-16)
+    QWEN35_MAX_TOKENS_ALL_USERS: "131072"
+    QWEN35_PREFILL_MAX_ROWS: "1024"   # hidden 4096: the 2D prefill matmuls of a 2048-row bucket overflow L1
+    QWEN35_PREFILL_SEGMENT: "2048"    # 4096-token segments overflow the GDN prefill L1
+    QWEN35_PREFILL_GROUP: "32"        # layer-major prefill over 32 segments (64K tokens): a layer's expert copies serve them all
+    QWEN35_MOE_DN_READERS: "4"
+    QWEN35_MOE_DN_CHUNK: "4"
+    QWEN35_ROWS_SDPA_SHARED_FROM: "0"
+    # --- the hybrid overlay ---
+    HYB_RAM_CHECK: error
+    HYB_ENABLE: "1"
+    HYB_PORT: qwen_qwen3_5_122b_a10b
+    HYB_SLOTS: "256"            # device slots per layer (multiple of 64: the fused rows kernels)
+    HYB_DYN_SLOTS: "0"
+    HYB_SKIP: "0"               # no expert is dropped (HYB_SKIP 0.15 cost ~6 points of top-1 on the Qwen3.5-397B)
+    HYB_MTP: "0"
+    HYB_ROWS: "4"
+    HYB_THREADS: "12"
+    HYB_HOSTK_THREADS: "6"      # 8 / 10 threads no faster (host DRAM bound, ~42 GB/s)
+    HYB_HOSTK_THREADS_PREFILL: "8"  # prefill's CPU experts are compute bound (BF16 tiles): one thread per core
+    # expert copies: built on the first start from the checkpoint above (hybrid/autobuild.py) into the weight cache;
+    # only the routing plan ships with the code (per layer the routed mass of every expert, from a BF16 CPU reference)
+    HYB_BUILD_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/plan_o397.npz
+    HYB_BUILD_S: "192"
+    HYB_LIB_KEYS: qwen35
+    HYB_PLAN: /opt/tt-metal/models/experimental/hybrid_moe/plans/plan_o397.npz
+    HYB_PLAN_WEIGHT: mass
+    HYB_LIB: /weight-cache/o397_int4_s192
+    HYB_LIB_RESIDENT: "1"
+    HYB_LOWBIT: "0.1"           # computed misses whose largest routing weight is below this read only their top 2 bits
+    HYB_WCACHE: /weight-cache/wcache_o397
+    # single-trace decode with host sockets + PCIe fetch of recently missed experts into 32 LRU slots per layer, from
+    # pinned device-format copies of each layer's 128 most-used off-device experts
+    HYB_SOCKET: "1"
+    HYB_LRU: "32"
+    HYB_PIN_TOP: "128"
+    HYB_DEV_EXPERTS: /weight-cache/o397_dev_p128
+    HYB_FETCH_FRAC: "0.15"
+    HYB_FETCH_POLICY: auto
+    HYB_FETCH_BUDGET: "8"
+    HYB_FETCH_MAX: "8"
+    HYB_STREAM_CQ1: "1"         # the fetch copies run on a second command queue (opens the mesh with two)
+    HYB_PREFETCH: "1"
+    HYB_PF_TOPK: "8"
+    # prefill streaming: a prefill step's missed experts are copied into 258 device staging slots (a layer's 128 pinned
+    # + its converted cold experts) and computed there; from 2560 prompt tokens the experts with no device-format copy
+    # are converted from the int4 library one layer ahead (hybrid/coldconv.py), below it they run on the CPU
+    HYB_STREAM: "1"
+    HYB_STREAM_SLOTS: "258"
+    HYB_STREAM_ROUNDS: "3"
+    HYB_STREAM_MIN: "4"
+    HYB_STREAM_MIN_LONG: "1"
+    HYB_STREAM_LONG_FROM: "1024"
+    HYB_PF_PREFETCH_MIN: "0"
+    HYB_PF_COLD_MIN: "2560"
+    HYB_PREFILL_SENTINEL: "1"
+    # DFlash speculative decoding (ornith-ai/Ornith-1.5-397B-DFlash), 3 drafts, GDN rows-mode verify
+    QWEN35_EXT_SPEC: dflash_serve:build
+    QWEN35_EXT_SPEC_K: "3"
+    DFLASH_DRAFTER: ornith-ai/Ornith-1.5-397B-DFlash
+    DFLASH_TP: "1"
+    DFLASH_BLOCK: "8"           # the drafter trained at 16; 16 rows exceed the K / V shard row (11 cores)
+    DFLASH_WINDOW: "256"
+    DFLASH_WARMUP: "384"
+  args: [--enable-auto-tool-choice, --enable-prefix-caching]
+
+serve_profiles:
+  - name: p300x2-128k
+    description: >
+      The default: up to 128K tokens, socket decode with PCIe fetch of recently missed experts. The fastest profile;
+      needs ~210 GB of free host RAM (the int4 library, pinned device-format copies of 128 experts per layer and the prefix-cache snapshots).
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 131072
+  - name: p300x2-128k-lowmem
+    description: >
+      Up to 128K tokens without the PCIe fetch: the CPU computes every off-device expert. ~135 GB of free host RAM
+      and no device-format copies to build or download; slower decode.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 131072
+    env:
+      HYB_SOCKET: "0"
+      HYB_LRU: "0"
+      HYB_PREFETCH: "0"
+      HYB_FETCH_FRAC: "0.3"
+      HYB_STREAM: "0"           # no device-format copies: prefill's off-device experts run on the CPU
+default_profile: p300x2-128k
+
+card:
+  attribution: >
+    Serves [ornith-ai/Ornith-1.5-397B-FP8](https://huggingface.co/ornith-ai/Ornith-1.5-397B-FP8) with
+    [ornith-ai/Ornith-1.5-397B-DFlash](https://huggingface.co/ornith-ai/Ornith-1.5-397B-DFlash) as the speculative
+    drafter. Only the official checkpoints are downloaded: the expert copies the hybrid needs are built from them on
+    the first start.
+  description: >
+    Ornith-1.5-397B (Qwen3.5-MoE: 397B parameters, 60 layers x 512 experts, top-10, gated-delta-net linear attention
+    with gated full attention every 4th layer) on one QB2. The model does not fit in the 4 dies' DRAM, so it runs
+    through a hybrid-MoE overlay: each layer keeps its 255 most-used experts on the device (bfp4), the CPU computes the
+    rest from int4 copies (AVX-512) while the device runs, and recently missed experts are copied over PCIe into 32
+    spare device slots per layer. Decoding is speculative (DFlash, 3 drafts per pass) for greedy and sampled requests
+    alike (exact speculative sampling).
+  intended_use: >
+    Single-user chat, reasoning and coding (tool calls through the qwen3_xml parser, reasoning split into
+    reasoning_content) on one QB2.
+  prerequisites: |
+    - A host CPU with AVX-512 (the host expert kernel); measured on an 8-core Ryzen 7 9700X with 2-channel DDR5. Host
+      memory bandwidth bounds the CPU half of every token: faster memory is faster decode.
+    - Free host RAM for the profile:
+
+      | profile | free host RAM |
+      | --- | --- |
+      | `p300x2-128k` (default) | ~210 GB (int4 library resident + pinned device-format copies + prefix-cache snapshots) |
+      | `p300x2-128k-lowmem` | ~135 GB (int4 library only) |
+
+      The server checks this at startup against the RAM free right now (other jobs count) and refuses to start if
+      the profile does not fit; `HYB_RAM_CHECK=warn` starts anyway (swapped expert pages make decode several times
+      slower).
+    - About 900 GB of disk: the FP8 checkpoint (397 GB) and drafter (2.5 GB), and in the weight cache the int4
+      library (141 GB), the device-format copies (51 GB, default profile only) and the device images the first boot
+      writes (~300 GB).
+  quickstart: |
+    ```
+    tt-model serve raahemnabeel/ornith-1.5-397b-hybrid-qb2            # default profile
+    tt-model serve raahemnabeel/ornith-1.5-397b-hybrid-qb2 --profile p300x2-128k-lowmem
+    ```
+
+    ### First start
+
+    After downloading the checkpoint, the server builds the hybrid's expert copies from it into the weight cache
+    (logged as `[hybrid build]`): the host int4 library (~20 minutes on 16 threads) and, for the default profile, the
+    device-format copies of the fetchable experts (~11 minutes). An interrupted build resumes where it stopped. The
+    first boot then converts the device experts into device images (written once). Later starts skip all of this and
+    are ready in about 15 minutes (kernel warm-up, pinning the host copies, loading the images).
+  usage: |
+    One request at a time (max_num_seqs 1). Greedy and sampled decoding are both speculative: sampled requests
+    (temperature, top_k, top_p, seed) use exact speculative sampling against the drafter's drafts, so the output
+    follows the requested distribution. A top_k of 32 or less (the model's default is 20) reads only the device's
+    top-k candidates; other settings read the verify's full logits (a little slower). Presence / frequency /
+    repetition penalties are applied as vLLM applies them. Requests that need vLLM's host sampler - logprobs,
+    structured outputs (response_format json_schema), logit_bias, min_p, min_tokens - decode one token per pass.
+    The model's recommended sampling: temperature 0.6, top_p 0.95, top_k 20.
+
+    Prefix caching is on: a prompt that shares a prefix with an earlier one (a follow-up chat turn, the same document
+    with a new question) resumes from the last 2048-token boundary of the shared part instead of prefilling it again.
+    The recurrent-state snapshots this needs live in host RAM (24 of them, ~5.4 GB); a single long prompt takes one per
+    2048 tokens, so a 48K prompt alone can evict every other conversation's snapshots.
+  performance: |
+    | eval | this package | prompts |
+    | --- | --- | --- |
+    | GSM8K accuracy, greedy | 37 / 40 (0.93) | first 40 test questions |
+
+    | profile | sampling | ISL | OSL | concurrency | N | TTFT | prefill tok/s/u | decode tok/s/u | E2EL |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | p300x2-128k | greedy | ~50 | 256 | 1 | 8 | ~1.1 s | — | 18.1 | — |
+    | p300x2-128k | T 0.6, top_p 0.95, top_k 20 | ~50 | 256 | 1 | 8 | 1.10 s | — | 18.7 | — |
+    | p300x2-128k | T 1.0 (full logits) | ~50 | 256 | 1 | 8 | 1.09 s | — | 18.3 | — |
+    | p300x2-128k | greedy | 1,146 | 128 | 1 | 1 | 6.6 s | 175 | 17.4 | 13.9 s |
+    | p300x2-128k | greedy | 2,332 | 128 | 1 | 1 | 10.3 s | 226 | 17.6 | 17.5 s |
+    | p300x2-128k | greedy | 3,146 | 128 | 1 | 1 | 10.5 s | 299 | 16.1 | 18.4 s |
+    | p300x2-128k | greedy | 4,547 | 128 | 1 | 1 | 10.5 s | 433 | 17.6 | 17.7 s |
+    | p300x2-128k | greedy | 18,017 | 128 | 1 | 1 | 14.9 s | 1,207 | 15.9 | 22.9 s |
+    | p300x2-128k | greedy | 36,264 | 128 | 1 | 1 | 23.6 s | 1,534 | 16.3 | 31.5 s |
+
+    Prefix caching (greedy, thinking off): two interleaved conversations of 16.7K and 10.8K tokens, cold first turns
+    13.9 s / 12.3 s, every follow-up turn 4.4-4.9 s; the 36,264-token prompt resent 8.8 s (resumed at 34,816 tokens).
+
+    Long-context retrieval (repeat the first sentence of problem k from a list of GSM8K problems, 8 values of k,
+    greedy): 7 / 8 at 18K tokens and 7 / 8 at 3K tokens (the 3K miss reproduces the sentence with a straight
+    apostrophe where the dataset has a typographic one); 6 / 8 at 3K when the questions resume from the prefix cache.
+
+    Measured on one QB2 (Ryzen 7 9700X, 2-channel DDR5 at 3600 MT/s) through the OpenAI endpoint with `tt-model
+    serve`, warm caches, 2026-11-16. The ~50-token rows are the 8 held-out chat prompts (thinking on), the long rows
+    GSM8K questions concatenated (thinking off), each long prompt cold (a unique first line, so no prefix-cache hit).
+    Prefill tok/s = prompt tokens / TTFT. Decode varies with the text (speculative acceptance and how many experts
+    miss the device; per prompt ~15-21 tok/s) and between restarts (about +-5%).
+  limitations: |
+    - One user at a time; the hybrid path does not batch.
+    - Decode speed depends on the text: the more of a token's experts are off the device, the more the CPU does
+      (the per-prompt spread in the table). Unusual domains route to more host experts and decode slower.
+    - Outputs are close to but not identical to the reference model (bfp4 device experts, int4 host experts, 2-bit
+      reads of low-weight host experts). They are not bit-reproducible between requests either: which copy of an
+      expert computes it depends on what the fetch has cached, so a fixed seed does not reproduce a sampled text. A
+      prompt resumed from the prefix cache also computes its new part on a different expert path than a cold prompt
+      (the CPU for short parts), so its answer can differ from the cold one.
+    - Prompts of 2-5K tokens take ~10 s to the first token (the experts without a prebuilt device copy are converted
+      on the CPU, bound by host memory bandwidth); from there time grows ~0.5 s per 1K tokens. From 2,560 prompt
+      tokens those converted experts carry a second 4-bit rounding (~12-16% weight error against the FP8 checkpoint
+      instead of ~10-12% for the prebuilt copies); the retrieval checks under Performance include it.
+    - A follow-up turn resumes from a 2048-token boundary, so it prefills up to ~2K tokens again (~4-5 s).
+    - Needs a QB2 (2 x p300) and a host as described under Prerequisites.
+  licensing: >
+    Ornith-1.5-397B and its DFlash drafter are MIT-licensed by ornith-ai; the expert copies the server builds are
+    derived from the checkpoint under the same terms. The serving code is Apache-2.0.
+  license: {id: mit}
+
+verify:
+  - "import models.autoports.qwen_qwen3_5_122b_a10b.tt.generator_vllm as g; assert g.Qwen35MoeForConditionalGeneration"

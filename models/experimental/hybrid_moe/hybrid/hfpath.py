@@ -23,6 +23,8 @@ def _pin(repo):
 
 
 def snapshot(repo):
+    if os.path.isdir(repo):  # already a local snapshot dir (the generator may have resolved HF_MODEL to one)
+        return repo
     from huggingface_hub import snapshot_download
 
     try:

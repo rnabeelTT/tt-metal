@@ -10,7 +10,7 @@ import subprocess
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _SO = os.path.join(_DIR, "libhostk.so")
 _lib = None
-MAXR = 16  # hostk.c MAXR
+MAXR = 64  # hostk.c MAXR
 
 
 def build(so=_SO):
@@ -45,12 +45,36 @@ def load(nthreads, so=_SO):
         lib.hostk_route_inkling.argtypes = [vp, ci, ci, ci, ci, ci, vp, vp, vp]
         lib.hostk_craft.argtypes = [ci, ci, vp, vp, vp, ci, ctypes.c_float, vp, ci, ci, vp]
         lib.hostk_set_active.argtypes = [ctypes.c_int]
+        lib.hostk_set_bf16.argtypes = [ctypes.c_int]
+        lib.hostk_to_bfp4.argtypes = [ctypes.c_int] * 6 + [ctypes.c_void_p] * 4 + [ctypes.c_int64, ctypes.c_void_p]
+        lib.hostk_to_bfp4.restype = ctypes.c_int64
         lib.hostk_touch_init.argtypes = [ctypes.c_int]
         lib.hostk_touch.argtypes = [ci, vp, vp]
         lib.hostk_touch_predict.argtypes = [vp, ci, ci, ci, ci, vp, vp, vp, vp, ctypes.c_int64, vp]
         lib.hostk_init(int(nthreads))
         _lib = lib
     return _lib
+
+
+def set_bf16(on):
+    """1: the kernel's many-row path (experts with more than 4 rows in a call: prefill tiles) uses AVX512-BF16 dot
+    products (two products per lane per instruction; the activations into the down projection rounded to bf16, as on
+    the device). Decode-sized calls are unchanged. Returns the previous setting."""
+    return _lib.hostk_set_bf16(int(on))
+
+
+def to_bfp4(lib_t, row, tp, out_ptr, sig=5):
+    """Expert ``row`` of a layer's int4 library (lib_t as moe()) -> its device-format bfp4_b copy (build_dev_experts.py's
+    per-die layout, from the int4 values rounded to ``sig`` significant bits) at the address out_ptr: [gate|up die 0 ..
+    tp-1 | down die 0 .. tp-1]. The GIL is released during the call (ctypes). Returns the bytes written."""
+    H = lib_t["gu_p"].shape[2] * 2
+    I = lib_t["dn_p"].shape[2] * 2
+    n = _lib.hostk_to_bfp4(
+        H, I, int(lib_t["gs"]), int(tp), int(bool(lib_t.get("planar", False))), int(sig), lib_t["gu_p"].data_ptr(),
+        lib_t["gu_sz"].data_ptr(), lib_t["dn_p"].data_ptr(), lib_t["dn_sz"].data_ptr(), int(row), int(out_ptr))
+    if n < 0:
+        raise ValueError(f"hostk.to_bfp4: unsupported shapes (H {H}, I {I}, gs {lib_t['gs']}, tp {tp})")
+    return n
 
 
 def set_active(n):

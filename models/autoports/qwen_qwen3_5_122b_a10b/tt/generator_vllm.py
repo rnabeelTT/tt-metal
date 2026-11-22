@@ -161,6 +161,43 @@ if _MTP_K > 0:
     mtp_plugin_shim.apply(_MTP_K + 1)
 
 
+def _dflash_bs_env() -> int:
+    """QWEN35_DFLASH=1: single-user speculative decoding with the DFlash 2 drafter (tt/dflash_serving.py), block
+    QWEN35_DFLASH_BLOCK (default 8: measured better than the drafter's 16, doc/dflash). Off with chunked prefill (not wired together, as MTP) and with MTP."""
+    if os.environ.get("QWEN35_DFLASH", "0") != "1" or os.environ.get("QWEN35_CHUNKED_PREFILL", "0") == "1":
+        return 0
+    assert _MTP_K == 0, "QWEN35_DFLASH and QWEN35_MTP are exclusive"
+    return int(os.environ.get("QWEN35_DFLASH_BLOCK", "8"))
+
+
+_DFLASH_BS = _dflash_bs_env()
+if _DFLASH_BS > 0:
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(_DFLASH_BS)
+
+
+def _ext_spec_env():
+    """QWEN35_EXT_SPEC="module:factory" + QWEN35_EXT_SPEC_K=k: an external single-user speculative step (the
+    hybrid-MoE DFlash, models/experimental/hybrid_moe/dflash_serve.py) driven through MtpServing's single-user
+    interface; `factory(generator, k)` builds it (as on the M2.7 port). Returns (spec, k) or (None, 0)."""
+    spec = os.environ.get("QWEN35_EXT_SPEC", "")
+    if not spec:
+        return None, 0
+    k = int(os.environ.get("QWEN35_EXT_SPEC_K", "0"))
+    if ":" not in spec or k < 1:
+        raise ValueError(f"QWEN35_EXT_SPEC={spec!r} QWEN35_EXT_SPEC_K={k}: expected 'module:factory' and k >= 1")
+    assert _MTP_K == 0 and _DFLASH_BS == 0, "QWEN35_EXT_SPEC excludes QWEN35_MTP and QWEN35_DFLASH"
+    return spec, k
+
+
+_EXT_SPEC, _EXT_SPEC_K = _ext_spec_env()
+if _EXT_SPEC_K > 0:
+    from models.autoports.qwen_qwen3_5_122b_a10b.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(_EXT_SPEC_K + 1)
+
+
 # QWEN35_VISION=1: serve image content parts (the checkpoint's ViT on the mesh through tt/vision.py; images are spliced
 # into the prompt embedding inside the traced prefill buckets, M-RoPE per request, per-slot decode deltas). Off: text
 # only (the processor advertises no image / video support, so vLLM rejects multimodal requests at the frontend).
@@ -178,7 +215,15 @@ _PREFILL_SEGMENT = int(os.environ.get("QWEN35_PREFILL_SEGMENT", "2048"))  # the 
 _PREFIX_DEVICES = {"P150": 1, "N150": 1, "P100": 1, "P300": 2, "P150X2": 2}.get(
     os.environ.get("MESH_DEVICE", "P300x2").strip().upper(), 4
 )
-_PREFIX_STATE_SLOTS = int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES))) if _MTP_K == 0 else 0
+# not wired with MTP; with an external spec step (DFlash) only when QWEN35_PREFIX_STATE_SLOTS is set explicitly (its
+# verify snapshots start from the slot state the prefill writes; a resume restores that state first)
+_PREFIX_STATE_SLOTS = (
+    int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", str(8 * _PREFIX_DEVICES)))
+    if (_MTP_K == 0 and _EXT_SPEC_K == 0)
+    else int(os.environ.get("QWEN35_PREFIX_STATE_SLOTS", "0") or 0)
+    if _MTP_K == 0
+    else 0
+)
 _PREFIX_STATE_MIN = int(os.environ.get("QWEN35_PREFIX_STATE_MIN", "1024"))
 # QWEN35_PREFIX_STATE_PROMPT_END=1 also snapshots each prompt's last block boundary: hits reach the end of the previous
 # turn, but every cold prompt pays one more prefill pass (+57..133 ms on Ornith p300x2) and its segment split (numerics)
@@ -255,6 +300,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         # chunked prefill on, the plugin schedules such a prompt only whole and rejects one past the step budget
         "mm_prompts_whole": True,
         **({"max_output_tokens_per_step": _MTP_K + 1} if _MTP_K > 0 else {}),
+        **({"max_output_tokens_per_step": _DFLASH_BS} if _DFLASH_BS > 0 else {}),
+        **({"max_output_tokens_per_step": _EXT_SPEC_K + 1} if _EXT_SPEC_K > 0 else {}),
     }
     # Explicit decode-input update contract (plugin async_decode.py, version 1): the plugin hands the four commands
     # reload_inputs / reload_page_table / reload_sampling_params / reset_sampling_state instead of the legacy reset_batch
@@ -317,6 +364,18 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             from models.autoports.qwen_qwen3_5_122b_a10b.tt.mtp_serving import MtpServing
 
             self._mtp = MtpServing(self._gen, mtp_k)
+        elif _DFLASH_BS > 0:
+            from models.autoports.qwen_qwen3_5_122b_a10b.tt.dflash_serving import DFlashServing
+
+            self._mtp = DFlashServing(self._gen, _DFLASH_BS)
+        elif _EXT_SPEC is not None:
+            if B != 1:
+                raise ValueError(f"QWEN35_EXT_SPEC={_EXT_SPEC}: a single-user step needs --max-num-seqs 1 (got {B})")
+            import importlib
+
+            mod, fn = _EXT_SPEC.split(":")
+            self._mtp = getattr(importlib.import_module(mod), fn)(self._gen, _EXT_SPEC_K)
+            logger.info(f"external speculative step {_EXT_SPEC} (k={_EXT_SPEC_K}): {type(self._mtp).__name__}")
         if os.environ.get("QWEN35_FAULTHANDLER", "1") == "1":
             # `kill -USR1 <EngineCore pid>` dumps every thread's Python stack to the engine's stderr (the readiness
             # runner's server.log): the only introspection available for a host-side stall under vLLM (no ptrace).
@@ -409,10 +468,14 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
     # and templates). The masked-bucket prefill programs allocate transients while a request runs (the expert-sorted
     # dispatch of the 2048-token bucket asked for one 512 MiB buffer during its trace capture) -> 1.25 GiB headroom.
     _PER_SLOT_GIB = 36.5 / 1024
-    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size)
-    _PREFIX_SLOT_GIB = 48.0 / 1024 * 4 / _PREFIX_DEVICES
+    # one prefix-cache GDN snapshot per die, p300x2 size scaled to the mesh (allocate_kv_cache checks the real size);
+    # QWEN35_PREFIX_SLOT_MIB for models with more GDN state (Ornith-1.5-397B: 56 MiB per die)
+    _PREFIX_SLOT_GIB = float(os.environ.get("QWEN35_PREFIX_SLOT_MIB", str(48.0 * 4 / _PREFIX_DEVICES))) / 1024
     _TRANSIENT_HEADROOM_GIB = 1.25
     _MTP_HEAD_GIB = 1.5  # QWEN35_MTP: head weights + step buffers + slack for the head K/V (also budgeted as a 13th KV layer; the first full server saw two 1017 MB head K/V buffers - the log line below reports the real size)
+    # QWEN35_DFLASH: per die the drafter (TP bfp8 matmul weights ~0.2 GiB, replicated conv projections ~0.07), the verify
+    # pass's GDN state snapshots (36 layers x block x 0.5 MiB = 0.14 GiB at block 8), the context-row staging (~0.04)
+    _DFLASH_GIB = 0.75
     _KV_LAYERS = 12  # attention layers holding paged K/V
     # The context contract's DRAM total (31.331 GiB) was measured with a 512 MiB trace region; a larger region (stage 10:
     # 768 MiB for the per-width decode traces) shrinks the allocator's DRAM by the difference.
@@ -444,6 +507,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             # server ran out of DRAM allocating the head's K/V after vLLM had taken the whole pool
             nonkv += cls._MTP_HEAD_GIB
             kv_bytes_per_token = kv_bytes_per_token * (cls._KV_LAYERS + 1) // cls._KV_LAYERS
+        if _DFLASH_BS > 0:
+            nonkv += cls._DFLASH_GIB
         trace_mib = int(os.environ.get("QWEN35_TRACE_REGION_MIB", cls._DEFAULT_TRACE_REGION_MIB))
         cls._budget_trace_region_mib = trace_mib
         trace_extra_gib = (trace_mib - cls._CONTRACT_TRACE_REGION_MIB) / 1024
@@ -484,8 +549,9 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             assert slot_bytes <= self._PREFIX_SLOT_GIB * 2**30, "prefix-cache snapshot larger than its KV-pool budget"
         if self._mtp is not None:
             self._mtp.allocate_kv(shape, self._gen.kv_dtype)
-            hk = self._mtp.head.kv_cache[0]
-            logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
+            if self._mtp.head is not None:
+                hk = self._mtp.head.kv_cache[0]
+                logger.info(f"MTP head KV: {tuple(hk.shape)} {hk.dtype} (x2 buffers)")
         logger.info(
             f"KV cache: vLLM {num_blocks} blocks (+1 scratch, {alloc_blocks} allocated) x {block} tokens, "
             f"{self._gen.kv_dtype}, {num_layers} attention layers, page-table width {width}"
@@ -561,6 +627,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         start_pos = kwargs.get("start_pos")
         starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
         prefix_state = kwargs.get("prefix_state")
+        if prefix_state is not None:
+            prefix_state = list(prefix_state)
         restored = [bool(p and p.get("restore")) for p in prefix_state] if prefix_state is not None else [False] * N
         if any(s and not r for s, r in zip(starts, restored)) and not self.model_capabilities["supports_chunked_prefill"]:
             raise NotImplementedError("chunked prefill is not supported (model_capabilities)")
@@ -608,7 +676,24 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
                     prompt_tokens=tokens[u : u + 1, : plens[u]].to(torch.long).repeat(total_batch, 1),
                     empty_slots=[slots[u]],
                 )
-                tt_tokens, _ = sampling_module.sample(logits_sh, enable_trace=False)
+                # QWEN35_ROWS_TOPK samples only the first `_active_trace_bucket` rows (the live decode width): a batched
+                # admission's request past it reads another row's stale top-k. Widen to the power-of-two width covering
+                # `row` for this draw (row-independent top-k: rows < width unchanged)
+                bucket = getattr(sampling_module, "_active_trace_bucket", None)
+                widen = bucket is not None and row >= bucket
+                if widen:
+                    sampling_module._active_trace_bucket = 1 << row.bit_length()
+                # penalties rewrite the logits in place (apply_penalties output_tensor=logits): a batched admission's
+                # rows share one logits tensor, so a penalised request's draw shifted the later requests' rows
+                # (conformance test_repetition_penalty_mixed_batch). Sample from a copy whenever penalties are on.
+                src = ttnn.clone(logits_sh) if getattr(sampling_module, "_penalties_active", False) else logits_sh
+                try:
+                    tt_tokens, _ = sampling_module.sample(src, enable_trace=False)
+                finally:
+                    if widen:
+                        sampling_module._active_trace_bucket = bucket
+                    if src is not logits_sh:
+                        ttnn.deallocate(src)
                 return int(ttnn.to_torch(ttnn.get_device_tensors(tt_tokens)[0]).reshape(-1)[row])
 
         logger.info(
@@ -618,7 +703,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         if prefix_state is not None:
             chunked["prefix_state"] = prefix_state
         if self._mtp is not None:
-            if chunked:
+            # DFlash: prefix-cache resumes (start > 0, final) are fine - the drafter's context then covers the uncached
+            # suffix only; intermediate chunks (chunked prefill) are not wired (DFlash is off with chunked prefill)
+            dflash_ok = self._mtp.head is None and all(finals)
+            if chunked and not dflash_ok:
                 raise NotImplementedError(
                     f"MTP with chunked prefill is not wired yet (QWEN35_MTP + QWEN35_CHUNKED_PREFILL); starts {starts} "
                     f"finals {finals} prompt_lens {plens} slots {slots} live {sorted(self._live_slots)} "
@@ -628,13 +716,29 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             if self._mtp.adaptive and self._mtp.in_phase:
                 self._mtp.suspend()  # unbind for the prefill; the next decode resumes / drops / leaves the phase
             for u in range(N):
-                self._mtp.begin_prefill(tokens[u, : plens[u]].tolist(), pt[u], slot=slots[u])
+                ids_u = tokens[u, : plens[u]].tolist()
+                hit = prefix_state is not None and prefix_state[u] and prefix_state[u].get("restore") is not None
+                if hit and starts[u] and self._mtp.feature_start(ids_u, starts[u]) != starts[u]:
+                    # the drafter's context window reaches before the cached prefix and the previous request does
+                    # not hold those rows' features: run the whole prompt (the cached KV is rewritten with the same
+                    # values) instead of failing the request
+                    logger.info(f"prefix-cache hit at {starts[u]} dropped (DFlash context window): full prefill")
+                    prefix_state[u] = dict(prefix_state[u], restore=None)
+                    starts[u] = 0
+                self._mtp.begin_prefill(ids_u, pt[u], slot=slots[u], start=starts[u])
             try:
-                out = self._gen.prefill_serving(tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp)
+                out = self._gen.prefill_serving(
+                    tokens, pt, plens, slots, sampler=sampler, vision=vision, mtp=self._mtp, **chunked
+                )
             except Exception:
                 self._mtp.abort_prefill()
                 raise
-            tok0 = [int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)]
+            if sampler is None and getattr(self._mtp, "host_logits", False):
+                tok0 = [None] * N  # vLLM's host sampler picks the first token; the first decode step receives it
+            else:
+                tok0 = [
+                    int(out[u, 0]) if sampler is not None else int(torch.argmax(out[u, -1]).item()) for u in range(N)
+                ]
             if self._mtp.multi or self._mtp.adaptive:
                 self._mtp.end_prefill(tok0, plens, slots)
             else:
@@ -787,8 +891,8 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
 
     @staticmethod
     def _mtp_sampling(sp, row):
-        """(temperature, top_k, top_p, seed) of request `row` from the plugin's TTSamplingParams (lists or tensors);
-        None when absent. Penalties are not applied by the MTP step."""
+        """(temperature, top_k, top_p, seed, presence, frequency, repetition) of request `row` from the plugin's
+        TTSamplingParams (lists or tensors); None when absent (DFlash applies the penalties; MtpServing ignores them)."""
         if sp is None:
             return None
 
@@ -810,7 +914,10 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
         p = float(pick(getattr(sp, "top_p", None), 1.0))
         seed = pick(getattr(sp, "seed", None), None)
         seed = None if seed is None or int(seed) < 0 else int(seed)
-        return (t, k, p, seed)
+        pres = float(pick(getattr(sp, "presence_penalty", None), 0.0))
+        freq = float(pick(getattr(sp, "frequency_penalty", None), 0.0))
+        rep = float(pick(getattr(sp, "repetition_penalty", None), 1.0))
+        return (t, k, p, seed, pres, freq, rep)
 
     def _mtp_decode(self, args, kwargs):
         """MTP step: the plugin hands the last emitted token at position num_tokens - 1 (padding rows at -1); returns a
@@ -838,13 +945,26 @@ class Qwen35MoeForConditionalGeneration(Qwen36ForCausalLM):
             self._decode_steps = getattr(self, "_decode_steps", 0) + 1
             return out
         assert len(live) <= 1, "single-user MTP step got several live rows"
+        sp = kwargs.get("sampling_params", args[6] if len(args) > 6 else None)
+        # no device sampling params = a step for vLLM's host sampler (logprobs, structured outputs, logit bias,
+        # min_tokens, ...): the plugin reads logits [B, 1, V] back, which a step with host_logits support returns
+        host = sp is None and getattr(self._mtp, "host_logits", False)
+        if host:
+            out = torch.zeros(tokens.numel(), 1, int(self._gen.args.vocab_size), dtype=torch.float32)
         for i in live:
             row = None
             if page_table is not None:
                 pt = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
                 row = pt[i]
             authoritative = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
-            sampling = self._mtp_sampling(kwargs.get("sampling_params", args[6] if len(args) > 6 else None), i)
+            if host:
+                lg = self._mtp.step(
+                    int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative, host_logits=True
+                ).reshape(-1)
+                n = min(int(lg.numel()), int(out.shape[-1]))
+                out[i, 0, :n] = lg[:n]
+                continue
+            sampling = self._mtp_sampling(sp, i)
             ids = self._mtp.step(
                 int(tokens[i]), int(pos[i]), page_table_row=row, host_authoritative=authoritative, sampling=sampling
             )

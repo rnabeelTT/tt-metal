@@ -1232,7 +1232,8 @@ class TPAttention:
                     # so each call writes one row (no per-row slice / reshard: 2 ops per row instead of ~10).
                     # per-row index tensors: shared by every layer when the caller built them once per pass
                     # (rows_pos_rows: list of [B] int32, row b = -1 except position b), else sliced here
-                    _rows = getattr(self, "rows_pos_rows", None)
+                    # (rows_pos_list: the same, staged by the Qwen3.5 DFlash verify)
+                    _rows = getattr(self, "rows_pos_rows", None) or getattr(self, "rows_pos_list", None)
                     # QWEN35_ROWS_FUSED_KV (default on): K and V of a row in ONE paged_fused_update_cache (its two inputs
                     # must be sharded on disjoint cores: V moves to the next core row)
                     fused_kv = os.environ.get("QWEN35_ROWS_FUSED_KV", "1") == "1"
@@ -1385,7 +1386,9 @@ class TPAttention:
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
 
-    def forward_prefill_paged_batched(self, x, cos_tt, sin_tt, page_tables, chunk_page_tables=None, user_ids=None):
+    def forward_prefill_paged_batched(
+        self, x, cos_tt, sin_tt, page_tables, chunk_page_tables=None, user_ids=None, chunk_start_idx_tensor=None
+    ):
         """Paged-KV prefill of B short prompts in ONE pass (batched short-prompt admission, Qwen3.5-122B perf work
         2026-10-01): ``x`` [1, 1, B*T, dim(/tp)] holds the users' T-row blocks back to back (user u = rows u*T ..
         (u+1)*T - 1, every user starts at position 0: ``cos_tt`` / ``sin_tt`` are the per-row tables over B*T rows,
@@ -1430,8 +1433,11 @@ class TPAttention:
             q8 = q
         k_paged, v_paged = self.paged_k, self.paged_v
         block_size = k_paged.shape[2]
-        qk_chunk = 128 if T >= 2048 else 64
-        sdpa_cfg = self._prefill_sdpa_cfg(T, qk_chunk)
+        # chunk_start_idx_tensor (a device 0): the FLEXIBLE chunked SDPA with 128-row chunks, exactly the served
+        # single-user bucket's call (forward_prefill_paged), so a batched admission's attention is bit-identical to a
+        # single one (the fixed-start 64-row-chunk form differs from it from 65 tokens on)
+        qk_chunk = 128 if (chunk_start_idx_tensor is not None or T >= 2048) else 64
+        sdpa_cfg = self._prefill_sdpa_cfg(T, qk_chunk, flexible=chunk_start_idx_tensor is not None)
         outs = []
         for u in range(B):
             pt = page_tables[u]
@@ -1466,14 +1472,19 @@ class TPAttention:
                 )
                 sdpa_pt = ttnn.concat([pt, zeros_pad], dim=-1)
                 ttnn.deallocate(zeros_pad)
+            start_kw = (
+                {"chunk_start_idx_tensor": chunk_start_idx_tensor}
+                if chunk_start_idx_tensor is not None
+                else {"chunk_start_idx": 0}
+            )
             attn_u = ttnn.transformer.chunked_scaled_dot_product_attention(
                 input_tensor_q=q_u,
                 input_tensor_k=k_paged,
                 input_tensor_v=v_paged,
                 page_table_tensor=sdpa_pt,
-                chunk_start_idx=0,
                 compute_kernel_config=self._sdpa_pf_ckc,
                 program_config=sdpa_cfg,
+                **start_kw,
             )
             if sdpa_pt is not pt:
                 ttnn.deallocate(sdpa_pt)

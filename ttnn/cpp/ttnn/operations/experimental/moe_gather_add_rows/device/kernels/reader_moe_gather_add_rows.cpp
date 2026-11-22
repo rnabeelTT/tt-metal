@@ -49,14 +49,45 @@ void kernel_main() {
         for (uint32_t j = 0; j < K; ++j) {
             dfb_in.reserve_back(Wt_c);
             const uint32_t base = dfb_in.get_write_ptr();
+            // A real pair's destination row is unique, so a row id that repeats in this block is the dispatch's one
+            // sentinel row (every pair whose expert lives on another die points there: ~3 of 4 pairs on 4 dies).
+            // Read it from DRAM once and copy the repeats from that L1 copy: the same bytes, without every core
+            // hammering the one DRAM page that holds it. Detection: the largest id, if it occurs more than once.
+            uint32_t hot = 0, hot_n = 0;
+            for (uint32_t r = 0; r < n_rows; ++r) {
+                const uint32_t s = und[r * K + j];
+                if (hot_n == 0 || s > hot) {
+                    hot = s;
+                    hot_n = 1;
+                } else if (s == hot) {
+                    ++hot_n;
+                }
+            }
+            const bool dedup = hot_n > 1;
+            uint32_t hot_first = 0xFFFFFFFF;
             for (uint32_t r = 0; r < n_rows; ++r) {
                 const uint32_t src_row = und[r * K + j];
+                if (dedup && src_row == hot) {
+                    if (hot_first != 0xFFFFFFFF) {
+                        continue;  // copied below, once the first copy has landed
+                    }
+                    hot_first = r;
+                }
                 noc.async_read(
                     s_rows,
                     CoreLocalMem<uint32_t>(base + r * row_bytes),
                     row_bytes,
                     {.page_id = src_row, .offset_bytes = cs * row_bytes},
                     {});
+            }
+            if (dedup) {
+                noc.async_read_barrier();
+                const uint64_t src = get_noc_addr(base + hot_first * row_bytes);
+                for (uint32_t r = hot_first + 1; r < n_rows; ++r) {
+                    if (und[r * K + j] == hot) {
+                        noc_async_read(src, base + r * row_bytes, row_bytes);
+                    }
+                }
             }
             if (n_rows < 32) {
                 volatile tt_l1_ptr uint32_t* z =

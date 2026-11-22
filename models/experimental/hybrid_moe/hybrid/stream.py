@@ -44,6 +44,7 @@ class PrefillStream:
         # its bank on CQ1 (prefetch): at these lengths a layer uses nearly every non-resident expert and its compute
         # outlasts the copies, which then run off the critical path. Needs HYB_STREAM_CQ1.
         self.prefetch_min = int(os.environ.get("HYB_PF_PREFETCH_MIN", "0"))
+        self.early = os.environ.get("HYB_PF_EARLY", "1") == "1"  # prefetch_after
         self.content = [None] * (self.NS - 1)  # (layer, expert) held by each staging slot (planned; copies in order)
         self.where = {}  # (layer, expert) -> slot
         self.reused = 0  # planned experts already in the staging (no copy)
@@ -188,6 +189,32 @@ class PrefillStream:
             ttnn.wait_for_event(1, ev)
         self.upload(nxt, writes, st, cq_id=1)
         st["prefetched"] = st.get("prefetched", 0) + len(writes)
+
+    def prefetch_after(self, layer, nonresident, mesh, st):
+        """HYB_PF_EARLY (unbanked group prefills): after the last segment step of `layer` is enqueued, the next hybrid
+        layer's non-resident experts that have a device-format copy now (pinned, or converted and registered) are copied
+        into the staging on CQ1, behind a CQ0 event that covers every read of `layer`'s staging. The copies then run
+        during the next layer's attention instead of after its first routing readback; its steps find them staged
+        (_assign: no copy) and order their routed calls after CQ1 (patch._stream_copy with no writes)."""
+        if not (self.early and self.on and self.cq1 and not self.banked and self.can_prefetch()):
+            return
+        if layer not in self.layers:
+            return
+        i = self.layers.index(layer)
+        if i + 1 >= len(self.layers):
+            return
+        nxt = self.layers[i + 1]
+        if nxt not in self.fetch.raw:
+            return
+        experts = [e for e in nonresident(nxt) if self.fetch.has_expert(nxt, e)][: len(self._slots(nxt))]
+        if not experts:
+            return
+        _, writes = self._assign(nxt, experts)
+        if not writes:
+            return
+        ttnn.wait_for_event(1, ttnn.record_event(mesh, cq_id=0))
+        self.upload(nxt, writes, st, cq_id=1)
+        st["pf_early"] = st.get("pf_early", 0) + len(writes)
 
     def mark_read(self, layer, mesh):
         """After a prefill step's routed calls over the staging are enqueued (banked prefills)."""

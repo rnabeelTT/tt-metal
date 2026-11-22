@@ -31,13 +31,13 @@ _files = {}
 
 
 def get(key):
-    """bf16 tensor for a checkpoint key (FP8 weights dequantized with their block scale)."""
+    """bf16 tensor for a checkpoint key (FP8 weights dequantized with their block or per-channel scale)."""
     shard = WMAP[key]
     f = _files.get(shard) or _files.setdefault(shard, safe_open(f"{SNAP}/{shard}", "pt"))
     t = f.get_tensor(key)
-    sk = key[: -len("weight")] + "weight_scale_inv"
-    if key.endswith(".weight") and sk in WMAP:
-        return dequant_fp8(t, get_raw(sk))
+    for sk in (key[: -len("weight")] + "weight_scale_inv", key[: -len("weight")] + "weight_scale"):
+        if key.endswith(".weight") and sk in WMAP:  # block (Qwen3.5 FP8) or per-channel (compressed-tensors)
+            return dequant_fp8(t, get_raw(sk))
     return t if t.dtype == torch.float32 else t.to(torch.bfloat16)  # A_log / GDN norm stay fp32, as stored
 
 
