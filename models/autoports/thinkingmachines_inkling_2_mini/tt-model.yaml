@@ -146,66 +146,54 @@ card:
     The KL spread between numerically equivalent variants is dominated by one text (code_mbpp, 0.03 - 0.16); on the
     other seven texts the decode KL is 0.002 - 0.012. Long context: a passphrase planted at 10 / 50 / 90 % depth of 17K,
     34K and 63K-token prompts is retrieved on 4 dies. Benchmark evals (GPQA, LiveCodeBench, IFEval) were not run.
-
-    ### Performance
+  performance: |
     Measured 2026-11-22 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
-    with the code this package ships, served from the source tree. Random-token prompts of exactly the input length,
-    output pinned with ignore_eos, greedy, streamed; users are concurrent requests in a closed loop (2 per user);
-    TTFT = time to first streamed token; TPOT = (E2EL - TTFT) / (output - 1).
+    with the code this package ships, served from the source tree. Random-token prompts of exactly the input length (ISL),
+    output pinned with ignore_eos (OSL), greedy, streamed; `concurrency` users in a closed loop, N requests in all;
+    TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per user, TPOT = (E2EL - TTFT) /
+    (OSL - 1); total = output tokens / wall time.
 
-    #### p300x2 (4 dies)
-
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 2 | 427 | 33.0 | 30.3 | 27.7 | 4.62 |
-    | 1,024 | 256 | 1 | 2 | 951 | 33.5 | 29.9 | 27.0 | 9.49 |
-    | 4,096 | 256 | 1 | 2 | 3,701 | 33.6 | 29.8 | 20.9 | 12.27 |
-    | 16,384 | 256 | 1 | 2 | 14,963 | 33.9 | 29.5 | 10.8 | 23.60 |
-    | 128 | 128 | 2 | 4 | 653 | 35.5 | 28.2 | 49.6 | 5.16 |
-    | 128 | 128 | 4 | 8 | 1,417 | 40.4 | 24.7 | 78.1 | 6.55 |
-    | 128 | 128 | 8 | 16 | 2,977 | 47.8 | 20.9 | 113.1 | 9.05 |
-    | 128 | 128 | 16 | 32 | 6,591 | 58.9 | 17.0 | 145.5 | 14.07 |
-    | 128 | 128 | 32 | 64 | 13,369 | 92.5 | 10.8 | 163.1 | 25.11 |
-    | 1,024 | 256 | 2 | 4 | 1,681 | 38.0 | 26.3 | 45.0 | 11.38 |
-    | 1,024 | 256 | 4 | 8 | 3,116 | 40.9 | 24.5 | 75.6 | 13.54 |
-    | 1,024 | 256 | 8 | 16 | 6,844 | 44.3 | 22.6 | 112.9 | 18.13 |
-    | 1,024 | 256 | 16 | 32 | 14,474 | 53.1 | 18.8 | 146.2 | 28.02 |
-    | 1,024 | 256 | 32 | 64 | 29,817 | 79.3 | 12.6 | 163.7 | 50.04 |
-
-    #### p300 (2 dies)
-
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 2 | 593 | 34.9 | 28.7 | 25.5 | 5.02 |
-    | 1,024 | 256 | 1 | 2 | 1,309 | 35.5 | 28.2 | 24.7 | 10.35 |
-    | 4,096 | 256 | 1 | 2 | 5,186 | 35.6 | 28.1 | 18.0 | 14.25 |
-    | 16,384 | 256 | 1 | 2 | 21,174 | 36.1 | 27.7 | 8.4 | 30.39 |
-    | 128 | 128 | 2 | 4 | 894 | 39.2 | 25.5 | 43.6 | 5.88 |
-    | 128 | 128 | 4 | 8 | 1,938 | 44.9 | 22.3 | 67.0 | 7.65 |
-    | 128 | 128 | 8 | 16 | 4,252 | 54.9 | 18.2 | 91.3 | 11.22 |
-    | 128 | 128 | 16 | 32 | 8,981 | 68.9 | 14.5 | 115.5 | 17.73 |
-    | 1,024 | 256 | 2 | 4 | 2,299 | 48.6 | 20.6 | 34.8 | 14.70 |
-    | 1,024 | 256 | 4 | 8 | 4,103 | 46.1 | 21.7 | 64.6 | 15.85 |
-    | 1,024 | 256 | 8 | 16 | 8,537 | 54.5 | 18.3 | 91.3 | 22.43 |
-    | 1,024 | 256 | 16 | 32 | 19,779 | 63.2 | 15.8 | 114.1 | 35.90 |
-
-    #### p150 (1 die)
-
-    | Input tokens | Output tokens | Users | N | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s | E2EL (s) |
-    | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 128 | 128 | 1 | 2 | 838 | 40.4 | 24.7 | 21.4 | 5.97 |
-    | 1,024 | 256 | 1 | 2 | 3,099 | 41.1 | 24.3 | 18.9 | 13.58 |
-    | 4,096 | 256 | 1 | 2 | 12,377 | 41.4 | 24.2 | 11.2 | 22.93 |
-    | 128 | 128 | 2 | 4 | 1,262 | 48.8 | 20.5 | 34.3 | 7.47 |
-    | 128 | 128 | 4 | 8 | 2,739 | 59.3 | 16.9 | 49.8 | 10.27 |
-    | 128 | 128 | 8 | 16 | 5,981 | 77.4 | 12.9 | 64.8 | 15.81 |
-    | 1,024 | 256 | 2 | 4 | 5,426 | 49.0 | 20.4 | 28.6 | 17.91 |
-    | 1,024 | 256 | 4 | 8 | 9,699 | 64.7 | 15.4 | 39.1 | 26.21 |
-    | 1,024 | 256 | 8 | 16 | 22,089 | 74.4 | 13.4 | 49.9 | 41.05 |
-
-    ### Limitations
-    - Prefills run one request at a time (~1,100 prompt tokens/s on 4 dies, ~800 on 2, ~330 on 1): time to first token
-      grows with the number of requests arriving together.
-    - No speculative decoding yet (the checkpoint's DSpark drafter is not served).
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill (tok/s) | Decode (tok/s/u) | Total (tok/s) | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 2 | 427 | 300 | 30.3 | 27.7 | 4.62 |
+    | p300x2 | 1,024 | 256 | 1 | 2 | 951 | 1,077 | 29.9 | 27.0 | 9.49 |
+    | p300x2 | 4,096 | 256 | 1 | 2 | 3,701 | 1,107 | 29.8 | 20.9 | 12.27 |
+    | p300x2 | 16,384 | 256 | 1 | 2 | 14,963 | 1,095 | 29.5 | 10.8 | 23.60 |
+    | p300x2 | 128 | 128 | 2 | 4 | 653 | 196 | 28.2 | 49.6 | 5.16 |
+    | p300x2 | 128 | 128 | 4 | 8 | 1,417 | 90 | 24.7 | 78.1 | 6.55 |
+    | p300x2 | 128 | 128 | 8 | 16 | 2,977 | 43 | 20.9 | 113.1 | 9.05 |
+    | p300x2 | 128 | 128 | 16 | 32 | 6,591 | 19 | 17.0 | 145.5 | 14.07 |
+    | p300x2 | 128 | 128 | 32 | 64 | 13,369 | 10 | 10.8 | 163.1 | 25.11 |
+    | p300x2 | 1,024 | 256 | 2 | 4 | 1,681 | 609 | 26.3 | 45.0 | 11.38 |
+    | p300x2 | 1,024 | 256 | 4 | 8 | 3,116 | 329 | 24.5 | 75.6 | 13.54 |
+    | p300x2 | 1,024 | 256 | 8 | 16 | 6,844 | 150 | 22.6 | 112.9 | 18.13 |
+    | p300x2 | 1,024 | 256 | 16 | 32 | 14,474 | 71 | 18.8 | 146.2 | 28.02 |
+    | p300x2 | 1,024 | 256 | 32 | 64 | 29,817 | 34 | 12.6 | 163.7 | 50.04 |
+    | p300 | 128 | 128 | 1 | 2 | 593 | 216 | 28.7 | 25.5 | 5.02 |
+    | p300 | 1,024 | 256 | 1 | 2 | 1,309 | 782 | 28.2 | 24.7 | 10.35 |
+    | p300 | 4,096 | 256 | 1 | 2 | 5,186 | 790 | 28.1 | 18.0 | 14.25 |
+    | p300 | 16,384 | 256 | 1 | 2 | 21,174 | 774 | 27.7 | 8.4 | 30.39 |
+    | p300 | 128 | 128 | 2 | 4 | 894 | 143 | 25.5 | 43.6 | 5.88 |
+    | p300 | 128 | 128 | 4 | 8 | 1,938 | 66 | 22.3 | 67.0 | 7.65 |
+    | p300 | 128 | 128 | 8 | 16 | 4,252 | 30 | 18.2 | 91.3 | 11.22 |
+    | p300 | 128 | 128 | 16 | 32 | 8,981 | 14 | 14.5 | 115.5 | 17.73 |
+    | p300 | 1,024 | 256 | 2 | 4 | 2,299 | 445 | 20.6 | 34.8 | 14.70 |
+    | p300 | 1,024 | 256 | 4 | 8 | 4,103 | 250 | 21.7 | 64.6 | 15.85 |
+    | p300 | 1,024 | 256 | 8 | 16 | 8,537 | 120 | 18.3 | 91.3 | 22.43 |
+    | p300 | 1,024 | 256 | 16 | 32 | 19,779 | 52 | 15.8 | 114.1 | 35.90 |
+    | p150 | 128 | 128 | 1 | 2 | 838 | 153 | 24.7 | 21.4 | 5.97 |
+    | p150 | 1,024 | 256 | 1 | 2 | 3,099 | 330 | 24.3 | 18.9 | 13.58 |
+    | p150 | 4,096 | 256 | 1 | 2 | 12,377 | 331 | 24.2 | 11.2 | 22.93 |
+    | p150 | 128 | 128 | 2 | 4 | 1,262 | 101 | 20.5 | 34.3 | 7.47 |
+    | p150 | 128 | 128 | 4 | 8 | 2,739 | 47 | 16.9 | 49.8 | 10.27 |
+    | p150 | 128 | 128 | 8 | 16 | 5,981 | 21 | 12.9 | 64.8 | 15.81 |
+    | p150 | 1,024 | 256 | 2 | 4 | 5,426 | 189 | 20.4 | 28.6 | 17.91 |
+    | p150 | 1,024 | 256 | 4 | 8 | 9,699 | 106 | 15.4 | 39.1 | 26.21 |
+    | p150 | 1,024 | 256 | 8 | 16 | 22,089 | 46 | 13.4 | 49.9 | 41.05 |
+  limitations: |
+    - Prefills run one request at a time (about 1,100 prompt tokens/s on 4 dies, 800 on 2, 330 on 1): time to first
+      token grows with the number of requests arriving together.
+    - No speculative decoding (the checkpoint's DSpark drafter is not served yet).
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Text only. The device sampler supports `top_k` up to 32; logprobs fall back to host sampling.
+    - Benchmark evals (GPQA, LiveCodeBench, IFEval) were not run; accuracy is teacher forcing against the reference.
