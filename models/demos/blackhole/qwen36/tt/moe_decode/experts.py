@@ -91,8 +91,13 @@ def ep_offsets(mesh_device, experts_per_die):
     )
 
 
+# QWEN35_MOE_ACT=inkling: Inkling-2's softcapped expert activation in the gate|up kernels (with [gate | up] packing)
+MOE_ACT = os.environ.get("QWEN35_MOE_ACT", "silu")
+
+
 def _ep_defines(ep_experts, gate_first=False):
-    return ([("EP_EXPERTS", str(ep_experts))] if ep_experts else []) + ([("GATE_FIRST", "1")] if gate_first else [])
+    act = [("ACT_INKLING", "1")] if (gate_first and MOE_ACT == "inkling") else []
+    return ([("EP_EXPERTS", str(ep_experts))] if ep_experts else []) + ([("GATE_FIRST", "1")] if gate_first else []) + act
 
 
 def logits_row_bytes(num_experts, router):

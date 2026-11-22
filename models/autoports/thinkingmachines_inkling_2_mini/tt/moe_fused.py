@@ -1,0 +1,109 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Inkling-2 decode MoE through the shared qwen36 fused MoE decode kernels (models/demos/blackhole/qwen36/tt/moe_decode:
+router top-k + gate|up + activation + down in ~3 programs, expert weights streamed per DRAM bank).
+
+  * router "sigb": sigmoid scores, top-k of score + selection bias, weights normalized to 1 (route_scale 8 folded
+    into the down weights); the logits come from this port's fp32 router matmul (tt/moe.py MoE.router_w).
+  * activation: the kernels' ACT_INKLING path (QWEN35_MOE_ACT=inkling, tt/__init__.py): act = tanh(g/4) s(g)
+    tanh(u'), u' = u / 25 folded into the up weights, the factor 100 folded into the down weights.
+  * the kernels take a die's expert slice of 128..768 columns (moe_decode/fused.py supported()): the die's 1152 / N
+    columns run as sub-shards (N = 1: 3 x 384; N = 2: 384 + 192 padded to 256; N = 4: 288 padded to 384; zero padding
+    is exact, act(0, 0) = 0), each with its own weights, the partial outputs summed.
+  * HiFi2 matmuls (QWEN35_MOE_DECODE_FIDELITY=hifi2): the full bfp8 weight, no 5-bit rounding.
+Output: this die's partial sum [1, 1, M, H] bf16 (the caller all-reduces), times 1/sqrt(5) (the post-MLP conv scale,
+as tt/moe.py).
+"""
+
+from __future__ import annotations
+
+import math
+import os
+
+import torch
+
+import ttnn
+from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
+
+_SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
+SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
+
+
+class FusedExperts:
+    def __init__(self, moe, ck, li, dtype=ttnn.bfloat8_b, cache_dir=None, rows_max=32):
+        from models.demos.blackhole.qwen36.tt.moe_decode.fused import FusedMoEDecode
+
+        self.moe, self.mesh = moe, moe.mesh
+        N, E, H, I, Il = moe.N, moe.E, moe.H, moe.I, moe.Il
+        self.N, self.H = N, H
+        subs = SUBS[N]
+        assert sum(r for r, _ in subs) == Il, (subs, Il)
+        mm = (lambda d: ttnn.ShardTensorToMesh(self.mesh, dim=d)) if N > 1 else (lambda d: None)
+        dt = {ttnn.bfloat8_b: "bfp8", ttnn.bfloat4_b: "bfp4"}[dtype]
+        cname = (lambda n: os.path.join(cache_dir, f"L{li}.fused.{n}.{dt}.tp{N}")) if cache_dir else (lambda n: None)
+        w13 = w2 = None
+        self.subs = []
+        off = 0
+        for si, (real, W) in enumerate(subs):
+            def make_ug(off=off, real=real, W=W):
+                nonlocal w13
+                if w13 is None:
+                    w13 = ck.experts(li, "w13")  # [E, 2I, H] rows [gate | up]
+                cols = []
+                for d in range(N):
+                    a = d * Il + off
+                    g = torch.zeros(E, H, W)
+                    u = torch.zeros(E, H, W)
+                    g[:, :, :real] = w13[:, a : a + real].transpose(1, 2)
+                    u[:, :, :real] = w13[:, I + a : I + a + real].transpose(1, 2) / 25.0
+                    cols.append(torch.cat([g, u], dim=-1))  # [gate | up] per die (gate_first)
+                return torch.cat(cols, -1).unsqueeze(0).to(torch.bfloat16)  # [1, E, H, N * 2W]
+
+            def make_dn(off=off, real=real, W=W):
+                nonlocal w2
+                if w2 is None:
+                    w2 = ck.experts(li, "w2")  # [E, H, I]
+                rows = []
+                for d in range(N):
+                    a = d * Il + off
+                    t = torch.zeros(E, W, H)
+                    t[:, :real] = w2[:, :, a : a + real].transpose(1, 2) * (100.0 * moe.route_scale / math.sqrt(5.0))
+                    rows.append(t)
+                return torch.cat(rows, 1).unsqueeze(0).to(torch.bfloat16)  # [1, E, N * W, H]
+
+            ug = cached(make_ug, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"ug{si}"), mesh_mapper=mm(-1))
+            dn = cached(make_dn, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"dn{si}"), mesh_mapper=mm(-2))
+            ckc = moe.rckc
+            op = FusedMoEDecode(
+                self.mesh, _SHARED, hidden=H, inter_local=W, num_experts=E, k=moe.k, tp=N, dtype=dtype,
+                router_weight=None, shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None,
+                shared_down_proj=None, cache_name=lambda n: None, router_ckc=ckc, router="sigb",
+                selection_bias=ck.L(li, "mlp.gate.bias").float(), router_logits=self._logits, gate_first=True,
+            )
+            self.subs.append((op, ug, dn))
+            off += real
+        del w13, w2
+        self.rows_max = rows_max
+
+    def _logits(self, x):
+        xf = ttnn.typecast(x, ttnn.float32)
+        return ttnn.matmul(xf, self.moe.router_w, compute_kernel_config=self.moe.rckc, dtype=ttnn.float32)
+
+    def build_rows(self, widths):
+        """Build the rows ops of every decode width before any trace capture (host uploads)."""
+        for op, _, _ in self.subs:
+            for w in widths:
+                if w > 1:
+                    op.rows_ops(w)
+
+    def forward(self, x):
+        """x [1, 1, M, H] bf16 (normed), M <= rows_max -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
+        M = int(x.shape[-2])
+        acc = None
+        for op, ug, dn in self.subs:
+            if M == 1:
+                out = op(x, ug, dn, logits=op._logits(x))
+            else:
+                out = op.rows(x, ug, dn)
+            acc = ttnn.clone(out) if acc is None else ttnn.add(acc, out)
+        return acc

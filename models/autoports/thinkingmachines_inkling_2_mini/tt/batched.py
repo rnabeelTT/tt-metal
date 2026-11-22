@@ -39,36 +39,38 @@ def _bf(t):
 
 class BatchedConv:
     """Static short conv (y = x + sum_j w_j x_{t-3+j}) over B slots, one row each. taps: [C_full, K] (the full
-    checkpoint weight); mapper shards the channel dim like the activations (None: replicated)."""
+    checkpoint weight); mapper shards the channel dim like the activations (None: replicated). States and taps are fp32
+    TILE tensors (no row-major round trips per step)."""
 
     def __init__(self, mesh, taps: torch.Tensor, mapper, c_local: int, B: int):
         self.mesh, self.B, self.C = mesh, B, c_local
-        up = lambda t, dt=ttnn.float32: ttnn.from_torch(t.contiguous(), dtype=dt, layout=ttnn.ROW_MAJOR_LAYOUT,  # noqa
-                                                        device=mesh, mesh_mapper=mapper)
-        self.w = [up(taps[:, j].float().reshape(1, 1, 1, -1)) for j in range(K)]
+        up = lambda t: ttnn.from_torch(t.contiguous(), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT,  # noqa: E731
+                                       device=mesh, mesh_mapper=mapper)
+        self.w = [up(taps[:, j].float().reshape(1, 1, 1, -1)) for j in range(K - 1)]
+        self.w_cur = up((taps[:, K - 1].float() + 1.0).reshape(1, 1, 1, -1))  # the current tap + the residual
         z = torch.zeros(1, 1, B, taps.shape[0])
         self.s = [up(z) for _ in range(K - 1)]  # s[0] = x_{t-3}, s[1] = x_{t-2}, s[2] = x_{t-1}
 
     def step(self, x):
         """x [1, 1, B, C] tile (any float) -> y [1, 1, B, C] bf16 tile; states advance by one token (in place)."""
-        xr = ttnn.to_layout(_f32(x), ttnn.ROW_MAJOR_LAYOUT)
-        y = ttnn.add(xr, ttnn.multiply(xr, self.w[K - 1]))
+        xf = _f32(x)
+        y = ttnn.multiply(xf, self.w_cur)
         for j in range(K - 1):
             y = ttnn.add(y, ttnn.multiply(self.s[j], self.w[j]))
         for j in range(K - 2):
             ttnn.copy(self.s[j + 1], self.s[j])
-        ttnn.copy(xr, self.s[K - 2])
-        return ttnn.to_layout(_bf(y), ttnn.TILE_LAYOUT)
+        ttnn.copy(xf, self.s[K - 2])
+        return _bf(y)
 
     def load_slot(self, b: int, lane_state):
         """Row b of the states := the lane's [1, 1, K-1, C] row-major fp32 state (after a slot's prefill)."""
+        lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
         for j in range(K - 1):
-            row = ttnn.slice(lane_state, [0, 0, j, 0], [1, 1, j + 1, self.C])
-            _set_row(self.s[j], b, row, self.B, self.C)
+            _set_row(self.s[j], b, ttnn.slice(lt, [0, 0, j, 0], [1, 1, j + 1, self.C]), self.B, self.C)
 
 
 def _set_row(t, b, row, B, C):
-    """In place: row b of the row-major [1, 1, B, C] tensor t := row [1, 1, 1, C]."""
+    """In place: row b of the [1, 1, B, C] tensor t := row [1, 1, 1, C] (same layout)."""
     parts = []
     if b > 0:
         parts.append(ttnn.slice(t, [0, 0, 0, 0], [1, 1, b, C]))
@@ -80,35 +82,37 @@ def _set_row(t, b, row, B, C):
 
 class BatchedDynConv:
     """Dynamic short conv of the global layers' K / V over B slots (see sconv.DynShortConv; the 1/3 is folded into the
-    projection weights): y = x + sum_L (static[L] + dyn(h)[head, L]) x_{t-L}. Reuses the lane conv's device weights."""
+    projection weights): y = x + sum_L (static[L] + dyn(h)[head, L]) x_{t-L}. Reuses the lane conv's device weights;
+    fp32 TILE states."""
 
     def __init__(self, lane, B: int):
         self.lane, self.B, self.C, self.mesh = lane, B, lane.C, lane.mesh
         N = self.mesh.get_num_devices()
         z = torch.zeros(1, 1, B, lane.C * N)
-        mk = lambda: ttnn.from_torch(z, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,  # noqa
+        mk = lambda: ttnn.from_torch(z, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh,  # noqa: E731
                                      mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=3) if N > 1 else None)
         self.s = [mk() for _ in range(K - 1)]
+        self.static = [ttnn.to_layout(t, ttnn.TILE_LAYOUT) for t in lane.static]
 
     def step(self, x, h):
         lane = self.lane
         dyn = ttnn.matmul(_bf(h), lane.wproj, compute_kernel_config=lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
-        xr = ttnn.to_layout(_f32(x), ttnn.ROW_MAJOR_LAYOUT)
-        hist = [xr, self.s[2], self.s[1], self.s[0]]  # x_{t-L} for L = 0..3
-        y = xr
+        xf = _f32(x)
+        hist = [xf, self.s[2], self.s[1], self.s[0]]  # x_{t-L} for L = 0..3
+        y = xf
         for L in range(K):
-            wl = ttnn.matmul(dyn, lane.expand[L], compute_kernel_config=lane.ckc, dtype=ttnn.float32)
-            wl = ttnn.add(ttnn.to_layout(wl, ttnn.ROW_MAJOR_LAYOUT), lane.static[L])
+            wl = ttnn.add(ttnn.matmul(dyn, lane.expand[L], compute_kernel_config=lane.ckc, dtype=ttnn.float32),
+                          self.static[L])
             y = ttnn.add(y, ttnn.multiply(hist[L], wl))
         ttnn.copy(self.s[1], self.s[0])
         ttnn.copy(self.s[2], self.s[1])
-        ttnn.copy(xr, self.s[2])
-        return ttnn.to_layout(_bf(y), ttnn.TILE_LAYOUT)
+        ttnn.copy(xf, self.s[2])
+        return _bf(y)
 
     def load_slot(self, b: int, lane_state):
+        lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
         for j in range(K - 1):
-            row = ttnn.slice(lane_state, [0, 0, j, 0], [1, 1, j + 1, self.C])
-            _set_row(self.s[j], b, row, self.B, self.C)
+            _set_row(self.s[j], b, ttnn.slice(lt, [0, 0, j, 0], [1, 1, j + 1, self.C]), self.B, self.C)
 
 
 class BatchedApp:

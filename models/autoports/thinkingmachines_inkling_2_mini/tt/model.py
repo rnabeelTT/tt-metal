@@ -36,6 +36,9 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.weights import Checkpoi
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 SQRT5 = math.sqrt(5.0)
 FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
+_DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
+ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
+HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 
 
 def _f32(t):
@@ -190,9 +193,10 @@ class AppState:
 
 
 class Inkling2Model:
-    def __init__(self, mesh, max_seq_len=8192, expert_dtype=ttnn.bfloat4_b, attn_dtype=ttnn.bfloat16,
+    def __init__(self, mesh, max_seq_len=8192, expert_dtype=ttnn.bfloat4_b, attn_dtype=None,
                  kv_dtype=ttnn.bfloat8_b, prefill_chunk=1024, cache_dir=None, tt_ccl=None, layers=None, slots=1):
         self.mesh = mesh
+        attn_dtype = ATTN_DT if attn_dtype is None else attn_dtype
         self.cfg = cfg = load_config()
         self.ck = ck = Checkpoint(cfg.snap)
         self.ops = ops = Ops(mesh, cfg.rms_norm_eps)
@@ -238,7 +242,7 @@ class Inkling2Model:
         Vp = (V + 31) // 32 * 32
         un = ck.get("model.llm.unembed.weight")[:V].float()
         un = torch.nn.functional.pad(un, (0, 0, 0, Vp - V))
-        self.lm_head = ttnn.as_tensor(un.T.contiguous().reshape(1, 1, H, Vp).to(torch.bfloat16), dtype=ttnn.bfloat16,
+        self.lm_head = ttnn.as_tensor(un.T.contiguous().reshape(1, 1, H, Vp).to(torch.bfloat16), dtype=HEAD_DT,
                                       layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM, mesh_mapper=ops.rep)
         self.softcap = cfg.final_logit_softcapping
         print("embedding + lm head up", flush=True)
