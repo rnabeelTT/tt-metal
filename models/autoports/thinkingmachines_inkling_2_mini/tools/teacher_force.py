@@ -56,7 +56,7 @@ def main():
             if n % 64:
                 chunk = torch.cat([chunk, torch.zeros((-n) % 64, dtype=chunk.dtype)])
             lg = m.forward(chunk, p0, valid=n)
-            lg = ttnn.to_torch(lg if n_dev == 1 else ttnn.get_device_tensors(lg)[0]).float()
+            lg = m.logits_host(lg, int(lg.shape[2]))  # (TILE rows; the vocab slices of a sharded head gathered)
             lps.append(torch.log_softmax(lg.reshape(len(chunk), -1)[:n, : m.V], -1))
         lp = torch.cat(lps)
         top_ids, top_lp = r["top_ids"], r["top_lp"]

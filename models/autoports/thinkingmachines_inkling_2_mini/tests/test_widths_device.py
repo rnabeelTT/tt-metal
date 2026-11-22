@@ -45,7 +45,7 @@ def main():
             tok = torch.tensor([ids[prefix[b] + t] if b in active else 0 for b in range(W)])
             pos = torch.tensor([prefix[b] + t if b in active else -1 for b in range(W)])
             d.set_inputs(tok, pos)
-            outs.append(ttnn.to_torch(d0(d.step())).float().reshape(W, -1)[:, : m.V])
+            outs.append(m.logits_host(d.step(), W))
         return torch.stack(outs)  # [D, W, V]
 
     worst = 1.0

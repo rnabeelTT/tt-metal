@@ -60,7 +60,7 @@ def main():
             pos = torch.tensor([prefix[b] + t if b in active else -1 for b in range(B)])
             d.set_inputs(tok, pos)
             t1 = time.time()
-            lg = ttnn.to_torch(d0(d.step())).float().reshape(B, -1)[:, : m.V]
+            lg = m.logits_host(d.step(), B)
             outs.append(lg)
             if t == D - 1:
                 print(f"  step {time.time() - t1:.2f}s (eager)", flush=True)

@@ -42,6 +42,26 @@ TIMING = os.environ.get("I2M_TIMING", "0") == "1"
 # decode width buckets: one decoder + trace per width (sharing the full width's state); a step runs the narrowest
 # width covering the highest live slot (new requests take the lowest free slot)
 WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").split(",")]  # per-100-step decode timing breakdown in the server log
+# I2M_PREFIX (default 1): vLLM's prefix cache. vLLM pages the global layers' KV (tt/attention.GlobalPages) and keeps the
+# cached prefixes; the rest of a sequence's state at a cached prefix's end (conv states, sliding-window KV) lives in the
+# plugin's prefix-state slots: one snapshot per prompt at its last 64-token boundary (tt/prefix.py, device pools).
+# I2M_PREFIX_SLOTS: snapshots kept (LRU; default 4 on one die, 16 on 2 / 4 dies: ~168 MB / dies each),
+# I2M_PREFIX_MIN: the shortest prompt snapshotted.
+PREFIX = os.environ.get("I2M_PREFIX", "1") == "1"
+PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
+
+
+def _prefix_slots():
+    n = os.environ.get("I2M_PREFIX_SLOTS")
+    if n:
+        return int(n)
+    tv = os.environ.get("TT_VISIBLE_DEVICES", "")
+    md = os.environ.get("MESH_DEVICE", "")
+    one_die = md in ("P150", "N150") or (tv != "" and "," not in tv)
+    return 4 if one_die else 16
+
+
+PREFIX_SLOTS = _prefix_slots()
 
 
 def _host_tensor(t):
@@ -55,7 +75,9 @@ class Inkling2ForCausalLM:
 
     supports_multimodal = False
     model_capabilities = {
-        "supports_prefix_caching": False,
+        "supports_prefix_caching": PREFIX,
+        **({"prefix_state_cache": {"slots": PREFIX_SLOTS, "segment": 0, "min_tokens": PREFIX_MIN, "prompt_end": True,
+                                   "prompt_end_before_last": True}} if PREFIX else {}),
         "supports_async_decode": False,
         "supports_sample_on_device": True,  # decode: device top-32 + host draw (tt/sampling.py)
         "supports_chunked_prefill": False,
@@ -74,11 +96,18 @@ class Inkling2ForCausalLM:
         self.row2slot = {}  # live vLLM row -> physical slot (slots stay put; new requests take the lowest free one)
         from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceTopK, HostSampler
 
-        self.topk = DeviceTopK(mesh, int(model.lm_head.shape[-1]), model.V)
+        self.topk = DeviceTopK(mesh, model.Vs, model.V, sharded=model.head_shard)
         self.hs = HostSampler(model.V)
         self.V = model.V
         self.vocab = int(model.cfg.vocab_size)
         self.N = mesh.get_num_devices()
+        self.store = None
+        if PREFIX and model is not None:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.prefix import PrefixStore
+
+            self.store = PrefixStore(model, PREFIX_SLOTS)  # (device pools: before any trace capture)
+            logger.info(f"prefix cache: {PREFIX_SLOTS} state snapshots, prompts >= {PREFIX_MIN} tokens")
+        self.px_stats = {"hits": 0, "hit_tokens": 0, "saves": 0, "fallbacks": 0}
         self._captured = False
         self.already_warmed_up_prefill = False
         self._decode_steps = 0
@@ -116,11 +145,15 @@ class Inkling2ForCausalLM:
         return (n + 63) // 64 * 64
 
     def allocate_kv_cache(self, kv_cache_shape, dtype, num_layers):
-        logger.info(f"KV: vLLM asked for {num_layers} x {tuple(kv_cache_shape)}; the engine keeps its own caches")
+        nb = int(kv_cache_shape[0])
+        if PREFIX:
+            self.m.pages.enable_vllm(nb)
+        logger.info(f"KV: vLLM asked for {num_layers} x {tuple(kv_cache_shape)}; the engine keeps its own caches"
+                    + (f" (the global layers' KV through vLLM's {nb} block ids)" if PREFIX else ""))
         return [(None, None)] * int(num_layers)
 
     def allocate_kv_cache_per_layer(self, per_layer_specs):
-        return [(None, None)] * len(per_layer_specs)
+        raise NotImplementedError("Inkling-2-Mini: one homogeneous KV spec (allocate_kv_cache)")
 
     # ------------------------------------------------------------------ warm-up
     def warmup_model_prefill(self, kv_cache=None, enable_trace=False, *args, **kwargs):
@@ -130,8 +163,41 @@ class Inkling2ForCausalLM:
             t0 = time.time()
             for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
                 self.m.reset()
-                self._host_logits(self.m.forward(torch.zeros(n, dtype=torch.long), 0, valid=n, slot=0, last_only=True), 1)
+                self._host_logits(self.m.forward_packed(torch.zeros(n, dtype=torch.long), [(0, n, 0, n, 0, 0)]), 1)
+            # several sequences per chunk (every lane once), at every chunk size
+            L = self.m.lanes
+            for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
+                k = max(2, min(L, n // 64))
+                sizes = [n // k // 64 * 64] * k
+                sizes[-1] += n - sum(sizes)
+                for first in range(0, L, k):
+                    segs, r0 = [], 0
+                    for j, R in enumerate(sizes):
+                        segs.append((r0, R, 0, R, j % self.B, (first + j) % L))
+                        r0 += R
+                    self.m.reset()
+                    self._host_logits(self.m.forward_packed(torch.zeros(n, dtype=torch.long), segs), len(segs))
+            # long prompts: the global layers' log-scaling (tau) ops past position 8192, at every chunk size
+            n_floor = int(self.m.cfg.log_scaling_n_floor or 0)
+            if n_floor and self.max_seq_len > n_floor + PREFILL_CHUNK:
+                p_hi = (n_floor + 63) // 64 * 64
+                for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
+                    self.m.reset()
+                    self.m.forward_packed(torch.zeros(n, dtype=torch.long), [(0, n, p_hi, n, 0, 0)])
+            lg = self.m.forward_packed(torch.zeros(PREFILL_PAD, dtype=torch.long), [(0, PREFILL_PAD, 0, PREFILL_PAD, 0, 0)])
+            for u in range(1, L + 1):  # the logits readback of u packed rows
+                self._host_logits(lg, u)
             self.m.reset()
+            if self.store is not None:  # the snapshot copy program and the conv-state slices of every chunk size
+                self.store.warm()
+                for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
+                    for r in (64, 0):
+                        self.m.reset()
+                        self.store.arm(r, 0)
+                        self.m.forward_packed(torch.zeros(n, dtype=torch.long), [(0, n, 0, n, 0, 0)])
+                        self.store.save(0, 0, max(r, 64), 0)
+                self.store.restore(0, 0, 64, 0)
+                self.m.reset()
             logger.info(f"prefill warm-up ({PREFILL_CHUNK // PREFILL_PAD} chunk sizes) in {time.time() - t0:.0f}s")
         self.already_warmed_up_prefill = True
 
@@ -154,12 +220,8 @@ class Inkling2ForCausalLM:
 
     # ------------------------------------------------------------------ helpers
     def _host_logits(self, t, rows):
-        """[1, 1, rows, Vp] fp32 TILE logits -> host [rows, V]: untilized on device first, so only the real rows cross
-        PCIe (the tile tensor is 32 padded rows: 25 MB at Vp 200K, ~8 ms)."""
-        t = ttnn.get_device_tensors(t)[0] if self.N > 1 else t
-        t = ttnn.untilize_with_unpadding(t, [0, 0, rows - 1, int(t.shape[-1]) - 1])
-        lg = ttnn.to_torch(t).float()
-        return lg.reshape(-1, lg.shape[-1])[:rows, : self.V]
+        """[1, 1, rows(+pad), Vs] fp32 TILE logits -> host [rows, V] (tt/model.Inkling2Model.logits_host)."""
+        return self.m.logits_host(t, rows)
 
     def _apply_remap(self, slot_remap):
         """The plugin condensed its rows: new row i holds what old row remap[i] held (its slot moves with it)."""
@@ -186,31 +248,108 @@ class Inkling2ForCausalLM:
 
     # ------------------------------------------------------------------ prefill
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
-        """Prefill N requests into their rows' slots; returns the last prompt token's logits [N, 1, vocab] (host)."""
+        """Prefill N requests into their rows' slots; returns the last prompt token's logits [N, 1, vocab] (host).
+
+        Packed: up to LANES requests at a time share each prefill chunk (their rows stacked, 64-row aligned; the MoE
+        reads each expert once per chunk however many sequences it holds). Prefix cache: a request vLLM resumes at
+        start_pos > 0 restores the snapshot its directive names (the plugin's prefix_state) and prefills from there; a
+        directive's saves snapshot the state at their positions."""
         N = int(tokens.shape[0])
         start_pos = kwargs.get("start_pos")
-        if start_pos is not None and any(int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()):
-            raise NotImplementedError("prefix caching / chunked prefill are off (start_pos must be 0)")
+        starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
+        if any(starts) and not PREFIX:
+            raise NotImplementedError("prefix caching is off (start_pos must be 0)")
+        pt = None
+        if PREFIX and page_table is not None:
+            pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
+        directives = kwargs.get("prefix_state") or [None] * N
         rows = kwargs.get("empty_slots")
         rows = list(range(N)) if rows is None else [int(r) for r in rows]
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         out = torch.full((N, 1, self.vocab), float("-inf"))
+        t0 = time.time()
+        reqs = []
         for u in range(N):
-            P, slot = plens[u], self._slot_for(rows[u])
-            ids = torch.as_tensor(tokens[u, :P]).to(torch.long)
-            t0 = time.time()
-            self.m.reset()
-            lg = None
-            for p0 in range(0, P, PREFILL_CHUNK):
-                c = ids[p0 : p0 + PREFILL_CHUNK]
-                n = int(c.numel())
-                if n % PREFILL_PAD:
-                    c = torch.cat([c, torch.zeros((-n) % PREFILL_PAD, dtype=c.dtype)])
-                lg = self.m.forward(c, p0, valid=n, slot=slot, last_only=True, last_row=n - 1)
-            self.dec.load_slot(slot)
-            out[u, 0, : self.V] = self._host_logits(lg, 1)[0]
-            logger.info(f"prefill {P} tokens -> row {rows[u]} slot {slot} in {time.time() - t0:.2f}s")
+            slot = self._slot_for(rows[u])
+            if pt is not None:
+                self.m.pages.set_row(slot, pt[u])
+            d = directives[u] or {}
+            reqs.append(dict(u=u, slot=slot, ids=torch.as_tensor(tokens[u, : plens[u]]).to(torch.long), P=plens[u],
+                             b0=starts[u], restore=d.get("restore"),
+                             saves=sorted((int(q), int(k)) for q, k in (d.get("saves") or ()))))
+        L = self.m.lanes
+        for g in range(0, N, L):
+            self._prefill_group(reqs[g : g + L], out)
+        if N > 1 or TIMING:
+            logger.info(f"prefill of {N} requests ({sum(r['P'] - r['b0'] for r in reqs)} new tokens) in "
+                        f"{time.time() - t0:.2f}s")
         return out
+
+    def _prefill_group(self, reqs, out):
+        """Up to LANES requests, one prefill lane each, packed into shared chunks until every prompt is done."""
+        for lane, r in enumerate(reqs):
+            r["lane"] = lane
+            self.m.reset(lane)
+            b0 = r["b0"]
+            if b0:
+                rs = r["restore"]
+                if rs is not None and int(rs[1]) == b0 and self.store is not None:
+                    self.store.restore(int(rs[0]), r["slot"], b0, lane)
+                    self.px_stats["hits"] += 1
+                    self.px_stats["hit_tokens"] += b0
+                else:  # no snapshot at b0: the cached KV alone cannot resume the prompt; prefill it whole (exact)
+                    logger.warning(f"prefix cache: no snapshot at {b0} (restore {rs}): prefilling {r['P']} tokens")
+                    self.px_stats["fallbacks"] += 1
+                    r["b0"] = b0 = 0
+            r["p"] = b0
+            r["saves"] = [(q, k) for q, k in r["saves"] if q > b0]
+        live = list(reqs)
+        while live:
+            segs, ids, armed, used = [], [], [], 0
+            for r in live:
+                rem = r["P"] - r["p"]
+                space = PREFILL_CHUNK - used
+                if rem <= space and (rem + 63) // 64 * 64 <= space:
+                    n, R = rem, (rem + 63) // 64 * 64
+                else:
+                    n = R = min(space, rem) // 64 * 64
+                if n <= 0:
+                    break
+                p0 = r["p"]
+                c = r["ids"][p0 : p0 + n]
+                if R > n:
+                    c = torch.cat([c, torch.zeros(R - n, dtype=c.dtype)])
+                sv = [(q, k) for q, k in r["saves"] if p0 < q <= p0 + n]
+                assert len(sv) <= 1, (r["saves"], p0, n)
+                if sv:
+                    self.store.arm(sv[0][0] - p0, r["lane"])
+                    armed.append((r, sv[0]))
+                segs.append([used, R, p0, n, r["slot"], r["lane"]])
+                ids.append(c)
+                used += R
+            if used % PREFILL_PAD:  # whole chunk to a multiple of PREFILL_PAD rows: the last segment takes the padding
+                extra = (-used) % PREFILL_PAD
+                segs[-1][1] += extra
+                ids.append(torch.zeros(extra, dtype=torch.long))
+                used += extra
+            lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs])
+            for r, (q, k) in armed:
+                self.store.save(k, r["slot"], q, r["lane"])
+                self.px_stats["saves"] += 1
+            done = []
+            for i, (_, R, p0, n, slot, lane) in enumerate(segs):
+                r = next(x for x in live if x["lane"] == lane)
+                r["p"] = p0 + n
+                if r["p"] >= r["P"]:
+                    done.append((i, r))
+            if done:
+                lgh = self._host_logits(lg, len(segs))
+                for i, r in done:
+                    self.dec.load_slot(r["slot"], r["lane"])
+                    out[r["u"], 0, : self.V] = lgh[i]
+                    live.remove(r)
+                    logger.info(f"prefill {r['P']} tokens (from {r['b0']}) -> slot {r['slot']}"
+                                + (f", snapshot at {r['saves'][0][0]}" if r["saves"] else ""))
 
     # ------------------------------------------------------------------ decode
     def decode_forward(self, *args, **kwargs):
@@ -223,15 +362,21 @@ class Inkling2ForCausalLM:
         # rows the plugin no longer decodes have finished (pos -1, or past the batch it sends): their slots are free
         for r in list(self.row2slot):
             if r >= R or int(pos[r]) < 0:
-                self.row2slot.pop(r)
+                self.m.pages.free(self.row2slot.pop(r))  # (its blocks may go to another request: scratch rows)
         live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
         tok_s = torch.zeros(W, dtype=torch.long)
         pos_s = torch.full((W,), -1, dtype=torch.long)
+        pt = kwargs.get("page_table", args[2] if len(args) > 2 else None)
+        if pt is not None and self.m.pages.paged:
+            pt = pt if isinstance(pt, torch.Tensor) else torch.as_tensor(pt)
         for r in live:
             s = self.row2slot[r]
             tok_s[s], pos_s[s] = tok[r], pos[r]
+            if pt is not None and self.m.pages.paged:
+                self.m.pages.set_row(s, pt[r])
+        self.m.pages.sync(W)
         d = self.trs[W] if (self.trs and self._captured) else self.decs[W]
         t0 = time.perf_counter()
         d.set_inputs(tok_s, pos_s)

@@ -21,6 +21,7 @@ DEFAULT = ("128:128:1,1024:256:1,4096:256:1,16384:256:1,128:128:2,128:128:4,128:
            "1024:256:2,1024:256:4,1024:256:8,1024:256:16,1024:256:32")
 CASES = [tuple(int(v) for v in c.split(":")) for c in (sys.argv[2] if len(sys.argv) > 2 else DEFAULT).split(",")]
 PER_USER = 2
+SALT = time.time_ns()
 MODEL = "inkling-2-mini"
 
 
@@ -54,12 +55,12 @@ def main():
     print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |", flush=True)
     for n_in, n_out, users in CASES:
         if n_in not in warmed:
-            one(n_in, 8, 12345)
+            one(n_in, 8, hash((SALT, n_in, "warm")))
             warmed.add(n_in)
         t0 = time.time()
 
-        def user(u):
-            return [one(n_in, n_out, 1000 * u + i) for i in range(PER_USER)]
+        def user(u):  # every request its own prompt (no prefix-cache hits between requests, cases or runs)
+            return [one(n_in, n_out, hash((SALT, n_in, n_out, users, u, i))) for i in range(PER_USER)]
 
         with cf.ThreadPoolExecutor(users) as ex:
             res = [x for xs in ex.map(user, range(users)) for x in xs]

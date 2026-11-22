@@ -153,6 +153,79 @@ def proj(w: "AttnWeights", which: str, x, dtype=None):
                                      decode_out_memory_config=DRAM, out_dtype=dtype)
 
 
+class GlobalPages:
+    """Block tables of the global-attention layers, shared by every global application (one logical block maps to the
+    same block id in each global layer's pool).
+
+    Engine-owned (default): slot b owns blocks [b * mb, (b + 1) * mb). vLLM-paged serving (``set_row``): a slot's row
+    is its request's vLLM block table (vLLM's prefix cache then shares the prompt blocks between requests); entries
+    vLLM has not allocated (0) and every row of a free slot map to scratch blocks past vLLM's pool, so padded prefill
+    rows and idle decode rows never write into a block vLLM may have handed to another request."""
+
+    def __init__(self, mesh, B: int, mb: int, scratch: int = 8):
+        self.mesh, self.B, self.mb, self.scratch = mesh, B, mb, scratch
+        self.scratch_base = B * mb
+        self.n_blocks = B * mb + scratch
+        self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
+        j = torch.arange(mb)
+        self.host = torch.stack([b * mb + j for b in range(B)]).to(torch.int32)  # [B, mb]
+        self.slot_dev = [self._up(self.host[b : b + 1]) for b in range(B)]  # [1, mb] per slot (prefill)
+        self.width_dev = {}  # W -> [W, mb] (batched decode of slots 0 .. W-1); built before any trace capture
+        self.dirty = set()
+        self.paged = False
+
+    def _up(self, t):
+        return ttnn.from_torch(t.to(torch.int32).contiguous(), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                               device=self.mesh, memory_config=DRAM, mesh_mapper=self.rep)
+
+    def table(self, W: int):
+        if W not in self.width_dev:
+            self.width_dev[W] = self._up(self.host[:W])
+        return self.width_dev[W]
+
+    def _scratch_row(self):
+        return (self.scratch_base + torch.arange(self.mb) % self.scratch).to(torch.int32)
+
+    def enable_vllm(self, num_blocks: int):
+        """vLLM pages the global KV: its block ids [0, num_blocks) index this pool; every slot starts free."""
+        assert num_blocks <= self.scratch_base, (num_blocks, self.scratch_base)
+        self.paged = True
+        for b in range(self.B):
+            self.free(b)
+
+    def set_row(self, b: int, row) -> bool:
+        """Slot b now serves the request whose vLLM block table row is `row`. Returns True if the row changed."""
+        if not self.paged or row is None:
+            return False
+        r = torch.as_tensor(row).reshape(-1).to(torch.int32)
+        m = self._scratch_row()
+        k = min(self.mb, int(r.numel()))
+        m[:k] = torch.where(r[:k] > 0, r[:k], m[:k])
+        return self._put(b, m)
+
+    def free(self, b: int):
+        if self.paged:
+            self._put(b, self._scratch_row())
+
+    def _put(self, b, m) -> bool:
+        if torch.equal(self.host[b], m):
+            return False
+        self.host[b] = m
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(m.reshape(1, -1).contiguous(), dtype=ttnn.int32,
+                                                        layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self.rep),
+                                        self.slot_dev[b])
+        self.dirty.update(w for w in self.width_dev if b < w)
+        return True
+
+    def sync(self, W: int):
+        """Before a decode step of width W: its device table catches up with the host rows."""
+        if W in self.dirty:
+            ttnn.copy_host_to_device_tensor(ttnn.from_torch(self.host[:W].contiguous(), dtype=ttnn.int32,
+                                                            layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self.rep),
+                                            self.width_dev[W])
+            self.dirty.discard(W)
+
+
 class AttnCache:
     """K / V caches of one application (layer, pass) for B sequence slots, plus the conv states of a single-sequence
     "lane" (prefill / verify rows run one slot at a time on the lane; batched decode keeps its conv states in
@@ -163,8 +236,9 @@ class AttnCache:
     b * n_ring + j % n_ring; writes go through an identity table per slot at position pos mod (n_ring * block)."""
 
     def __init__(self, w: AttnWeights, max_seq_len: int, block: int = 64, kv_dtype=ttnn.bfloat8_b,
-                 prefill_chunk: int = 1024, slots: int = 1):
+                 prefill_chunk: int = 1024, slots: int = 1, pages: GlobalPages = None):
         mesh, N = w.mesh, w.N
+        self.pages = None if w.sliding else pages
         self.w, self.block, self.kv_dtype, self.prefill_chunk, self.B = w, block, kv_dtype, prefill_chunk, slots
         self.max_blocks = mb = math.ceil(max_seq_len / block)
         kv_shard = ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None
@@ -179,7 +253,8 @@ class AttnCache:
             self.v_conv = DynShortConv(mesh, w.v_static, w.v_wproj, kv_shard, C, w.NKV, w.ckc)
             per = mb
         self.per_slot = per
-        z = torch.zeros(per * slots, w.NKV * N, block, w.HD)
+        nblk = per * slots if self.pages is None else self.pages.n_blocks
+        z = torch.zeros(nblk, w.NKV * N, block, w.HD)
         mk = lambda: ttnn.from_torch(z, dtype=kv_dtype, layout=ttnn.TILE_LAYOUT, device=mesh,  # noqa: E731
                                      memory_config=DRAM,
                                      mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=1) if N > 1 else None)
@@ -192,10 +267,17 @@ class AttnCache:
             write = torch.stack([b * per + torch.arange(per) for b in range(slots)])  # [B, n_ring]
         else:
             read = write = torch.stack([b * per + j for b in range(slots)])
-        self.read_host, self.write_host = read, write
-        self.read_table, self.write_table = self._up_i32(read), self._up_i32(write)  # [B, .] (batched decode)
-        self.read_slot = [self._up_i32(read[b : b + 1]) for b in range(slots)]  # [1, .] per slot (one sequence)
-        self.write_slot = [self._up_i32(write[b : b + 1]) for b in range(slots)]
+        if self.pages is not None:  # the shared global tables (updated in place)
+            pg = self.pages
+            assert pg.mb == mb and pg.B == slots, (pg.mb, mb, pg.B, slots)
+            self.read_host = self.write_host = pg.host
+            self.read_table = self.write_table = pg.table(slots)
+            self.read_slot = self.write_slot = pg.slot_dev
+        else:
+            self.read_host, self.write_host = read, write
+            self.read_table, self.write_table = self._up_i32(read), self._up_i32(write)  # [B, .] (batched decode)
+            self.read_slot = [self._up_i32(read[b : b + 1]) for b in range(slots)]  # [1, .] per slot (one sequence)
+            self.write_slot = [self._up_i32(write[b : b + 1]) for b in range(slots)]
         self._kv_shard = ttnn.create_sharded_memory_config(
             shape=(ttnn.TILE_SIZE, w.HD), core_grid=ttnn.CoreGrid(x=1, y=1), strategy=ttnn.ShardStrategy.HEIGHT,
             orientation=ttnn.ShardOrientation.ROW_MAJOR, use_height_and_width_as_shard_shape=True)
@@ -319,6 +401,106 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, R, w.H))
+    if N > 1:
+        out = all_reduce(out, w.mesh, tt_ccl)
+    return out
+
+
+class PackedCtx:
+    """One packed prefill chunk: several sequences' rows stacked (segments), each segment 64-row aligned.
+
+    segs: [(row0, R, p0, valid, slot, lane)] (R % 64 == 0, p0 % 64 == 0). Built once per chunk: the SDPA's per-item
+    positions and page-table rows (one 8-row item never straddles two segments), shared by every application."""
+
+    def __init__(self, mesh, segs, sliding_cache: "AttnCache", global_cache: "AttnCache"):
+        self.segs = segs
+        rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
+        up = lambda t: ttnn.from_torch(t.to(torch.int32).contiguous(), dtype=ttnn.int32,  # noqa: E731
+                                       layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM, mesh_mapper=rep)
+        from .blkcopy import BlockCopy
+
+        pos, slot_of = [], []
+        for row0, R, p0, valid, slot, lane in segs:
+            assert R % 64 == 0 and p0 % 64 == 0 and row0 % 64 == 0, (row0, R, p0)
+            pos.append(torch.arange(p0, p0 + R))
+            slot_of += [slot] * (R // R_ITEM)
+        self.T = sum(s[1] for s in segs)
+        self.positions = up(torch.cat(pos).reshape(-1, R_ITEM))
+        self.pt, self.fill = {}, {}
+        for c in (sliding_cache, global_cache):
+            if c is not None:
+                self.pt[c.w.sliding] = up(c.read_host[slot_of])
+                # one KV fill per chunk: the physical block of each 64-row block of the packed rows
+                blk = [c.read_host[slot, p0 // 64 + j] for _, R, p0, _, slot, _ in segs for j in range(R // 64)]
+                self.fill[c.w.sliding] = up(torch.stack(blk).reshape(1, -1))
+        self.p_hi = max(p0 + R for _, R, p0, _, _, _ in segs)
+        self.bc = BlockCopy(mesh, sliding_cache.k_cache)
+
+    def release(self):
+        for t in [self.positions] + list(self.pt.values()) + list(self.fill.values()):
+            ttnn.deallocate(t)
+
+
+def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: PackedCtx, tt_ccl=None):
+    """attention() for a packed prefill chunk (PackedCtx): the projections, norms, gate and o_proj on all rows at once;
+    the K / V convs (per-sequence state: lanes[lane] = (k_conv, v_conv)) and the KV writes per segment; one SDPA over
+    every segment (per-item page-table rows). xq / xk / xv [1, 1, T, H] bf16 -> [1, 1, T, H] bf16."""
+    NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
+    T = int(xq.shape[2])
+    pq = proj(w, "q", xq, ttnn.float32 if FUSED_OPS else None)
+    pk = proj(w, "k", xk)
+    pv = proj(w, "v", xv)
+    if w.dram_sharded:
+        pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, T, w.kd))
+        pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, T, w.kd))
+    o0 = 0
+    q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.qd)); o0 += w.qd
+    r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.rd)); o0 += w.rd
+    s = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + NH)); o0 += w.sd
+    g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))
+    ttnn.deallocate(pq)
+    sk_ = [(row0, R, valid, lanes[lane][0]) for row0, R, p0, valid, slot, lane in ctx.segs]
+    sv_ = [(row0, R, valid, lanes[lane][1]) for row0, R, p0, valid, slot, lane in ctx.segs]
+    if w.sliding:
+        k = c.k_conv.prefill_packed(pk, sk_)
+        v = c.v_conv.prefill_packed(pv, sv_)
+    else:
+        k = c.k_conv.rows_packed(pk, xk, sk_, ctx.bc)
+        v = c.v_conv.rows_packed(pv, xv, sv_, ctx.bc)
+    ttnn.deallocate(pk)
+    ttnn.deallocate(pv)
+    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    q = _l2clip(f32(ttnn.reshape(q, (1, T, NH, HD))), w.qk_clip, w.q_scale)
+    r = _l2clip(f32(ttnn.reshape(r, (1, T, NH, DR))), w.rel_clip, w.r_scale)
+    k = _l2clip(f32(ttnn.reshape(k, (1, T, NKV, HD))), w.qk_clip)
+    v = _rms_unweighted(f32(ttnn.reshape(v, (1, T, NKV, HD))), w.eps)
+    if not w.sliding and ctx.p_hi > w.n_floor - 1:  # log scaling (exact host tau per row)
+        tau = torch.cat([tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha) for _, R, p0, _, _, _ in ctx.segs])
+        tau_t = ttnn.from_torch(tau.reshape(1, T, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=w.mesh,
+                                mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if N > 1 else None)
+        q = ttnn.multiply(q, tau_t)
+        r = ttnn.multiply(r, tau_t)
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
+    q, k, v = bf(q), bf(k), bf(v)
+    # KV writes: one fill for the chunk (each 64-row block to its sequence's physical block)
+    for cache, t in ((c.k_cache, k), (c.v_cache, v)):
+        tt_ = ttnn.transpose(t, 1, 2)  # [1, NKV, T, HD]
+        t8 = ttnn.typecast(tt_, c.kv_dtype) if c.kv_dtype != tt_.dtype else tt_
+        ttnn.experimental.paged_fill_cache(cache, t8, ctx.fill[w.sliding], batch_idx=0)
+        ttnn.deallocate(t8)
+    ttnn.deallocate(k)
+    ttnn.deallocate(v)
+    rq = ttnn.pad(bf(r), [1, T, NH, 32], [0, 0, 0, 0], 0.0)
+    sk = bf(ttnn.multiply(f32(ttnn.reshape(s, (1, T, NH, 1))), w.sink_bcast))
+    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, ctx.positions, ctx.pt[w.sliding], rq, w.table, w.scale, w.W, w.E,
+                            sink=sk, out_memory_config=DRAM, pt_per_item=True)
+    for t in (q, rq, sk):
+        ttnn.deallocate(t)
+    o = ttnn.reshape(o, (1, 1, T, NH * HD))
+    o = bf(ttnn.multiply(f32(o), ttnn.sigmoid(f32(g))))
+    out = proj(w, "o", o)
+    if w.dram_sharded and int(out.shape[-1]) != w.H:
+        out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, T, w.H))
     if N > 1:
         out = all_reduce(out, w.mesh, tt_ccl)
     return out

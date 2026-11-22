@@ -21,11 +21,15 @@ GROUP = 8  # RowsTopK's live-row limit
 
 
 class DeviceTopK:
-    def __init__(self, mesh, Vp: int, V: int):
+    def __init__(self, mesh, Vp: int, V: int, sharded: bool = False):
+        """Vp: one die's logits columns. sharded: the LM head is split over the vocab (die d holds columns
+        [d * Vp, (d + 1) * Vp)): each die's candidates are its slice's top K, shifted by the max over ALL dies (one
+        small all-gather) so the host can merge them by value."""
         from models.demos.blackhole.qwen36.tt.decode_sampling.ops import RowsTopK
 
         self.mesh, self.Vp, self.V = mesh, Vp, V
         self.N = mesh.get_num_devices()
+        self.sharded = sharded and self.N > 1
         self.rtk = RowsTopK(mesh, Vp, k=K)
 
     def device(self, lg, W: int):
@@ -41,6 +45,9 @@ class DeviceTopK:
             part_f = lg if W <= GROUP else ttnn.slice(lg, [0, 0, g0, 0], [1, 1, g0 + rows, self.Vp])
             v1, _ = self.rtk(part_b, rows)
             top = ttnn.typecast(ttnn.slice(v1, [0, 0, 0, 0], [1, 1, rows, 1]), ttnn.float32)
+            if self.sharded:  # every die shifts by the same value: the max over the dies' maxima
+                tops = ttnn.all_gather(top, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N]
+                top = ttnn.max(tops, dim=-1, keepdim=True)
             if int(part_f.shape[2]) != rows:
                 part_f = ttnn.slice(part_f, [0, 0, 0, 0], [1, 1, rows, self.Vp])
             shifted = ttnn.typecast(ttnn.subtract(part_f, top), ttnn.bfloat16)
@@ -50,11 +57,24 @@ class DeviceTopK:
         return parts
 
     def host(self, parts):
-        """-> host (indices [W, K] int64, logits [W, K] fp32) by row, sorted descending."""
-        d0 = (lambda t: ttnn.get_device_tensors(t)[0]) if self.N > 1 else (lambda t: t)
-        idx = torch.cat([ttnn.to_torch(d0(i)).reshape(r, K).to(torch.int64) for i, _, r in parts])
-        val = torch.cat([ttnn.to_torch(d0(v)).float().reshape(r, K) for _, v, r in parts])
-        return idx, val
+        """-> host (indices [W, K] int64, logits [W, K] fp32) by row, sorted descending (sharded head: the dies'
+        candidates merged by value, ties to the lower index)."""
+        devs = (lambda t: ttnn.get_device_tensors(t)) if self.N > 1 else (lambda t: [t])
+        nd = self.N if self.sharded else 1
+        idx, val = [], []
+        for i, v, r in parts:
+            ii = [ttnn.to_torch(t).reshape(r, K).to(torch.int64) + d * self.Vp for d, t in enumerate(devs(i)[:nd])]
+            vv = [ttnn.to_torch(t).float().reshape(r, K) for t in devs(v)[:nd]]
+            ii, vv = torch.cat(ii, -1), torch.cat(vv, -1)
+            if nd > 1:
+                # by value descending, then by index ascending (stable sort on the index order first)
+                o = torch.argsort(ii, dim=-1, stable=True)
+                ii, vv = ii.gather(-1, o), vv.gather(-1, o)
+                o = torch.argsort(vv, dim=-1, descending=True, stable=True)[:, :K]
+                ii, vv = ii.gather(-1, o), vv.gather(-1, o)
+            idx.append(ii)
+            val.append(vv)
+        return torch.cat(idx), torch.cat(val)
 
     def __call__(self, lg, W: int):
         return self.host(self.device(lg, W))

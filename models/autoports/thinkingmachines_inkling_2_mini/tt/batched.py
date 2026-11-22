@@ -156,7 +156,9 @@ class BatchedApp:
         kv_map = ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None
         rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
         # this width's page tables: rows 0 .. B-1 of the cache's slot tables (slot = row)
-        if shared is None:
+        if c.pages is not None:  # global layers: the shared tables (vLLM's block ids when paged)
+            self.read_table = self.write_table = c.pages.table(B)
+        elif shared is None:
             self.read_table, self.write_table = c.read_table, c.write_table
         else:
             self.read_table = c._up_i32(c.read_host[:B])
@@ -181,13 +183,13 @@ class BatchedApp:
             strategy=ttnn.ShardStrategy.HEIGHT, orientation=ttnn.ShardOrientation.ROW_MAJOR,
             use_height_and_width_as_shard_shape=True)
 
-    def load_slot(self, b, app):
-        """After slot b's prefill on the lane: copy the lane conv states into row b."""
-        c = app.cache
-        self.k.load_slot(b, c.k_conv.st)
-        self.v.load_slot(b, c.v_conv.st)
-        self.attn.load_slot(b, app.attn_conv.st)
-        self.mlp.load_slot(b, app.mlp_conv.st)
+    def load_slot(self, b, app, lane=0):
+        """After slot b's prefill on prefill lane `lane`: copy the lane's conv states into row b."""
+        k, v, at, ml = app.lanes[lane]
+        self.k.load_slot(b, k.st)
+        self.v.load_slot(b, v.st)
+        self.attn.load_slot(b, at.st)
+        self.mlp.load_slot(b, ml.st)
 
 
 def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, tau, tt_ccl=None):
@@ -316,11 +318,11 @@ class BatchedDecoder:
         self.tau = ttnn.from_torch(torch.ones(1, B, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
                                    mesh_mapper=self.rep)
 
-    def load_slot(self, b):
+    def load_slot(self, b, lane=0):
         if self.shared is not None:
-            return self.shared.load_slot(b)
+            return self.shared.load_slot(b, lane)
         for a in range(len(self.apps)):
-            self.apps[a].load_slot(b, self.m.apps[a])
+            self.apps[a].load_slot(b, self.m.apps[a], lane)
 
     def set_inputs(self, tokens: torch.Tensor, positions: torch.Tensor):
         """tokens [B] int, positions [B] int (-1 = idle slot)."""

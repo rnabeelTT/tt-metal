@@ -36,6 +36,7 @@ KERNELS = Path(__file__).parent / "sconv_kernels"
 # more; longer row sets (prefill chunks) keep the ttnn ops
 FUSED = os.environ.get("INKLING_SCONV_KERNEL", "1") == "1"
 FUSED_MAX_ROWS = 29  # 3 carried rows + R rows in one tile
+PF_MAXSEG = 8  # sequences per packed prefill chunk (sconv_kernels/pfseg_reader.cpp MAXSEG)
 # INKLING_SCONV_PF_KERNEL (default 1): a prefill chunk (R % 32 == 0 rows, bf16) through one program over the row tiles
 # (sconv_kernels/pf_*.cpp: the same arithmetic as the fused rows kernel, the carried rows passed between tiles) plus a
 # state copy, instead of ~15 ttnn ops per conv
@@ -159,8 +160,20 @@ class ShortConv:
             self.cores = _cores(mesh, ncores)
         self._seq_tile = None
 
+    snap_row = None  # prefix cache (tt/prefix.py): set for the prefill chunk holding a snapshot position
+    snap_out = None
+
     def reset(self):
         ttnn.copy(self._zero, self.st)
+
+    def _state_at(self, x, r):
+        """The state after row r - 1 of chunk x (r = 0: the current state): x's rows r-3 .. r-1 as fp32 row-major."""
+        if r == 0:
+            return ttnn.clone(self.st)
+        assert r % 32 == 0 and r >= 32, r
+        t = ttnn.slice(x, [0, 0, r - 32, 0], [1, 1, r, self.C])
+        t = ttnn.to_layout(ttnn.typecast(t, ttnn.float32), ttnn.ROW_MAJOR_LAYOUT)
+        return ttnn.slice(t, [0, 0, 32 - (K - 1), 0], [1, 1, 32, self.C])
 
     def _conv(self, x, out_dtype=ttnn.float32):
         """x [1, 1, R, C] (tile, any float dtype) -> (y tile [1, 1, R, C] in out_dtype, seq = [s0, s1, s2, x_0 .. x_{R-1}]
@@ -290,6 +303,8 @@ class ShortConv:
         first n rows (default R: a padded last chunk passes its real row count). One program + a state copy."""
         R = int(x.shape[2])
         n = R if n is None else int(n)
+        if self.snap_row is not None:  # prefix cache: the state at row snap_row of this chunk, before it advances
+            self.snap_out = self._state_at(x, int(self.snap_row))
         if not self._pf_ok(x) or n < 1:
             y = self.rows(x, commit_all=(n == R))
             if n != R:
@@ -347,6 +362,57 @@ class ShortConv:
         ttnn.generic_op([x, self.st, self.taps_tiles, stn, y], prog)
         ttnn.copy(stn, self.st)
         self._last_seq = None
+        return y
+
+    def prefill_packed(self, x, segs):
+        """A packed prefill chunk (several sequences): x [1, 1, T, C] bf16 tile -> y [1, 1, T, C] bf16 in one program
+        (sconv_kernels/pfseg_reader.cpp; the program depends on T only). segs: [(row0, R, n, lane_conv)] (64-row
+        aligned, covering all T rows): segment rows run against lane_conv's state, which then advances past the
+        segment's first n rows; a lane conv with snap_row set also gets the state at that row in its snap_buf."""
+        T = int(x.shape[2])
+        assert self._pf_ok(x) and len(segs) <= PF_MAXSEG, (T, len(segs))
+        pr = self._pf_program(T)
+        cols, Rt, G, gy = pr["ct"]
+        cr = pr["cr"]
+        y = ttnn.allocate_tensor_on_device(
+            ttnn.Shape([1, 1, T, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, ttnn.DRAM_MEMORY_CONFIG
+        )
+        NONE = 0xFFFFFFFF
+        args = [x.buffer_address(), self.taps_tiles.buffer_address(), len(segs)]
+        for row0, R, n, lc in segs:
+            assert row0 % 32 == 0 and R % 32 == 0
+            snap = lc.snap_row
+            args += [row0 // 32, (row0 + R) // 32, lc.st.buffer_address(), lc._pf_stn.buffer_address(), int(n),
+                     lc.snap_buf.buffer_address() if snap is not None else 0, int(snap) if snap is not None else NONE]
+        args += [0] * (3 + 7 * PF_MAXSEG - len(args))
+        cb_x, cb_s, cb_t, cb_scr, cb_o = 0, 1, 2, 3, 16
+        rd_ct = [cb_x, cb_s, cb_t, cb_scr, cols, Rt, G, gy]
+        for t in (x, self.st, self.taps_tiles):
+            rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
+
+        def kd(source, ct, common, cfg):
+            k = ttnn.KernelDescriptor(kernel_source=str(KERNELS / source), core_ranges=cr, compile_time_args=ct,
+                                      config=cfg)
+            k.common_runtime_args = common
+            return k
+
+        kernels = [
+            kd("pfseg_reader.cpp", rd_ct, args,
+               ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
+            kd("pf_writer.cpp", wr_ct, [y.buffer_address()],
+               ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
+            kd("pf_compute.cpp", [cb_x, cb_s, cb_t, cb_o, cols, Rt, G, gy], [],
+               ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                            math_approx_mode=False)),
+        ]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=pr["cbs"])
+        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg", self.C, T, G, gy)
+        ttnn.generic_op([x, self.st, self.taps_tiles, y], prog)
+        for row0, R, n, lc in segs:
+            ttnn.copy(lc._pf_stn, lc.st)
+            if lc.snap_row is not None:
+                lc.snap_out = lc.snap_buf
         return y
 
     def _commit_kernel(self, seq, n):
@@ -472,6 +538,9 @@ class DynShortConv:
         self.state = [self.st]
         self._last_seq = None
 
+    snap_row = None  # prefix cache (see ShortConv)
+    snap_out = None
+
     def reset(self):
         ttnn.copy(self._zero, self.st)
 
@@ -486,6 +555,9 @@ class DynShortConv:
         xf = ttnn.typecast(x, ttnn.float32) if x.dtype != ttnn.float32 else x
         xr = ttnn.to_layout(xf, ttnn.ROW_MAJOR_LAYOUT)
         seq = ttnn.concat([self.st, xr], dim=2)  # [1, 1, K-1+R, C]: rows t-3, t-2, t-1, then x
+        if self.snap_row is not None:  # prefix cache: the state after row snap_row - 1
+            r = int(self.snap_row)
+            self.snap_out = ttnn.slice(seq, [0, 0, r, 0], [1, 1, r + K - 1, self.C])
         y = xr
         for L in range(K):
             # per-token taps for lag L: static[L] + dyn expanded over the head's channels (exact), in fp32
@@ -505,6 +577,47 @@ class DynShortConv:
 
     def commit_rows(self, n: int):
         ttnn.copy(ttnn.slice(self._last_seq, [0, 0, n, 0], [1, 1, n + K - 1, self.C]), self.st)
+
+    def rows_packed(self, x, h, segs, bc):
+        """A packed prefill chunk (several sequences; see ShortConv.prefill_packed): x [1, 1, T, C], h [1, 1, T, H] ->
+        y [1, 1, T, C] bf16 (times 3). The lagged rows x_{t-L} come from one block-copy program per chunk (each
+        segment's rows shifted by L, its lane state in front), so every op's shape depends on T only."""
+        T = int(x.shape[2])
+        hb = ttnn.typecast(h, ttnn.bfloat16) if h.dtype != ttnn.bfloat16 else h
+        dyn_b = ttnn.matmul(hb, self.wproj, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16)  # [1, 1, T, nh*K]
+        xf = ttnn.typecast(x, ttnn.float32) if x.dtype != ttnn.float32 else x
+        xr = ttnn.to_layout(xf, ttnn.ROW_MAJOR_LAYOUT)
+        xs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.C]), ttnn.float32, ttnn.ROW_MAJOR_LAYOUT,
+                                             self.mesh, ttnn.DRAM_MEMORY_CONFIG) for _ in range(K - 1)]
+        jobs, after = [], []
+        for row0, R, n, lc in segs:
+            for L in range(1, K):
+                jobs.append((xr, row0, xs[L - 1], row0 + L, R - L))
+                jobs.append((lc.st, K - 1 - L, xs[L - 1], row0, L))
+            for P, dst in ((int(n), lc._pf_stn), (lc.snap_row, lc.snap_buf)):
+                if P is None:
+                    continue
+                P = int(P)
+                for r in range(K - 1):  # state row r = seq[P + r] = the old state row P + r, or segment row P + r - 3
+                    if P + r < K - 1:
+                        jobs.append((lc.st, P + r, dst, r, 1))
+                    else:
+                        jobs.append((xr, row0 + P + r - (K - 1), dst, r, 1))
+        bc(jobs)
+        y = xr
+        for L in range(K):
+            wl = ttnn.matmul(dyn_b, self.expand[L], compute_kernel_config=self.ckc, dtype=ttnn.float32)
+            wl = ttnn.add(ttnn.to_layout(wl, ttnn.ROW_MAJOR_LAYOUT), self.static[L])
+            y = ttnn.add(y, ttnn.multiply(xr if L == 0 else xs[L - 1], wl))
+        ttnn.deallocate(dyn_b)
+        for t in xs:
+            ttnn.deallocate(t)
+        for row0, R, n, lc in segs:
+            ttnn.copy(lc._pf_stn, lc.st)
+            if lc.snap_row is not None:
+                lc.snap_out = lc.snap_buf
+        y = ttnn.typecast(y, ttnn.bfloat16)
+        return ttnn.to_layout(y, ttnn.TILE_LAYOUT)
 
 
 def dyn_host_reference(x, h, static, wproj, state=None):

@@ -69,7 +69,7 @@ def main():
             tok = torch.tensor([ref[n_]["ids"][P + t] for n_ in group] + [0] * (B - len(group)))
             pos = torch.tensor([P + t] * len(group) + [-1] * (B - len(group)))
             d.set_inputs(tok, pos)
-            lg = ttnn.to_torch(d0(d.step())).float().reshape(B, -1)[:, : m.V]
+            lg = m.logits_host(d.step(), B)
             for b in range(len(group)):
                 lps[b].append(torch.log_softmax(lg[b], -1))
         dt = time.time() - t0

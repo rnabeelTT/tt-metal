@@ -22,6 +22,7 @@ by 4 learned queries per loop layer (MessageAttnRes). The short convs' scales ar
 
 from __future__ import annotations
 
+import copy
 import math
 import os
 
@@ -30,7 +31,8 @@ import torch
 import ttnn
 
 from .dmm import dmm
-from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import AttnCache, AttnWeights, attention
+from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import (AttnCache, AttnWeights, GlobalPages, PackedCtx,
+                                                                          attention, attention_packed)
 from models.autoports.thinkingmachines_inkling_2_mini.tt.moe import MoE
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import ShortConv
 from models.autoports.thinkingmachines_inkling_2_mini.tt.weights import Checkpoint, load_config, schedule
@@ -45,6 +47,25 @@ GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gat
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
+# packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
+LANES = int(os.environ.get("I2M_PREFILL_LANES", "8"))
+
+
+def _lane_bufs(cv):
+    """A conv lane's packed-prefill buffers: its next state and its prefix-snapshot state (allocated before any
+    trace capture)."""
+    cv._pf_stn = ttnn.clone(cv._zero)
+    cv.snap_buf = ttnn.clone(cv._zero)
+    return cv
+
+
+def _lane_copy(cv):
+    """Another sequence lane of a conv: the same taps / programs, its own state (allocated now, before any capture)."""
+    c = copy.copy(cv)
+    c.st = ttnn.clone(cv._zero)
+    c.state = [c.st]
+    c._last_seq = None
+    return _lane_bufs(c)
 
 
 def _f32(t):
@@ -231,18 +252,25 @@ class Layer:
 class AppState:
     """Per application (layer, pass): attention caches + the two hidden-size conv states."""
 
-    def __init__(self, layer: Layer, max_seq_len, kv_dtype, prefill_chunk, slots=1):
+    def __init__(self, layer: Layer, max_seq_len, kv_dtype, prefill_chunk, slots=1, pages=None, lanes=1):
         mesh = layer.ops.mesh
         H = layer.attn_conv_w.shape[0]
-        self.cache = AttnCache(layer.attn, max_seq_len, kv_dtype=kv_dtype, prefill_chunk=prefill_chunk, slots=slots)
+        self.cache = AttnCache(layer.attn, max_seq_len, kv_dtype=kv_dtype, prefill_chunk=prefill_chunk, slots=slots,
+                               pages=pages)
         rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         self.attn_conv = ShortConv(mesh, layer.attn_conv_w, rep, H)
         self.mlp_conv = ShortConv(mesh, layer.mlp_conv_w, rep, H)
 
-    def reset(self):
-        self.cache.reset()
-        self.attn_conv.reset()
-        self.mlp_conv.reset()
+        self.lanes = [tuple(_lane_bufs(cv) for cv in (self.cache.k_conv, self.cache.v_conv, self.attn_conv,
+                                                       self.mlp_conv))]
+        for _ in range(lanes - 1):
+            self.lanes.append(tuple(_lane_copy(cv) for cv in self.lanes[0]))
+
+    def reset(self, lane=None):
+        for i, ln in enumerate(self.lanes):
+            if lane is None or i == lane:
+                for cv in ln:
+                    cv.reset()
 
     def conv(self, which, x, rows_mode, nvalid):
         c = self.attn_conv if which == "attn" else self.mlp_conv
@@ -278,7 +306,11 @@ class Inkling2Model:
             self.layers[li] = Layer(ops, cfg, ck, li, expert_dtype, attn_dtype, cache_dir, tt_ccl)
             print(f"layer {li} loaded in {__import__('time').time() - t0:.0f}s", flush=True)
         self.slots = slots
-        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots) if li in self.layers else None
+        # the global layers' block tables (shared; vLLM's block ids when vLLM pages the global KV)
+        self.pages = GlobalPages(mesh, slots, math.ceil(max_seq_len / 64))
+        self.lanes = LANES
+        self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots, self.pages, LANES)
+                     if li in self.layers else None
                      for li, p in self.sched]
         print(f"application states up ({sum(a is not None for a in self.apps)})", flush=True)
         # message queries [n_loop, 4, H] -> per loop layer [1,1,H,32] (4 query columns, pre-scaled)
@@ -294,11 +326,19 @@ class Inkling2Model:
         emb = ck.get("model.llm.embed.weight")
         self.embed = ttnn.as_tensor(emb.to(torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT,
                                     device=mesh, memory_config=DRAM, mesh_mapper=ops.rep)  # no ttnn cache: large cached uploads hang
-        Vp = (V + 31) // 32 * 32
+        # I2M_HEAD_SHARD (default 1 on > 1 die): the LM head split over the vocab (each die computes Vp / N logits; the
+        # device top-k runs per die and the host merges the candidates; logits_host gathers full rows)
+        N = mesh.get_num_devices()
+        self.head_shard = N > 1 and os.environ.get("I2M_HEAD_SHARD", "1") == "1"
+        q = 32 * (N if self.head_shard else 1)
+        Vp = (V + q - 1) // q * q
         un = ck.get("model.llm.unembed.weight")[:V].float()
         un = torch.nn.functional.pad(un, (0, 0, 0, Vp - V))
         self.lm_head = ttnn.as_tensor(un.T.contiguous().reshape(1, 1, H, Vp).to(torch.bfloat16), dtype=HEAD_DT,
-                                      layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM, mesh_mapper=ops.rep)
+                                      layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM,
+                                      mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=3) if self.head_shard else ops.rep)
+        self.Vp = Vp  # all dies' columns
+        self.Vs = Vp // N if self.head_shard else Vp  # one die's logits columns
         self.softcap = cfg.final_logit_softcapping
         print("embedding + lm head up", flush=True)
 
@@ -311,7 +351,7 @@ class Inkling2Model:
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
         return _bf(self.ops.rms(e, self.embed_norm))
 
-    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0):
+    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0, ctx=None):
         """Application a on x [1,1,T,H] bf16 (block partial sum) at positions p0..; blocks_n = rms-normed fp32 blocks.
         messages: 4 fp32 [1,1,T,H] (q, k, v, mlp) on passes > 1. Returns the bf16 output."""
         li, _ = self.sched[a]
@@ -339,8 +379,12 @@ class Inkling2Model:
             if messages is not None:
                 qi, ki, vi = (L.gates[n](h, m) for n, h, m in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
             qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
-        att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl, slot=slot)
-        att = st.conv("attn", att, rows_mode, nvalid)
+        if ctx is not None:
+            att = attention_packed(L.attn, st.cache, [ln[:2] for ln in st.lanes], qn, kn, vn, ctx, tt_ccl=self.tt_ccl)
+            att = self._seg_conv(st, 2, att, ctx)
+        else:
+            att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl, slot=slot)
+            att = st.conv("attn", att, rows_mode, nvalid)
         if L.boundary:
             resid = _f32(att)
             blocks_n = blocks_n + [xn if xn is not None else ops.rms(x)]
@@ -350,8 +394,15 @@ class Inkling2Model:
         if messages is not None:
             m = L.gates["mlp"](m, messages[3])
         mo = L.moe.forward(_bf(ops.rms(m, L.mlp_norm)))
-        mo = st.conv("mlp", mo, rows_mode, nvalid)
+        mo = self._seg_conv(st, 3, mo, ctx) if ctx is not None else st.conv("mlp", mo, rows_mode, nvalid)
         return _bf(ttnn.add(resid, _f32(mo)))
+
+    @staticmethod
+    def _seg_conv(st, i, x, ctx):
+        """Conv i (2: attention output, 3: MoE output) of a packed chunk: each segment on its lane's state."""
+        x = _bf(x)
+        return st.lanes[0][i].prefill_packed(x, [(row0, R, valid, st.lanes[lane][i])
+                                                 for row0, R, _, valid, _, lane in ctx.segs])
 
     def messages(self, loop_idx, prev_src_n):
         """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages."""
@@ -365,13 +416,37 @@ class Inkling2Model:
         lg = dmm(h, self.lm_head, ops.ckc, dtype=ttnn.float32, memory_config=DRAM, linear=True)
         return ttnn.multiply(ttnn.tanh(ttnn.multiply(lg, 1.0 / self.softcap)), self.softcap)
 
+    def logits_host(self, t, rows):
+        """[1, 1, >= rows, Vs] fp32 TILE logits (per die: its vocab slice when the head is sharded) -> host [rows, V].
+        Untilized on device first, so only the real rows cross PCIe."""
+        dev = ttnn.get_device_tensors(t) if self.mesh.get_num_devices() > 1 else [t]
+        if not self.head_shard:
+            dev = dev[:1]
+        parts = []
+        for d in dev:
+            u = ttnn.untilize_with_unpadding(d, [0, 0, rows - 1, int(d.shape[-1]) - 1])
+            parts.append(ttnn.to_torch(u).float().reshape(-1, int(d.shape[-1]))[:rows])
+        return torch.cat(parts, dim=-1)[:, : self.V]
+
     # -- whole model -------------------------------------------------------------------------------------------------
-    def reset(self):
+    def reset(self, lane=None):
         for s in self.apps:
             if s is not None:
-                s.reset()
+                s.reset(lane)
 
-    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None):
+    def forward_packed(self, ids: torch.Tensor, segs):
+        """A packed prefill chunk: ids [T] holding segments segs = [(row0, R, p0, valid, slot, lane)] (each its own
+        sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row."""
+        slid = next(self.apps[a].cache for a, (li, _) in enumerate(self.sched) if self.layers[li].sliding)
+        glob = next((self.apps[a].cache for a, (li, _) in enumerate(self.sched) if not self.layers[li].sliding), None)
+        ctx = PackedCtx(self.mesh, segs, slid, glob)
+        try:
+            return self.forward(ids, 0, ctx=ctx, last_rows=[row0 + valid - 1 for row0, _, _, valid, _, _ in segs])
+        finally:
+            ctx.release()
+
+    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None,
+                ctx=None, last_rows=None):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
         capture(a, out) is called with each application's output (debug)."""
         cfg, ops = self.cfg, self.ops
@@ -393,7 +468,7 @@ class Inkling2Model:
             if L.loop and p > 0:
                 msgs = self.messages(li - cfg.loop_start, prev_src)
             xin = x
-            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid, slot=slot)
+            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid, slot=slot, ctx=ctx)
             if L.boundary:
                 blocks_n = blocks_n + [ops.rms(xin)]
             if capture is not None:
@@ -402,6 +477,15 @@ class Inkling2Model:
                 # sources for the next pass's messages: the block appended at layer 12 of this pass + this output
                 b12 = blocks_n[len(pre_blocks) + 1]
                 prev_src = [b12, ops.rms(x)]
+        if last_rows is not None:  # the head on the given rows (each packed segment's last prompt token), rows 0..U-1
+            def cut(t):  # row gather through row-major pages: every program's shape depends on T only
+                rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT)
+                g = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, int(t.shape[-1])]), t.dtype,
+                                                   ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM)
+                ctx.bc([(rm, r, g, i, 1) for i, r in enumerate(last_rows)])
+                ttnn.deallocate(rm)
+                return ttnn.to_layout(g, ttnn.TILE_LAYOUT)
+            return self.head(cut(x), [cut(b) for b in blocks_n])
         if last_only:  # the head on one row (a prefill's last prompt token): [1, 1, 1, Vp]
             r = int(ids.numel()) - 1 if last_row is None else int(last_row)
             cut = lambda t: ttnn.slice(t, [0, 0, r, 0], [1, 1, r + 1, t.shape[-1]])  # noqa: E731
