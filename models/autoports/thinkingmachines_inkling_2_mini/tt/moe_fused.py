@@ -29,6 +29,9 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
 SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
+# I2M_MOE_SUBS1 (one die): "768,384" -> two sub-shards (m = 6 and 3 column tiles per bank: both supported) instead of 3
+if os.environ.get("I2M_MOE_SUBS1"):
+    SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
 
 class FusedExperts:
@@ -74,8 +77,9 @@ class FusedExperts:
                     rows.append(t)
                 return torch.cat(rows, 1).unsqueeze(0).to(torch.bfloat16)  # [1, E, N * W, H]
 
-            ug = cached(make_ug, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"ug{si}"), mesh_mapper=mm(-1))
-            dn = cached(make_dn, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"dn{si}"), mesh_mapper=mm(-2))
+            tag = f"{si}" if subs == [(384, 384)] * 3 or N > 1 else f"{si}o{off}w{W}"  # (old names for the old split)
+            ug = cached(make_ug, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"ug{tag}"), mesh_mapper=mm(-1))
+            dn = cached(make_dn, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"dn{tag}"), mesh_mapper=mm(-2))
             ckc = moe.rckc
             op = FusedMoEDecode(
                 self.mesh, _SHARED, hidden=H, inter_local=W, num_experts=E, k=moe.k, tp=N, dtype=dtype,

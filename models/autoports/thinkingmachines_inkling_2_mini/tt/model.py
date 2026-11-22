@@ -40,6 +40,7 @@ SQRT5 = math.sqrt(5.0)
 FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
 _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
+GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"  # the whole message gate in one program (tt/gate.py)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
@@ -67,6 +68,7 @@ class Ops:
         self.qrep = {}  # id(Q) -> Qrep [1,1,H,nq*32] (tt/mixw.py)
         self.mixk = None
         self.gatek = None
+        self.gatefk = None
         self.rms_cfg = {}
 
     def query(self, Qcols):
@@ -169,10 +171,17 @@ class MessageGate:
         # [forget | gain] in one fp32 matmul
         wfg = torch.cat([L("forget_weight").float().T, L("gain_weight").float().T], dim=1)  # [r, 2H]
         self.wfg = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.float32)
+        if GATE_FUSED:  # the one-program gate (tt/gate.py): bf16 forget / gain weights (the checkpoint's, exact)
+            self.wfg_bf = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat16)
 
     def __call__(self, h, m):
         o, H = self.ops, self.H
         hf, mf = _f32(h), _f32(m)
+        if GATE_FUSED and int(hf.shape[-2]) <= 32 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
+            if o.gatefk is None:
+                from .gate import GateKernel
+                o.gatefk = GateKernel(o.mesh, H, int(self.wd.shape[-1]), o.eps)
+            return o.gatefk(hf, mf, self.wd, self.wfg_bf)
         hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
         g = dmm(hm, self.wd, o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
         T = int(hf.shape[-2])

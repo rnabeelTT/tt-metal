@@ -72,6 +72,14 @@ slot caches, a row -> slot map for the plugin's condense remaps, host sampling (
 | explicit 1D mcast matmul configs for every decode matmul (tt/dmm.py) | 57.8 ms | | |
 | one-row rms_norm width-sharded on 8 cores | 51.0 ms | 67.5 ms | decode 0.970 / 0.996 / 0.015 |
 | attention prep in one program (tt/aprep.py: head gather, l2 clips, rms, tau, sink, KV-write layout) | 42.5 ms | 58.8 ms | see below |
+| message gate in one program (tt/gate.py: two cross-core rounds through a root core) | 41.1 ms | | decode (8 x 736) 0.9669 / 0.9965 / 0.0191 |
+
+TP (same code, B = 4 traced): TP4 38.1 ms, TP2 43.5 ms; TP4 B = 1 device 34.9 ms (replicated glue + 96 all-reduces at
+39 us + the replicated LM head dominate: next, the fabric all-reduce boundary and a vocab-sharded head).
+
+Fused gate zones (tools/zones_gate.py, us): squares 6, root reduce #1 11.5, norm + partial down proj 6, root reduce #2
+9, forget / gain 10, tail 10 (fp32 unpack-to-dest copies with per-copy re-inits ~300 cycles each). Next step for it:
+one round (scale the partial projections by the rms factors after the reduce) and a tree reduce over the cores.
 
 At one row most ops are bound by the 32-row tile, not by bytes (attention projections ~60 us each vs a 32 us
 bandwidth floor; DRAM-sharded only wins at LoFi): wider batches are nearly free, single-user latency needs fused
