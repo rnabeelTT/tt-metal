@@ -27,6 +27,7 @@ import ttnn
 from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
+ROW1 = os.environ.get("I2M_MOE_ROW1", "0") == "1"
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
 SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
 # I2M_MOE_SUBS1 (one die): "768,384" -> two sub-shards (m = 6 and 3 column tiles per bank: both supported) instead of 3
@@ -35,7 +36,7 @@ if os.environ.get("I2M_MOE_SUBS1"):
 
 
 class FusedExperts:
-    def __init__(self, moe, ck, li, dtype=ttnn.bfloat8_b, cache_dir=None, rows_max=16):
+    def __init__(self, moe, ck, li, dtype=ttnn.bfloat8_b, cache_dir=None, rows_max=None):
         from models.demos.blackhole.qwen36.tt.moe_decode.fused import FusedMoEDecode
 
         self.moe, self.mesh = moe, moe.mesh
@@ -90,7 +91,9 @@ class FusedExperts:
             self.subs.append((op, ug, dn))
             off += real
         del w13, w2
-        self.rows_max = rows_max
+        # I2M_MOE_ROWS_MAX: the widest decode batch through one fused call (32: every expert of the union read once;
+        # 16: two calls above 16 rows)
+        self.rows_max = int(os.environ.get("I2M_MOE_ROWS_MAX", "16")) if rows_max is None else rows_max
 
     def _logits(self, x):
         xf = ttnn.typecast(x, ttnn.float32)
@@ -100,7 +103,7 @@ class FusedExperts:
         """Build the rows ops of every decode width before any trace capture (host uploads)."""
         for op, _, _ in self.subs:
             for w in widths:
-                w = max(w, 2)
+                w = w if ROW1 else max(w, 2)
                 if w <= self.rows_max:
                     op.rows_ops(w)
 
@@ -109,9 +112,12 @@ class FusedExperts:
         tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
         assert int(x.shape[-2]) <= self.rows_max
         M = int(x.shape[-2])
-        # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5)
-        xr = ttnn.concat([x, x], dim=2) if M == 1 else x
-        m = max(M, 2)
+        # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5);
+        # I2M_MOE_ROW1=1: the rows kernels at one row instead (no concat / slice / clone)
+        if M == 1 and not ROW1:
+            xr, m = ttnn.concat([x, x], dim=2), 2
+        else:
+            xr, m = x, M
         from models.demos.blackhole.qwen36.tt.moe_decode.union import act_buffer
 
         op0 = self.subs[0][0]
@@ -126,7 +132,10 @@ class FusedExperts:
             gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None)
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)
-            acc = ttnn.clone(b.out) if acc is None else ttnn.add(acc, b.out)
-        if M == 1:
+            if acc is None:  # (one sub-shard: the shared out buffer itself, consumed before the next layer's MoE)
+                acc = b.out if len(self.subs) == 1 and ROW1 else ttnn.clone(b.out)
+            else:
+                acc = ttnn.add(acc, b.out)
+        if M == 1 and not ROW1:
             acc = ttnn.slice(acc, [0, 0, 0, 0], [1, 1, 1, self.H])
         return acc

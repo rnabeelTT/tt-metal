@@ -24,7 +24,7 @@ def main():
         Qc = torch.randn(H, nq) * H**-0.5 * 3
         Qk = ops.query(Qc)
         for n in range(1, 7):
-            for T in ((1, 4, 32) if os.environ.get("BIG") != "1" else (64, 256, 1024)):
+            for T in ((1, 4, 16, 32) if os.environ.get("BIG") != "1" else (64, 256, 1024)):
                 src = [torch.randn(1, 1, T, H) for _ in range(n)]
                 tt = [ops.up(s) for s in src]
                 S = torch.cat(src, 1)  # [1, n, T, H]
@@ -36,8 +36,16 @@ def main():
                 oo = [ttnn.to_torch(o).float()[:, :, :T] for o in ops.mix(tt, Qk, nq)]
                 dk = max((a - r).abs().max().item() for a, r in zip(ok, ref))
                 do = max((a - r).abs().max().item() for a, r in zip(oo, ref))
+                dm = 0.0
+                if T <= 32:  # MixKernel.multi: separate sources, each with its own logits tensor
+                    from models.autoports.thinkingmachines_inkling_2_mini.tt.dmm import dmm
+
+                    lgs = [(dmm(t, ops.qrep[id(Qk)], ops.ckc, dtype=ttnn.float32), 0) for t in tt]
+                    om = [ttnn.to_torch(o).float()[:, :, :T] for o in ops.mixk.multi(tt, lgs, nq)]
+                    dm = max((a - r).abs().max().item() for a, r in zip(om, ref))
+                    dk = max(dk, dm)
                 worst_k, worst_o = max(worst_k, dk), max(worst_o, do)
-                print(f"nq={nq} n={n} T={T}: kernel {dk:.2e}  ops {do:.2e}", flush=True)
+                print(f"nq={nq} n={n} T={T}: kernel {dk:.2e} (multi {dm:.2e})  ops {do:.2e}", flush=True)
     ttnn.close_mesh_device(mesh)
     print(f"{'PASS' if worst_k < 0.03 and worst_o < 0.03 else 'FAIL'}: worst kernel {worst_k:.2e}, ops {worst_o:.2e}")
 

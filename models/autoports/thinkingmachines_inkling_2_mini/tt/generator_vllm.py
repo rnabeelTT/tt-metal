@@ -153,7 +153,10 @@ class Inkling2ForCausalLM:
         return [(None, None)] * int(num_layers)
 
     def allocate_kv_cache_per_layer(self, per_layer_specs):
-        raise NotImplementedError("Inkling-2-Mini: one homogeneous KV spec (allocate_kv_cache)")
+        """(the plugin's per-layer form: [(shape, dtype, layer name)], one homogeneous full-attention spec here)"""
+        shape, dtype = per_layer_specs[0][0], per_layer_specs[0][1]
+        self.allocate_kv_cache(shape, dtype, 1)
+        return [(None, None)] * len(per_layer_specs)
 
     # ------------------------------------------------------------------ warm-up
     def warmup_model_prefill(self, kv_cache=None, enable_trace=False, *args, **kwargs):

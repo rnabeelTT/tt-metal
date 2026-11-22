@@ -167,7 +167,7 @@ class MoE:
             else:
                 out = self._masked(x, w, ids, T)
         if self.N > 1:
-            out = all_reduce(out, self.mesh, self.tt_ccl)
+            out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp")
         return out
 
     def _sorted(self, x, T):

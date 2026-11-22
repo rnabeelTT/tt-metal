@@ -36,11 +36,18 @@ def main():
     for li in (0, 23):
         moe = MoE(mesh, cfg, ck, li, expert_dtype=dt, cache_dir="/cache/wcache")
         fe = FusedExperts(moe, ck, li, dtype=dt, cache_dir="/cache/wcache")
-        fe.build_rows([4, 8])
-        for M in (1, 4, 8):
+        rows = [int(v) for v in os.environ.get("ROWS", "1,4,8").split(",")]
+        fe.build_rows([r for r in rows if r <= fe.rows_max])
+        for M in rows:
             x = ttnn.from_torch(xs[:M].reshape(1, 1, M, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
                                 layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
-            ref = ttnn.to_torch(d0(moe.forward(x))).float().reshape(M, -1)  # all-reduced
+            # reference: the prefill path (sorted dispatch + grouped sparse matmuls), all-reduced
+            ref = moe._sorted(x, M) if M >= 32 or os.environ.get("REF_SORTED") else moe.forward(x)
+            if N > 1 and (M >= 32 or os.environ.get("REF_SORTED")):
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
+
+                ref = all_reduce(ref, mesh)
+            ref = ttnn.to_torch(d0(ref)).float().reshape(M, -1)
             got = fe.forward(x)
             if N > 1:
                 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce

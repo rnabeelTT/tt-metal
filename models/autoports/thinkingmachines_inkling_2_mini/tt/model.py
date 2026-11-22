@@ -299,6 +299,9 @@ class Inkling2Model:
 
             tt_ccl = TT_CCL(mesh)
         self.tt_ccl = tt_ccl
+        from models.autoports.thinkingmachines_inkling_2_mini.tt import ccl as _ccl
+
+        _ccl.prepare(mesh, cfg.hidden_size)  # (decode all-reduce scratch: before any trace capture)
         lids = range(cfg.num_hidden_layers) if layers is None else layers
         self.layers = {}
         for li in lids:
@@ -411,7 +414,11 @@ class Inkling2Model:
     def head(self, x, blocks_n):
         """x [1,1,T,H] bf16 (layer 23's output) -> logits [1,1,T,Vp] fp32 (softcapped)."""
         ops = self.ops
-        h = ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0]
+        return self.head_tail(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0])
+
+    def head_tail(self, h):
+        """The final mix's output h -> logits (norm, LM head, softcap)."""
+        ops = self.ops
         h = _bf(ops.rms(h, self.final_norm))
         lg = dmm(h, self.lm_head, ops.ckc, dtype=ttnn.float32, memory_config=DRAM, linear=True)
         return ttnn.multiply(ttnn.tanh(ttnn.multiply(lg, 1.0 / self.softcap)), self.softcap)

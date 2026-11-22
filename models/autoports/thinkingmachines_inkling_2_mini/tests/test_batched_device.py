@@ -76,10 +76,11 @@ def main():
         worst = min(worst, p)
         print(f"slot {b} (prefix {prefix[b]}): logits pcc {p:.5f}  top-1 {top1:.3f}", flush=True)
     # control: slot 1 alone (re-prefilled), the others idle -> same logits as in the batch
-    prefill(1)
-    solo = run({1})
-    print(f"control: slot 1 alone vs in batch: pcc {pcc(solo[1], got[1]):.6f}, max abs diff "
-          f"{(solo[1] - got[1]).abs().max():.4f}", flush=True)
+    if B > 1:
+        prefill(1)
+        solo = run({1})
+        print(f"control: slot 1 alone vs in batch: pcc {pcc(solo[1], got[1]):.6f}, max abs diff "
+              f"{(solo[1] - got[1]).abs().max():.4f}", flush=True)
     # traced: re-prefill every slot, capture, replay the same steps -> same logits; then timing
     for b in range(B):
         prefill(b)

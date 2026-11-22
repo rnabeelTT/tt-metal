@@ -32,6 +32,57 @@ SDPA_K_CHUNK = 256
 # I2M_GLUE_L1 (default 1): the decode step's activations live in L1 (interleaved): the glue ops (norms, mixes, gates,
 # residual adds) inherit their input's memory config, so the chain stays out of DRAM
 GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
+# I2M_MIX_CACHE (default 1): a block's mix logits against every later query that reads it, in one matmul when the block
+# is made (MixPlan); each mix then computes only its current source's logits and the mix kernel reads every source and
+# logit tile in place (no stacked copy): per mix ~1 small matmul + 1 program instead of concat + an n-row matmul + 1
+MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE", "1") == "1"
+
+
+class MixPlan:
+    """Which blocks each decode mix reads (the step's block bookkeeping, walked once), and per block the concatenated
+    query columns of all its readers (Qcat) with each reader's offset. Shared by every decode width of a model."""
+
+    def __init__(self, model):
+        m, cfg, ops = model, model.cfg, model.ops
+        if ops.mixk is None:
+            from .mixw import MixKernel
+            ops.mixk = MixKernel(m.mesh, m.H)
+        srcs, blocks, pre = {}, [], None
+        for a, (li, p) in enumerate(m.sched):
+            L = m.layers[li]
+            if li == cfg.loop_start:
+                if p == 0:
+                    pre = list(blocks)
+                else:
+                    blocks = list(pre)
+            if L.nq:
+                srcs[("attn", a)] = list(blocks)
+            srcs[("mlp", a)] = blocks + [a] if L.boundary else list(blocks)
+            if L.boundary:
+                blocks = blocks + [a]
+        srcs[("head", -1)] = list(blocks)
+        self.srcs = srcs
+        readers = {}
+        for key, bl in srcs.items():
+            for b in bl:
+                readers.setdefault(b, []).append(key)
+        self.qcat, self.off = {}, {}
+        for b, keys in readers.items():
+            qs, off = [], 0
+            for key in keys:
+                Q, nq = self.query(m, key)
+                self.off[(b, key)] = off
+                qs.append(ops.qrep[id(Q)])
+                off += nq
+            self.qcat[b] = ttnn.concat(qs, dim=3) if len(qs) > 1 else qs[0]
+
+    @staticmethod
+    def query(m, key):
+        kind, a = key
+        if kind == "head":
+            return m.final_Q, 1
+        L = m.layers[m.sched[a][0]]
+        return (L.attn_Q, L.nq) if kind == "attn" else (L.mlp_Q, 1)
 # I2M_BCONV_KERNEL (default 1): the static short convs' decode step as one program (tt/bconv.py)
 BCONV_KERNEL = __import__("os").environ.get("I2M_BCONV_KERNEL", "1") == "1"
 # I2M_APREP (default 1): the decode attention prep (clips / rms / tau / sink / KV layout) as one program (tt/aprep.py)
@@ -285,7 +336,7 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl):
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, w.H))
-    return all_reduce(out, w.mesh, tt_ccl) if N > 1 else out
+    return all_reduce(out, w.mesh, tt_ccl, site="mixer") if N > 1 else out
 
 
 class BatchedDecoder:
@@ -317,6 +368,11 @@ class BatchedDecoder:
         self.pos_wr = i32(torch.zeros(B, dtype=torch.int32))  # sliding-layer write slot (pos mod ring period)
         self.tau = ttnn.from_torch(torch.ones(1, B, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
                                    mesh_mapper=self.rep)
+        self.plan = None
+        if MIX_CACHE:
+            if getattr(model, "_mixplan", None) is None:
+                model._mixplan = MixPlan(model)
+            self.plan = model._mixplan
 
     def load_slot(self, b, lane=0):
         if self.shared is not None:
@@ -349,31 +405,44 @@ class BatchedDecoder:
         if GLUE_L1:
             x = ttnn.to_memory_config(x, L1)
         pos_w, pos_wr, pos_sdpa, tau = self.pos_w, self.pos_wr, self.pos_sdpa, self.tau
-        blocks_n, pre_x, pre_blocks, prev_src = [], None, None, None
+        blocks_n, ids, pre_x, pre_blocks, pre_ids, prev_src = [], [], None, None, None, None
+        D = {}  # block id (its application) -> its logits against every later query (MixPlan)
         for a, (li, p) in enumerate(m.sched):
             L = m.layers[li]
             if li == cfg.loop_start:
                 if p == 0:
-                    pre_x, pre_blocks = x, list(blocks_n)
+                    pre_x, pre_blocks, pre_ids = x, list(blocks_n), list(ids)
                 else:
-                    x, blocks_n = pre_x, list(pre_blocks)
+                    x, blocks_n, ids = pre_x, list(pre_blocks), list(pre_ids)
             msgs = m.messages(li - cfg.loop_start, prev_src) if (L.loop and p > 0) else None
-            xin = x
-            x = self._layer(a, x, blocks_n, msgs, pos_w, pos_wr, pos_sdpa, tau)
-            if L.boundary:
-                blocks_n = blocks_n + [ops.rms(xin)]
+            x, blk = self._layer(a, x, blocks_n, msgs, pos_w, pos_wr, pos_sdpa, tau, ids, D)
+            if L.boundary:  # (the block: the layer's normed input, made once in _layer)
+                blocks_n, ids = blocks_n + [blk], ids + [a]
             if L.loop and li == cfg.loop_end - 1:
                 prev_src = [blocks_n[len(pre_blocks) + 1], ops.rms(x)]
-        return m.head(x, blocks_n)
+        if self.plan is None:
+            return m.head(x, blocks_n)
+        h = self._mix(("head", -1), blocks_n, ids, D, ops.rms(x), m.final_Q, 1)[0]
+        return m.head_tail(h)
 
-    def _layer(self, a, x, blocks_n, messages, pos, pos_wr, pos_sdpa, tau):
+    def _mix(self, key, blocks_n, ids, D, cur, Q, nq):
+        """mix(blocks_n + [cur], Q, nq): the blocks' logits from their MixPlan matmuls, the current source's here."""
+        ops = self.m.ops
+        if self.plan is None:
+            return ops.mix(blocks_n + [cur], Q, nq)
+        cur = ttnn.sharded_to_interleaved(cur, L1) if cur.is_sharded() else cur
+        lg = dmm(cur, ops.qrep[id(Q)], ops.ckc, dtype=ttnn.float32, memory_config=L1)
+        lgs = [(D[b], self.plan.off[(b, key)]) for b in ids] + [(lg, 0)]
+        return ops.mixk.multi(blocks_n + [cur], lgs, nq)
+
+    def _layer(self, a, x, blocks_n, messages, pos, pos_wr, pos_sdpa, tau, ids=(), D=None):
         m, ops = self.m, self.m.ops
         li, _ = m.sched[a]
         L, ba, c = m.layers[li], self.apps[a], m.apps[a].cache
         xn = None
         if L.nq:
             xn = ops.rms(x)
-            ins = ops.mix(blocks_n + [xn], L.attn_Q, L.nq)
+            ins = self._mix(("attn", a), blocks_n, ids, D, xn, L.attn_Q, L.nq)
         else:
             ins = [_f32(x)]
         if L.sliding:
@@ -392,17 +461,21 @@ class BatchedDecoder:
             qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
         att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl)
         att = ba.attn.step(att)
+        blk = None
         if L.boundary:
             resid = _f32(att)
-            blocks_n = blocks_n + [xn if xn is not None else ops.rms(x)]
+            blk = xn if xn is not None else ops.rms(x)
+            if self.plan is not None:
+                D[a] = dmm(blk, self.plan.qcat[a], ops.ckc, dtype=ttnn.float32, memory_config=L1)
+            blocks_n, ids = blocks_n + [blk], list(ids) + [a]
         else:
             resid = ttnn.add(_f32(x), _f32(att))
-        mi = ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1)[0]
+        mi = self._mix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1)[0]
         if messages is not None:
             mi = L.gates["mlp"](mi, messages[3])
         mo = ba.mlp.step(L.moe.forward(_bf(ops.rms(mi, L.mlp_norm))))
         out = _bf(ttnn.add(resid, _f32(mo)))
-        return ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out
+        return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
 
 
 class TracedDecoder:
