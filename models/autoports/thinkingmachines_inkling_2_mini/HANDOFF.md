@@ -130,6 +130,30 @@ the sorted dispatch (MiniMax / Qwen3.5 moe_dispatch, grouped sparse matmuls) tak
 256 rows 1031 ms (prefill quality 0.969 / 0.996 / 0.016). Next for prefill: the multi-row block mix / message sums
 (~165 ms of the 128-row chunk), then batching prefills across users.
 
+## Serving profiles (measured through vLLM; tools/bench_card.py: random-token prompts, ignore_eos, greedy, streamed)
+
+Capacity (tools/mem_probe.py, DRAM per die after the build): one die 26.7 GiB of weights + 0.46 GiB per slot at 8K
+(8 x 8K leaves 1.2 GiB); TP2 16 x 32K leaves 6.3 GiB; TP4 32 x 64K leaves 3.8 GiB. Long context (TP4): passphrase
+found at depths 0.1 / 0.5 / 0.9 of 17K, 34K and 63K-token prompts (tools/needle_serve.py). 32-wide decode (TP4)
+quality 0.969 / 0.995 top-1 (the 17-32 rows run as two 16-row fused MoE calls).
+
+p300x2 (4 dies, 32 x 64K, 1024-row prefill chunks):
+
+| Input | Output | Users | TTFT (ms) | TPOT (ms) | Decode tok/s/user | Total out tok/s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 128 | 128 | 1 | 427 | 33.0 | 30.3 | 27.7 |
+| 1,024 | 256 | 1 | 951 | 33.5 | 29.9 | 27.0 |
+| 4,096 | 256 | 1 | 3,701 | 33.6 | 29.8 | 20.9 |
+| 16,384 | 256 | 1 | 14,963 | 33.9 | 29.5 | 10.8 |
+| 128 | 128 | 8 | 2,977 | 47.8 | 20.9 | 113.1 |
+| 128 | 128 | 16 | 6,591 | 58.9 | 17.0 | 145.5 |
+| 128 | 128 | 32 | 13,369 | 92.5 | 10.8 | 163.1 |
+| 1,024 | 256 | 32 | 29,817 | 79.3 | 12.6 | 163.7 |
+
+Gaps: prefill ~1,100 tok/s on 4 dies and prefills run one request at a time (TTFT at concurrency grows linearly);
+single-user decode is bound by the per-layer glue (TP4 B=1 device 35 ms of which ~25 ms replicated glue, 96
+all-reduces at 39 us, the replicated LM head).
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from
