@@ -45,7 +45,8 @@ GATE_NORM = int(__import__("os").environ.get("I2M_GATE_NORM", "2"))
 GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1"  # likewise the attention-side gates
 POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"
 AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"
-GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
+GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"
+KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
@@ -286,7 +287,9 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
             k, v = ba.k.step(pk), ba.v.step(pv)
         else:
             k, v = ba.k.step(pk, xk), ba.v.step(pv, xv)
-        q, rq, kp, vp, sk = ba.aprep(pq, k, v, tau)
+        wpos = pos_wr if w.sliding else pos
+        fkv = KV_FUSED and not APREP_OLD and c.k_cache.dtype == ttnn.bfloat16
+        q, rq, kp, vp, sk = ba.aprep(pq, k, v, tau, kv=(c.k_cache, c.v_cache, wpos, ba.write_table) if fkv else None)
         if APREP_DRAM:
             q, rq, sk = (ttnn.to_memory_config(t, DRAM) for t in (q, rq, sk))
         if APREP_OLD:  # (debug) take these from the op path
@@ -298,9 +301,9 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
                 kp = ttnn.to_memory_config(ttnn.pad(ok, [1, B, 32, w.HD], [0, 0, 0, 0], 0.0), ba.kv_shard)
             if "v" in APREP_OLD:
                 vp = ttnn.to_memory_config(ttnn.pad(ov, [1, B, 32, w.HD], [0, 0, 0, 0], 0.0), ba.kv_shard)
-        wpos = pos_wr if w.sliding else pos
-        ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=ba.write_table)
-        ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=ba.write_table)
+        if not fkv:
+            ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=ba.write_table)
+            ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=ba.write_table)
         g0 = w.qd + w.rd + w.sd
         if AGATE and B <= 16 and g0 % 32 == 0:  # (the gate read from pq in the output-gate program)
             return _attn_out(w, c, ba, q, rq, sk, None, pos_sdpa, B, tt_ccl, pq=pq, g0=g0, packed_out=packed_out)

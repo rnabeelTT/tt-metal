@@ -39,7 +39,9 @@ class AttnPrep:
         self.crs = _range_set(self.cores)
         self.HT = w.HD // 32
 
-    def __call__(self, pq, k, v, tau=None):
+    def __call__(self, pq, k, v, tau=None, kv=None):
+        """kv = (k_cache, v_cache, positions int32 [B], block table int32 [B, max blocks]): the k / v rows written into
+        the paged bf16 caches here (no k / v outputs: None)."""
         w, B, HT, mesh = self.w, self.B, self.HT, self.mesh
         L1 = ttnn.L1_MEMORY_CONFIG
         k = k if (not k.is_sharded() and k.memory_config().buffer_type == ttnn.BufferType.L1) else \
@@ -74,26 +76,47 @@ class AttnPrep:
         cp_rt = [[i, nc, self.total] for i in range(nc)]
         wr_ct = [cb_out, HT] + ttnn.TensorAccessorArgs(q_o).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(r_o).get_compile_time_args() + ttnn.TensorAccessorArgs(k_o).get_compile_time_args()
+        wr_extra, wr_defs = [], [("APREP_KV", "0")]
+        if kv is not None:
+            kc, vc, wpos, tab = kv
+            cb_st = 7
+            cbs.append(_cb(self.crs, cb_st, bf, BF, 1))
+            wr_ct += ttnn.TensorAccessorArgs(kc).get_compile_time_args() \
+                + ttnn.TensorAccessorArgs(wpos).get_compile_time_args() + ttnn.TensorAccessorArgs(tab).get_compile_time_args()
+            wr_extra = [kc.buffer_address(), vc.buffer_address(), wpos.buffer_address(), tab.buffer_address()]
+            pos_page = int(wpos.shape[-1]) * 4
+            assert pos_page <= 256 and kc.dtype == ttnn.bfloat16 and int(kc.shape[1]) == w.NKV
+            al = 64 if tab.memory_config().buffer_type == ttnn.BufferType.DRAM else 16
+            tab_page = -(-int(tab.shape[-1]) * 4 // al) * al  # (interleaved pages sit at the aligned page size)
+            wr_defs = [("APREP_KV", "1"), ("APREP_CB_STAGE", str(cb_st)), ("APREP_NKV", str(w.NKV)),
+                       ("APREP_BLK", str(int(kc.shape[2]))), ("APREP_POS_PAGE", str(pos_page)),
+                       ("APREP_TAB_PAGE", str(tab_page))]
         wr_rt = [[q_o.buffer_address(), r_o.buffer_address(), k_o.buffer_address(), v_o.buffer_address(),
-                  s_o.buffer_address(), i, nc, self.total] for i in range(nc)]
+                  s_o.buffer_address(), i, nc, self.total] + wr_extra for i in range(nc)]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         for i in (cb_xf, cb_f):
             u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
+        dm = lambda src, ct, rt, riscv, noc, defs=(): ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
-            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
+            defines=list(defs), config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("aprep_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
-            dm("aprep_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
+            dm("aprep_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1, wr_defs),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "aprep_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=cp_ct, runtime_args=_rt(self.cores, cp_rt), config=cfg),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_aprep", B, nc, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
-               repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]))
+               repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
+               tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o], prog)
+        io = [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ())
+        ttnn.generic_op(io, prog)
+        if kv is not None:
+            ttnn.deallocate(k_o)
+            ttnn.deallocate(v_o)
+            return q_o, r_o, None, None, s_o
         return q_o, r_o, k_o, v_o, s_o

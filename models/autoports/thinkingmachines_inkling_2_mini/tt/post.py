@@ -23,9 +23,9 @@ from .bconv import KDIR, _cb, _range_set, _rt
 F32, BF = 4096, 2048
 CX, CY = [int(v) for v in __import__("os").environ.get("I2M_POST_GRID", "9,4").split(",")]  # the core rectangle: Ht / C tiles each
 C = CX * CY
-# the router round's gather (2 E / 32 parts of ceil(C T / 32) tiles) on top of the other rounds' buffers: <= 4 rows
-# (at 8 rows the program's CBs reach ~890 KB per core and overlap L1 tensors: a hang at B = 8 with tt/agate.py's)
-ROUTER_ROWS = 4
+# the router round (a root-only gather of 2 E / 32 parts) at <= 4 rows: at 8 the round costs more than the separate
+# router matmul (B = 8 29.0 vs 28.8 ms). I2M_POST_ROUTER_ROWS
+ROUTER_ROWS = int(__import__("os").environ.get("I2M_POST_ROUTER_ROWS", "4"))
 
 
 def _bits(x: float) -> int:
