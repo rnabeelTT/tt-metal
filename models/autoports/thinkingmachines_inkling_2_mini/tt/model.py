@@ -229,6 +229,15 @@ class MessageGate:
         if GATE_FUSED:  # the one-program gate (tt/gate.py): bf16 forget / gain weights (the checkpoint's, exact)
             self.wfg_bf = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat16)
 
+    def fused_args(self, h, m, nw_rows):
+        """(h, m, wd, wf|wg, nw) for GateKernel2.multi, or None (not available here)."""
+        o = self.ops
+        hf, mf = _f32(h), _f32(m)
+        if not (GATE2 and o.gate2k is not None and len(hf.shape) == 4 and int(hf.shape[1]) == 1
+                and int(hf.shape[-2]) <= 16):
+            return None
+        return hf, mf, self.wd, self.wfg_bf, nw_rows
+
     def fused_norm(self, h, m, nw_rows, router=None, dup=False):
         """The gate + the following RMS norm (nw_rows: [1, 1, 32, H] fp32) in one program, with the router logits
         (router: bf16 hi / lo [1, 1, H, E]) -> (bf16 normed x, logits | None). None: not available here."""

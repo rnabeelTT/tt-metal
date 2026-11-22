@@ -44,7 +44,8 @@ PRE = __import__("os").environ.get("I2M_PRE", "1") == "1"  # the fused pre-atten
 GATE_NORM = int(__import__("os").environ.get("I2M_GATE_NORM", "2"))
 GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1"  # likewise the attention-side gates
 POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"
-AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
+AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"
+GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
@@ -521,6 +522,12 @@ class BatchedDecoder:
         GateKernel2) -> self._gn = (qn, kn, vn) bf16; False: not available (the separate ops then)."""
         hs = ins * 3 if len(ins) == 1 else ins
         nws = [self.norm_rows[(li, "in")]] * 3 if L.sliding else [self.norm_rows[(li, k)] for k in "qkv"]
+        if GATE_MULTI:  # the three gates in one program, on three core rectangles (tt/gate.py GateKernel2.multi)
+            args = [L.gates[n].fused_args(hh, mm, nw) for n, hh, mm, nw in zip(("attn", "k", "v"), hs, messages[:3], nws)]
+            g2 = self.m.ops.gate2k
+            if all(a is not None for a in args) and len(g2.rects) >= 3:
+                self._gn = tuple(x for x, _ in g2.multi(args))
+                return True
         out = []
         for n, hh, mm, nw in zip(("attn", "k", "v"), hs, messages[:3], nws):
             f = L.gates[n].fused_norm(hh, mm, nw)

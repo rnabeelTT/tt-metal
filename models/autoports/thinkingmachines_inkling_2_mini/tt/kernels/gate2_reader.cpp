@@ -44,7 +44,12 @@ void kernel_main() {
     constexpr auto x_args = TensorAccessorArgs<16>();
     constexpr auto w_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     auto ca = [](uint32_t i) { return get_common_arg_val<uint32_t>(i); };
-    const uint32_t c = (uint32_t)get_absolute_logical_y() * G2_CX + (uint32_t)get_absolute_logical_x();
+#ifndef G2_X0
+#define G2_X0 0
+#define G2_Y0 0
+#endif
+    // this core's slot in its rectangle (origin G2_X0, G2_Y0; GateKernel2.multi runs several rectangles)
+    const uint32_t c = ((uint32_t)get_absolute_logical_y() - G2_Y0) * G2_CX + (uint32_t)get_absolute_logical_x() - G2_X0;
     const uint32_t t0 = c * PER;
     const auto ah = TensorAccessor(x_args, ca(0), F32);
     const auto am = TensorAccessor(x_args, ca(1), F32);

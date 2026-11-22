@@ -209,6 +209,9 @@ packing).
 | attention output gate in one program (tt/agate.py; bit-identical) | 17.9 | 27.1 | | |
 | post / pre read the packed all-reduce rows in place (no unpack program; bit-identical) | 17.7 | 26.9 | | |
 | global layers' dynamic conv taps: one matmul + one add (4 + 4 + 1 programs before) | 17.4 | 26.6 | | |
+| the three attention-side gates in one program on three core rectangles (GateKernel2.multi), rounds in parallel | 16.6 | 25.2 | | |
+
+B = 8: 29.2 ms (274 tok/s). Decode eval 0.9706 / 0.9970 / 0.0153.
 
 B = 8 at this point: 31.4 ms (255 tok/s). B = 8 trace replays hung (timing-dependent; not with the watcher): the
 middle dies sat in a decode matmul on core (9, 0), the fabric sender core all_reduce_async places right of its output
