@@ -1,11 +1,20 @@
 #!/bin/bash
 # Serve tencent/Hy4-flash (dev) on the QB2: the tt-model image with this checkout's models/ mounted over the image's.
-# usage: serve/serve_hy4.sh ; logs -> serve/server_hy4.log. env: CTX (default 32768), SPEC (DFly2 drafts per verify
+# usage: [PROFILE=default|long] serve/serve_hy4.sh ; logs -> serve/server_hy4.log. env: CTX (default: the budget's max, below), SPEC (DFly2 drafts per verify
 # pass, default 4, 0 = plain decode; NSEQS > 1: drafts while one request decodes alone, 2+ live requests decode plain in
-# the batch), NSEQS (concurrent users, default 1; 2..8 -> the batched engine, CTX <= 98304 / NSEQS), PORT (8000), IMG
+# the batch), NSEQS (concurrent users, default 1; 2..8 -> the batched engine), PORT (8000), IMG
 # (default the local hy4-flash-qb2 image).
-CTX=${CTX:-32768}
-NSEQS=${NSEQS:-1}
+# PROFILE (default "default"): default = 8 users, spec decode on (SPEC=4), the largest per-user CTX the budget allows
+# (20480); long = 1 user, spec on, CTX 223232 (SPEC=0 gives 262144). NSEQS / SPEC / CTX still override.
+case "${PROFILE:-default}" in
+  default) NSEQS=${NSEQS:-8} ;;
+  long) NSEQS=${NSEQS:-1} ;;
+  *) echo "unknown PROFILE '$PROFILE' (default|long)"; exit 1 ;;
+esac
+# CTX default: the largest max_model_len the per-die DRAM budget allows (tt/generator_vllm.py max_ctx_for, ViT on,
+# 400 MiB trace region; 2026-11-22): spec on 1/2/4/8 users 223232/102400/47104/20480, SPEC=0 262144/120832/55296/24576
+if [ "${SPEC:-4}" = 0 ]; then D=(0 262144 120832 0 55296 0 0 0 24576); else D=(0 223232 102400 0 47104 0 0 0 20480); fi
+CTX=${CTX:-${D[$NSEQS]:-20480}}
 K=ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/device/kernels/moe_sorted_dispatch.cpp
 IMG=${IMG:-tt-model/hy4-flash-qb2:1e7f2ff5eaab}
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -32,4 +41,4 @@ docker run -d --name hy4-serve \
     --max-num-seqs $NSEQS --block-size 64 --additional-config '$TT_CFG' --served-model-name hy4-flash \
     --enable-auto-tool-choice --tool-call-parser hy_v4 --reasoning-parser hy_v4 --port 8000" \
   && (docker logs -f hy4-serve > $P/serve/server_hy4.log 2>&1 &)
-echo "started (CTX $CTX, SPEC ${SPEC:-4}, NSEQS $NSEQS); tail -f $P/serve/server_hy4.log"
+echo "started (PROFILE ${PROFILE:-default}, CTX $CTX, SPEC ${SPEC:-4}, NSEQS $NSEQS); tail -f $P/serve/server_hy4.log"
