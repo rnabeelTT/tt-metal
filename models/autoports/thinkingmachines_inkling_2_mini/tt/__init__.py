@@ -6,3 +6,5 @@ import os as _os
 
 _os.environ.setdefault("QWEN35_MOE_ACT", "inkling")
 _os.environ.setdefault("QWEN35_MOE_DECODE_FIDELITY", "hifi2")
+# H = 2304 is 9 tile columns per DRAM bank: the rows down op needs a reader count dividing 9 (3 serve up to 16 rows)
+_os.environ.setdefault("QWEN35_MOE_DN_READERS", "3")

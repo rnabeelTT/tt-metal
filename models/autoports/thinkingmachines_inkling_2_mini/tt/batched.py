@@ -20,7 +20,7 @@ import math
 import torch
 
 import ttnn
-from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2clip, _rms_unweighted
+from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2clip, _rms_unweighted, proj
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
@@ -155,9 +155,12 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM, dtype=ttnn.float32)
-    pk = ttnn.linear(xk, w.w_k, compute_kernel_config=ckc, memory_config=DRAM)
-    pv = ttnn.linear(xv, w.w_v, compute_kernel_config=ckc, memory_config=DRAM)
+    pq = proj(w, "q", xq, ttnn.float32)
+    pk = proj(w, "k", xk)
+    pv = proj(w, "v", xv)
+    if w.dram_sharded:
+        pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, B, w.kd))
+        pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, B, w.kd))
     o0 = 0
     q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.qd)); o0 += w.qd
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.rd)); o0 += w.rd
@@ -188,7 +191,9 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
                             sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
     o = ttnn.reshape(o, (1, 1, B, NH * HD))
     o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
-    out = ttnn.linear(o, w.w_o, compute_kernel_config=ckc, memory_config=DRAM)
+    out = proj(w, "o", o)
+    if w.dram_sharded and int(out.shape[-1]) != w.H:
+        out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, w.H))
     return all_reduce(out, w.mesh, tt_ccl) if N > 1 else out
 
 
@@ -198,6 +203,9 @@ class BatchedDecoder:
     def __init__(self, model, B: int):
         self.m, self.B = model, B
         self.apps = [BatchedApp(model.apps[a], model.layers[li], B) for a, (li, _) in enumerate(model.sched)]
+        for L in model.layers.values():  # the fused MoE rows ops of this width, built before any trace capture
+            if getattr(L.moe, "fused", False):
+                L.moe.fe.build_rows([B])
         mesh = model.mesh
         self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         any_sl = next(model.apps[a].cache for a, (li, _) in enumerate(model.sched) if model.layers[li].sliding)

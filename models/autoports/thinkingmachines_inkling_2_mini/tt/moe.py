@@ -29,10 +29,22 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 TILE = 32
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
+# I2M_MOE_LAYOUT=fused (default): ONE copy of the experts in the fused decode kernels' layout (tt/moe_fused.py: per
+# sub-shard [gate | up / 25], down x 100); decode rows (<= 16) run the fused kernels, prefill / wider batches the
+# sparse_matmul union path over the same sub-shard tensors. sparse: the original layout and paths.
+FUSED_LAYOUT = os.environ.get("I2M_MOE_LAYOUT", "fused") == "fused"
 
 
 def softcap(t, c):
     return ttnn.multiply(ttnn.tanh(ttnn.multiply(t, 1.0 / c)), c)
+
+
+def inkling_act_fused(g, u):
+    """The fused layout's activation: tanh(g / 4) sigmoid(g) tanh(u') (u' = u / 25 in the weights, x 100 in down)."""
+    g = ttnn.typecast(g, ttnn.float32) if g.dtype != ttnn.float32 else g
+    u = ttnn.typecast(u, ttnn.float32) if u.dtype != ttnn.float32 else u
+    a = ttnn.multiply(ttnn.tanh(ttnn.multiply(g, 0.25)), ttnn.sigmoid(g))
+    return ttnn.typecast(ttnn.multiply(a, ttnn.tanh(u)), ttnn.bfloat16)
 
 
 def inkling_act(g, u):
@@ -74,17 +86,28 @@ class MoE:
             dn = ck.experts(li, "w2").transpose(1, 2) * (self.route_scale / math.sqrt(5.0))  # [E, I, H]
             return dn.unsqueeze(0).to(torch.bfloat16)
 
-        self.up_gate = cached(make_ug, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("ug"), mesh_mapper=mm)
-        self.down = cached(make_dn, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("dn"), mesh_mapper=mm2)
-        self.ones_mask = ttnn.from_torch(torch.ones(1, 1, 1, E, dtype=torch.bfloat16), dtype=ttnn.bfloat16,
-                                         layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=rep)
-        self.tile = ttnn.Tile([TILE, TILE])
         self.ckc = ttnn.init_device_compute_kernel_config(
             mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi2 if expert_dtype != ttnn.bfloat16 else
             ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=False)
         self.rckc = ttnn.init_device_compute_kernel_config(
             mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
             packer_l1_acc=False)
+        self.fused = FUSED_LAYOUT and expert_dtype in (ttnn.bfloat8_b, ttnn.bfloat4_b)
+        if self.fused:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.moe_fused import FusedExperts
+
+            self.fe = FusedExperts(self, ck, li, dtype=expert_dtype, cache_dir=cache_dir)
+            kc = lambda W: max(H, W) // TILE  # noqa: E731
+            self.subs = [(ug, dn, W, sparse_matmul_program_config(PF_CHUNK, 2 * W, H, target_cores=32,
+                                                                     in0_block_w_cap=kc(W)),
+                          sparse_matmul_program_config(PF_CHUNK, H, W, target_cores=32, in0_block_w_cap=kc(W)))
+                         for (op, ug, dn), (_, W) in zip(self.fe.subs, self.fe.widths)]
+        else:
+            self.up_gate = cached(make_ug, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("ug"), mesh_mapper=mm)
+            self.down = cached(make_dn, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("dn"), mesh_mapper=mm2)
+        self.ones_mask = ttnn.from_torch(torch.ones(1, 1, 1, E, dtype=torch.bfloat16), dtype=ttnn.bfloat16,
+                                         layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=rep)
+        self.tile = ttnn.Tile([TILE, TILE])
         # K in ONE in0 block (cap = all K tiles): with fp32 dest accumulation, sparse_matmul's masked mode mis-accumulates
         # across in0 blocks (layer 0, 32 rows: pcc 0.85 per expert at in0_block_w = Kt / 2, 1.00000 at Kt; this image)
         kcap = max(H, Il) // TILE
@@ -110,11 +133,20 @@ class MoE:
     def forward(self, x):
         """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc)."""
         T = int(x.shape[2])
-        w, ids = self.route(x)
-        if T <= 8:  # decode rows: per token, only its 8 experts are read (the union path computes all E slots)
-            out = self._gather(x, w, ids, T)
+        if self.fused and T <= self.fe.rows_max:
+            out = self.fe.forward(x)
+        elif self.fused:
+            w, ids = self.route(x)
+            out = None
+            for ug, dn, W, cgu, cdn in self.subs:
+                part = self._masked(x, w, ids, T, ug=ug, dn=dn, Il=W, cfg_gu=cgu, cfg_dn=cdn, act=inkling_act_fused)
+                out = part if out is None else ttnn.add(out, part)
         else:
-            out = self._masked(x, w, ids, T)
+            w, ids = self.route(x)
+            if T <= 8:  # decode rows: per token, only its 8 experts are read (the union path computes all E slots)
+                out = self._gather(x, w, ids, T)
+            else:
+                out = self._masked(x, w, ids, T)
         if self.N > 1:
             out = all_reduce(out, self.mesh, self.tt_ccl)
         return out
@@ -154,8 +186,14 @@ class MoE:
         r = ttnn.scatter(z, dim=-1, index=idx, src=src)
         return ttnn.to_layout(r, ttnn.TILE_LAYOUT)
 
-    def _masked(self, x, w, ids, T):
-        E, Il, H, C = self.E, self.Il, self.H, PF_CHUNK
+    def _masked(self, x, w, ids, T, ug=None, dn=None, Il=None, cfg_gu=None, cfg_dn=None, act=None):
+        E, H, C = self.E, self.H, PF_CHUNK
+        Il = self.Il if Il is None else Il
+        ug = self.up_gate if ug is None else ug
+        dn = self.down if dn is None else dn
+        cfg_gu = self.cfg_gu_m if cfg_gu is None else cfg_gu
+        cfg_dn = self.cfg_dn_m if cfg_dn is None else cfg_dn
+        act = inkling_act if act is None else act
         routing = self._routing_matrix(w, ids, T)  # [1,1,T,E] fp32
         pad = (-T) % C
         if pad:
@@ -168,16 +206,15 @@ class MoE:
             r_c = ttnn.slice(routing, [0, 0, s0, 0], [1, 1, s0 + C, E])
             mask = ttnn.to_layout(ttnn.typecast(ttnn.sum(r_c, dim=2, keepdim=True), ttnn.bfloat16),
                                   ttnn.ROW_MAJOR_LAYOUT)
-            fused = ttnn.sparse_matmul(x_c, self.up_gate, sparsity=mask, nnz=None, memory_config=DRAM,
-                                       output_tile=self.tile, program_config=self.cfg_gu_m,
+            fused = ttnn.sparse_matmul(x_c, ug, sparsity=mask, nnz=None, memory_config=DRAM,
+                                       output_tile=self.tile, program_config=cfg_gu,
                                        compute_kernel_config=self.ckc, dtype=ttnn.bfloat16)  # [1,1,1,E,C,2Il]
             fused = ttnn.reshape(fused, (1, E, C, 2 * Il))
-            din = inkling_act(ttnn.slice(fused, [0, 0, 0, 0], [1, E, C, Il]),
-                              ttnn.slice(fused, [0, 0, 0, Il], [1, E, C, 2 * Il]))
+            din = act(ttnn.slice(fused, [0, 0, 0, 0], [1, E, C, Il]), ttnn.slice(fused, [0, 0, 0, Il], [1, E, C, 2 * Il]))
             ttnn.deallocate(fused)
-            down = ttnn.sparse_matmul(din, self.down, sparsity=mask, nnz=None, is_input_a_sparse=True,
+            down = ttnn.sparse_matmul(din, dn, sparsity=mask, nnz=None, is_input_a_sparse=True,
                                       is_input_b_sparse=True, memory_config=DRAM, output_tile=self.tile,
-                                      program_config=self.cfg_dn_m, compute_kernel_config=self.ckc,
+                                      program_config=cfg_dn, compute_kernel_config=self.ckc,
                                       dtype=ttnn.bfloat16)  # [1,E,C,H]
             ttnn.deallocate(din)
             wc = ttnn.permute(r_c, (0, 3, 2, 1))  # [1,E,C,1]

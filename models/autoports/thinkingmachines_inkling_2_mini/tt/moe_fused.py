@@ -30,7 +30,7 @@ SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (r
 
 
 class FusedExperts:
-    def __init__(self, moe, ck, li, dtype=ttnn.bfloat8_b, cache_dir=None, rows_max=32):
+    def __init__(self, moe, ck, li, dtype=ttnn.bfloat8_b, cache_dir=None, rows_max=16):
         from models.demos.blackhole.qwen36.tt.moe_decode.fused import FusedMoEDecode
 
         self.moe, self.mesh = moe, moe.mesh
@@ -43,6 +43,7 @@ class FusedExperts:
         cname = (lambda n: os.path.join(cache_dir, f"L{li}.fused.{n}.{dt}.tp{N}")) if cache_dir else (lambda n: None)
         w13 = w2 = None
         self.subs = []
+        self.widths = subs
         off = 0
         for si, (real, W) in enumerate(subs):
             def make_ug(off=off, real=real, W=W):
@@ -93,17 +94,33 @@ class FusedExperts:
         """Build the rows ops of every decode width before any trace capture (host uploads)."""
         for op, _, _ in self.subs:
             for w in widths:
-                if w > 1:
+                w = max(w, 2)
+                if w <= self.rows_max:
                     op.rows_ops(w)
 
     def forward(self, x):
-        """x [1, 1, M, H] bf16 (normed), M <= rows_max -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
+        """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
+        tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
+        assert int(x.shape[-2]) <= self.rows_max
         M = int(x.shape[-2])
+        # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5)
+        xr = ttnn.concat([x, x], dim=2) if M == 1 else x
+        m = max(M, 2)
+        from models.demos.blackhole.qwen36.tt.moe_decode.union import act_buffer
+
+        op0 = self.subs[0][0]
+        route, _, _, b0 = op0.rows_ops(m)
+        logits = self._logits(xr)
+        route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
+        ttnn.deallocate(logits)
         acc = None
-        for op, ug, dn in self.subs:
-            if M == 1:
-                out = op(x, ug, dn, logits=op._logits(x))
-            else:
-                out = op.rows(x, ug, dn)
-            acc = ttnn.clone(out) if acc is None else ttnn.add(acc, out)
+        for (op, ug, dn), (_, W) in zip(self.subs, self.widths):
+            _, gu, dnop, b = op.rows_ops(m)
+            act = act_buffer(self.mesh, W, self.moe.E, self.moe.k, m)
+            gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None)
+            dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
+            ttnn.deallocate(act)
+            acc = ttnn.clone(b.out) if acc is None else ttnn.add(acc, b.out)
+        if M == 1:
+            acc = ttnn.slice(acc, [0, 0, 0, 0], [1, 1, 1, self.H])
         return acc

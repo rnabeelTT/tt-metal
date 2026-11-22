@@ -31,6 +31,11 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import DynShortCo
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 FUSED_OPS = __import__("os").environ.get("I2M_OPS", "fused") == "fused"
+# I2M_DRAM_SHARDED (default 1): the attention projections as DRAM-width-sharded weights (qwen36 tp_common
+# sharded_decode_matmul: the DRAM-sharded kernel for decode rows, a 2D matmul for prefill)
+# (measured: at one row these projections are compute-bound on the 32-row tile; DRAM-sharded only wins at LoFi without
+# fp32 accumulation, 45 vs 60 us; at HiFi2 it is slower, 67-69 us: off by default)
+DRAM_SHARDED = __import__("os").environ.get("I2M_DRAM_SHARDED", "0") == "1"
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 
@@ -64,6 +69,7 @@ class AttnWeights:
         wo = L("wo_ud.weight").float() / SQRT5
         # fused q-input projection per die: [q_d | r_d | s_d (padded to 32) | g_d], die-major columns
         self.qd, self.rd, self.sd, self.gd = NH * HD, NH * DR, 32, NH * HD
+        self.kd, self.H = NKV * HD, cfg.hidden_size
         self.fq = self.qd + self.rd + self.sd + self.gd
         if FUSED_OPS:  # the per-(head, dim) q / r scales folded into the projection rows (exact up to weight rounding)
             wq = wq.float() * L("q_l2_clip.scale").float().reshape(-1, 1)
@@ -80,10 +86,34 @@ class AttnWeights:
         up = lambda t, dt, mm: ttnn.as_tensor(t.to(torch.bfloat16).contiguous(), dtype=dt,  # noqa: E731
                                               layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM,
                                               mesh_mapper=mm)
-        self.w_q = up(torch.cat(cols, 0).T.reshape(1, 1, wq.shape[1], -1), wdtype, shard_c)
-        self.w_k = up(wk.T.reshape(1, 1, wk.shape[1], -1), wdtype, shard_c)
-        self.w_v = up(wv.T.reshape(1, 1, wv.shape[1], -1), wdtype, shard_c)
-        self.w_o = up(wo.T.reshape(1, 1, wo.shape[1], -1), wdtype, shard_r)
+        self.dram_sharded = DRAM_SHARDED
+        if DRAM_SHARDED:
+            from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+            def dsh(per_die):  # per_die: list of N [K, n_d] (input-major) blocks -> DRAM-sharded [K, N * n_pad]
+                K, n = per_die[0].shape
+                npad = -(-n // (32 * 8)) * (32 * 8)
+                t = torch.cat([torch.nn.functional.pad(b, (0, npad - n)) for b in per_die], -1)
+                mc = tpc.create_dram_sharded_mem_config(K, npad)
+                w = ttnn.as_tensor(t.to(torch.bfloat16).reshape(1, 1, K, -1).contiguous(), dtype=wdtype,
+                                   layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=mc,
+                                   mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None)
+                return w, (tpc.create_dram_sharded_matmul_program_config(32, K, npad),
+                           tpc.create_activation_shard_config(K), K)
+
+            qcat = torch.cat(cols, 0)  # [N * fq, H] die-major rows
+            fq = self.fq
+            self.w_q, self.pc_q = dsh([qcat[d * fq : (d + 1) * fq].T for d in range(N)])
+            kd = NKV * HD
+            self.w_k, self.pc_k = dsh([wk[d * kd : (d + 1) * kd].T for d in range(N)])
+            self.w_v, self.pc_v = dsh([wv[d * kd : (d + 1) * kd].T for d in range(N)])
+            od = NH * HD  # o_proj: row-parallel (input dim split) -> per die [od, H]
+            self.w_o, self.pc_o = dsh([wo[:, d * od : (d + 1) * od].T for d in range(N)])
+        else:
+            self.w_q = up(torch.cat(cols, 0).T.reshape(1, 1, wq.shape[1], -1), wdtype, shard_c)
+            self.w_k = up(wk.T.reshape(1, 1, wk.shape[1], -1), wdtype, shard_c)
+            self.w_v = up(wv.T.reshape(1, 1, wv.shape[1], -1), wdtype, shard_c)
+            self.w_o = up(wo.T.reshape(1, 1, wo.shape[1], -1), wdtype, shard_r)
         # per-head scales (fp32): q [NH, HD], r [NH, DR] (head-sharded), as [1, 1, NH, HD] rows
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
                                           layout=ttnn.TILE_LAYOUT, device=mesh,
@@ -103,9 +133,22 @@ class AttnWeights:
         else:
             self.k_static, self.k_wproj = L("k_sconv.static_w").float(), L("k_sconv.weight_proj").float()
             self.v_static, self.v_wproj = L("v_sconv.static_w").float(), L("v_sconv.weight_proj").float()
+        # HiFi2 reads a bfp8 weight's whole mantissa; HiFi4 only for bf16 weights
         self.ckc = ckc or ttnn.init_device_compute_kernel_config(
-            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
-            packer_l1_acc=True)
+            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4 if wdtype == ttnn.bfloat16 else ttnn.MathFidelity.HiFi2,
+            math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True)
+
+
+def proj(w: "AttnWeights", which: str, x, dtype=None):
+    """One attention projection (q | k | v | o) on x [1, 1, M, K] -> [1, 1, M, n(+pad)] in DRAM."""
+    W = getattr(w, "w_" + which)
+    if not w.dram_sharded:
+        return ttnn.linear(x, W, compute_kernel_config=w.ckc, memory_config=DRAM, dtype=dtype)
+    from models.demos.blackhole.qwen36.tt import tp_common as tpc
+
+    pc, act, K = getattr(w, "pc_" + which)
+    return tpc.sharded_decode_matmul(x, W, w.ckc, pc, act, tpc.create_prefill_matmul_program_config, K,
+                                     decode_out_memory_config=DRAM, out_dtype=dtype)
 
 
 class AttnCache:
@@ -194,10 +237,12 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
         assert p0 % c.block == 0 and R % 64 == 0 and R <= c.prefill_chunk, (p0, R)
     nvalid = R if valid is None else valid
     ckc = w.ckc
-    pq = ttnn.linear(xq, w.w_q, compute_kernel_config=ckc, memory_config=DRAM,
-                     dtype=ttnn.float32 if FUSED_OPS else None)  # [1, 1, R, fq]
-    pk = ttnn.linear(xk, w.w_k, compute_kernel_config=ckc, memory_config=DRAM)
-    pv = ttnn.linear(xv, w.w_v, compute_kernel_config=ckc, memory_config=DRAM)
+    pq = proj(w, "q", xq, ttnn.float32 if FUSED_OPS else None)  # [1, 1, R, fq(+pad)]
+    pk = proj(w, "k", xk)
+    pv = proj(w, "v", xv)
+    if w.dram_sharded:  # drop the bank padding of k / v (the convs take exactly NKV * HD columns)
+        pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, R, w.kd))
+        pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, R, w.kd))
     o0 = 0
     q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.qd)); o0 += w.qd
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.rd)); o0 += w.rd
@@ -269,7 +314,9 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     o = ttnn.reshape(o, (1, 1, R, NH * HD))
     gate = ttnn.sigmoid(f32(g))
     o = bf(ttnn.multiply(f32(o), gate))
-    out = ttnn.linear(o, w.w_o, compute_kernel_config=ckc, memory_config=DRAM)
+    out = proj(w, "o", o)
+    if w.dram_sharded and int(out.shape[-1]) != w.H:
+        out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, R, w.H))
     if N > 1:
         out = all_reduce(out, w.mesh, tt_ccl)
     return out
