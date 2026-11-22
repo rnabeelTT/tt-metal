@@ -49,6 +49,12 @@ def main():
         a, b = sys.argv[4].split("-")
         layers = range(int(a), int(b) + 1)
     handles = {}
+    # checkpoint key style (as build_int4_library.py HYB_LIB_KEYS): (prefix, (gate, up, down) names)
+    style = os.environ.get("HYB_LIB_KEYS", "minimax_m2")
+    pre_fmt, names = {
+        "minimax_m2": ("model.layers.{L}.block_sparse_moe.experts.{e}.", ("w1", "w3", "w2")),
+        "qwen35": ("model.language_model.layers.{L}.mlp.experts.{e}.", ("gate_proj", "up_proj", "down_proj")),
+    }[style]
 
     def get(key):
         def h(k):
@@ -111,12 +117,8 @@ def main():
                 gu, down = gu.float(), down.float()
                 gate, up = gu[: gu.shape[0] // 2], gu[gu.shape[0] // 2 :]
             else:
-                pre = f"model.layers.{L}.block_sparse_moe.experts.{e}."
-                gate, up, down = (
-                    get(pre + "w1.weight"),
-                    get(pre + "w3.weight"),
-                    get(pre + "w2.weight"),
-                )  # [N,H] [N,H] [H,N]
+                pre = pre_fmt.format(L=L, e=e)
+                gate, up, down = (get(pre + n + ".weight") for n in names)  # [N,H] [N,H] [H,N]
             N, H = gate.shape
             Nl = N // TP
             gate_t, up_t = gate.T, up.T  # [H, N]
