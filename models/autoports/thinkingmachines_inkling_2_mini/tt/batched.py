@@ -37,6 +37,7 @@ GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
 # logit tile in place (no stacked copy): per mix ~1 small matmul + 1 program instead of concat + an n-row matmul + 1
 # (default on 2 / 4 dies; off on one die, whose DRAM has no room for the ~184 MB of concatenated queries)
 MIX_CACHE = __import__("os").environ.get("I2M_MIX_CACHE")
+POST = __import__("os").environ.get("I2M_POST", "1") == "1"
 
 
 class MixPlan:
@@ -370,10 +371,20 @@ class BatchedDecoder:
         self.tau = ttnn.from_torch(torch.ones(1, B, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
                                    mesh_mapper=self.rep)
         self.plan = None
+        self.post = None
         if (MIX_CACHE == "1") if MIX_CACHE is not None else mesh.get_num_devices() > 1:
             if getattr(model, "_mixplan", None) is None:
                 model._mixplan = MixPlan(model)
             self.plan = model._mixplan
+            # I2M_POST (default 1): the fused post-attention section (tt/post.py) at <= 16 rows
+            if POST and B <= 16:
+                if getattr(model, "_post", None) is None:
+                    from .post import PostKernel
+
+                    model._post = PostKernel(mesh, model.H, model.cfg.rms_norm_eps)
+                    model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
+                    model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
+                self.post, self.nw_rows, self.q_rows = model._post, model._nw_rows, model._q_rows
 
     def load_slot(self, b, lane=0):
         if self.shared is not None:
@@ -463,16 +474,28 @@ class BatchedDecoder:
             bf = ttnn.bfloat16
             qn, kn, vn = ops.rms(qi, L.q_norm, bf), ops.rms(ki, L.k_norm, bf), ops.rms(vi, L.v_norm, bf)
         att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl)
-        att = ba.attn.step(att)
         blk = None
         if L.boundary:
-            resid = _f32(att)
             blk = xn if xn is not None else ops.rms(x)
             if self.plan is not None:
                 D[a] = dmm(blk, self.plan.qcat[a], ops.ckc, dtype=ttnn.float32, memory_config=L1)
             blocks_n, ids = blocks_n + [blk], list(ids) + [a]
-        else:
-            resid = ttnn.add(_f32(x), _f32(att))
+        if self.post is not None and ba.attn.kernel is not None:
+            # conv + residual + norm + mix (+ the MoE-input norm) in one program (tt/post.py)
+            att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att
+            att = att if att.memory_config() == L1 else ttnn.to_memory_config(att, L1)
+            lgs = [(D[b], self.plan.off[(b, ("mlp", a))]) for b in ids]
+            resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
+                                 nw=None if messages is not None else self.nw_rows[li])
+            if messages is not None:
+                mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
+            else:
+                mn = o
+            mo = ba.mlp.step(L.moe.forward(mn))
+            out = _bf(ttnn.add(resid, _f32(mo)))
+            return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
+        att = ba.attn.step(att)
+        resid = _f32(att) if L.boundary else ttnn.add(_f32(x), _f32(att))
         mi = self._mix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1)[0]
         if messages is not None:
             mi = L.gates["mlp"](mi, messages[3])
