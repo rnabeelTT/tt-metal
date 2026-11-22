@@ -192,7 +192,7 @@ class AttnCache:
             write = torch.stack([b * per + torch.arange(per) for b in range(slots)])  # [B, n_ring]
         else:
             read = write = torch.stack([b * per + j for b in range(slots)])
-        self.read_host = read
+        self.read_host, self.write_host = read, write
         self.read_table, self.write_table = self._up_i32(read), self._up_i32(write)  # [B, .] (batched decode)
         self.read_slot = [self._up_i32(read[b : b + 1]) for b in range(slots)]  # [1, .] per slot (one sequence)
         self.write_slot = [self._up_i32(write[b : b + 1]) for b in range(slots)]

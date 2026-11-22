@@ -58,8 +58,10 @@ class BConvKernel:
         self.per = self.Ct // ncores
         self.crs = _range_set(self.cores)
 
-    def step(self, x, s, out_mc=ttnn.L1_MEMORY_CONFIG):
-        """x [1, 1, B, C] TILE interleaved (bf16 or fp32), s = [s0, s1, s2] fp32 TILE (updated in place) -> y bf16."""
+    def step(self, x, s, out_mc=ttnn.L1_MEMORY_CONFIG, taps=None):
+        """x [1, 1, B, C] TILE interleaved (bf16 or fp32), s = [s0, s1, s2] fp32 TILE (updated in place) -> y bf16.
+        taps: (w0, w1, w2, wc) [1, 1, B, C] fp32 per-row taps (the dynamic convs) instead of the static ones."""
+        w_taps, wc = (list(taps[:3]), taps[3]) if taps is not None else (self.w, self.wc)
         if x.is_sharded():
             x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
         y = ttnn.allocate_tensor_on_device(ttnn.Shape(list(x.shape)), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
@@ -70,11 +72,11 @@ class BConvKernel:
         cbs = [_cb(self.crs, cb_x, x.dtype, xb, 2), _cb(self.crs, cb_s, f32, 4096, 3), _cb(self.crs, cb_w, f32, 4096, 4),
                _cb(self.crs, cb_y, bf, 2048, 2)] + [_cb(self.crs, i, f32, 4096, 2) for i in (cb_o0, cb_o1, cb_o2)]
         rd_ct = [cb_x, cb_s, cb_w, xb] + ttnn.TensorAccessorArgs(x).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(s[0]).get_compile_time_args() + ttnn.TensorAccessorArgs(self.w[0]).get_compile_time_args()
+            + ttnn.TensorAccessorArgs(s[0]).get_compile_time_args() + ttnn.TensorAccessorArgs(w_taps[0]).get_compile_time_args()
         wr_ct = [cb_y, cb_o0, cb_o1, cb_o2] + ttnn.TensorAccessorArgs(y).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(s[0]).get_compile_time_args()
-        addr = [x.buffer_address()] + [t.buffer_address() for t in s] + [t.buffer_address() for t in self.w] \
-            + [self.wc.buffer_address()]
+        addr = [x.buffer_address()] + [t.buffer_address() for t in s] + [t.buffer_address() for t in w_taps] \
+            + [wc.buffer_address()]
         rd_rt = [addr + [i * self.per, self.per] for i in range(len(self.cores))]
         wr_rt = [[y.buffer_address()] + [t.buffer_address() for t in s] + [i * self.per, self.per]
                  for i in range(len(self.cores))]
@@ -96,7 +98,7 @@ class BConvKernel:
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_bconv", self.C, len(self.cores), str(x.dtype), int(x.shape[-2]), repr(x.memory_config()),
-               repr(out_mc), repr(s[0].memory_config()))
+               repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([x] + list(s) + list(self.w) + [self.wc, y], prog)
+        ttnn.generic_op([x] + list(s) + list(w_taps) + [wc, y], prog)
         return y

@@ -75,17 +75,28 @@ def main():
     dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
     m = Inkling2Model(mesh, max_seq_len=1024, expert_dtype=dt[os.environ.get("EXPERT_DT", "bfp8")],
                       kv_dtype=dt[os.environ.get("KV_DT", "bf16")], prefill_chunk=256, slots=B)
-    dec = BatchedDecoder(m, B)
-    dec.set_inputs(torch.arange(100, 100 + B), torch.arange(300, 300 + B))
-    dec.step()
-    dec.step()
-    _read()
-    REC["on"] = True
-    dec.step()
+    T = int(os.environ.get("PREFILL", "0"))
+    if T:  # one prefill chunk of T rows (slot 0) instead of a decode step
+        ids = torch.arange(1000, 1000 + T)
+        for _ in range(2):
+            m.reset()
+            m.forward(ids, 0, valid=T, slot=0, last_only=True)
+        m.reset()
+        _read()
+        REC["on"] = True
+        m.forward(ids, 0, valid=T, slot=0, last_only=True)
+    else:
+        dec = BatchedDecoder(m, B)
+        dec.set_inputs(torch.arange(100, 100 + B), torch.arange(300, 300 + B))
+        dec.step()
+        dec.step()
+        _read()
+        REC["on"] = True
+        dec.step()
     REC["on"] = False
     rows = REC["rows"]
     tot = sum(r[3] for r in rows)
-    print(f"== B={B}: {len(rows)} top-level ops, {sum(r[2] for r in rows)} programs, device total {tot / 1e3:.2f} ms")
+    print(f"== {'PREFILL T=' + str(T) if T else 'B=' + str(B)}: {len(rows)} top-level ops, {sum(r[2] for r in rows)} programs, device total {tot / 1e3:.2f} ms")
     site_t = collections.defaultdict(lambda: [0.0, 0])
     comp = collections.defaultdict(lambda: [0.0, 0])
     for name, site, n, us in rows:

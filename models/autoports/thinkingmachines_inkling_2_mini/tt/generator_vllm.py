@@ -36,6 +36,10 @@ EXPERT_DT = os.environ.get("I2M_EXPERT_DT", "bfp8")
 KV_DT = os.environ.get("I2M_KV_DT", "bf16")
 PREFILL_CHUNK = int(os.environ.get("I2M_PREFILL_CHUNK", "256"))
 TRACE = os.environ.get("I2M_TRACE", "1") == "1"
+TIMING = os.environ.get("I2M_TIMING", "0") == "1"
+# decode width buckets: one decoder + trace per width (sharing the full width's state); a step runs the narrowest
+# width covering the highest live slot (new requests take the lowest free slot)
+WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").split(",")]  # per-100-step decode timing breakdown in the server log
 
 
 class Inkling2ForCausalLM:
@@ -55,8 +59,11 @@ class Inkling2ForCausalLM:
         # adapter through initialize_vllm_model)
         self.m, self.mesh, self.B, self.max_seq_len = model, mesh, B, max_seq_len
         self.dec = BatchedDecoder(model, B)
-        self.tr = TracedDecoder(self.dec) if TRACE else None
-        self.row2slot = list(range(B))  # vLLM row -> physical slot
+        self.widths = sorted({w for w in WIDTHS if w < B} | {B})
+        self.decs = {w: (self.dec if w == B else BatchedDecoder(model, w, shared=self.dec)) for w in self.widths}
+        self.trs = {w: TracedDecoder(d) for w, d in self.decs.items()} if TRACE else {}
+        self.tr = self.trs.get(B)
+        self.row2slot = {}  # live vLLM row -> physical slot (slots stay put; new requests take the lowest free one)
         self.V = model.V
         self.vocab = int(model.cfg.vocab_size)
         self.N = mesh.get_num_devices()
@@ -111,7 +118,7 @@ class Inkling2ForCausalLM:
             t0 = time.time()
             for n in range(64, PREFILL_CHUNK + 1, 64):
                 self.m.reset()
-                self.m.forward(torch.zeros(n, dtype=torch.long), 0, valid=n, slot=0, last_only=True)
+                self._host_logits(self.m.forward(torch.zeros(n, dtype=torch.long), 0, valid=n, slot=0, last_only=True), 1)
             self.m.reset()
             logger.info(f"prefill warm-up ({PREFILL_CHUNK // 64} chunk sizes) in {time.time() - t0:.0f}s")
         self.already_warmed_up_prefill = True
@@ -119,36 +126,48 @@ class Inkling2ForCausalLM:
     def warmup_model_decode(self, *args, **kwargs):
         if not self.already_warmed_up_prefill:
             self.warmup_model_prefill()
-        if self.tr is not None and not self._captured:
+        if self.trs and not self._captured:
             t0 = time.time()
-            self.dec.set_inputs(torch.zeros(self.B, dtype=torch.long), torch.full((self.B,), -1))
-            self.tr.capture()
+            for w in self.trs:  # every width's programs first (eager), then the captures
+                self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
+                self._host_logits(self.decs[w].step(), w)  # (the readback untilize is a program too)
+            ttnn.synchronize_device(self.mesh)
+            for w, tr in self.trs.items():
+                self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
+                tr.capture(compile=False)
             self._captured = True
-            logger.info(f"decode trace captured ({self.B} slots) in {time.time() - t0:.1f}s")
+            logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
 
     # ------------------------------------------------------------------ helpers
     def _host_logits(self, t, rows):
-        lg = ttnn.to_torch(ttnn.get_device_tensors(t)[0] if self.N > 1 else t).float()
+        """[1, 1, rows, Vp] fp32 TILE logits -> host [rows, V]: untilized on device first, so only the real rows cross
+        PCIe (the tile tensor is 32 padded rows: 25 MB at Vp 200K, ~8 ms)."""
+        t = ttnn.get_device_tensors(t)[0] if self.N > 1 else t
+        t = ttnn.untilize_with_unpadding(t, [0, 0, rows - 1, int(t.shape[-1]) - 1])
+        lg = ttnn.to_torch(t).float()
         return lg.reshape(-1, lg.shape[-1])[:rows, : self.V]
 
     def _apply_remap(self, slot_remap):
+        """The plugin condensed its rows: new row i holds what old row remap[i] held (its slot moves with it)."""
         if slot_remap is None:
             return
         remap = [int(v) for v in torch.as_tensor(slot_remap).reshape(-1).tolist()]
         if remap == list(range(len(remap))):
             return
-        old = list(self.row2slot)
-        new = [old[r] for r in remap]
-        # rows whose source moved elsewhere now duplicate a slot: give them the slots no row holds (keeps a permutation)
-        seen, dup = set(), []
-        for i, s in enumerate(new):
-            if s in seen:
-                dup.append(i)
-            seen.add(s)
-        free = [s for s in range(self.B) if s not in seen]
-        for i, s in zip(dup, free):
-            new[i] = s
+        old, new, used = dict(self.row2slot), {}, set()
+        for i, r in enumerate(remap):
+            if r in old and old[r] not in used:
+                new[i] = old[r]
+                used.add(old[r])
         self.row2slot = new
+
+    def _slot_for(self, row):
+        """A new request in vLLM row `row`: the lowest slot no other live row holds."""
+        self.row2slot.pop(row, None)
+        used = set(self.row2slot.values())
+        slot = next(s for s in range(self.B) if s not in used)
+        self.row2slot[row] = slot
+        return slot
 
     # ------------------------------------------------------------------ prefill
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
@@ -162,7 +181,7 @@ class Inkling2ForCausalLM:
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         out = torch.full((N, 1, self.vocab), float("-inf"))
         for u in range(N):
-            P, slot = plens[u], self.row2slot[rows[u]]
+            P, slot = plens[u], self._slot_for(rows[u])
             ids = torch.as_tensor(tokens[u, :P]).to(torch.long)
             t0 = time.time()
             self.m.reset()
@@ -186,20 +205,43 @@ class Inkling2ForCausalLM:
         tok = torch.as_tensor(tokens).reshape(-1).to(torch.long)
         pos = torch.as_tensor(start_pos).reshape(-1).to(torch.long)
         R = int(pos.numel())
-        tok_s = torch.zeros(self.B, dtype=torch.long)
-        pos_s = torch.full((self.B,), -1, dtype=torch.long)
-        for r in range(min(R, self.B)):
-            if int(pos[r]) >= 0:
-                s = self.row2slot[r]
-                tok_s[s], pos_s[s] = tok[r], pos[r]
-        d = self.tr if (self.tr is not None and self._captured) else self.dec
+        for r in range(R):  # rows the plugin no longer decodes have finished: their slots are free
+            if int(pos[r]) < 0:
+                self.row2slot.pop(r, None)
+        live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
+        top = max((self.row2slot[r] for r in live), default=0)
+        W = next(w for w in self.widths if w > top)
+        tok_s = torch.zeros(W, dtype=torch.long)
+        pos_s = torch.full((W,), -1, dtype=torch.long)
+        for r in live:
+            s = self.row2slot[r]
+            tok_s[s], pos_s[s] = tok[r], pos[r]
+        d = self.trs[W] if (self.trs and self._captured) else self.decs[W]
+        t0 = time.perf_counter()
         d.set_inputs(tok_s, pos_s)
-        lg = self._host_logits(d.step(), self.B)  # [B, V] by physical slot
+        t1 = time.perf_counter()
+        dev = d.step()
+        if TIMING:
+            ttnn.synchronize_device(self.mesh)
+        t2 = time.perf_counter()
+        lg = self._host_logits(dev, W)  # [W, V] by physical slot
+        t3 = time.perf_counter()
         out = torch.full((R, 1, self.vocab), float("-inf"))
-        for r in range(min(R, self.B)):
-            if int(pos[r]) >= 0:
-                out[r, 0, : self.V] = lg[self.row2slot[r]]
+        for r in live:
+            out[r, 0, : self.V] = lg[self.row2slot[r]]
+        t4 = time.perf_counter()
         self._decode_steps += 1
+        if TIMING:
+            acc = self._tacc = getattr(self, "_tacc", [0.0] * 5)
+            for i, v in enumerate((t1 - t0, t2 - t1, t3 - t2, t4 - t3, t0 - getattr(self, "_tlast", t0))):
+                acc[i] += v
+            self._tlast = t4
+            if self._decode_steps % 100 == 0:
+                n = 100
+                logger.info(f"decode timing (ms/step over {n}): inputs {acc[0] / n * 1e3:.1f}  device {acc[1] / n * 1e3:.1f}  "
+                            f"readback {acc[2] / n * 1e3:.1f}  pack {acc[3] / n * 1e3:.1f}  outside (plugin + sampling) "
+                            f"{acc[4] / n * 1e3:.1f}")
+                self._tacc = [0.0] * 5
         return out
 
     def read_decode_output(self, tt_out, async_read=False, **kwargs):

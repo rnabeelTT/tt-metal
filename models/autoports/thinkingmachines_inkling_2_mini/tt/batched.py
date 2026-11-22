@@ -112,10 +112,20 @@ class BatchedDynConv:
                                      mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=3) if N > 1 else None)
         self.s = [mk() for _ in range(K - 1)]
         self.static = [ttnn.to_layout(t, ttnn.TILE_LAYOUT) for t in lane.static]
+        self.kernel = None
+        if BCONV_KERNEL:  # the one-program conv step with per-row taps (any decode width: one tile row of states)
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.bconv import BConvKernel
+
+            self.kernel = BConvKernel(self.mesh, torch.zeros(lane.C * N, K), ttnn.ShardTensorToMesh(self.mesh, dim=-1)
+                                      if N > 1 else None, lane.C)
 
     def step(self, x, h):
         lane = self.lane
         dyn = dmm(_bf(h), lane.wproj, lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
+        if self.kernel is not None:
+            # y = x + sum_L tap_L x_{t-L} = x (tap_0 + 1) + s2 tap_1 + s1 tap_2 + s0 tap_3   (s0 = x_{t-3})
+            tap = [ttnn.add(dmm(dyn, lane.expand[L], lane.ckc, dtype=ttnn.float32), self.static[L]) for L in range(K)]
+            return self.kernel.step(x, self.s, taps=(tap[3], tap[2], tap[1], ttnn.add(tap[0], 1.0)))
         xf = _f32(x)
         hist = [xf, self.s[2], self.s[1], self.s[0]]  # x_{t-L} for L = 0..3
         y = xf
@@ -137,21 +147,32 @@ class BatchedDynConv:
 class BatchedApp:
     """Batched decode state of one application: the k / v / attention-output / MLP-output convs over B slots."""
 
-    def __init__(self, app, layer, B: int):
+    def __init__(self, app, layer, B: int, shared: "BatchedApp" = None):
+        """shared: the full-width BatchedApp whose conv states this narrower decode width uses (rows 0 .. B-1 of the
+        same one-tile-row state tensors)."""
         c, mesh = app.cache, layer.ops.mesh
         N = mesh.get_num_devices()
         w = layer.attn
         kv_map = ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None
         rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
-        if w.sliding:
+        # this width's page tables: rows 0 .. B-1 of the cache's slot tables (slot = row)
+        if shared is None:
+            self.read_table, self.write_table = c.read_table, c.write_table
+        else:
+            self.read_table = c._up_i32(c.read_host[:B])
+            self.write_table = c._up_i32(c.write_host[:B])
+        if shared is not None:
+            self.k, self.v, self.attn, self.mlp = shared.k, shared.v, shared.attn, shared.mlp
+        elif w.sliding:
             self.k = BatchedConv(mesh, w.k_taps, kv_map, w.NKV * w.HD, B)
             self.v = BatchedConv(mesh, w.v_taps, kv_map, w.NKV * w.HD, B)
         else:
             self.k = BatchedDynConv(c.k_conv, B)
             self.v = BatchedDynConv(c.v_conv, B)
-        H = layer.attn_conv_w.shape[0]
-        self.attn = BatchedConv(mesh, layer.attn_conv_w, rep, H, B)
-        self.mlp = BatchedConv(mesh, layer.mlp_conv_w, rep, H, B)
+        if shared is None:
+            H = layer.attn_conv_w.shape[0]
+            self.attn = BatchedConv(mesh, layer.attn_conv_w, rep, H, B)
+            self.mlp = BatchedConv(mesh, layer.mlp_conv_w, rep, H, B)
         self.aprep = None
         # KV write: [1, B, NKV, HD] padded to 32 head rows, height-sharded one user per core
         grid = mesh.compute_with_storage_grid_size()
@@ -203,11 +224,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
             if "v" in APREP_OLD:
                 vp = ttnn.to_memory_config(ttnn.pad(ov, [1, B, 32, w.HD], [0, 0, 0, 0], 0.0), ba.kv_shard)
         wpos = pos_wr if w.sliding else pos
-        ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=c.write_table)
-        ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=c.write_table)
+        ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=ba.write_table)
+        ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=ba.write_table)
         g0 = w.qd + w.rd + w.sd
         g = ttnn.slice(pq, (0, 0, 0, g0), (1, 1, B, g0 + w.gd))
-        return _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl)
+        return _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl)
     o0 = 0
     q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.qd)); o0 += w.qd
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.rd)); o0 += w.rd
@@ -229,12 +250,12 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     for cache, t in ((c.k_cache, k), (c.v_cache, v)):
         tp = ttnn.pad(t, [1, B, 32, HD], [0, 0, 0, 0], 0.0)
         tsh = ttnn.to_memory_config(tp, ba.kv_shard)
-        ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=c.write_table)
+        ttnn.experimental.paged_update_cache(cache, tsh, update_idxs_tensor=wpos, page_table=ba.write_table)
         ttnn.deallocate(tsh)
         ttnn.deallocate(tp)
     rq = ttnn.pad(_bf(r), [1, B, NH, 32], [0, 0, 0, 0], 0.0)
     sk = _bf(ttnn.multiply(_f32(ttnn.reshape(s, (1, B, NH, 1))), w.sink_bcast))
-    return _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl)
+    return _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl)
 
 
 def _old_prep(w, pq, k, v, tau, B):
@@ -253,9 +274,9 @@ def _old_prep(w, pq, k, v, tau, B):
     return _bf(q), rq, _bf(k), _bf(v), sk
 
 
-def _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl):
+def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl):
     NH, HD, N = w.NH, w.HD, w.N
-    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, c.read_table, rq, w.table, w.scale, w.W, w.E,
+    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
                             sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
     o = ttnn.reshape(o, (1, 1, B, NH * HD))
     o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
@@ -268,9 +289,13 @@ def _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl):
 class BatchedDecoder:
     """B-slot decode on an Inkling2Model built with slots=B."""
 
-    def __init__(self, model, B: int):
-        self.m, self.B = model, B
-        self.apps = [BatchedApp(model.apps[a], model.layers[li], B) for a, (li, _) in enumerate(model.sched)]
+    def __init__(self, model, B: int, shared: "BatchedDecoder" = None):
+        """shared: a wider decoder on the same model whose conv states this one uses (slots 0 .. B-1 = its rows
+        0 .. B-1; its rows past B are left stale and re-initialised by the next prefill into them)."""
+        self.m, self.B, self.shared = model, B, shared
+        assert shared is None or shared.B >= B
+        self.apps = [BatchedApp(model.apps[a], model.layers[li], B, shared=shared.apps[a] if shared else None)
+                     for a, (li, _) in enumerate(model.sched)]
         for L in model.layers.values():  # the fused MoE rows ops of this width, built before any trace capture
             if getattr(L.moe, "fused", False):
                 L.moe.fe.build_rows([B])
@@ -292,6 +317,8 @@ class BatchedDecoder:
                                    mesh_mapper=self.rep)
 
     def load_slot(self, b):
+        if self.shared is not None:
+            return self.shared.load_slot(b)
         for a in range(len(self.apps)):
             self.apps[a].load_slot(b, self.m.apps[a])
 
@@ -388,8 +415,11 @@ class TracedDecoder:
     def set_inputs(self, tokens, positions):
         self.dec.set_inputs(tokens, positions)
 
-    def capture(self):
-        self.dec.step()  # compile
+    def capture(self, compile=True):
+        """compile=False: the step's programs are already compiled (several widths: compile every width, THEN capture
+        every trace; a program first compiled after a capture can be overwritten by that trace's replays)."""
+        if compile:
+            self.dec.step()
         ttnn.synchronize_device(self.mesh)
         self.tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.out = self.dec.step()
