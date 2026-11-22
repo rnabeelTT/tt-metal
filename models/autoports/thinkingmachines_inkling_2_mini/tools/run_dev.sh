@@ -10,7 +10,7 @@ REPO=$(cd "$P/../../.." && pwd)
 IMG=${I2M_IMAGE:-tt-model/inkling-small-hybrid-qb2:3d102efec36e}
 HF_HOST=${HF_HOST:-${HF_HOME:-/opt/tenstorrent/models}}
 CACHE=${I2M_CACHE:-$HOME/.cache/inkling2}
-mkdir -p "$CACHE/tt" "$CACHE/logs" "$CACHE/wcache" "$HOME/.cache/hybrid-moe"
+mkdir -p "$CACHE/tt" "$CACHE/logs" "$CACHE/wcache" "$CACHE/generated" "$HOME/.cache/hybrid-moe"
 M=(-v "$P:/opt/tt-metal/models/autoports/thinkingmachines_inkling_2_mini")
 if [ "${MOUNT_SHARED:-1}" = 1 ]; then
   for d in models/demos/blackhole/qwen36 models/autoports/minimaxai_minimax_m2_7 models/common/modules/moe; do
@@ -25,7 +25,7 @@ TTY=(); [ -t 0 ] && TTY=(-it)
 exec docker run --rm "${TTY[@]}" --name "${NAME:-i2m-dev-$$}" \
   --device /dev/tenstorrent --ipc host --ulimit memlock=-1:-1 \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
-  "${M[@]}" -v "$HF_HOST:/hf" -v "$CACHE:/cache" \
+  "${M[@]}" -v "$HF_HOST:/hf" -v "$CACHE:/cache" -v "$CACHE/generated:/opt/tt-metal/generated" \
   --user "$(id -u):$(id -g)" -w /opt/tt-metal \
   -e HOME=/tmp -e ARCH_NAME=blackhole -e MESH_DEVICE=${MESH_DEVICE:-P150} -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub \
   -e HF_HUB_OFFLINE=1 -e TT_METAL_CACHE=/cache/tt -e TT_METAL_LOGS_PATH=/cache/logs -e I2M_WCACHE=/cache/wcache \

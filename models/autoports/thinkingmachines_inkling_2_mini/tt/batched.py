@@ -291,3 +291,33 @@ class BatchedDecoder:
             mi = L.gates["mlp"](mi, messages[3])
         mo = ba.mlp.step(L.moe.forward(_bf(ops.rms(mi, L.mlp_norm))))
         return _bf(ttnn.add(resid, _f32(mo)))
+
+
+class TracedDecoder:
+    """A captured BatchedDecoder.step: capture() compiles (one eager step), then records the step as a trace; step()
+    replays it (the per-step inputs are written by set_inputs before each replay). Every program the replays share
+    the device with (prefill buckets, sampling) must be compiled BEFORE capture: a program first compiled after it can
+    have its kernel binaries overwritten by the replays (Inkling-Small)."""
+
+    def __init__(self, dec: BatchedDecoder):
+        self.dec, self.mesh, self.tid, self.out = dec, dec.m.mesh, None, None
+
+    def set_inputs(self, tokens, positions):
+        self.dec.set_inputs(tokens, positions)
+
+    def capture(self):
+        self.dec.step()  # compile
+        ttnn.synchronize_device(self.mesh)
+        self.tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+        self.out = self.dec.step()
+        ttnn.end_trace_capture(self.mesh, self.tid, cq_id=0)
+        ttnn.synchronize_device(self.mesh)
+
+    def step(self):
+        ttnn.execute_trace(self.mesh, self.tid, cq_id=0, blocking=False)
+        return self.out
+
+    def release(self):
+        if self.tid is not None:
+            ttnn.release_trace(self.mesh, self.tid)
+            self.tid = None

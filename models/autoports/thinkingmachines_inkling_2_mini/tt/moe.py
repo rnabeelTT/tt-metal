@@ -111,7 +111,7 @@ class MoE:
         """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc)."""
         T = int(x.shape[2])
         w, ids = self.route(x)
-        if T <= 8:
+        if T == 1:  # one token: only its 8 experts' weights are read
             out = self._gather(x, w, ids, T)
         else:
             out = self._masked(x, w, ids, T)
