@@ -145,7 +145,7 @@ class MoE:
         return wn, ids16
 
     # -- experts -----------------------------------------------------------------------------------------------------
-    def forward(self, x, logits=None, dup=False):
+    def forward(self, x, logits=None, dup=False, packed_out=False):
         """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc).
         logits: the router logits computed upstream ([1, 1, max(T, 2), E] fp32; T = 1: dup, row 1 = row 0 in x too)."""
         T = int(x.shape[2])
@@ -177,7 +177,7 @@ class MoE:
             else:
                 out = self._masked(x, w, ids, T)
         if self.N > 1:
-            out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp", rows=rows)
+            out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp", rows=rows, packed_out=packed_out)
         return out
 
     def _sorted(self, x, T):

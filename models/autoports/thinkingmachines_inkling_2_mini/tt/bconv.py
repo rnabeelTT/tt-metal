@@ -62,7 +62,12 @@ class BConvKernel:
 
     def step(self, x, s, out_mc=ttnn.L1_MEMORY_CONFIG, taps=None):
         """x [1, 1, B, C] TILE interleaved (bf16 or fp32), s = [s0, s1, s2] fp32 TILE (updated in place) -> y bf16.
-        taps: (w0, w1, w2, wc) [1, 1, B, C] fp32 per-row taps (the dynamic convs) instead of the static ones."""
+        taps: (w0, w1, w2, wc) [1, 1, B, C] fp32 per-row taps (the dynamic convs) instead of the static ones, or
+        (cat,): one [1, 1, B, 4 C] tensor [w0 | w1 | w2 | wc]."""
+        stride = 0
+        if taps is not None and len(taps) == 1:
+            stride = int(x.shape[-1]) // 32
+            taps = (taps[0],) * 4
         w_taps, wc = (list(taps[:3]), taps[3]) if taps is not None else (self.w, self.wc)
         if x.is_sharded():
             x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
@@ -90,6 +95,7 @@ class BConvKernel:
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
+            defines=[("BCONV_TAP_STRIDE", str(stride))] if stride else [],
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("bconv_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
@@ -101,7 +107,7 @@ class BConvKernel:
                                   else []),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_bconv", self.C, len(self.cores), str(x.dtype), int(x.shape[-2]), repr(x.memory_config()),
+        key = ("i2m_bconv", self.C, len(self.cores), str(x.dtype), int(x.shape[-2]), stride, repr(x.memory_config()),
                repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([x] + list(s) + list(w_taps) + [wc, y], prog)

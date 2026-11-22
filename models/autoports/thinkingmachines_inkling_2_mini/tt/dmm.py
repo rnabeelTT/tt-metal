@@ -16,6 +16,11 @@ import ttnn
 
 ON = os.environ.get("I2M_DMM", "1") == "1"
 CORES = int(os.environ.get("I2M_DMM_CORES", "48"))
+# I2M_DMM_GRID_W: the matmul grid's width (default: 9 columns on > 1 die). all_reduce_async runs its fabric sender on
+# the first core right of its output shard grid ((9, 0) for tt/ccl.py's grids); a decode matmul on that core right
+# after the all-reduce hung on the middle dies of the (1, 4) mesh at B = 8 (its in0 receiver never saw the multicast;
+# tools/tt-triage.py dump_callstacks), so the decode matmuls stay on columns 0 .. 8
+GRID_W = int(os.environ.get("I2M_DMM_GRID_W", "-1"))
 _cfg = {}
 
 
@@ -27,7 +32,8 @@ def _progcfg(mesh, m, k, n):
         grid = mesh.compute_with_storage_grid_size()
         nt = math.ceil(n / 32)
         nc = min(grid.x * grid.y if nt >= 2048 else CORES, nt, grid.x * grid.y)
-        _cfg[key] = tpc.create_matmul_1d_decode_progcfg(m, k, n, nc, grid_w=grid.x)
+        gw = GRID_W if GRID_W > 0 else (min(9, grid.x) if GRID_W < 0 and mesh.get_num_devices() > 1 else grid.x)
+        _cfg[key] = tpc.create_matmul_1d_decode_progcfg(m, k, n, nc, grid_w=gw)
     return _cfg[key]
 
 

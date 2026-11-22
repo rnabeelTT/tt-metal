@@ -48,10 +48,13 @@ void kernel_main() {
         noc_async_read(as1.get_noc_addr(t), s + F32, F32);
         noc_async_read(as2.get_noc_addr(t), s + 2 * F32, F32);
         const uint32_t w = get_write_ptr(cb_w);
+#ifndef BCONV_TAP_STRIDE
+#define BCONV_TAP_STRIDE 0  // (> 0: the four taps are one tensor, tap j at tile t + j * stride)
+#endif
         noc_async_read(aw0.get_noc_addr(t), w, F32);
-        noc_async_read(aw1.get_noc_addr(t), w + F32, F32);
-        noc_async_read(aw2.get_noc_addr(t), w + 2 * F32, F32);
-        noc_async_read(awc.get_noc_addr(t), w + 3 * F32, F32);
+        noc_async_read(aw1.get_noc_addr(t + BCONV_TAP_STRIDE), w + F32, F32);
+        noc_async_read(aw2.get_noc_addr(t + 2 * BCONV_TAP_STRIDE), w + 2 * F32, F32);
+        noc_async_read(awc.get_noc_addr(t + 3 * BCONV_TAP_STRIDE), w + 3 * F32, F32);
         noc_async_read_barrier();
         cb_push_back(cb_x, 1);
         cb_push_back(cb_s, 3);

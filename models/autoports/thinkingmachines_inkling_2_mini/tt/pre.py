@@ -25,8 +25,13 @@ class PreKernel:
         output (bf16) + residual (fp32) + its MoE-output BatchedConv; blocks n fp32 with logits [(tensor, first tile)]
         (NQ consecutive tiles each); qrows NQ query rows ([1, 1, 32, H] fp32); nws NQ norm weight rows (None: return
         the fp32 mixes). -> (x (bf16; the input when no tail), xn (fp32 or None), [NQ outputs])."""
+        from .ccl import PackedAR
+
         pk, PER = self.post, self.PER
         T = int(x.shape[-2])
+        packed = tail is not None and isinstance(tail[0], PackedAR)  # (mo: the packed all-reduce rows, in place)
+        if packed:
+            tail = (tail[0].t,) + tuple(tail[1:])
         NB, NQ = len(blocks), len(qrows)
         norm = nws is not None
         assert T <= 16 and 1 <= NB and NQ <= 3 and len(logits) == NB
@@ -83,7 +88,7 @@ class PreKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("PRE_CX", str(CX)), ("PRE_ROWS", str(T))]
+        defs = [("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -100,7 +105,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY,
+        key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

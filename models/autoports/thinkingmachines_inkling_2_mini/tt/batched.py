@@ -24,7 +24,7 @@ import ttnn
 from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2clip, _rms_unweighted, proj
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
-from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
+from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import PackedAR, all_reduce, unpacked
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -43,7 +43,8 @@ PRE = __import__("os").environ.get("I2M_PRE", "1") == "1"  # the fused pre-atten
 # program (tt/gate.py GateKernel2); 0: separate ops
 GATE_NORM = int(__import__("os").environ.get("I2M_GATE_NORM", "2"))
 GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1"  # likewise the attention-side gates
-POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"  # the router logits in tt/post.py
+POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"
+AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
@@ -185,14 +186,18 @@ class BatchedDynConv:
 
             self.kernel = BConvKernel(self.mesh, torch.zeros(lane.C * N, K), ttnn.ShardTensorToMesh(self.mesh, dim=-1)
                                       if N > 1 else None, lane.C)
+            # the four taps in one matmul + one add, in the kernel's order [w0 | w1 | w2 | wc] = taps 3, 2, 1, 0 (+ 1)
+            self.ecat = ttnn.concat([lane.expand[L] for L in (3, 2, 1, 0)], dim=-1)
+            self.scat = ttnn.concat([self.static[3], self.static[2], self.static[1], ttnn.add(self.static[0], 1.0)],
+                                    dim=-1)
 
     def step(self, x, h):
         lane = self.lane
         dyn = dmm(_bf(h), lane.wproj, lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
         if self.kernel is not None:
             # y = x + sum_L tap_L x_{t-L} = x (tap_0 + 1) + s2 tap_1 + s1 tap_2 + s0 tap_3   (s0 = x_{t-3})
-            tap = [ttnn.add(dmm(dyn, lane.expand[L], lane.ckc, dtype=ttnn.float32), self.static[L]) for L in range(K)]
-            return self.kernel.step(x, self.s, taps=(tap[3], tap[2], tap[1], ttnn.add(tap[0], 1.0)))
+            tap = ttnn.add(dmm(dyn, self.ecat, lane.ckc, dtype=ttnn.float32), self.scat)
+            return self.kernel.step(x, self.s, taps=(tap,))
         xf = _f32(x)
         hist = [xf, self.s[2], self.s[1], self.s[0]]  # x_{t-L} for L = 0..3
         y = xf
@@ -259,7 +264,7 @@ class BatchedApp:
         self.mlp.load_slot(b, ml.st)
 
 
-def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, tau, tt_ccl=None):
+def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, tau, tt_ccl=None, packed_out=False):
     """B users, one row each. pos [B] int32 (logical positions; global-layer writes), pos_wr [B] int32 (sliding-layer
     write slots: pos mod ring period), pos_sdpa [B, 1] int32, tau [1, B, 1, 1] fp32."""
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
@@ -297,9 +302,9 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
         ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=ba.write_table)
         g0 = w.qd + w.rd + w.sd
         if AGATE and B <= 16 and g0 % 32 == 0:  # (the gate read from pq in the output-gate program)
-            return _attn_out(w, c, ba, q, rq, sk, None, pos_sdpa, B, tt_ccl, pq=pq, g0=g0)
+            return _attn_out(w, c, ba, q, rq, sk, None, pos_sdpa, B, tt_ccl, pq=pq, g0=g0, packed_out=packed_out)
         g = ttnn.slice(pq, (0, 0, 0, g0), (1, 1, B, g0 + w.gd))
-        return _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl)
+        return _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, packed_out=packed_out)
     o0 = 0
     q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.qd)); o0 += w.qd
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.rd)); o0 += w.rd
@@ -348,7 +353,7 @@ def _old_prep(w, pq, k, v, tau, B):
 _AGATE = {}
 
 
-def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None):
+def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, packed_out=False):
     NH, HD, N = w.NH, w.HD, w.N
     if pq is not None:  # the output gate in one program (tt/agate.py): SDPA output in L1
         o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
@@ -369,7 +374,7 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None):
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, w.H))
-    return all_reduce(out, w.mesh, tt_ccl, site="mixer") if N > 1 else out
+    return all_reduce(out, w.mesh, tt_ccl, site="mixer", packed_out=packed_out) if N > 1 else out
 
 
 class BatchedDecoder:
@@ -498,7 +503,7 @@ class BatchedDecoder:
         """A deferred tail -> the layer output x = bf16(resid + conv(mo)) (the ops path)."""
         if not isinstance(x, Tail):
             return x
-        out = _bf(ttnn.add(x.resid, _f32(x.conv.step(x.mo))))
+        out = _bf(ttnn.add(x.resid, _f32(x.conv.step(unpacked(x.mo)))))
         return ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out
 
     def _mix(self, key, blocks_n, ids, D, cur, Q, nq):
@@ -539,7 +544,8 @@ class BatchedDecoder:
                 nws = None
             lgs = [(D[b], self.plan.off[(b, ("attn", a))]) for b in ids]
             if isinstance(x, Tail):
-                xin = x.mo if x.mo.memory_config() == L1 else ttnn.to_memory_config(x.mo, L1)
+                xin = x.mo if isinstance(x.mo, PackedAR) or x.mo.memory_config() == L1 else \
+                    ttnn.to_memory_config(x.mo, L1)
                 x, xn, outs = self.pre(xin, blocks_n, lgs, self.aq_rows[li], nws, tail=(xin, x.resid, x.conv),
                                        bound=L.boundary)
             else:
@@ -573,7 +579,11 @@ class BatchedDecoder:
                 qi, ki, vi = (L.gates[n](hh, mm) for n, hh, mm in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
             bf = ttnn.bfloat16
             qn, kn, vn = ops.rms(qi, L.q_norm, bf), ops.rms(ki, L.k_norm, bf), ops.rms(vi, L.v_norm, bf)
-        att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl)
+        post_path = self.post is not None and ba.attn.kernel is not None
+        att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl,
+                                packed_out=post_path and AR_DIRECT)
+        if not post_path:
+            att = unpacked(att)
         blk = None
         if L.boundary:
             blk = xn if xn is not None else ops.rms(x)
@@ -582,8 +592,9 @@ class BatchedDecoder:
             blocks_n, ids = blocks_n + [blk], list(ids) + [a]
         if self.post is not None and ba.attn.kernel is not None:
             # conv + residual + norm + mix (+ the MoE-input norm) in one program (tt/post.py)
-            att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att
-            att = att if att.memory_config() == L1 else ttnn.to_memory_config(att, L1)
+            if not isinstance(att, PackedAR):
+                att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att
+                att = att if att.memory_config() == L1 else ttnn.to_memory_config(att, L1)
             lgs = [(D[b], self.plan.off[(b, ("mlp", a))]) for b in ids]
             lg, dup = None, False
             T = int(att.shape[-2])
@@ -606,10 +617,12 @@ class BatchedDecoder:
                     mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
             else:
                 mn = o
-            mo = L.moe.forward(mn, logits=lg, dup=dup) if (lg is not None or dup) else L.moe.forward(mn)
+            pk = self.pre is not None and AR_DIRECT  # (the next pre program reads the packed rows)
+            mo = L.moe.forward(mn, logits=lg, dup=dup, packed_out=pk) if (lg is not None or dup or pk) \
+                else L.moe.forward(mn)
             if self.pre is not None:  # the tail (MoE-output conv + residual) runs in the next application's program
                 return Tail(mo, resid, ba.mlp), blk
-            out = _bf(ttnn.add(resid, _f32(ba.mlp.step(mo))))
+            out = _bf(ttnn.add(resid, _f32(ba.mlp.step(unpacked(mo)))))
             return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
         att = ba.attn.step(att)
         resid = _f32(att) if L.boundary else ttnn.add(_f32(x), _f32(att))

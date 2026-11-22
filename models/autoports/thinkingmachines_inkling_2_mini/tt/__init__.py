@@ -15,3 +15,39 @@ _os.environ.setdefault("QWEN35_MOE_DN_READERS_WIDE", "9")
 _os.environ.setdefault("QWEN35_MOE_GU_READERS", "2")
 _os.environ.setdefault("QWEN35_MOE_DN_OFFROW", "1")
 _os.environ.setdefault("QWEN35_MOE_DN_CHUNK", "2")
+
+# I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
+# allocated L1 address (fast runtime mode does not check CB / L1-buffer clashes: an overlap hangs or corrupts)
+if _os.environ.get("I2M_L1_CHECK") == "1":
+    import traceback as _tb
+
+    import ttnn as _ttnn
+
+    _gen = _ttnn.generic_op
+    _seen = set()
+
+    def _checked(io, prog, *a, **k):
+        dev = next((t.device() for t in io if t.device() is not None), None)
+        if dev is not None:
+            per = {}
+            for cb in prog.cbs:
+                for r in cb.core_ranges.ranges():
+                    for x in range(r.start.x, r.end.x + 1):
+                        for y in range(r.start.y, r.end.y + 1):
+                            per[(x, y)] = per.get((x, y), 0) + cb.total_size
+            cbs = max(per.values()) if per else 0
+            base = _ttnn.get_allocator_base_address(dev, _ttnn.BufferType.L1)
+            mv = _ttnn.get_memory_view(dev, _ttnn.BufferType.L1)
+            low = min((int(b["address"]) for b in mv.block_table
+                       if str(b.get("allocated", "")).lower() in ("yes", "true", "1")), default=None)
+            site = next((f"{f.filename.split('/')[-1]}:{f.lineno}" for f in reversed(_tb.extract_stack()[:-1])
+                         if "thinkingmachines_inkling_2_mini/tt/" in f.filename), "?")
+            key = (site, cbs, low)
+            if key not in _seen:
+                _seen.add(key)
+                over = low is not None and base + cbs > low
+                print(f"L1CHECK {'OVERLAP ' if over else ''}{site}: CBs {cbs / 1024:.0f} KB from {base:#x} -> "
+                      f"{base + cbs:#x}, lowest L1 buffer {low if low is None else hex(low)}", flush=True)
+        return _gen(io, prog, *a, **k)
+
+    _ttnn.generic_op = _checked

@@ -75,7 +75,17 @@ void kernel_main() {
     }
     for (uint32_t i = 0; i < PER; ++i) {
         const uint32_t t = t0 + i;
+#if POST_ATT_PACKED
+        for (uint32_t r = 0; r < T; ++r) {  // chunk (t, r, f) of the packed all-reduce result (tt/ccl.py)
+            for (uint32_t f = 0; f < 2; ++f) {
+                const uint32_t ch = (t * T + r) * 2 + f;
+                noc_async_read(att.get_noc_addr(ch >> 6) + (ch & 63) * 32,
+                               get_write_ptr(cb_att) + i * BF + f * 512 + r * 32, 32);
+            }
+        }
+#else
         rb(att.get_noc_addr(t), get_write_ptr(cb_att) + i * BF);
+#endif
         if constexpr (ADD) {
             rb(xx.get_noc_addr(t), get_write_ptr(cb_x) + i * BF);
         }

@@ -76,7 +76,11 @@ class PostKernel:
         """att / x [1, 1, T, H] bf16 (x None: a block boundary, resid = y), conv: the BatchedConv (states / taps),
         q: the query as rows ([1, 1, 32, H] fp32, rows_weight), blocks n fp32 [1, 1, T, H] with logits [(tensor, tile)], nw: the norm weight rows
         ([1, 1, 32, H] fp32; None: return the mix output) -> (resid fp32, out bf16 | fp32)."""
+        from .ccl import PackedAR
+
+        packed = isinstance(att, PackedAR)  # (att: the packed all-reduce rows, read in place)
         T = int(att.shape[-2])
+        att = att.t if packed else att
         assert T <= 16 and att.dtype == ttnn.bfloat16 and len(blocks) == len(logits) >= 1
         NB, PER, add, norm = len(blocks), self.PER, x is not None, nw is not None
         # router (W hi, W lo) bf16 [1, 1, H, E] with nw, <= ROUTER_ROWS rows: the MoE router logits too (a root-only round) ->
@@ -137,7 +141,7 @@ class PostKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("POST_CX", str(CX)), ("POST_ROWS", str(T))] + rdefs
+        defs = [("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed)))] + rdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -154,7 +158,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, NB, add, norm, self.H, ET, dup, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, NB, add, norm, self.H, ET, dup, packed, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

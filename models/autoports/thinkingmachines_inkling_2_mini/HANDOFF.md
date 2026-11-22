@@ -207,9 +207,17 @@ packing).
 | MoE output read by the all-reduce in place (no clone / slice) | 19.0 | 27.9 | | |
 | router logits in the post-attention program (applications without message gates; <= 4 rows) | 18.7 | 27.9 | | |
 | attention output gate in one program (tt/agate.py; bit-identical) | 17.9 | 27.1 | | |
+| post / pre read the packed all-reduce rows in place (no unpack program; bit-identical) | 17.7 | 26.9 | | |
+| global layers' dynamic conv taps: one matmul + one add (4 + 4 + 1 programs before) | 17.4 | 26.6 | | |
 
-B = 8 at this point: 31.9 ms (251 tok/s). The post router round is limited to 4 rows: at 8 its CBs (~890 KB per core)
-overlapped L1 tensors and the B = 8 trace hung (fast runtime mode does not check CB / L1 clashes). Tried and dropped:
+B = 8 at this point: 31.4 ms (255 tok/s). B = 8 trace replays hung (timing-dependent; not with the watcher): the
+middle dies sat in a decode matmul on core (9, 0), the fabric sender core all_reduce_async places right of its output
+shard grid, while the outer dies ran ahead into the next all-reduce (tools/tt-triage.py dump_running_operations /
+dump_callstacks on the live hang). The decode matmuls now stay on columns 0..8 (tt/dmm.py). I2M_L1_CHECK=1 checks
+every generic_op's CBs against the lowest L1 buffer (no overlap; pre / fused MoE reach ~1 MB per core). The post
+router round is limited to 4 rows (set while chasing the hang; may be liftable).
+Tried and dropped: merging the message gate's first two rounds (the projections of the raw operands with the norm
+statistics): slower (18.1 / 27.8 / 33.4 ms at B = 1 / 4 / 8): the bigger round costs more than the round it saves. Tried and dropped:
 the attention projections streamed per DRAM bank (qwen36 DecodeLinear): no faster (compute-bound at one row).
 
 Decode quality after the packed all-reduce row (TP4, 8 x 736 teacher-forced): 0.9720 / 0.9970 / 0.0156 (0.9689 / 0.9962 /

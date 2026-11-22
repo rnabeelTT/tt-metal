@@ -88,7 +88,13 @@ class _Packed:
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([t, shard], prog)
 
-    def __call__(self, x, site, rows=None):
+    def unpack(self, r, T, H):
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
+                                             ttnn.L1_MEMORY_CONFIG)
+        self._move(False, out, r, T)
+        return out
+
+    def __call__(self, x, site, rows=None, packed_out=False):
         T, H = rows or int(x.shape[-2]), int(x.shape[-1])
         p = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, 32 * self.K]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                                            self.mesh, self.mc)
@@ -98,11 +104,27 @@ class _Packed:
                                                multi_device_global_semaphore=sem, memory_config=self.mc,
                                                dtype=ttnn.bfloat16, topology=ttnn.Topology.Linear, num_links=1)
         ttnn.deallocate(p)
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
-                                             ttnn.L1_MEMORY_CONFIG)
-        self._move(False, out, r, T)
+        if packed_out:  # (the consumer reads the packed rows: tt/post.py, tt/pre.py)
+            return PackedAR(r, T, H, self)
+        out = self.unpack(r, T, H)
         ttnn.deallocate(r)
         return out
+
+
+class PackedAR:
+    """A packed all-reduce result: T rows of [1, 1, T, H] bf16 as chunk c = (tile, row, face) at byte 32 c of t."""
+
+    def __init__(self, t, T, H, op):
+        self.t, self.T, self.H, self.op = t, T, H, op
+        self.shape = ttnn.Shape([1, 1, T, H])
+
+    def unpack(self):
+        return self.op.unpack(self.t, self.T, self.H)
+
+
+def unpacked(x):
+    """A tensor from an all-reduce result (unpacks a PackedAR)."""
+    return x.unpack() if isinstance(x, PackedAR) else x
 
 
 def _packed(mesh, T):
@@ -129,17 +151,17 @@ def packed_rows(T):
     return PACK and T <= PACK_K[-1][0]
 
 
-def all_reduce(x, mesh, tt_ccl=None, memory_config=ttnn.DRAM_MEMORY_CONFIG, site=None, rows=None):
+def all_reduce(x, mesh, tt_ccl=None, memory_config=ttnn.DRAM_MEMORY_CONFIG, site=None, rows=None, packed_out=False):
     """rows: only the first `rows` rows of x are live (the packed path reads just those; -> [1, 1, rows, H])."""
     if mesh.get_num_devices() == 1:
         return x
     H = int(x.shape[-1])
     if rows is not None and site in PACK_SITES and packed_rows(rows) and x.layout == ttnn.TILE_LAYOUT \
             and x.dtype == ttnn.bfloat16 and not x.is_sharded():
-        return _packed(mesh, rows)(x, site, rows)
+        return _packed(mesh, rows)(x, site, rows, packed_out=packed_out)
     if (PACK and site in PACK_SITES and int(x.shape[-2]) <= PACK_K[-1][0] and len(x.shape) == 4 and int(x.shape[1]) == 1
             and x.dtype == ttnn.bfloat16 and x.layout == ttnn.TILE_LAYOUT and not x.is_sharded()):
-        return _packed(mesh, int(x.shape[-2]))(x, site)
+        return _packed(mesh, int(x.shape[-2]))(x, site, packed_out=packed_out)
     if (ASYNC and site is not None and int(x.shape[-2]) <= 32 and len(x.shape) == 4 and int(x.shape[1]) == 1
             and (H // 32) % (CORES[0] * CORES[1]) == 0 and x.dtype == ttnn.bfloat16):
         st = _decode_ar(mesh, H)
