@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 """DRAM per die after building the model with SLOTS x CTX (bfp8 experts, bf16 KV) and one decoder + trace per width:
-prints the allocator statistics (die 0). env: MESH (1), SLOTS (8), CTX (8192)"""
+prints the allocator statistics (die 0). env: MESH (1), SLOTS (8), CTX (8192), POOL (the shared global-KV pool in
+tokens; default SLOTS x CTX): with a small POOL the free DRAM at the end is what a bigger pool may take"""
 
 import os
 
@@ -27,15 +28,16 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=300 << 20)
     stats(mesh, "empty")
     S, C = int(os.environ.get("SLOTS", "8")), int(os.environ.get("CTX", "8192"))
-    m = Inkling2Model(mesh, max_seq_len=C + 256, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16, prefill_chunk=256,
-                      slots=S)
+    pool = int(os.environ.get("POOL", "0")) or S * C
+    m = Inkling2Model(mesh, max_seq_len=C + 256, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16,
+                      prefill_chunk=int(os.environ.get("I2M_PREFILL_CHUNK", "256")), slots=S, kv_pool_tokens=pool)
     stats(mesh, f"model {S} slots x {C}")
     if os.environ.get("ADAPTER", "1") == "1":  # + the vLLM adapter: decoders (MixPlan), prefix pools, warm-ups, traces
         from models.autoports.thinkingmachines_inkling_2_mini.tt.generator_vllm import Inkling2ForCausalLM
 
         ad = Inkling2ForCausalLM(m, mesh, S, C)
         stats(mesh, "adapter (decoders, prefix pools)")
-        ad.allocate_kv_cache((S * C // 64, 1, 64, 128), None, 24)
+        ad.allocate_kv_cache((pool // 64, 1, 64, 128), None, 24)
         ad.warmup_model_prefill()
         stats(mesh, "after the prefill warm-up")
         ad.warmup_model_decode()

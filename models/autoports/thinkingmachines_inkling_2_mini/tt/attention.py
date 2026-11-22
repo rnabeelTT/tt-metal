@@ -165,13 +165,19 @@ class GlobalPages:
     vLLM has not allocated (0) and every row of a free slot map to scratch blocks past vLLM's pool, so padded prefill
     rows and idle decode rows never write into a block vLLM may have handed to another request."""
 
-    def __init__(self, mesh, B: int, mb: int, scratch: int = 8):
+    def __init__(self, mesh, B: int, mb: int, scratch: int = 8, pool_blocks: int = None):
+        """pool_blocks: the KV pool (vLLM's block budget, shared by the slots; default B * mb, every slot a full
+        context). Smaller than B * mb only with vLLM paging (the slots then start free)."""
         self.mesh, self.B, self.mb, self.scratch = mesh, B, mb, scratch
-        self.scratch_base = B * mb
-        self.n_blocks = B * mb + scratch
+        pool = int(pool_blocks) if pool_blocks else B * mb
+        self.scratch_base = pool
+        self.n_blocks = pool + scratch
         self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         j = torch.arange(mb)
-        self.host = torch.stack([b * mb + j for b in range(B)]).to(torch.int32)  # [B, mb]
+        if pool >= B * mb:
+            self.host = torch.stack([b * mb + j for b in range(B)]).to(torch.int32)  # [B, mb]
+        else:  # (shared pool: free slots on the scratch blocks until vLLM assigns rows)
+            self.host = torch.stack([pool + j % scratch for _ in range(B)]).to(torch.int32)
         self.slot_dev = [self._up(self.host[b : b + 1]) for b in range(B)]  # [1, mb] per slot (prefill)
         self.width_dev = {}  # W -> [W, mb] (batched decode of slots 0 .. W-1); built before any trace capture
         self.dirty = set()

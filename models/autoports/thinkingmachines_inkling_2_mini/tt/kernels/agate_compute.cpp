@@ -42,29 +42,31 @@ void kernel_main() {
     constexpr uint32_t cb_g = get_compile_time_arg_val(1);
     constexpr uint32_t cb_out = get_compile_time_arg_val(2);
     compute_kernel_hw_startup(cb_g, cb_out);
-    cb_wait_front(cb_g, 1);
-    cb_wait_front(cb_o, 1);
-    tile_regs_acquire();
-    reconfig_data_format_srca(cb_g);
-    copy_init(cb_g);
-    copy_tile(cb_g, 0, 0);
-    reconfig_data_format_srca(cb_o);
-    copy_init(cb_o);
-    copy_tile(cb_o, 0, 1);
-    sigmoid_tile_init<false>();
-    sigmoid_tile<VectorMode::R, false>(0);
+    for (uint32_t jj = 0; jj < AG_J; ++jj) {
+        cb_wait_front(cb_g, 1);
+        cb_wait_front(cb_o, 1);
+        tile_regs_acquire();
+        reconfig_data_format_srca(cb_g);
+        copy_init(cb_g);
+        copy_tile(cb_g, 0, 0);
+        reconfig_data_format_srca(cb_o);
+        copy_init(cb_o);
+        copy_tile(cb_o, 0, 1);
+        sigmoid_tile_init<false>();
+        sigmoid_tile<VectorMode::R, false>(0);
 #ifdef TRISC_MATH
-    TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
+        TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
 #endif
-    MATH((SFPU_BINARY_INIT(unused)));
-    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_ag_mul_rbf16, (RIT), 0, 1, 0, VectorMode::R)));
-    tile_regs_commit();
-    cb_reserve_back(cb_out, 1);
-    tile_regs_wait();
-    pack_reconfig_data_format(cb_out);
-    pack_tile(0, cb_out);
-    tile_regs_release();
-    cb_push_back(cb_out, 1);
-    cb_pop_front(cb_g, 1);
-    cb_pop_front(cb_o, 1);
+        MATH((SFPU_BINARY_INIT(unused)));
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_ag_mul_rbf16, (RIT), 0, 1, 0, VectorMode::R)));
+        tile_regs_commit();
+        cb_reserve_back(cb_out, 1);
+        tile_regs_wait();
+        pack_reconfig_data_format(cb_out);
+        pack_tile(0, cb_out);
+        tile_regs_release();
+        cb_push_back(cb_out, 1);
+        cb_pop_front(cb_g, 1);
+        cb_pop_front(cb_o, 1);
+    }
 }

@@ -70,6 +70,19 @@ def _host_tensor(t):
     return t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
 
 
+
+# The global layers' KV pool (tokens), shared by the slots through vLLM's block manager: slots x max_model_len, capped
+# at what fits beside the weights (bf16 KV: 8 global applications x 2 x 8 kv heads x 128 x 2 B = 32 KiB per token,
+# / dies; mem_probe after the build). I2M_KV_POOL_TOKENS overrides the cap.
+KV_POOL_CAP = {4: 2_359_296, 2: 851_968, 1: 81_920}
+
+
+def kv_pool_tokens(num_devices, max_model_len, max_num_seqs):
+    want = max_model_len * max_num_seqs
+    env = os.environ.get("I2M_KV_POOL_TOKENS")
+    cap = int(env) if env else KV_POOL_CAP.get(num_devices, want)
+    return (max(max_model_len, min(want, cap)) + 63) // 64 * 64
+
 class Inkling2ForCausalLM:
     """vLLM bridge (HF arch Inkling2LoopForConditionalGeneration, text only)."""
 
@@ -131,8 +144,10 @@ class Inkling2ForCausalLM:
         max_seq_len = int(max_seq_len or 32768)
         B = int(max_batch_size)
         t0 = time.time()
+        pool = kv_pool_tokens(mesh_device.get_num_devices(), max_seq_len, B)
         model = Inkling2Model(mesh_device, max_seq_len=max_seq_len + max(64, PREFILL_PAD), expert_dtype=DT[EXPERT_DT], kv_dtype=DT[KV_DT],
-                              prefill_chunk=PREFILL_CHUNK, slots=B)
+                              prefill_chunk=PREFILL_CHUNK, slots=B, kv_pool_tokens=pool)
+        logger.info(f"{cls.__name__}: global-layer KV pool {pool} tokens (shared by the {B} slots)")
         logger.info(f"{cls.__name__}: {B} slots x {max_seq_len} tokens, experts {EXPERT_DT}, KV {KV_DT}, "
                     f"{mesh_device.get_num_devices()} device(s), up in {time.time() - t0:.0f}s (engine-owned caches)")
         return cls(model, mesh_device, B, max_seq_len)
@@ -141,8 +156,7 @@ class Inkling2ForCausalLM:
     @classmethod
     def get_max_tokens_all_users(cls, model_name="", num_devices=1, tt_data_parallel=1, max_model_len=None,
                                  max_num_seqs=None, **kwargs):
-        n = int(max_model_len or 32768) * int(max_num_seqs or 1)
-        return (n + 63) // 64 * 64
+        return kv_pool_tokens(int(num_devices or 1), int(max_model_len or 32768), int(max_num_seqs or 1))
 
     def allocate_kv_cache(self, kv_cache_shape, dtype, num_layers):
         nb = int(kv_cache_shape[0])

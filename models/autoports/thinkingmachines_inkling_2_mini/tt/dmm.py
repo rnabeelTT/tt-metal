@@ -33,6 +33,7 @@ def _progcfg(mesh, m, k, n):
         nt = math.ceil(n / 32)
         nc = min(grid.x * grid.y if nt >= 2048 else CORES, nt, grid.x * grid.y)
         gw = GRID_W if GRID_W > 0 else (min(9, grid.x) if GRID_W < 0 and mesh.get_num_devices() > 1 else grid.x)
+        nc = min(nc, gw * grid.y)  # (the narrower grid's rows: the LM head asks for every core)
         _cfg[key] = tpc.create_matmul_1d_decode_progcfg(m, k, n, nc, grid_w=gw)
     return _cfg[key]
 

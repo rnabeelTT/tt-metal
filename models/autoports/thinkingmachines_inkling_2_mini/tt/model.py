@@ -337,7 +337,8 @@ class AppState:
 
 class Inkling2Model:
     def __init__(self, mesh, max_seq_len=8192, expert_dtype=ttnn.bfloat4_b, attn_dtype=None,
-                 kv_dtype=ttnn.bfloat8_b, prefill_chunk=1024, cache_dir=None, tt_ccl=None, layers=None, slots=1):
+                 kv_dtype=ttnn.bfloat8_b, prefill_chunk=1024, cache_dir=None, tt_ccl=None, layers=None, slots=1,
+                 kv_pool_tokens=None):
         self.mesh = mesh
         attn_dtype = ATTN_DT if attn_dtype is None else attn_dtype
         self.cfg = cfg = load_config()
@@ -366,7 +367,8 @@ class Inkling2Model:
             print(f"layer {li} loaded in {__import__('time').time() - t0:.0f}s", flush=True)
         self.slots = slots
         # the global layers' block tables (shared; vLLM's block ids when vLLM pages the global KV)
-        self.pages = GlobalPages(mesh, slots, math.ceil(max_seq_len / 64))
+        self.pages = GlobalPages(mesh, slots, math.ceil(max_seq_len / 64),
+                                 pool_blocks=math.ceil(kv_pool_tokens / 64) if kv_pool_tokens else None)
         self.lanes = LANES or (4 if mesh.get_num_devices() == 1 else 8)
         self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots, self.pages, self.lanes)
                      if li in self.layers else None
