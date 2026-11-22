@@ -35,6 +35,8 @@ DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 EXPERT_DT = os.environ.get("I2M_EXPERT_DT", "bfp8")
 KV_DT = os.environ.get("I2M_KV_DT", "bf16")
 PREFILL_CHUNK = int(os.environ.get("I2M_PREFILL_CHUNK", "256"))
+# a prompt's last chunk is padded to a multiple of this (64 | 128 | 256 ...): fewer prefill programs to warm up
+PREFILL_PAD = int(os.environ.get("I2M_PREFILL_PAD", str(min(256, PREFILL_CHUNK))))
 TRACE = os.environ.get("I2M_TRACE", "1") == "1"
 TIMING = os.environ.get("I2M_TIMING", "0") == "1"
 # decode width buckets: one decoder + trace per width (sharing the full width's state); a step runs the narrowest
@@ -100,7 +102,7 @@ class Inkling2ForCausalLM:
         max_seq_len = int(max_seq_len or 32768)
         B = int(max_batch_size)
         t0 = time.time()
-        model = Inkling2Model(mesh_device, max_seq_len=max_seq_len + 64, expert_dtype=DT[EXPERT_DT], kv_dtype=DT[KV_DT],
+        model = Inkling2Model(mesh_device, max_seq_len=max_seq_len + max(64, PREFILL_PAD), expert_dtype=DT[EXPERT_DT], kv_dtype=DT[KV_DT],
                               prefill_chunk=PREFILL_CHUNK, slots=B)
         logger.info(f"{cls.__name__}: {B} slots x {max_seq_len} tokens, experts {EXPERT_DT}, KV {KV_DT}, "
                     f"{mesh_device.get_num_devices()} device(s), up in {time.time() - t0:.0f}s (engine-owned caches)")
@@ -126,11 +128,11 @@ class Inkling2ForCausalLM:
         if not getattr(self, "_pf_warmed", False):  # (the plugin may call this again after the decode capture)
             self._pf_warmed = True
             t0 = time.time()
-            for n in range(64, PREFILL_CHUNK + 1, 64):
+            for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
                 self.m.reset()
                 self._host_logits(self.m.forward(torch.zeros(n, dtype=torch.long), 0, valid=n, slot=0, last_only=True), 1)
             self.m.reset()
-            logger.info(f"prefill warm-up ({PREFILL_CHUNK // 64} chunk sizes) in {time.time() - t0:.0f}s")
+            logger.info(f"prefill warm-up ({PREFILL_CHUNK // PREFILL_PAD} chunk sizes) in {time.time() - t0:.0f}s")
         self.already_warmed_up_prefill = True
 
     def warmup_model_decode(self, *args, **kwargs):
@@ -202,8 +204,8 @@ class Inkling2ForCausalLM:
             for p0 in range(0, P, PREFILL_CHUNK):
                 c = ids[p0 : p0 + PREFILL_CHUNK]
                 n = int(c.numel())
-                if n % 64:
-                    c = torch.cat([c, torch.zeros((-n) % 64, dtype=c.dtype)])
+                if n % PREFILL_PAD:
+                    c = torch.cat([c, torch.zeros((-n) % PREFILL_PAD, dtype=c.dtype)])
                 lg = self.m.forward(c, p0, valid=n, slot=slot, last_only=True, last_row=n - 1)
             self.dec.load_slot(slot)
             out[u, 0, : self.V] = self._host_logits(lg, 1)[0]

@@ -20,20 +20,25 @@ def pcc(a, b):
 
 
 def main():
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1))
+    N = int(os.environ.get("MESH", "1"))
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N))
+    rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
+    d0 = (lambda t: ttnn.get_device_tensors(t)[0]) if N > 1 else (lambda t: t)
     cfg, ck = load_config(), Checkpoint()
     g = torch.load("/cache/fixtures/golden_t256.pt")
     xs = g["internals"]["layers.0.post_attention_layernorm"][0][0]  # [T, H]
     worst = 1.0
     for li in (0, 23):
         moe = MoE(mesh, cfg, ck, li, expert_dtype=ttnn.bfloat8_b, cache_dir="/cache/wcache")
-        for T in (64, 128, 256):
+        for T in [int(t) for t in os.environ.get("TS", "64,128,256").split(",")]:
             x = ttnn.from_torch(xs[:T].reshape(1, 1, T, -1).to(torch.bfloat16), dtype=ttnn.bfloat16,
-                                layout=ttnn.TILE_LAYOUT, device=mesh)
+                                layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
             res, tm = {}, {}
             for mode in (False, True):
                 mm.SORTED = mode
-                res[mode] = ttnn.to_torch(moe.forward(x)).float().reshape(T, -1)
+                res[mode] = ttnn.to_torch(d0(moe.forward(x))).float().reshape(T, -1)
                 ttnn.synchronize_device(mesh)
                 t0 = time.time()
                 for _ in range(3):

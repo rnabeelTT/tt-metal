@@ -1,0 +1,118 @@
+# tt-model container (v5.1) manifest for thinkingmachines/Inkling-2-Mini (26.4B looped MoE, 3.4B active per token, NVFP4 /
+# MXFP8 checkpoint) on Blackhole: 4 dies (p300x2 / p150x4), 2 dies (p300 / p150x2) or 1 die (p150), tensor parallel.
+# Build: tt-model package --container models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml
+# (source.tt_metal must be a FULL checkout of branch raahem/inkling-2-mini: the image builds tt-metal from it, and the
+# expert-sorted prefill needs this branch's moe_sorted_dispatch / moe_gather_rows / moe_gather_add_rows ops.)
+schema: "5.1"
+
+repo: raahemnabeel/inkling-2-mini
+name: inkling-2-mini
+# weights stay a pointer: the exact HF snapshot every check of this port ran against
+weights: {repo: thinkingmachines/Inkling-2-Mini, revision: ed40e7da625f594fc9c4990f5f66be24873c22d7}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/inkling2-pkg   # full worktree of raahem/inkling-2-mini (rnabeelTT/tt-metal)
+  code:  # the port's import closure; runtime files only (no tests / tools / reference)
+    - models/autoports/thinkingmachines_inkling_2_mini/__init__.py
+    - models/autoports/thinkingmachines_inkling_2_mini/tt
+    - models/autoports/thinkingmachines_inkling_2_mini/hf_config
+    - models/autoports/thinkingmachines_inkling_2_mini/vllm_metadata.json
+    - models/autoports/thinkingmachines_inkling_2_mini/vllm_bundle
+    # shared kernels: the fused MoE decode kernels and the decode top-k sampler (qwen36), the expert-sorted prefill
+    # dispatch (the M2.7 port's moe_dispatch), tt_transformers' CCL helpers
+    - models/demos/blackhole/qwen36
+    - models/autoports/minimaxai_minimax_m2_7/__init__.py
+    - models/autoports/minimaxai_minimax_m2_7/tt
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-inkling}   # inkling-mm (d53d9b3): the plugin every serving run of this port used
+  extra_models_dir: models/autoports/thinkingmachines_inkling_2_mini/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2",
+              "numpy==1.26.4"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 65536
+  capabilities:
+    tool_parser: inkling
+    reasoning_parser: inkling
+  # vLLM 0.26 / transformers 5.12 do not know the inkling2_loop architecture: the port ships an HF config shim
+  # (architecture TTInkling2LoopForConditionalGeneration) and the plugin serves it through the bundle's adapter
+  args: [--enable-auto-tool-choice, --trust-remote-code,
+         --hf-config-path, /opt/tt-metal/models/autoports/thinkingmachines_inkling_2_mini/hf_config]
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: decode_only
+      trace_region_size: 314572800
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: thinkingmachines/Inkling-2-Mini
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    I2M_EXPERT_DT: bfp8        # routed experts at bfp8 (the checkpoint's NVFP4 / MXFP8 dequantized): quality at the
+    I2M_KV_DT: bf16            # fp32-vs-bf16 reference noise floor; bfp8 KV costs measurable KL
+    I2M_PREFILL_CHUNK: "1024"  # prefill rows per chunk (the sliding-window rings hold the window + one chunk)
+    I2M_PREFILL_PAD: "256"     # a prompt's last chunk padded to a multiple of 256: 4 prefill programs to warm up
+
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 65536-token context. The fastest profile.
+    hardware: p300x2
+    mesh_device: P300x2
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 boards (the identical (1,4) mesh).
+    hardware: p150x4
+    mesh_device: P150x4
+  - name: p300
+    description: One p300 board (2 dies, tensor parallel 2), 16 sequences, 32768-token context.
+    hardware: p300
+    mesh_device: P300
+    max_num_seqs: 16
+    max_model_len: 32768
+    env: {TT_VISIBLE_DEVICES: "0,1"}   # fabric init needs every visible chip in the mesh
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300. Not run on p150 boards (the identical (1,2) mesh).
+    hardware: p150x2
+    mesh_device: P150x2
+    max_num_seqs: 16
+    max_model_len: 32768
+    env: {TT_VISIBLE_DEVICES: "0,1"}
+  - name: p150
+    description: One p150 (1 die), 8 sequences, 8192-token context (the bfp8 experts take 27 of the die's 31.5 GiB).
+    hardware: p150
+    mesh_device: P150
+    max_num_seqs: 8
+    max_model_len: 8192
+    additional_config: {tt: {fabric_config: DISABLED}}
+    env: {I2M_PREFILL_CHUNK: "256", I2M_PREFILL_PAD: "256"}   # the 1024-row rings do not fit beside 8 KV slots
+default_profile: p300
+
+verify:
+  - "import models.autoports.thinkingmachines_inkling_2_mini.tt.generator_vllm as g; assert g.Inkling2ForCausalLM"
+  - "import models.autoports.thinkingmachines_inkling_2_mini.tt.sampling as s; assert s.DeviceTopK"
+
+card:
+  description: >
+    Inkling-2-Mini (26.4B looped mixture of experts: 24 layers of which 12 run three passes, 3.4B parameters active per
+    token; 128 routed experts top-8, sliding-window and global attention with relative position bias, block attention
+    residuals, message gates between passes) served on Blackhole through vLLM and the Tenstorrent plugin on four, two or
+    one dies: tensor-parallel attention and experts, fused decode kernels for the model's per-layer glue, expert-sorted
+    prefill, on-device sampling, decode traces for 1-32 users, reasoning and tool calling.
+  quickstart: |
+    (filled in from the measured runs)
