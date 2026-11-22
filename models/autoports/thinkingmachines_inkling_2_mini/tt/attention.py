@@ -24,6 +24,8 @@ import math
 import torch
 
 import ttnn
+
+from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.thinkingmachines_inkling_2_mini.tt import relbias
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
@@ -143,7 +145,7 @@ def proj(w: "AttnWeights", which: str, x, dtype=None):
     """One attention projection (q | k | v | o) on x [1, 1, M, K] -> [1, 1, M, n(+pad)] in DRAM."""
     W = getattr(w, "w_" + which)
     if not w.dram_sharded:
-        return ttnn.linear(x, W, compute_kernel_config=w.ckc, memory_config=DRAM, dtype=dtype)
+        return dmm(x, W, w.ckc, dtype=dtype, memory_config=DRAM, linear=True)
     from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
     pc, act, K = getattr(w, "pc_" + which)

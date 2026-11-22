@@ -23,6 +23,8 @@ import os
 import torch
 
 import ttnn
+
+from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
@@ -88,7 +90,7 @@ class FusedExperts:
 
     def _logits(self, x):
         xf = ttnn.typecast(x, ttnn.float32)
-        return ttnn.matmul(xf, self.moe.router_w, compute_kernel_config=self.moe.rckc, dtype=ttnn.float32)
+        return dmm(xf, self.moe.router_w, self.moe.rckc, dtype=ttnn.float32)
 
     def build_rows(self, widths):
         """Build the rows ops of every decode width before any trace capture (host uploads)."""

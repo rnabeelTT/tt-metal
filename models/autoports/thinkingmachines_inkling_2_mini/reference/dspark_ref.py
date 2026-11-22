@@ -395,6 +395,7 @@ class TargetRunner:
         taps = torch.stack([self.captured[v] for v in self.target_layer_ids[:-1]] + [final], dim=1)
         logits = self.model.lm_head(final).float()
         logits = self.model.logit_softcap(logits)
+        self.last_logits = logits  # [T, V] fp32 (softcapped): the sampled-acceptance estimate
         return taps, logits.argmax(-1)
 
     @torch.no_grad()
@@ -525,9 +526,19 @@ def main():
 
     # results[mode][text] = list of accepted lengths
     modes = ["tf_markov", "tf_base", "greedy_markov", "greedy_base"]
+    samp_all = {}
     results = {m: {} for m in modes}
 
-    def eval_anchors(ids, taps, greedy, anchors, tag, consistent_mask=None):
+    def sampled_accept(d_logits, t_logits):
+        """Expected accepted drafts under speculative sampling at temperature 1 (rejection sampling, draft q vs target
+        p): sum_k prod_{j<=k} alpha_j, alpha_j = sum_x min(p_j(x), q_j(x)). An estimate: alpha_j uses the target
+        conditioned on the text prefix and the draft conditioned on its greedy path."""
+        q = torch.softmax(d_logits.float(), -1)
+        pt = torch.softmax(t_logits.float(), -1)
+        alpha = torch.minimum(q, pt).sum(-1)
+        return float(torch.cumprod(alpha, 0).sum())
+
+    def eval_anchors(ids, taps, greedy, anchors, tag, consistent_mask=None, t_logits=None, samp=None):
         """Context = taps of positions 0..a, anchor token = ids[a+1] at position a+1,
         drafts for positions a+2..a+8 compared with greedy[a+1..a+7]."""
         ctx_kv = drafter.context_kv(taps, torch.arange(taps.shape[0]))
@@ -540,7 +551,9 @@ def main():
             h = drafter.block_hidden(ctx_kv, p, anchor)
             f_rnn = drafter.f_rnn(taps[p - 1])
             target = greedy[p : p + gamma]
-            d_m, _ = drafter.draft_from_hidden(h, anchor, f_rnn, use_markov=True)
+            d_m, lg_m = drafter.draft_from_hidden(h, anchor, f_rnn, use_markov=True)
+            if t_logits is not None and samp is not None:
+                samp.append(sampled_accept(lg_m, t_logits[p : p + gamma]))
             d_b, _ = drafter.draft_from_hidden(h, anchor, f_rnn, use_markov=False)
             acc_m.append(accepted_len(d_m, target))
             acc_b.append(accepted_len(d_b, target))
@@ -555,8 +568,11 @@ def main():
         taps, greedy = runner.run(ids)
         log(f"[{name}] pass 1 (teacher forced) forward {time.time() - t1:.0f}s")
         # --- teacher-forced (one forward, as specified): anchor = text token
-        acc_m, acc_b = eval_anchors(ids, taps, greedy, anchors, "tf")
+        samp = []
+        acc_m, acc_b = eval_anchors(ids, taps, greedy, anchors, "tf", t_logits=runner.last_logits, samp=samp)
         results["tf_markov"][name], results["tf_base"][name] = acc_m, acc_b
+        samp_all[name] = samp
+        log(f"  {name}/tf markov sampled-T1 estimate: accepted={sum(samp) / len(samp):.3f}")
         log(fmt_row(f"{name}/tf markov", acc_m, gamma))
         log(fmt_row(f"{name}/tf base", acc_b, gamma))
         if args.tf_only:
@@ -595,6 +611,9 @@ def main():
         log(fmt_row("ALL (pooled)", allacc, gamma))
         per_text = [sum(a) / len(a) for a in results[m].values() if a]
         log(f"  mean of per-text means: accepted={sum(per_text) / len(per_text):.3f}")
+    if samp_all:
+        pooled = [x for v in samp_all.values() for x in v]
+        log(f"sampled (temperature 1) estimate, tf markov, pooled: accepted={sum(pooled) / len(pooled):.3f}")
     log(f"total time {time.time() - t0:.0f}s")
     if args.report:
         with open(args.report, "w") as f:

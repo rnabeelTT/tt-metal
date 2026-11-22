@@ -20,6 +20,8 @@ import math
 import torch
 
 import ttnn
+
+from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2clip, _rms_unweighted, proj
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
@@ -109,12 +111,12 @@ class BatchedDynConv:
 
     def step(self, x, h):
         lane = self.lane
-        dyn = ttnn.matmul(_bf(h), lane.wproj, compute_kernel_config=lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
+        dyn = dmm(_bf(h), lane.wproj, lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
         xf = _f32(x)
         hist = [xf, self.s[2], self.s[1], self.s[0]]  # x_{t-L} for L = 0..3
         y = xf
         for L in range(K):
-            wl = ttnn.add(ttnn.matmul(dyn, lane.expand[L], compute_kernel_config=lane.ckc, dtype=ttnn.float32),
+            wl = ttnn.add(dmm(dyn, lane.expand[L], lane.ckc, dtype=ttnn.float32),
                           self.static[L])
             y = ttnn.add(y, ttnn.multiply(hist[L], wl))
         ttnn.copy(self.s[1], self.s[0])

@@ -67,6 +67,10 @@ slot caches, a row -> slot map for the plugin's condense remaps, host sampling (
 | bfp8 attention + lm_head, tile-layout conv states | 103 ms | 171 ms | 0.971 / 0.997 / 0.014 |
 | fused MoE decode kernels (qwen36 moe_decode + ACT_INKLING), one fused-layout weight copy | 102 ms | 133 ms | 0.968 / 0.996 / 0.014 |
 | route once per layer | 97 ms | 126 ms | decode path: 0.967 / 0.994 / 0.018 (sparse 0.970 / 0.997 / 0.023) |
+| activations in L1, one-program batched conv step | 83.0 ms | 101.3 ms | |
+| fused block-mix + message-gate-tail kernels | 72.6 ms | 90.6 ms | decode 0.968 / 0.996 / 0.018, prefill 0.968 / 0.996 / 0.014 |
+| explicit 1D mcast matmul configs for every decode matmul (tt/dmm.py) | 57.8 ms | | |
+| one-row rms_norm width-sharded on 8 cores | 51.0 ms | 67.5 ms | decode 0.970 / 0.996 / 0.015 |
 
 At one row most ops are bound by the 32-row tile, not by bytes (attention projections ~60 us each vs a 32 us
 bandwidth floor; DRAM-sharded only wins at LoFi): wider batches are nearly free, single-user latency needs fused
@@ -76,6 +80,13 @@ Fused MoE notes: the kernels' single-row sigb path routes wrongly (pcc 0.5): one
 must be 128..768 columns: sub-shards 3 x 384 (1 die), 384 + 256 (2), 384 padded (4). Down rows op: 3 readers per bank
 (H = 2304 is 9 columns per bank) -> 16 rows max; wider batches use the sparse union path.
 
+Bandwidth floor (one die, bfp8): every application re-reads its layer's weights (attention ~30 MB, 8 experts ~67 MB),
+~5.7 GB per token -> ~11 ms at 512 GB/s; 51 ms is ~22 %. Matmul notes (tools/bench_proj.py, traced, M = 32): the
+default config is 2-5x slow at one tile row (k / v 34 -> 13 us, o 60 -> 24, gate down 104 -> 20 with a 1D mcast_in0
+config on ~48 cores); DRAM-sharded is slower than 1D here. Small-N matmuls (mix logits N <= 4 tiles, gate down 8 tiles,
+router) still run on a few cores (~20 us each): split-K next. One-row rms_norm: 29 us interleaved, 10 us width-sharded
+on 8 cores incl. both reshards (tools/bench_norm.py).
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from
@@ -84,6 +95,11 @@ zcnrex/sglang@chunan/inkling-2-mini-day0) saved under ~/inkling2-work/ref/sglang
 head = markov_head_type rnn_hidden; context KV from the target's hidden states), srt/models/dflash.py (DFlash base),
 kernels/ops/speculative/dspark/markov_walk.py / markov_sample.py, srt/models/inkling2.py (taps at visits 5, 23, 41 +
 the final normed state, 48).
+
+DSpark acceptance (reference/dspark_ref.py, CPU, 8 held-out texts x 40 anchors; accepted drafts of 7 per pass):
+teacher-forced greedy 1.20 (base logits without the Markov head 0.70), sampled at temperature 1 (the checkpoint's
+default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, human chat 0.4 - 0.6. Exact greedy
+(the target's own continuation) on math: 2.05 vs 1.30 teacher-forced.
 
 ## Next
 

@@ -28,6 +28,8 @@ import os
 import torch
 
 import ttnn
+
+from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import AttnCache, AttnWeights, attention
 from models.autoports.thinkingmachines_inkling_2_mini.tt.moe import MoE
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import ShortConv
@@ -39,6 +41,7 @@ FUSED_OPS = os.environ.get("I2M_OPS", "fused") == "fused"
 _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
+RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 
@@ -64,6 +67,7 @@ class Ops:
         self.qrep = {}  # id(Q) -> Qrep [1,1,H,nq*32] (tt/mixw.py)
         self.mixk = None
         self.gatek = None
+        self.rms_cfg = {}
 
     def query(self, Qcols):
         """Qcols [H, nq] (pre-scaled) -> Q [1,1,H,32] fp32 (columns 0..nq-1); also builds the mix kernel's Qrep."""
@@ -82,6 +86,24 @@ class Ops:
         """fp32 RMS norm over the last dim (transformers Inkling2RMSNorm / UnweightedRMSNorm), w [1,1,1,H] fp32.
         I2M_OPS=fused (default): one ttnn.rms_norm; ref: the explicit fp32 ops."""
         x = _f32(x)
+        if FUSED_OPS and RMS_SHARD and len(x.shape) == 4 and int(x.shape[0]) * int(x.shape[1]) == 1 \
+                and int(x.shape[2]) <= 32 and int(x.shape[3]) % 256 == 0:
+            # one tile row: width-sharded multi-core norm (8 cores) incl. the reshards, 29 -> 10 us (tools/bench_norm.py)
+            H = int(x.shape[3])
+            if H not in self.rms_cfg:
+                mc = ttnn.create_sharded_memory_config(shape=(32, H // 8), core_grid=ttnn.CoreGrid(x=8, y=1),
+                                                       strategy=ttnn.ShardStrategy.WIDTH,
+                                                       orientation=ttnn.ShardOrientation.ROW_MAJOR,
+                                                       use_height_and_width_as_shard_shape=True)
+                bw = H // 8 // 32
+                pc = ttnn.LayerNormShardedMultiCoreProgramConfig(
+                    compute_with_storage_grid_size=ttnn.CoreCoord(8, 1),
+                    subblock_w=max(d for d in range(1, 5) if bw % d == 0), block_h=1, block_w=bw, inplace=False)
+                self.rms_cfg[H] = (mc, pc)
+            mc, pc = self.rms_cfg[H]
+            y = ttnn.rms_norm(ttnn.to_memory_config(x, mc), epsilon=self.eps, weight=w, program_config=pc,
+                              memory_config=mc, compute_kernel_config=self.ckc)
+            return ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG)
         if FUSED_OPS:
             return ttnn.rms_norm(x, epsilon=self.eps, weight=w, compute_kernel_config=self.ckc)
         ms = ttnn.mean(ttnn.multiply(x, x), dim=-1, keepdim=True)
@@ -99,14 +121,13 @@ class Ops:
                 self.mixk = MixKernel(self.mesh, int(srcs_normed[0].shape[3]))
             src = [ttnn.sharded_to_interleaved(s, ttnn.L1_MEMORY_CONFIG) if s.is_sharded() else s for s in srcs_normed]
             S = src[0] if n == 1 else ttnn.concat(src, dim=1, memory_config=ttnn.L1_MEMORY_CONFIG)
-            lg = ttnn.matmul(S, self.qrep[id(Q)], compute_kernel_config=self.ckc, dtype=ttnn.float32,
-                             memory_config=ttnn.L1_MEMORY_CONFIG)  # [1, n, T, nq*32]
+            lg = dmm(S, self.qrep[id(Q)], self.ckc, dtype=ttnn.float32, memory_config=ttnn.L1_MEMORY_CONFIG)  # [1, n, T, nq*32]
             return self.mixk(S, lg, n, nq)
         if FUSED_OPS:
             # Qrep [H, nq*32]: query q in all 32 columns of tile q -> every slice below starts on a tile boundary
             # (a width-1 slice at an unaligned column of a [1, n, T, 32] tile tensor returns wrong weights for n > 1)
             S = srcs_normed[0] if n == 1 else ttnn.concat(srcs_normed, dim=1)  # [1, n, T, H]
-            lg = ttnn.matmul(S, self.qrep[id(Q)], compute_kernel_config=self.ckc, dtype=ttnn.float32)  # [1,n,T,nq*32]
+            lg = dmm(S, self.qrep[id(Q)], self.ckc, dtype=ttnn.float32)  # [1, n, T, nq*32]
             m = ttnn.max(lg, dim=1, keepdim=True)
             e = ttnn.exp(ttnn.subtract(lg, m))
             w = ttnn.multiply(e, ttnn.reciprocal(ttnn.sum(e, dim=1, keepdim=True)))
@@ -153,11 +174,10 @@ class MessageGate:
         o, H = self.ops, self.H
         hf, mf = _f32(h), _f32(m)
         hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
-        g = ttnn.matmul(hm, self.wd, compute_kernel_config=o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
+        g = dmm(hm, self.wd, o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
         T = int(hf.shape[-2])
         if GATE_KERNEL and T <= 32:
-            fg = ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32,
-                             memory_config=ttnn.L1_MEMORY_CONFIG)  # pre-tanh [.., 2H]
+            fg = dmm(_f32(g), self.wfg, o.ckc, dtype=ttnn.float32, memory_config=ttnn.L1_MEMORY_CONFIG)  # pre-tanh [.., 2H]
             if o.gatek is None:
                 from .gatet import GateTail
                 o.gatek = GateTail(o.mesh, H)
@@ -332,7 +352,7 @@ class Inkling2Model:
         ops = self.ops
         h = ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0]
         h = _bf(ops.rms(h, self.final_norm))
-        lg = ttnn.linear(h, self.lm_head, compute_kernel_config=ops.ckc, dtype=ttnn.float32, memory_config=DRAM)
+        lg = dmm(h, self.lm_head, ops.ckc, dtype=ttnn.float32, memory_config=DRAM, linear=True)
         return ttnn.multiply(ttnn.tanh(ttnn.multiply(lg, 1.0 / self.softcap)), self.softcap)
 
     # -- whole model -------------------------------------------------------------------------------------------------

@@ -22,6 +22,8 @@ import os
 import torch
 
 import ttnn
+
+from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.minimaxai_minimax_m2_7.tt.moe import sparse_matmul_program_config
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
@@ -120,7 +122,7 @@ class MoE:
     def route(self, x):
         """x [1, 1, T, H] bf16 -> (weights [1, 1, T, k] fp32 normalized (no route_scale), ids [1, 1, T, k] uint16)."""
         xf = ttnn.typecast(x, ttnn.float32)
-        logits = ttnn.matmul(xf, self.router_w, compute_kernel_config=self.rckc, dtype=ttnn.float32)
+        logits = dmm(xf, self.router_w, self.rckc, dtype=ttnn.float32)
         sig = ttnn.sigmoid(logits)
         choice = ttnn.add(sig, self.router_b)
         _, ids = ttnn.topk(choice, k=self.k, dim=-1, largest=True, sorted=True)
