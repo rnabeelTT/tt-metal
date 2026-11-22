@@ -19,8 +19,9 @@ void kernel_main() {
     const uint32_t t1 = get_arg_val<uint32_t>(5);
 
     constexpr uint32_t TR = get_compile_time_arg_val(0);  // row tiles of x / the tables
+    constexpr uint32_t WT = get_compile_time_arg_val(1);  // x tiles per tile row (2; tail mode: W / 32, last 2 roped)
     constexpr uint32_t cb_x = 0, cb_p = 1, cb_c = 2, cb_s = 3;
-    constexpr auto x_args = TensorAccessorArgs<1>();
+    constexpr auto x_args = TensorAccessorArgs<2>();
     constexpr auto c_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto s_args = TensorAccessorArgs<c_args.next_compile_time_args_offset()>();
     constexpr auto p_args = TensorAccessorArgs<s_args.next_compile_time_args_offset()>();
@@ -40,7 +41,7 @@ void kernel_main() {
         cb_reserve_back(cb_x, 1);
         cb_reserve_back(cb_c, 1);
         cb_reserve_back(cb_s, 1);
-        noc_async_read(s_x.get_noc_addr(t), get_write_ptr(cb_x), BF);
+        noc_async_read(s_x.get_noc_addr((t >> 1) * WT + WT - 2 + (t & 1)), get_write_ptr(cb_x), BF);
         noc_async_read(s_c.get_noc_addr(ct), get_write_ptr(cb_c), F32);
         noc_async_read(s_s.get_noc_addr(ct), get_write_ptr(cb_s), F32);
         noc_async_read_barrier();

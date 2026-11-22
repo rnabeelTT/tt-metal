@@ -115,6 +115,28 @@ class DeviceRope:
                      memory_config=mem)
         return ttnn.typecast(y, ttnn.bfloat16, memory_config=mem)
 
+    def tail(self, x, cos, sin, mem=None, keep=False):
+        """RoPE of x's last 64 columns: keep=False -> the roped [.., 64] (as rope(slice(x))); keep=True -> x's shape,
+        the leading columns unchanged (as concat([slice, rope(slice)])). HY4_ROPE_TAIL (default 1): one program."""
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        W = int(x.shape[-1])
+        if self.dim == 64 and os.environ.get("HY4_ROPE_TAIL", "1") == "1" and os.environ.get("HY4_ROPE_FUSED", "1") == "1":
+            from models.autoports.tencent_hy4_flash.tt.rope_fused import RopeFusedOp
+
+            if RopeFusedOp.supports_tail(x, cos, sin):
+                return RopeFusedOp.get(self.mesh).tail(x, cos, sin, mem, keep=keep)
+        s = [int(v) for v in x.shape]
+        kr = ttnn.slice(x, (0, 0, 0, W - 64), (s[0], s[1], s[2], W), memory_config=mem)
+        y = self(kr, cos, sin, mem)
+        ttnn.deallocate(kr)
+        if not keep:
+            return y
+        kp = ttnn.slice(x, (0, 0, 0, 0), (s[0], s[1], s[2], W - 64), memory_config=mem)
+        out = ttnn.concat([kp, y], dim=-1, memory_config=mem)
+        ttnn.deallocate(kp)
+        ttnn.deallocate(y)
+        return out
+
     def tables(self, positions: torch.Tensor, theta: float, shard_rows: bool = False):
         """Upload fp32 copies of the bf16 cos / sin for these positions: [1, 1, n_pad32, 64] each (shard_rows: split
         over the dies by rows, die d holding the d-th quarter; n a multiple of 32 x dies)."""

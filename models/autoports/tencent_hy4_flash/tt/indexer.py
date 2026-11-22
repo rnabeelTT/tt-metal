@@ -391,14 +391,9 @@ class Hy4Indexer:
             q = ttnn.experimental.view(q, (1, self.nh, Tp, self.d))
         else:
             q = ttnn.permute(ttnn.reshape(q, (1, Tp, self.nh, self.d)), (0, 2, 1, 3), memory_config=mem)
-        qp = ttnn.slice(q, (0, 0, 0, 0), (1, self.nh, Tp, self.d - self.rope_d), memory_config=mem)
-        qr = ttnn.slice(q, (0, 0, 0, self.d - self.rope_d), (1, self.nh, Tp, self.d), memory_config=mem)
+        q2 = self.rope.tail(q, cos, sin, mem, keep=True)  # [nope | rope(last 64)] (one program)
         ttnn.deallocate(q)
-        qr2 = self.rope(qr, cos, sin, mem)
-        ttnn.deallocate(qr)
-        q = ttnn.concat([qp, qr2], dim=-1, memory_config=mem)
-        ttnn.deallocate(qp)
-        ttnn.deallocate(qr2)
+        q = q2
         if hw is None:
             hw = ttnn.matmul(x, self.whw, compute_kernel_config=self.ckc, memory_config=mem)
         w = ttnn.multiply(hw, self.hw_scale, memory_config=mem)
@@ -504,7 +499,7 @@ class Hy4Indexer:
         ttnn.deallocate(top)
         return out
 
-    def _topk_vlen(self, q, w, si, mem, R, n_sel):
+    def _topk_vlen(self, q, w, si, mem, R, n_sel, raw=False):
         """Decode selection without the full-width visibility mask (HY4_IDX_VLEN): the top-512 of the raw score row's
         first si.vlen columns (topk_large_indices' valid_length_tensor; vlen = the rows' largest visible group count)
         -> fp32 TILE group ids [1, 1, 32, n_sel]. A pass of R <= ratio + 1 rows spans at most two visibilities (vlen,
@@ -528,6 +523,8 @@ class Hy4Indexer:
             sc = s2
         ids = ttnn.experimental.topk_large_indices(sc, k=TOPK, valid_length_tensor=si.vlen)
         ttnn.deallocate(sc)
+        if raw:  # (the uint32 RM ids, for tt/sel_expand)
+            return ids
         it = ttnn.to_layout(ids, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(ids)
         f = ttnn.typecast(it, ttnn.float32, memory_config=mem)
@@ -1020,8 +1017,24 @@ class Hy4Indexer:
         q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
         n_sel = self.cfg.idx_group_topk - 1
         R = int(getattr(si, "rows", 0) or 32)
-        if (os.environ.get("HY4_IDX_VLEN", "1") == "1" and getattr(si, "vlen", None) is not None
-                and R <= self.r + 1):
+        vlen_ok = (os.environ.get("HY4_IDX_VLEN", "1") == "1" and getattr(si, "vlen", None) is not None
+                   and R <= self.r + 1)
+        if (vlen_ok and os.environ.get("HY4_IDX_SELX", "1") == "1" and R <= 8
+                and os.environ.get("HY4_IDX_PADSENT", "1") == "1" and getattr(si, "base_f", None) is not None
+                and not (os.environ.get("HY4_SPARSE_FD", "0") == "1" and getattr(si, "idx_tail_fd", None) is not None
+                         and getattr(si, "fd_cur", None))):
+            # top-512 ids -> [selection | tail] lists + the persistent selection in one program (tt/sel_expand)
+            from models.autoports.tencent_hy4_flash.tt.sel_expand import SelExpandOp
+
+            ids = self._topk_vlen(q, w, si, mem, R, n_sel, raw=True)
+            ttnn.deallocate(q)
+            ttnn.deallocate(w)
+            sel_buf = getattr(self, "sel_buf", None)
+            sel, idx = SelExpandOp.get(self.mesh)(ids, si.base_f, si.idx_tail, R, sel=sel_buf, r=self.r, n_sel=n_sel)
+            ttnn.deallocate(ids)
+            self.sel = sel
+            return idx
+        if vlen_ok:
             f511 = self._topk_vlen(q, w, si, mem, R, n_sel)
             ttnn.deallocate(q)
             ttnn.deallocate(w)

@@ -39,7 +39,9 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     StreamLinear,
     TILE,
     ckc,
+    DECODE_ROWS,
     dl_split,
+    norm_shard,
     mm,
     num_devices,
     stream_enabled,
@@ -280,12 +282,21 @@ class Hy4Attention:
             wq = T_("compressed_indexer.query_projection.weight")
             self.dec["iq"] = StreamLinear(self.mesh, [wq] * N, ttnn.bfloat16, cache=cache("iq.bf16"))
 
+    def _q_shard(self):
+        """HY4_Q_SHARD (default 1): the decode q_a part written width-sharded for q_norm, whose output stays sharded
+        for its consumers (the q_b / indexer query streamed linears read it by page; same values)."""
+        return (os.environ.get("HY4_Q_SHARD", "1") == "1" and norm_shard() and self.q_norm.dec is not None
+                and int(DECODE_ROWS[0]) <= 32)
+
     def _xa(self, x, mem):
         """Decode: the fused x-projections -> [q_a, kv_a, (token key, head weights)] column slices."""
         if dl_split():
             # the parts written straight by the linear; kv_a as (c, k_rope) for _kv_row
             q, kvl = self.xa_cols[0][1], self.kvl
             cols = [self.xa_cols[0], (q, q + kvl), (q + kvl, self.xa_cols[1][1])] + self.xa_cols[2:]
+            if self._q_shard():
+                # q_a straight into q_norm's width-sharded layout (no to_memory_config / sharded_to_interleaved)
+                cols[0] = (cols[0][0], cols[0][1], None, self.q_norm.dec_mem)
             if pair_enabled() and os.environ.get("HY4_PAIR_G", "1") == "1" and self.dec.get("g") is not None:
                 # HY4_PAIR: the output gate's linear (same input x) in the same program; kept for _attend_out
                 outs, self._g_early = stream_pair(self.dec["xa"], dict(x=x, mem=mem, splits=cols), self.dec["g"],
@@ -366,7 +377,7 @@ class Hy4Attention:
         dec = qa is not None
         if qa is None:
             qa = mm(x, self.wqa, wfid(self.ckc, self.wqa), mem)
-        q_resid = self.q_norm(qa, mem)
+        q_resid = self.q_norm(qa, mem, shard_out=dec and qa.memory_config() == self.q_norm.dec_mem)
         ttnn.deallocate(qa)
         if dec:
             q = self.dec["qb"](q_resid, mem)
@@ -388,9 +399,8 @@ class Hy4Attention:
         if dec and self.ukv_on(Tp):
             # W_uk streamed per head, straight from the q view (its first 192 columns per head): no q_nope slice
             q_lat = self._ukv("uk", q, int(q.shape[-1]) // TILE, mem)
-            q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
+            q_rope = self.rope.tail(q, cos, sin, mem)  # columns nope.. = the last 64 (one program)
             ttnn.deallocate(q)
-            q_rope = self.rope(q_rope, cos, sin, mem)
             return q_lat, q_rope, q_resid
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)

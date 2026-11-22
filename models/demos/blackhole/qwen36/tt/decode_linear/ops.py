@@ -107,11 +107,13 @@ class DecodeLinear:
         outs = None
         if splits is not None:
             assert 1 <= len(splits) <= 5 and splits[0][0] == 0 and -(-splits[-1][1] // TILE) == self.n_tiles
-            assert all(a % TILE == 0 for a, _, _ in splits) and all(splits[i][1] == splits[i + 1][0]
-                                                                     for i in range(len(splits) - 1))
+            # (a 4th element: that part's memory config, e.g. a width-sharded consumer layout; default out_memory_config)
+            splits = [tuple(s) + (None,) * (4 - len(s)) for s in splits]
+            assert all(s[0] % TILE == 0 for s in splits) and all(splits[i][1] == splits[i + 1][0]
+                                                                 for i in range(len(splits) - 1))
             outs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rk or out_rows or rows, b - a]), out_dtype,
-                                                   ttnn.TILE_LAYOUT, self.mesh_device, out_memory_config)
-                    for a, b, rk in splits]
+                                                   ttnn.TILE_LAYOUT, self.mesh_device, om or out_memory_config)
+                    for a, b, rk, om in splits]
             out = outs[0]
         elif heads is not None:
             out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, heads[0], out_rows or rows, self.n // heads[0]]),
@@ -164,7 +166,7 @@ class DecodeLinear:
             defines += [("X_SPLIT", "1"), ("X_KT1", str(int(x.shape[-1]) // TILE)), ("X_B_ARG", str(4 + len(ext))),
                         ("XB_CTA_OFFSET", str(xb_cta))]
         if outs is not None:
-            bounds = [a // TILE for a, _, _ in splits[1:]] + [1 << 20] * (5 - len(splits))
+            bounds = [sp[0] // TILE for sp in splits[1:]] + [1 << 20] * (5 - len(splits))
             defines.append(("OUT_SPLIT", "1"))
             defines += [(f"OB{i + 1}", str(v)) for i, v in enumerate(bounds)]
         if flat is not None:

@@ -284,7 +284,7 @@ class StreamLinear:
         op = op or pend or self._op(heads)
         pf = pend is op
         if splits is not None:
-            splits = [(s[0], s[1], s[2] if len(s) > 2 else None) for s in splits]
+            splits = [(s[0], s[1], s[2] if len(s) > 2 else None, s[3] if len(s) > 3 else None) for s in splits]
         if R <= 16 and os.environ.get("HY4_STREAM_REAL_ROWS", "1") == "1":
             # read only the pass's real rows of the activation (64 B per tile per row instead of the whole 2 KB tile into
             # every reader core: the compute waited ~28 us for it); the output keeps 32 rows, padded rows zeroed
