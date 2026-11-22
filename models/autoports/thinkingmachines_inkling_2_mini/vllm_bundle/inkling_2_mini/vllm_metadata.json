@@ -1,0 +1,7 @@
+{
+  "arch": "Inkling2LoopForConditionalGeneration",
+  "main_class": "models.autoports.thinkingmachines_inkling_2_mini.tt.generator_vllm:Inkling2ForCausalLM",
+  "hf_model": "thinkingmachines/Inkling-2-Mini",
+  "mesh_device": ["P300x2", "P150x4", "P300", "P150x2", "P150"],
+  "notes": "Inkling-2-Mini (26B looped MoE) on a (1,4), (1,2) or (1,1) Blackhole mesh, tensor parallel, every cache engine-owned; registered by the vLLM TT plugin from EXTRA_MODELS_DIR (vllm_bundle/). Serve with --hf-config-path <port>/hf_config --trust-remote-code."
+}

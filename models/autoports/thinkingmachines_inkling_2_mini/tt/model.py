@@ -294,7 +294,7 @@ class Inkling2Model:
             if s is not None:
                 s.reset()
 
-    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0):
+    def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
         capture(a, out) is called with each application's output (debug)."""
         cfg, ops = self.cfg, self.ops
@@ -325,4 +325,8 @@ class Inkling2Model:
                 # sources for the next pass's messages: the block appended at layer 12 of this pass + this output
                 b12 = blocks_n[len(pre_blocks) + 1]
                 prev_src = [b12, ops.rms(x)]
+        if last_only:  # the head on one row (a prefill's last prompt token): [1, 1, 1, Vp]
+            r = int(ids.numel()) - 1 if last_row is None else int(last_row)
+            cut = lambda t: ttnn.slice(t, [0, 0, r, 0], [1, 1, r + 1, t.shape[-1]])  # noqa: E731
+            return self.head(cut(x), [cut(b) for b in blocks_n])
         return self.head(x, blocks_n)
