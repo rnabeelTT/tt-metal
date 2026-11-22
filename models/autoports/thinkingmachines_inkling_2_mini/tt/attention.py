@@ -24,6 +24,7 @@ import math
 import torch
 
 import ttnn
+from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.thinkingmachines_inkling_2_mini.tt import relbias
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import DynShortConv, ShortConv
@@ -256,8 +257,5 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     o = bf(ttnn.multiply(f32(o), gate))
     out = ttnn.linear(o, w.w_o, compute_kernel_config=ckc, memory_config=DRAM)
     if N > 1:
-        from models.tt_transformers.tt.ccl import tt_all_reduce
-
-        out = tt_all_reduce(out, w.mesh, tt_ccl, cluster_axis=1, dim=3, topology=ttnn.Topology.Linear,
-                            memory_config=DRAM)
+        out = all_reduce(out, w.mesh, tt_ccl)
     return out

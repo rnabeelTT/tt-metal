@@ -38,8 +38,10 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, n_dev))
     dt = os.environ.get("EXPERT_DT", "bfp4")
     t0 = time.time()
-    m = Inkling2Model(mesh, max_seq_len=1024 + CHUNK, expert_dtype=DT.get(dt, dt), prefill_chunk=CHUNK)
-    print(f"model up in {time.time() - t0:.0f}s (experts {dt}, {n_dev} devices)", flush=True)
+    kv = os.environ.get("KV_DT", "bfp8")
+    m = Inkling2Model(mesh, max_seq_len=1024 + CHUNK, expert_dtype=DT.get(dt, dt), prefill_chunk=CHUNK,
+                      kv_dtype=DT[kv])
+    print(f"model up in {time.time() - t0:.0f}s (experts {dt}, kv {kv}, {n_dev} devices)", flush=True)
     results = {}
     for name in names:
         r = ref[name]

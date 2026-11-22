@@ -22,6 +22,7 @@ import os
 import torch
 
 import ttnn
+from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.minimaxai_minimax_m2_7.tt.moe import sparse_matmul_program_config
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
@@ -115,10 +116,7 @@ class MoE:
         else:
             out = self._masked(x, w, ids, T)
         if self.N > 1:
-            from models.tt_transformers.tt.ccl import tt_all_reduce
-
-            out = tt_all_reduce(out, self.mesh, self.tt_ccl, cluster_axis=1, dim=3, topology=ttnn.Topology.Linear,
-                                memory_config=DRAM)
+            out = all_reduce(out, self.mesh, self.tt_ccl)
         return out
 
     def _gather(self, x, w, ids, T):
