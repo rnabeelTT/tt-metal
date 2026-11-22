@@ -101,7 +101,7 @@ def main():
     for k, (us, c) in sorted(comp.items(), key=lambda kv: -kv[1][0])[:25]:
         print(f"{us / 1e3:9.2f} ms {c:6d}  {k}")
     print("-- top call sites: ms, calls, op")
-    for (site, name), (us, c) in sorted(site_t.items(), key=lambda kv: -kv[1][0])[:40]:
+    for (site, name), (us, c) in sorted(site_t.items(), key=lambda kv: -kv[1][0])[: int(os.environ.get("TOP", "40"))]:
         print(f"{us / 1e3:9.2f} ms {c:5d}  {name:40s} {site}")
     ttnn.close_mesh_device(mesh)
     print("== done")

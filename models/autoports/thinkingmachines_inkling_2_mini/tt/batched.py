@@ -34,6 +34,10 @@ SDPA_K_CHUNK = 256
 GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
 # I2M_BCONV_KERNEL (default 1): the static short convs' decode step as one program (tt/bconv.py)
 BCONV_KERNEL = __import__("os").environ.get("I2M_BCONV_KERNEL", "1") == "1"
+# I2M_APREP (default 1): the decode attention prep (clips / rms / tau / sink / KV layout) as one program (tt/aprep.py)
+APREP = __import__("os").environ.get("I2M_APREP", "1") == "1"
+APREP_OLD = __import__("os").environ.get("I2M_APREP_OLD", "")  # (debug) letters of q r k v s from the op path
+APREP_DRAM = __import__("os").environ.get("I2M_APREP_DRAM", "0") == "1"  # (debug) SDPA inputs moved to DRAM
 L1 = ttnn.L1_MEMORY_CONFIG
 
 
@@ -148,6 +152,7 @@ class BatchedApp:
         H = layer.attn_conv_w.shape[0]
         self.attn = BatchedConv(mesh, layer.attn_conv_w, rep, H, B)
         self.mlp = BatchedConv(mesh, layer.mlp_conv_w, rep, H, B)
+        self.aprep = None
         # KV write: [1, B, NKV, HD] padded to 32 head rows, height-sharded one user per core
         grid = mesh.compute_with_storage_grid_size()
         self.kv_shard = ttnn.create_sharded_memory_config(
@@ -176,6 +181,33 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     if w.dram_sharded:
         pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, B, w.kd))
         pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, B, w.kd))
+    if APREP and B <= 32 and not w.dram_sharded:
+        if ba.aprep is None:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.aprep import AttnPrep
+
+            ba.aprep = AttnPrep(w, B, ba.kv_shard)
+        if w.sliding:
+            k, v = ba.k.step(pk), ba.v.step(pv)
+        else:
+            k, v = ba.k.step(pk, xk), ba.v.step(pv, xv)
+        q, rq, kp, vp, sk = ba.aprep(pq, k, v, tau)
+        if APREP_DRAM:
+            q, rq, sk = (ttnn.to_memory_config(t, DRAM) for t in (q, rq, sk))
+        if APREP_OLD:  # (debug) take these from the op path
+            oq, orq, ok, ov, osk = _old_prep(w, pq, k, v, tau, B)
+            q = oq if "q" in APREP_OLD else q
+            rq = orq if "r" in APREP_OLD else rq
+            sk = osk if "s" in APREP_OLD else sk
+            if "k" in APREP_OLD:
+                kp = ttnn.to_memory_config(ttnn.pad(ok, [1, B, 32, w.HD], [0, 0, 0, 0], 0.0), ba.kv_shard)
+            if "v" in APREP_OLD:
+                vp = ttnn.to_memory_config(ttnn.pad(ov, [1, B, 32, w.HD], [0, 0, 0, 0], 0.0), ba.kv_shard)
+        wpos = pos_wr if w.sliding else pos
+        ttnn.experimental.paged_update_cache(c.k_cache, kp, update_idxs_tensor=wpos, page_table=c.write_table)
+        ttnn.experimental.paged_update_cache(c.v_cache, vp, update_idxs_tensor=wpos, page_table=c.write_table)
+        g0 = w.qd + w.rd + w.sd
+        g = ttnn.slice(pq, (0, 0, 0, g0), (1, 1, B, g0 + w.gd))
+        return _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl)
     o0 = 0
     q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.qd)); o0 += w.qd
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, B, o0 + w.rd)); o0 += w.rd
@@ -202,6 +234,27 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
         ttnn.deallocate(tp)
     rq = ttnn.pad(_bf(r), [1, B, NH, 32], [0, 0, 0, 0], 0.0)
     sk = _bf(ttnn.multiply(_f32(ttnn.reshape(s, (1, B, NH, 1))), w.sink_bcast))
+    return _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl)
+
+
+def _old_prep(w, pq, k, v, tau, B):
+    NH, NKV, HD, DR = w.NH, w.NKV, w.HD, w.DR
+    q = ttnn.slice(pq, (0, 0, 0, 0), (1, 1, B, w.qd))
+    r = ttnn.slice(pq, (0, 0, 0, w.qd), (1, 1, B, w.qd + w.rd))
+    s = ttnn.slice(pq, (0, 0, 0, w.qd + w.rd), (1, 1, B, w.qd + w.rd + NH))
+    q = _l2clip(_f32(ttnn.reshape(q, (1, B, NH, HD))), w.qk_clip, w.q_scale)
+    r = _l2clip(_f32(ttnn.reshape(r, (1, B, NH, DR))), w.rel_clip, w.r_scale)
+    k = _l2clip(_f32(ttnn.reshape(k, (1, B, NKV, HD))), w.qk_clip)
+    v = _rms_unweighted(_f32(ttnn.reshape(v, (1, B, NKV, HD))), w.eps)
+    if not w.sliding:
+        q, r = ttnn.multiply(q, tau), ttnn.multiply(r, tau)
+    rq = ttnn.pad(_bf(r), [1, B, NH, 32], [0, 0, 0, 0], 0.0)
+    sk = _bf(ttnn.multiply(_f32(ttnn.reshape(s, (1, B, NH, 1))), w.sink_bcast))
+    return _bf(q), rq, _bf(k), _bf(v), sk
+
+
+def _attn_out(w, c, q, rq, sk, g, pos_sdpa, B, tt_ccl):
+    NH, HD, N = w.NH, w.HD, w.N
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, c.read_table, rq, w.table, w.scale, w.W, w.E,
                             sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
     o = ttnn.reshape(o, (1, 1, B, NH * HD))

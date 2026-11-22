@@ -71,6 +71,7 @@ slot caches, a row -> slot map for the plugin's condense remaps, host sampling (
 | fused block-mix + message-gate-tail kernels | 72.6 ms | 90.6 ms | decode 0.968 / 0.996 / 0.018, prefill 0.968 / 0.996 / 0.014 |
 | explicit 1D mcast matmul configs for every decode matmul (tt/dmm.py) | 57.8 ms | | |
 | one-row rms_norm width-sharded on 8 cores | 51.0 ms | 67.5 ms | decode 0.970 / 0.996 / 0.015 |
+| attention prep in one program (tt/aprep.py: head gather, l2 clips, rms, tau, sink, KV-write layout) | 42.5 ms | 58.8 ms | see below |
 
 At one row most ops are bound by the 32-row tile, not by bytes (attention projections ~60 us each vs a 32 us
 bandwidth floor; DRAM-sharded only wins at LoFi): wider batches are nearly free, single-user latency needs fused
@@ -79,6 +80,13 @@ kernels (layer glue: norms / mixes / gates / convs ~50 ms of the 97).
 Fused MoE notes: the kernels' single-row sigb path routes wrongly (pcc 0.5): one row runs the 2-row path. Expert slices
 must be 128..768 columns: sub-shards 3 x 384 (1 die), 384 + 256 (2), 384 padded (4). Down rows op: 3 readers per bank
 (H = 2304 is 9 columns per bank) -> 16 rows max; wider batches use the sparse union path.
+
+Decode-quality noise: the teacher-forced decode eval (8 texts x 256 steps) moves by ~0.5 pt top-1 and ~0.005 KL
+between numerically equivalent variants (ulp-level rounding differences); code_mbpp alone swings KL 0.03 - 0.10.
+The attention-prep kernel at 8 x 736 steps: top-1 0.9671 = ops path 0.9671, top-1 (conf) 0.9954 vs 0.9951, KL 0.0171
+vs 0.0150 (all of the difference in code_mbpp / chat_french; with the ops path's r instead, KL 0.0108). The relative-bias
+query r is the sensitive input: its per-head sums of squares must not go through a plain TF32 matmul (truncation
+bias +1e-4 on the clip factor measurably moved quality); the kernel splits x^2 into hi + lo (exact).
 
 Bandwidth floor (one die, bfp8): every application re-reads its layer's weights (attention ~30 MB, 8 experts ~67 MB),
 ~5.7 GB per token -> ~11 ms at 512 GB/s; 51 ms is ~22 %. Matmul notes (tools/bench_proj.py, traced, M = 32): the
