@@ -261,6 +261,13 @@ Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), to
 0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
 760 s (1,350 tok/s over the whole prompt).
 
+Quality after this round (teacher_force.py prefill path, bfp8 experts, bf16 KV): TP4 2048-row chunks 0.9717 / 0.9970 /
+0.0153; TP2 1024-row 0.9697 / 0.9962 / 0.0160; TP1 256-row 0.9703 / 0.9966 / 0.0142; decode eval (TP4 B=8) 0.9711 /
+0.9955 / 0.0168. Prefill wall: TP2 442.6 ms per 1024 rows (2,314 tok/s), TP1 320 ms per 256 rows (800 tok/s).
+tests/test_packed_device.py on one die: packed vs alone KL 8.6e-4 / 1.8e-3 (bar 1e-4; TP4 / TP2 ~1e-9), argmax equal,
+the same at the round's first commit (d1a18d465da): pre-existing, row-count dependent matmul configs on the unsplit
+weights (not chased).
+
 At 128K positions (op_prof P0=131072, one 1024-row chunk, device): SDPA 377 -> 111 ms (2 items: 228; the stream bound:
 linear in items per unit), the chunk 709 -> 443 ms. 8 items: the CBs (1.56 MB) clash with L1; the tree reduction's
 code compiles only for one-item units (4 items overflowed the kernel config buffer by 320 bytes).
