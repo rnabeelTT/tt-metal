@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Device sampler ops (tt/sampling.py) on [1, 1, W, Vp] fp32 logits, traced: typecast, RowsTopK, gather, slices."""
+"""Device sampler ops (tt/sampling.py) on [1, 1, W, Vp] fp32 logits, traced: typecast, RowsTopK, gather, slices.
+env: VP (the die's vocab columns, default 200064: one die; TP4 50016), WIDTHS (1,8)"""
 
+import os
 import time
 
 import torch
@@ -9,7 +11,7 @@ import torch
 import ttnn
 from models.demos.blackhole.qwen36.tt.decode_sampling.ops import RowsTopK
 
-VP, REPS, ITERS = 200064, 10, 10
+VP, REPS, ITERS = int(os.environ.get("VP", "200064")), 10, 10
 
 
 def timed(mesh, fn):
@@ -33,8 +35,8 @@ def main():
     rtk = RowsTopK(mesh, VP)
     from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceTopK
 
-    dtk = DeviceTopK(mesh, VP, VP - 6)
-    for W in (1, 8):
+    dtk = DeviceTopK(mesh, VP, VP - 6)  # (the real vocab end: only the last die pads)
+    for W in [int(w) for w in os.environ.get("WIDTHS", "1,8").split(",")]:
         lg = ttnn.from_torch(torch.randn(1, 1, W, VP) * 5, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
         lb = ttnn.typecast(lg, ttnn.bfloat16)
         _, idx = rtk(lb, W)

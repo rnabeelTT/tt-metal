@@ -5,7 +5,8 @@ decode steps; every slot's logits vs the CPU reference at its own positions (top
 run of one slot alone (B-slot model, the others idle) that must give the same logits as in the batch.
 
 usage (in the image): tools/run_dev.sh python models/autoports/thinkingmachines_inkling_2_mini/tests/test_batched_device.py
-env: EXPERT_DT (bfp8), KV_DT (bf16), MESH (1), D (8), PREFIX (64,100,160,200), MAXLEN (512)
+env: EXPERT_DT (bfp8), KV_DT (bf16), MESH (1), D (8), PREFIX (64,100,160,200), MAXLEN (512), POOL (shared global-KV
+pool tokens; default slots x MAXLEN)
 """
 
 import os
@@ -34,8 +35,9 @@ def main():
     if N > 1:
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=int(os.environ.get("TRACE_MB", "300")) << 20)
-    m = Inkling2Model(mesh, max_seq_len=int(os.environ.get("MAXLEN", "512")), expert_dtype=DT[os.environ.get("EXPERT_DT", "bfp8")],
-                      kv_dtype=DT[os.environ.get("KV_DT", "bf16")], prefill_chunk=256, slots=B)
+    m = Inkling2Model(mesh, max_seq_len=int(os.environ.get("MAXLEN", "512")),
+                      expert_dtype=DT[os.environ.get("EXPERT_DT", "bfp8")], kv_dtype=DT[os.environ.get("KV_DT", "bf16")],
+                      prefill_chunk=256, slots=B, kv_pool_tokens=int(os.environ.get("POOL", "0")) or None)
     dec = BatchedDecoder(m, B)
     d0 = (lambda t: ttnn.get_device_tensors(t)[0]) if N > 1 else (lambda t: t)
 
