@@ -384,6 +384,8 @@ cores per head) x kv heads) now assumes 16: K / V 6.8 -> 1.4 us per chunk, SDPA 
 300); long contexts keep the stock throttle (global layer at 60K: 385 us either way; a fixed looser throttle made the
 slowest core 385 -> 413 us), prefill too. One die 22.3 -> 21.9 ms, TP4 14.4 / 21.3 -> 14.0 / 20.9 ms (B=1 / 4); bitwise. Note: the device profiler writes one CSV in the shared generated mount:
 profile on one die at a time.
+Streamed q readers per bank: 2 on one die (3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies (TP2 17.6 -> 17.2, TP4 14.0 /
+20.9 -> 13.9 / 20.8 ms). Not kept: o_proj streamed the same way (K = 3072: one die 21.9 -> 22.3, TP2 17.2 -> 17.6 ms).
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v

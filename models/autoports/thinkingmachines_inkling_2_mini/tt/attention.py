@@ -138,7 +138,10 @@ class AttnWeights:
             from .mstream import MultiStream
 
             K, fqp = wq.shape[1], self.fq + (-self.fq) % 256
-            self.ms = MultiStream(mesh, K, [(fqp, ttnn.float32, 2), (self.kd, ttnn.bfloat16, 1),
+            # q readers per bank: 2 on one die (28 q columns per bank; 3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies
+            # (TP2 17.6 -> 17.2 ms, TP4 14.0 -> 13.9)
+            qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "4" if N > 1 else "2"))
+            self.ms = MultiStream(mesh, K, [(fqp, ttnn.float32, qr), (self.kd, ttnn.bfloat16, 1),
                                             (self.kd, ttnn.bfloat16, 1)], wdtype, interleaved=True,
                                   fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2)
             self.ms_w = [self.w_q, self.w_k, self.w_v]
