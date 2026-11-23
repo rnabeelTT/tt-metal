@@ -52,6 +52,7 @@ from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, rkey, rpos
 
 SKF = getattr(ttnn.transformer, "SparseKVFormat", None) or getattr(ttnn, "SparseKVFormat", None)
 SENTINEL = 0xFFFFFFFF
+_SPLIT_OK = [True]  # sparse_sdpa accepts kv_split / active_tokens (HY4_SDPA_SPLIT; cleared on a TypeError)
 K_CHUNK = 128  # sparse_sdpa key chunk; index lists are padded to a multiple of it
 SINK_COLS = 32
 SINK_KEY = 16.0
@@ -482,8 +483,20 @@ class Hy4Attention:
 
             glue = AttnGlue.get(self.mesh)
             q_rm = glue.qprep(q_lat, q_rope, self._qs32, self.Hp, int(R))
-            o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
-                                             k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())
+            # HY4_SDPA_SPLIT=C (opt-in, default 0; not exact, gates mixed): each real row's selected keys over up to C
+            # cores (partial flash states merged on one core per row, FP32 DEST); only the R real rows are computed
+            # (otile reads rows < R only). Off or a ttnn without the kv_split argument: one core per row.
+            split = int(os.environ.get("HY4_SDPA_SPLIT", "0"))
+            kw = {"kv_split": split, "active_tokens": int(R)} if split > 1 and self.Hp == TILE and _SPLIT_OK[0] else {}
+            try:
+                o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
+                                                 k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc(), **kw)
+            except TypeError:
+                if not kw:
+                    raise
+                _SPLIT_OK[0] = False  # (argument binding fails before any device work)
+                o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,
+                                                 k_chunk_size=K_CHUNK, compute_kernel_config=self._sdpa_ckc())
             o2 = glue.otile(o, self.Hd, int(R), mem)
             ttnn.deallocate(o)
             return self._attend_out(x, o2, mem, dec, R)

@@ -431,6 +431,11 @@ void bind_sdpa(nb::module_& mod) {
                 sp_coord*tp + tp_coord), so stripes = sp*tp and per-stripe chunk = block_cyclic_chunk_local/tp.
             sub_core_grids (ttnn.CoreRangeSet, optional): restrict work to these cores (default: all cores of the
                 first subdevice). Part of the program-cache key.
+            kv_split (int): decode key split: each token's keys spread over up to kv_split cores, partial flash
+                states merged on one core per token (FP32 DEST). 1 (default) = off. Effective split is
+                min(kv_split, cores / active_tokens); needs H == 32, plain KV, no sink, no block-cyclic remap.
+            active_tokens (int, optional): compute only the first active_tokens query tokens (other output rows are
+                left unwritten). Part of the program-cache key.
         Returns:
             ttnn.Tensor: [1, H, S, v_dim] ROW-MAJOR, DRAM interleaved; dtype matches q (bf16->bf16, fp8->fp8).
         )doc",
@@ -449,7 +454,9 @@ void bind_sdpa(nb::module_& mod) {
         nb::arg("block_cyclic_chunk_local") = nb::none(),
         nb::arg("block_cyclic_cache_tp_sharded") = false,
         nb::arg("attention_sink") = nb::none(),
-        nb::arg("sub_core_grids") = nb::none());
+        nb::arg("sub_core_grids") = nb::none(),
+        nb::arg("kv_split") = 1,
+        nb::arg("active_tokens") = nb::none());
 
     ttnn::bind_function<"sparse_sdpa_msa", "ttnn.transformer.">(
         mod,

@@ -30,6 +30,13 @@ struct SparseSDPAParams {
     bool has_scaled_kv() const { return kv_format == transformer::SparseKVFormat::SCALED_FP8; }
     // Worker cores: sub_core_grids, or all cores of the first subdevice.
     tt::tt_metal::CoreRangeSet worker_core_grid;
+    // Key split (decode): the softmax over each token's selected keys is spread over up to kv_split cores, whose
+    // partial flash states one core per token merges (FP32 DEST). 1 = off (one core per token, the original
+    // program). Only the first active_tokens query tokens are computed when set (the rest of the output is left
+    // unwritten); the effective split is min(kv_split, cores / active_tokens) and needs H == 32, a plain bf16/fp8
+    // KV, no attention sink and no block-cyclic remap (else it falls back to 1).
+    uint32_t kv_split = 1;
+    std::optional<uint32_t> active_tokens = std::nullopt;
 };
 
 struct SparseSDPAInputs {

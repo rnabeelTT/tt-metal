@@ -61,6 +61,14 @@ void kernel_main() {
     constexpr uint32_t packed_row_bytes = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::PACKED_ROW_BYTES);
     constexpr uint32_t cb_kreq = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_KREQ);
     constexpr uint32_t cb_kack = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_KACK);
+    // Key split (1 = off): KV_SPLIT cores per token; runtime arg 2 = this core's index j in its token group.
+    constexpr uint32_t kv_split = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::KV_SPLIT);
+    constexpr bool split = kv_split > 1;
+    constexpr uint32_t cb_split_ctl = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_SPLIT_CTL);
+    constexpr uint32_t cb_rmax = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_RMAX);
+    constexpr uint32_t cb_rsum = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_RSUM);
+    constexpr uint32_t cb_rout = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_ROUT);
+    constexpr uint32_t vDHt = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::V_DHT);
 
     // kv carries a RUNTIME tensor shape (its T dim is common runtime args, not compile-time), so its accessor
     // spans both the compile-time AND common-runtime arg streams. Thread both offsets through all three.
@@ -75,6 +83,7 @@ void kernel_main() {
     const uint32_t idx_addr = get_common_arg_val<uint32_t>(sparse_sdpa::reader_common_arg::INDICES_ADDRESS);
     const uint32_t tok_start = get_arg_val<uint32_t>(0);
     const uint32_t tok_count = get_arg_val<uint32_t>(1);
+    const uint32_t split_j = split ? get_arg_val<uint32_t>(2) : 0;
     // Indexed KV cache: page offset (cache_batch_idx * T) selecting the cache's batch slot; 0 if not indexed.
     const uint32_t kv_batch_page_offset =
         get_common_arg_val<uint32_t>(sparse_sdpa::reader_common_arg::KV_BATCH_PAGE_OFFSET);
@@ -98,13 +107,15 @@ void kernel_main() {
     volatile tt_l1_ptr uint32_t* idx_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(idx_l1);
 
     for (uint32_t tok = tok_start; tok < tok_start + tok_count; ++tok) {
-        // Q: H head-rows -> cb_q_rm.  Q is [1,H,S,576] row-major: row (h,tok) = page h*S+tok.
-        q_cb.reserve_back(H);
-        for (uint32_t h = 0; h < H; ++h) {
-            noc.async_read(q, q_cb, q_row_bytes, {.page_id = h * S + tok}, {.offset_bytes = h * q_row_bytes});
+        if constexpr (!split) {
+            // Q: H head-rows -> cb_q_rm.  Q is [1,H,S,576] row-major: row (h,tok) = page h*S+tok.
+            q_cb.reserve_back(H);
+            for (uint32_t h = 0; h < H; ++h) {
+                noc.async_read(q, q_cb, q_row_bytes, {.page_id = h * S + tok}, {.offset_bytes = h * q_row_bytes});
+            }
+            noc.async_read_barrier();
+            q_cb.push_back(H);
         }
-        noc.async_read_barrier();
-        q_cb.push_back(H);
 
         // indices row for this token (page = tok) -> idx_cb scratch
         noc.async_read(idx, idx_cb, idx_row_bytes, {.page_id = tok}, {.offset_bytes = 0});
@@ -126,6 +137,38 @@ void kernel_main() {
         }
         const uint32_t n_active = (nv + k_chunk - 1) / k_chunk;
 
+        // Key split: participants p = min(KV_SPLIT, n_active); this core's chunk range and role.
+        uint32_t chunk_begin = 0, chunk_end = n_active, role = sparse_sdpa::split_role::REDUCER, parts = 1;
+        if constexpr (split) {
+            parts = n_active < kv_split ? n_active : kv_split;
+            if (split_j >= parts) {
+                role = sparse_sdpa::split_role::IDLE;
+                chunk_begin = chunk_end = 0;
+            } else {
+                role = split_j == 0 ? sparse_sdpa::split_role::REDUCER : sparse_sdpa::split_role::WORKER;
+                chunk_begin = sparse_sdpa::split_chunk_begin(n_active, parts, split_j);
+                chunk_end = sparse_sdpa::split_chunk_end(n_active, parts, split_j);
+            }
+            experimental::CB split_ctl_cb(cb_split_ctl);
+            split_ctl_cb.reserve_back(1);
+            {
+                volatile tt_l1_ptr uint32_t* sp =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(split_ctl_cb.get_write_ptr());
+                sp[sparse_sdpa::split_message::ROLE] = role;
+                sp[sparse_sdpa::split_message::PARTS] = parts;
+                sp[sparse_sdpa::split_message::LOCAL_CHUNKS] = chunk_end - chunk_begin;
+            }
+            split_ctl_cb.push_back(1);
+            if (role != sparse_sdpa::split_role::IDLE) {
+                q_cb.reserve_back(H);
+                for (uint32_t h = 0; h < H; ++h) {
+                    noc.async_read(q, q_cb, q_row_bytes, {.page_id = h * S + tok}, {.offset_bytes = h * q_row_bytes});
+                }
+                noc.async_read_barrier();
+                q_cb.push_back(H);
+            }
+        }
+
         // hand the active chunk count + valid-key count to compute (it can't issue DRAM reads to derive
         // them). nv lets compute place the boundary mask (which key tiles of the last chunk to -inf).
         ctrl_cb.reserve_back(1);
@@ -133,10 +176,16 @@ void kernel_main() {
             volatile tt_l1_ptr uint32_t* cp = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ctrl_cb.get_write_ptr());
             cp[sparse_sdpa::control_message::ACTIVE_CHUNKS] = n_active;
             cp[sparse_sdpa::control_message::VALID_KEYS] = nv;
+            if constexpr (split) {
+                cp[sparse_sdpa::control_message::CHUNK_BEGIN] = chunk_begin;
+                cp[sparse_sdpa::control_message::CHUNK_END] = chunk_end;
+                cp[sparse_sdpa::control_message::ROLE] = role;
+                cp[sparse_sdpa::control_message::PARTS] = parts;
+            }
         }
         ctrl_cb.push_back(1);
 
-        for (uint32_t chunk = 0; chunk < n_active; ++chunk) {
+        for (uint32_t chunk = chunk_begin; chunk < chunk_end; ++chunk) {
             const uint32_t base = chunk * k_chunk;
             const uint32_t valid = (nv - base) < k_chunk ? (nv - base) : k_chunk;  // (0, k_chunk]
 
@@ -211,7 +260,7 @@ void kernel_main() {
                         reinterpret_cast<volatile tt_l1_ptr uint32_t*>(kreq_cb.get_write_ptr());
                     request[sparse_sdpa::gather_request::BASE] = base;
                     request[sparse_sdpa::gather_request::SPLIT] = half;
-                    request[sparse_sdpa::gather_request::IS_LAST] = chunk == n_active - 1;
+                    request[sparse_sdpa::gather_request::IS_LAST] = chunk == chunk_end - 1;
                     request[sparse_sdpa::gather_request::DST_L1] = k_write_ptr;
                 }
                 kreq_cb.push_back(1);
@@ -255,6 +304,23 @@ void kernel_main() {
                     }
                 }
                 mask_part_cb.push_back(1);
+            }
+        }
+
+        if constexpr (split) {
+            if (role == sparse_sdpa::split_role::REDUCER) {
+                // Every participant (this core's writer included) wrote its slot and bumped the arrival count.
+                volatile tt_l1_ptr uint32_t* arrivals =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(sparse_sdpa::SPLIT_ARRIVAL_SEMAPHORE));
+                noc_semaphore_wait_min(arrivals, parts);
+                noc_semaphore_set(arrivals, 0);
+                experimental::CB rmax_cb(cb_rmax), rsum_cb(cb_rsum), rout_cb(cb_rout);
+                rmax_cb.reserve_back(kv_split);
+                rsum_cb.reserve_back(kv_split);
+                rout_cb.reserve_back(kv_split * vDHt);
+                rmax_cb.push_back(kv_split);
+                rsum_cb.push_back(kv_split);
+                rout_cb.push_back(kv_split * vDHt);
             }
         }
     }

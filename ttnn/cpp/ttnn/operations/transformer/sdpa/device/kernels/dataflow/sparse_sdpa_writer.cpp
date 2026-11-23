@@ -47,6 +47,21 @@ void kernel_main() {
     constexpr bool use_attention_sink = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::USE_ATTENTION_SINK) != 0;
     constexpr uint32_t cb_attention_sink = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_ATTENTION_SINK);
     constexpr uint32_t cb_sink_scratch = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_SINK_SCRATCH);
+    // Key split (1 = off): runtime args 2..4 = this core's index j in its token group, the group reducer's NoC x/y.
+    constexpr uint32_t kv_split = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::KV_SPLIT);
+    constexpr bool kv_split_on = kv_split > 1;
+    constexpr uint32_t cb_split_ctl = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_SPLIT_CTL);
+    constexpr uint32_t cb_split_done = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_SPLIT_DONE);
+    constexpr uint32_t cb_rmax = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_RMAX);
+    constexpr uint32_t cb_rsum = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_RSUM);
+    constexpr uint32_t cb_rout = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_ROUT);
+    constexpr uint32_t cb_max_a = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_MAX_A);
+    constexpr uint32_t cb_max_b = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_MAX_B);
+    constexpr uint32_t cb_sum_a = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_SUM_A);
+    constexpr uint32_t cb_sum_b = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_SUM_B);
+    constexpr uint32_t cb_out_a = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_OUT_A);
+    constexpr uint32_t cb_out_b = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_OUT_B);
+    constexpr uint32_t cb_identity = get_compile_time_arg_val(sparse_sdpa::writer_ct_arg::CB_IDENTITY);
     constexpr auto out_args =
         TensorAccessorArgs<sparse_sdpa::writer_ct_arg::END, sparse_sdpa::writer_common_arg::END>();
     // kv carries a RUNTIME tensor shape (T dim in common runtime args), so its accessor spans both arg streams.
@@ -138,7 +153,57 @@ void kernel_main() {
         }
     }
 
+    // Key split: the exported flash state is read straight from compute's ping-pong CBs (single-block CBs, so the
+    // data always sits at the CB base); the receive slots sit at the same L1 offsets on every core.
+    uint32_t split_j = 0;
+    uint64_t arrival_noc_addr = 0, rmax_noc = 0, rsum_noc = 0, rout_noc = 0;
+    constexpr uint32_t state_tile_bytes = tt::constants::TILE_HW * sizeof(uint16_t);  // bf16 flash state tiles
+    uint32_t max_a_l1 = 0, max_b_l1 = 0, sum_a_l1 = 0, sum_b_l1 = 0, out_a_l1 = 0, out_b_l1 = 0;
+    if constexpr (kv_split_on) {
+        max_a_l1 = experimental::CB(cb_max_a).get_read_ptr();
+        max_b_l1 = experimental::CB(cb_max_b).get_read_ptr();
+        sum_a_l1 = experimental::CB(cb_sum_a).get_read_ptr();
+        sum_b_l1 = experimental::CB(cb_sum_b).get_read_ptr();
+        out_a_l1 = experimental::CB(cb_out_a).get_read_ptr();
+        out_b_l1 = experimental::CB(cb_out_b).get_read_ptr();
+        split_j = get_arg_val<uint32_t>(2);
+        const uint32_t rx = get_arg_val<uint32_t>(3), ry = get_arg_val<uint32_t>(4);
+        arrival_noc_addr = get_noc_addr(rx, ry, get_semaphore(sparse_sdpa::SPLIT_ARRIVAL_SEMAPHORE));
+        rmax_noc = get_noc_addr(rx, ry, experimental::CB(cb_rmax).get_write_ptr() + split_j * state_tile_bytes);
+        rsum_noc = get_noc_addr(rx, ry, experimental::CB(cb_rsum).get_write_ptr() + split_j * state_tile_bytes);
+        rout_noc =
+            get_noc_addr(rx, ry, experimental::CB(cb_rout).get_write_ptr() + split_j * vDHt * state_tile_bytes);
+        if (split_j == 0 && tok_count > 0) {
+            // Identity tile (bf16 1.0 on the diagonal): the reducer turns each column-0 correction into diag(corr).
+            experimental::CB identity_cb(cb_identity);
+            identity_cb.reserve_back(1);
+            noc.async_write_zeros(identity_cb, state_tile_bytes);
+            noc.write_zeros_l1_barrier();
+            volatile tt_l1_ptr uint16_t* p = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(identity_cb.get_write_ptr());
+            for (uint32_t r = 0; r < tt::constants::FACE_HEIGHT; ++r) {
+                p[r * (tt::constants::FACE_WIDTH + 1)] = 0x3F80u;
+                p[3 * tt::constants::FACE_HW + r * (tt::constants::FACE_WIDTH + 1)] = 0x3F80u;
+            }
+            identity_cb.push_back(1);
+        }
+    }
+
     for (uint32_t tok = tok_start; tok < tok_start + tok_count; ++tok) {
+        uint32_t split_role = sparse_sdpa::split_role::REDUCER, local_chunks = 0;
+        if constexpr (kv_split_on) {
+            experimental::CB split_ctl_cb(cb_split_ctl);
+            split_ctl_cb.wait_front(1);
+            {
+                volatile tt_l1_ptr uint32_t* sp =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(split_ctl_cb.get_read_ptr());
+                split_role = sp[sparse_sdpa::split_message::ROLE];
+                local_chunks = sp[sparse_sdpa::split_message::LOCAL_CHUNKS];
+            }
+            split_ctl_cb.pop_front(1);
+            if (split_role == sparse_sdpa::split_role::IDLE) {
+                continue;
+            }
+        }
         // K-gather phase: process this token's active chunks (reader signals per chunk; is_last ends the token).
         // Gather rows [0,split) on the writer's NoC into the reader-reserved destination, then ack.
         bool last = false;
@@ -180,6 +245,22 @@ void kernel_main() {
             }
             kack_cb.reserve_back(1);
             kack_cb.push_back(1);
+        }
+        if constexpr (kv_split_on) {
+            // Compute signals its final local state (chunk 0 lands in the b buffers, so an odd count ends in b).
+            experimental::CB done_cb(cb_split_done);
+            done_cb.wait_front(1);
+            done_cb.pop_front(1);
+            const bool in_b = (local_chunks & 1u) != 0;
+            noc_async_write(in_b ? max_b_l1 : max_a_l1, rmax_noc, state_tile_bytes);
+            noc_async_write(in_b ? sum_b_l1 : sum_a_l1, rsum_noc, state_tile_bytes);
+            noc_async_write(in_b ? out_b_l1 : out_a_l1, rout_noc, vDHt * state_tile_bytes);
+            noc_async_write_barrier();
+            noc_semaphore_inc(arrival_noc_addr, 1);
+            noc_async_atomic_barrier();
+            if (split_role == sparse_sdpa::split_role::WORKER) {
+                continue;  // the reducer writes this token's output
+            }
         }
         out_cb.wait_front(block_tiles);  // one untilized [H, V_DIM] block
         for (uint32_t h = 0; h < H; ++h) {

@@ -278,7 +278,24 @@ ttsl::hash::hash_t SparseSDPAOperation::compute_program_hash(const SparseSDPAPar
         t.indices.logical_shape(),
         t.indices.dtype(),
         t.attention_sink,
-        attrs.worker_core_grid);
+        attrs.worker_core_grid,
+        effective_kv_split(attrs, t),
+        attrs.active_tokens.value_or(t.q.logical_shape()[2]));
+}
+
+uint32_t SparseSDPAOperation::effective_kv_split(const SparseSDPAParams& attrs, const SparseSDPAInputs& t) {
+    if (attrs.kv_split <= 1) {
+        return 1;
+    }
+    const uint32_t H = t.q.logical_shape()[1];
+    const uint32_t S = t.q.logical_shape()[2];
+    const uint32_t active = std::min(attrs.active_tokens.value_or(S), S);
+    if (H != tt::constants::TILE_HEIGHT || attrs.has_scaled_kv() || attrs.has_block_cyclic() ||
+        t.attention_sink.has_value() || active == 0) {
+        return 1;
+    }
+    const uint32_t split = std::min(attrs.kv_split, static_cast<uint32_t>(attrs.worker_core_grid.num_cores()) / active);
+    return split >= 2 ? split : 1;
 }
 
 Tensor sparse_sdpa(
@@ -293,7 +310,9 @@ Tensor sparse_sdpa(
     std::optional<uint32_t> cache_batch_idx,
     std::optional<BlockCyclicLayout> block_cyclic,
     const std::optional<Tensor>& attention_sink,
-    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids) {
+    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids,
+    uint32_t kv_split,
+    std::optional<uint32_t> active_tokens) {
     using OperationType = ttnn::prim::SparseSDPAOperation;
     // Validated (non-empty, inside the first subdevice) in validate_non_hashed, on every dispatch.
     auto* device = q.device();
@@ -309,6 +328,8 @@ Tensor sparse_sdpa(
             .cache_batch_idx = cache_batch_idx,
             .block_cyclic = block_cyclic,
             .worker_core_grid = worker_core_grid,
+            .kv_split = kv_split,
+            .active_tokens = active_tokens,
         },
         OperationType::tensor_args_t{
             .q = q,

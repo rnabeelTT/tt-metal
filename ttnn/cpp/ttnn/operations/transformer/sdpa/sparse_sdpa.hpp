@@ -51,6 +51,11 @@ enum class SparseKVFormat : uint8_t {
 // DeepSeek-V4 stores sinks in the already-scaled logit domain: pass model_sink / scale (scale != 0),
 // reshaped to [1,1,1,H], so the denominator receives exp(model_sink), not exp(scale * model_sink).
 //
+// kv_split / active_tokens (decode): spread each token's selected keys over up to kv_split cores (partial flash
+// states merged on one core per token, FP32 DEST accumulation; a different reduction order than kv_split = 1), and
+// compute only the first active_tokens query tokens (the other output rows are left unwritten). The effective split is
+// min(kv_split, cores / active_tokens); it needs H == 32, a plain KV, no sink, no block-cyclic remap (else off).
+//
 // Producer preconditions (NOT validated per-element): sentinels are a contiguous tail, every row has >= 1
 // valid key, and all non-sentinel indices are < T.
 //
@@ -72,6 +77,8 @@ ttnn::Tensor sparse_sdpa(
     std::optional<uint32_t> block_cyclic_chunk_local = std::nullopt,
     bool block_cyclic_cache_tp_sharded = false,
     const std::optional<ttnn::Tensor>& attention_sink = std::nullopt,
-    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids = std::nullopt);
+    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids = std::nullopt,
+    uint32_t kv_split = 1,
+    std::optional<uint32_t> active_tokens = std::nullopt);
 
 }  // namespace ttnn::transformer
