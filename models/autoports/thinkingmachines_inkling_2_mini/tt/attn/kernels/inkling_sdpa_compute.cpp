@@ -17,6 +17,8 @@
 
 #include <cstdint>
 
+#include "tools/profiler/kernel_profiler.hpp"
+
 #define REDUCE_OP (PoolType::MAX)
 #define REDUCE_DIM (ReduceDim::REDUCE_ROW)
 #define MAX_TREE_REDUCTION_ROUNDS 6
@@ -96,6 +98,7 @@ void kernel_main() {
     constexpr uint32_t dst_size = get_compile_time_arg_val(7);
     constexpr uint32_t W = get_compile_time_arg_val(8);  // sliding window (0 = global layer)
     constexpr uint32_t E = get_compile_time_arg_val(9);  // rel_extent: bias band
+    constexpr uint32_t G = get_compile_time_arg_val(10);  // q heads per kv head (a unit's tile rows: MI x R x G)
 
     // SDPA_MI (prefill): MI consecutive items per unit, their Q tiles stacked as MI tile rows: each K / V chunk is read
     // once for all of them (per-row max / sum as in the stock prefill SDPA; band bias and masks per item)
@@ -109,7 +112,9 @@ void kernel_main() {
     constexpr uint32_t out_in0_num_subblocks = Sq_chunk_t;
     constexpr uint32_t out_in1_num_subblocks = vDHt / out_subblock_w;
     static_assert(vDHt % out_subblock_w == 0, "V head dim tiles split into whole subblocks");
-    constexpr VectorMode vector_mode = VectorMode::RC;  // full 32x32 Q tiles
+    // the softmax SFPU steps on the live Q rows only: decode / verify units hold R x G <= 16 rows (faces 0 / 1:
+    // VectorMode::R); rows are independent through QK, the row softmax and PV, so the live rows are unchanged
+    constexpr VectorMode vector_mode = (MI * R * G <= 16) ? VectorMode::R : VectorMode::RC;
 
     constexpr uint32_t cb_q_in = tt::CBIndex::c_0;
     constexpr uint32_t cb_k_in = tt::CBIndex::c_1;
@@ -216,6 +221,8 @@ void kernel_main() {
     uint32_t cb_prev_sum = cb_sum_2;
     uint32_t cb_out_mm = cb_out_accumulate_im;
 
+    {
+    DeviceZoneScopedN("S_C_KV");
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
         reconfig_data_format(cb_k_in, cb_q_in);
         pack_reconfig_data_format(cb_qk_im);
@@ -316,8 +323,11 @@ void kernel_main() {
         move_block<true>(cb_cur_sum, cb_prev_sum, Sq_chunk_t);
     }
 
+    }
     // tree reduction (stock): combine each round's child into the local (O, max, sum) (decode only: MI > 1 units run
     // on one core each)
+    {
+    DeviceZoneScopedN("S_C_RED");
     if constexpr (MI == 1) {
     if (num_active_children > 0) {
         for (uint32_t round = 0; round < num_active_rounds; ++round) {
@@ -347,6 +357,8 @@ void kernel_main() {
     }
     }
 
+    }
+    DeviceZoneScopedN("S_C_FIN");
     CircularBuffer(cb_sink).wait_front(Sq_chunk_t);
     if (is_tree_root) {
         /* Inkling-2 sink (the stock op's attention-sink step with a per-row sink): m' = max(m, s);

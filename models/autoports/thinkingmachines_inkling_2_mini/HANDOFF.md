@@ -339,6 +339,16 @@ variants. Memory at the served shapes: 4 dies 1.11 GiB free after the traces (po
 prefill headroom), 2 dies 4.1 GiB. Side tests can run on dies 2 / 3 while a 2-die server uses 0 / 1 (TT_LOCK_HELD=1,
 TT_VISIBLE_DEVICES=2,3): fine for correctness / device time, but host load skews served timings (p300 prefix TTFT 0.94 ->
 1.32 s while one ran).
+Decode SDPA (tools/zones_sdpa.py: device zones per phase): at short context the time is the per-core chunk compute
+(~20 us for a 256-key chunk on 4 cores; reduction / finalize ~3 us each). Its softmax SFPU steps now run on the live Q
+rows only (VectorMode::R when MI x R x G <= 16: decode units hold 3 rows): one die B=1 / 4 23.8 / 42.7 -> 23.4 / 41.9 ms,
+decode eval identical to the last digit (0.9708 / 0.9959 / 0.0142, nll 1.7544). Rejected: 128-key decode chunks on the
+sliding layers (I2M_SDPA_K_CHUNK_SW): -0.8 ms on one die, op-level pcc unchanged, but the decode eval drops across 6 of
+8 texts (top-1 0.9708 -> 0.9635, KL 0.0142 -> 0.0167): more partitions, more bf16 roundings of the partial outputs in
+the cross-core reduction. Streamed q / k / v on one die (I2M_MSTREAM_1DIE): -1.2 ms, but its weight copies (~530 MB)
+need room: prefill through the streamed copies instead of the interleaved ones (I2M_MSTREAM_PREFILL, one call per
+32-row tile) costs 368 -> 423 ms per 512-row chunk (+15 %): not taken; a smaller one-die KV pool would be the way.
+Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
 different inputs), ~0.2-0.4 ms per token, and the merged weight did not fit beside 8 x 8K on one die.

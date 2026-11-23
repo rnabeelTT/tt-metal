@@ -349,7 +349,7 @@ def _build_and_run(
     else:
         wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
     cp_ct = [DHt, DHt, Sk_fixed, DST_TILES, cpk, R, struct.unpack("<I", struct.pack("<f", float(scale)))[0], DST_TILES]
-    cp_ct += [window, extent]
+    cp_ct += [window, extent, G]
 
     if static_only:
         per_core = []

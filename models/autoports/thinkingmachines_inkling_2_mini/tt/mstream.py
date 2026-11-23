@@ -6,7 +6,7 @@ global layer's q | r | s | g, k and v: three launches of ~11-16 us each on 4 die
 Each projection gets its own reader cores beside every bank (the qwen36 DecodeLinear placement, later projections
 excluding the earlier ones' cores) and its own per-bank column-major weight copy (DecodeLinear.weight); the kernels are
 the LM head's (kernels/head_compute.cpp without the softcap; kernels/mstream_writer.cpp: FP32 or BF16 output tiles).
-Decode rows only (<= 16)."""
+One tile row (<= 32 rows) per call."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class MultiStream:
     def __call__(self, xs, ws, rows, out_mc=ttnn.DRAM_MEMORY_CONFIG):
         """xs: one [1, 1, rows, K] bf16 TILE input per projection (may repeat), ws = weights() -> outputs
         [1, 1, rows, n] in the specs' dtypes."""
-        assert 1 <= rows <= 16
+        assert 1 <= rows <= 32
         cb_x, cb_w, cb_out = 0, 1, 16
         dm = ttnn.DataMovementConfigDescriptor
         kernels, cbs, outs, io = [], [], [], []

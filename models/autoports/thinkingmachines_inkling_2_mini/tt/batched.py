@@ -28,7 +28,10 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import PackedAR, al
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
-SDPA_K_CHUNK = 256
+# I2M_SDPA_K_CHUNK: keys per decode SDPA chunk (one core each; smaller chunks spread a short context over more cores)
+SDPA_K_CHUNK = int(__import__("os").environ.get("I2M_SDPA_K_CHUNK", "256"))
+# I2M_SDPA_K_CHUNK_SW: the sliding layers' chunk (their window keeps the context short: smaller chunks, more cores)
+SDPA_K_CHUNK_SW = int(__import__("os").environ.get("I2M_SDPA_K_CHUNK_SW", str(SDPA_K_CHUNK)))
 # I2M_GLUE_L1 (default 1): the decode step's activations live in L1 (interleaved): the glue ops (norms, mixes, gates,
 # residual adds) inherit their input's memory config, so the chain stays out of DRAM
 GLUE_L1 = __import__("os").environ.get("I2M_GLUE_L1", "1") == "1"
@@ -364,7 +367,7 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
     NH, HD, N = w.NH, w.HD, w.N
     if pq is not None:  # the output gate in one program (tt/agate.py): SDPA output in L1
         o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
-                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=L1)
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=L1)
         key = (id(w.mesh), NH, HD)
         if key not in _AGATE:
             from .agate import AttnGate
@@ -375,7 +378,7 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
         o = og
     else:
         o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
-                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK, out_memory_config=DRAM)
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=DRAM)
         o = ttnn.reshape(o, (1, 1, B, NH * HD))
         o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
     out = proj(w, "o", o)

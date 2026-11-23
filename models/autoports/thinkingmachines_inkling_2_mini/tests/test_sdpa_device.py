@@ -144,7 +144,7 @@ def run_case(dev, W, E, pos, seed, items_r=0, users=0):
     cur = ttnn.from_torch(pos_t, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     ptt = ttnn.from_torch(page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     out = inkling_sdpa_decode(
-        q, K, V, cur, ptt, rq, table, SCALE, W, E, sink=sk, pt_per_item=bool(users), k_chunk_size=256 if users else 0,
+        q, K, V, cur, ptt, rq, table, SCALE, W, E, sink=sk, pt_per_item=bool(users), k_chunk_size=int(os.environ.get("KCH", "0")) or (256 if users else 0),
         mi=MI if items_r else 1,
     )
     got = ttnn.to_torch(out).float().reshape(R, NH, HD)  # ([1, 1, R, NH * HD] when mi items fill a tile row)

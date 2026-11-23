@@ -18,6 +18,7 @@
 #include "ttnn/operations/transformer/sdpa_decode/device/kernels/rt_args_common.hpp"
 #include "ttnn/operations/transformer/sdpa_decode/device/kernels/dataflow/dataflow_common.hpp"
 #include "inkling_sdpa_common.hpp"
+#include "tools/profiler/kernel_profiler.hpp"
 
 #ifndef SDPA_MI
 #define SDPA_MI 1  // prefill: consecutive items per unit (their Q tiles stacked; see the compute)
@@ -317,6 +318,7 @@ void kernel_main() {
     const uint32_t v_chunk_tiles = Sk_chunk_t_dynamic * vDHt;
     const auto tbl_reader = TensorAccessor(tbl_args, tbl_addr, q_tile_bytes);
     CircularBuffer cb_tblc(cb_tbl);
+    DeviceZoneScopedN("S_R_KV");
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
         const uint32_t k_chunk_start_row_num = k_chunk * Sk_chunk_t_dynamic;
         // per item: R x Sk table tiles: row j, key tile b = k_chunk * Sk + t -> T[phi_j][m = a_j - b] (zero outside

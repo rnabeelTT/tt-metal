@@ -42,6 +42,19 @@ DRAM_SHARDED = __import__("os").environ.get("I2M_DRAM_SHARDED", "0") == "1"
 # I2M_MSTREAM (default 1 on > 1 die): the decode q | r | s | g, k and v projections in one program, each weight streamed
 # per DRAM bank (tt/mstream.py; per-bank weight copies beside the interleaved ones: ~30 MB per die at 4 dies, no room on 1)
 MSTREAM = __import__("os").environ.get("I2M_MSTREAM", "1") == "1"
+MSTREAM_1DIE = __import__("os").environ.get("I2M_MSTREAM_1DIE", "0") == "1"  # (one die: the copies need ~530 MB)
+# I2M_MSTREAM_PREFILL (experiment): prefill's q / k / v through the streamed copies too, one call per 32-row tile
+MSTREAM_PREFILL = __import__("os").environ.get("I2M_MSTREAM_PREFILL", "0") == "1"
+
+
+def _ms_rows(w, xs, T):
+    """The streamed q / k / v projections of T rows (one call per 32-row tile) -> (pq, pk, pv)."""
+    outs = []
+    for r0 in range(0, T, 32):
+        r1 = min(T, r0 + 32)
+        sl = [ttnn.slice(x, (0, 0, r0, 0), (1, 1, r1, int(x.shape[-1]))) for x in xs]
+        outs.append(w.ms(sl, w.ms_w, r1 - r0, ))
+    return tuple(ttnn.concat([o[i] for o in outs], dim=2) for i in range(3))
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 # prefill SDPA items per work unit (inkling_sdpa_decode mi; I2M_SDPA_MI): each K / V chunk read once for 4 items' Q tiles
@@ -128,7 +141,7 @@ class AttnWeights:
             self.w_v = up(wv.T.reshape(1, 1, wv.shape[1], -1), wdtype, shard_c)
             self.w_o = up(wo.T.reshape(1, 1, wo.shape[1], -1), wdtype, shard_r)
         self.ms = None
-        if MSTREAM and N > 1 and not DRAM_SHARDED:
+        if MSTREAM and (N > 1 or MSTREAM_1DIE) and not DRAM_SHARDED:
             from .mstream import MultiStream
 
             K, kd, fq = wq.shape[1], self.kd, self.fq
@@ -543,9 +556,12 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     every segment (per-item page-table rows). xq / xk / xv [1, 1, T, H] bf16 -> [1, 1, T, H] bf16."""
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     T = int(xq.shape[2])
-    pq = proj(w, "q", xq, ttnn.float32 if FUSED_OPS else None)
-    pk = proj(w, "k", xk)
-    pv = proj(w, "v", xv)
+    if MSTREAM_PREFILL and getattr(w, "ms", None) is not None:
+        pq, pk, pv = _ms_rows(w, [xq, xk, xv], T)
+    else:
+        pq = proj(w, "q", xq, ttnn.float32 if FUSED_OPS else None)
+        pk = proj(w, "k", xk)
+        pv = proj(w, "v", xv)
     if w.dram_sharded:
         pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, T, w.kd))
         pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, T, w.kd))
