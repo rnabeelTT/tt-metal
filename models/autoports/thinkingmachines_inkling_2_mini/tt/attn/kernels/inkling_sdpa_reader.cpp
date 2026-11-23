@@ -152,7 +152,14 @@ void kernel_main() {
     constexpr uint32_t q_tile_bytes = get_tile_size(cb_q_in);
     constexpr uint32_t k_tile_bytes = get_tile_size(cb_k_in);
     constexpr uint32_t v_tile_bytes = get_tile_size(cb_v_in);
+    // the stock read throttle (a NOC barrier every (512 / readers) x 1152 / tile bytes reads) assumes every core of the
+    // program reads at once: 2 tiles per barrier at ~100 cores. A decode step at short context has only min(chunks,
+    // cores per head) x kv heads readers: with <= 16 the throttle assumes 16 (K / V reads 6.8 -> 1.4 us per chunk);
+    // long contexts and prefill (one core per unit, every core reading) keep the stock one
     constexpr uint32_t barrier_threshold = get_barrier_read_threshold<q_tile_bytes, num_cores>();
+    constexpr uint32_t barrier_threshold_few = get_barrier_read_threshold<q_tile_bytes, 16>();
+    const bool few_readers = num_cores_per_head > 1 &&
+        (k_num_chunks < num_cores_per_head ? k_num_chunks : num_cores_per_head) * num_kv_heads <= 16;
     uint32_t barrier_count = 0;
 
     // Q: this kv head's G head rows of every row's tile row, read from DRAM into a scratch tile at the same in-tile
@@ -350,27 +357,27 @@ void kernel_main() {
         }
         {
         DeviceZoneScopedN("S_R_K");
-        read_k<cb_k_in, DHt, num_kv_heads, block_size_t, k_tile_bytes, barrier_threshold, false, false, 0>(
-            k_chunk_tiles,
-            cur_head,
-            Sk_chunk_t_dynamic,
-            k_chunk_start_row_num,
-            k_reader,
-            nullptr,
-            page_table_ptr,
-            barrier_count);
+        if (few_readers) {
+            read_k<cb_k_in, DHt, num_kv_heads, block_size_t, k_tile_bytes, barrier_threshold_few, false, false, 0>(
+                k_chunk_tiles, cur_head, Sk_chunk_t_dynamic, k_chunk_start_row_num, k_reader, nullptr, page_table_ptr,
+                barrier_count);
+        } else {
+            read_k<cb_k_in, DHt, num_kv_heads, block_size_t, k_tile_bytes, barrier_threshold, false, false, 0>(
+                k_chunk_tiles, cur_head, Sk_chunk_t_dynamic, k_chunk_start_row_num, k_reader, nullptr, page_table_ptr,
+                barrier_count);
+        }
         }
         {
         DeviceZoneScopedN("S_R_V");
-        read_v<cb_v_in, vDHt, num_kv_heads, block_size_t, v_tile_bytes, barrier_threshold, false, false, 0>(
-            v_chunk_tiles,
-            cur_head,
-            Sk_chunk_t_dynamic,
-            k_chunk_start_row_num,
-            v_reader,
-            nullptr,
-            page_table_ptr,
-            barrier_count);
+        if (few_readers) {
+            read_v<cb_v_in, vDHt, num_kv_heads, block_size_t, v_tile_bytes, barrier_threshold_few, false, false, 0>(
+                v_chunk_tiles, cur_head, Sk_chunk_t_dynamic, k_chunk_start_row_num, v_reader, nullptr, page_table_ptr,
+                barrier_count);
+        } else {
+            read_v<cb_v_in, vDHt, num_kv_heads, block_size_t, v_tile_bytes, barrier_threshold, false, false, 0>(
+                v_chunk_tiles, cur_head, Sk_chunk_t_dynamic, k_chunk_start_row_num, v_reader, nullptr, page_table_ptr,
+                barrier_count);
+        }
         }
     }
     }  // units

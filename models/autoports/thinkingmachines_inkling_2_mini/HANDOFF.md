@@ -377,8 +377,12 @@ chunks, 4-die shape at position 300): the compute waited up to 16 us in the bias
 fully masked 2 KB tile written with 512 RISC stores, 6 of the 8 tiles of the newest chunk; every row of a partly masked
 tile). Now one fully masked tile per block is written and copied (L1 -> L1 NOC reads), partly masked tiles are zeroed
 (NOC) and only their live rows (R x G) written: bias wait 16 -> 4 us, SDPA 29 -> 26.5 us; model B=1 / 4 22.4 / 38.5 ->
-22.3 / 38.3 ms; outputs bitwise (logits, SDPA test 24 / 24, packed test with HiFi2 identical to before). The reader is
-now the limit (K / V ~6.8 us each per chunk). Note: the device profiler writes one CSV in the shared generated mount:
+22.3 / 38.3 ms; outputs bitwise (logits, SDPA test 24 / 24, packed test with HiFi2 identical to before). The reader was
+then the limit: the stock read throttle (a NOC barrier every (512 / readers) x 1152 / tile bytes reads) assumes every
+program core reads at once (2 tiles per barrier at ~100 cores). A decode step with <= 16 active readers (min(chunks,
+cores per head) x kv heads) now assumes 16: K / V 6.8 -> 1.4 us per chunk, SDPA 26.5 -> 18.8 us (4-die shape, position
+300); long contexts keep the stock throttle (global layer at 60K: 385 us either way; a fixed looser throttle made the
+slowest core 385 -> 413 us), prefill too. One die 22.3 -> 21.9 ms, TP4 14.4 / 21.3 -> 14.0 / 20.9 ms (B=1 / 4); bitwise. Note: the device profiler writes one CSV in the shared generated mount:
 profile on one die at a time.
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
