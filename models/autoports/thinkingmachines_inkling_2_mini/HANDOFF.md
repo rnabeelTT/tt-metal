@@ -413,6 +413,32 @@ teacher-forced greedy 1.20 (base logits without the Markov head 0.70), sampled a
 default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, human chat 0.4 - 0.6. Exact greedy
 (the target's own continuation) on math: 2.05 vs 1.30 teacher-forced.
 
+### Speculative decoding on device (in progress)
+
+Verify rows (committed): BatchedDecoder(verify=R) runs R consecutive tokens of one sequence in one decode pass, bitwise
+the sequential decode at the same width (R = 2, 4; one die and TP2; eager and traced; tests/test_verify_device.py).
+The short convs are the only row-coupled ops: their readers (bconv / post / pre) rebuild each row's conv state in L1
+from the slot's committed row (a device tensor = the previous pass's accepted row) and the earlier rows' inputs
+(tt/kernels/seqshift.hpp); after the pass row j holds the state after row j, so a pass can be rewound to any of its
+rows (vLLM resync, leaving speculative decode: move_row j -> 0). R = 3 is not bitwise (some program is row-position
+dependent at width 3; never served). Taps for the drafter come out of the verify pass and the prefill (forward
+taps=): vs HF 0.98 - 0.9999 pcc.
+
+Measured, one die, greedy, eager drafter, d = 3 (tools/spec_bench.py): 2.54 tokens per pass (math 2.49, code 2.31,
+chat 2.89); verify pass 37.5 ms device (B=4 plain 36.1, B=1 22.5: MoE 7.9 -> 18.7 ms, 4 consecutive tokens share
+almost no experts), the drafter ~15 ms eager -> 23.3 ms/token vs 22.6 plain. With a ~3 ms drafter: ~16 ms/token.
+The streams of spec (width 4) and plain decode (width 1) split at the first near-tie (8 - 35 tokens): every emitted
+token is the target's argmax at the verify width.
+
+Sampling: tt/sampling.HostSampler.spec: a greedy drafter is a point-mass proposal; draft j kept with probability
+p_j(draft) under vLLM's semantics (penalties, temperature, top-k, top-p), else a draw from p_j without it (Monte Carlo:
+the emitted distribution matches p to 0.002). vLLM pages the global KV only up to the current token's block: a pass
+keeps no draft past it (the token there is a full draw from its row).
+
+Serving (tt/generator_vllm.py, I2M_SPEC=d, off by default): a request decoding alone in slot 0 (prefilled from 0,
+on-device sampling) runs passes; accepted tokens go to vLLM one per decode call; another request / a vLLM token
+mismatch rewinds to what vLLM holds. tests/test_spec_generator.py drives it like the plugin (no server).
+
 ## Next
 
 1. Decode glue: a persistent width-sharded layout for the one-row activations (the norms' reshards and casts are ~1/3

@@ -48,6 +48,12 @@ WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").s
 # I2M_PREFIX_SLOTS: snapshots kept (LRU; default 1 on one die, 16 on 2 / 4 dies: ~168 MB / dies each),
 # I2M_PREFIX_MIN: the shortest prompt snapshotted.
 PREFIX = os.environ.get("I2M_PREFIX", "1") == "1"
+# I2M_SPEC d (default 0: off): speculative decoding of a request decoding alone (slot 0, prompt prefilled from 0, on-device
+# sampling): the DSpark drafter (tt/drafter.py) proposes d tokens, one verify pass of d + 1 rows scores them, the
+# accepted ones are handed to vLLM one per call (tt/sampling.HostSampler.spec: the target's distribution exactly).
+# d + 1 must be 2 or 4. I2M_SPEC_MAX_LEN: the longest sequence it serves (the drafter's caches).
+SPEC = int(os.environ.get("I2M_SPEC", "0"))
+SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 
 
@@ -68,6 +74,11 @@ def _host_tensor(t):
     if t is None:
         return None
     return t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
+
+
+def _row(t, r):
+    t = _host_tensor(t)
+    return None if t is None else t[r]
 
 
 
@@ -127,6 +138,15 @@ class Inkling2ForCausalLM:
             self.store = PrefixStore(model, PREFIX_SLOTS)  # (device pools: before any trace capture)
             logger.info(f"prefix cache: {PREFIX_SLOTS} state snapshots, prompts >= {PREFIX_MIN} tokens")
         self.px_stats = {"hits": 0, "hit_tokens": 0, "saves": 0, "fallbacks": 0}
+        self.dr = self.spec = None
+        if SPEC and TRACE and model is not None and B >= SPEC + 1:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.drafter import DSparkDrafter
+
+            self.dr = DSparkDrafter(mesh, model, max_len=min(max_seq_len, SPEC_MAX_LEN) + 64, d_max=SPEC)
+            self.ver = BatchedDecoder(model, SPEC + 1, shared=self.dec, verify=SPEC + 1)
+            self.vtr = TracedDecoder(self.ver)
+            self.sp_stats = [0, 0]  # passes, drafts kept
+            logger.info(f"speculative decoding: {SPEC} drafts per pass (sequences up to {SPEC_MAX_LEN} tokens)")
         self._captured = False
         self.already_warmed_up_prefill = False
         self._decode_steps = 0
@@ -234,7 +254,14 @@ class Inkling2ForCausalLM:
                 out = self.decs[w].step()
                 self._host_logits(out, w)  # (the readback untilize is a program too)
                 self.topk(out, w)  # the device-sampling programs of this width
+            if self.dr is not None:
+                self._spec_warm()
             ttnn.synchronize_device(self.mesh)
+            if self.dr is not None:
+                R = SPEC + 1
+                self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
+                self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R))
+                self.dr.capture(self.ver.taps, SPEC)  # (its taps buffer: the verify trace's taps output)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
                 tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
@@ -278,6 +305,8 @@ class Inkling2ForCausalLM:
         start_pos > 0 restores the snapshot its directive names (the plugin's prefix_state) and prefills from there; a
         directive's saves snapshot the state at their positions."""
         N = int(tokens.shape[0])
+        if self.spec is not None:  # (another request: the speculative one goes back to plain decode first)
+            self._spec_exit()
         start_pos = kwargs.get("start_pos")
         starts = [int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()] if start_pos is not None else [0] * N
         if any(starts) and not PREFIX:
@@ -310,6 +339,10 @@ class Inkling2ForCausalLM:
 
     def _prefill_group(self, reqs, out):
         """Up to LANES requests, one prefill lane each, packed into shared chunks until every prompt is done."""
+        spec = (self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and not reqs[0]["b0"]
+                and reqs[0]["P"] + 64 <= SPEC_MAX_LEN)
+        if spec:
+            self.dr.reset()
         for lane, r in enumerate(reqs):
             r["lane"] = lane
             self.m.reset(lane)
@@ -355,7 +388,11 @@ class Inkling2ForCausalLM:
                 segs[-1][1] += extra
                 ids.append(torch.zeros(extra, dtype=torch.long))
                 used += extra
-            lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs])
+            taps = [] if spec else None
+            lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs], taps=taps)
+            if spec:  # (one segment: the drafter's context of its rows)
+                _, R0, p0, n0, _, _ = segs[0]
+                self._dr_commit(ttnn.slice(taps[0], [0, 0, 0, 0], [1, 4, R0, self.m.H]), p0, n0)
             for r, (q, k) in armed:
                 self.store.save(k, r["slot"], q, r["lane"])
                 self.px_stats["saves"] += 1
@@ -369,6 +406,9 @@ class Inkling2ForCausalLM:
                 lgh = self._host_logits(lg, len(segs))
                 for i, r in done:
                     self.dec.load_slot(r["slot"], r["lane"])
+                    if spec:
+                        self.ver.set_accept([0])
+                        self.spec = dict(row=next(k for k, v in self.row2slot.items() if v == 0), n=None)
                     out[r["u"], 0, : self.V] = lgh[i]
                     live.remove(r)
                     logger.info(f"prefill {r['P']} tokens (from {r['b0']}) -> slot {r['slot']}"
@@ -387,6 +427,14 @@ class Inkling2ForCausalLM:
             if r >= R or int(pos[r]) < 0:
                 self.m.pages.free(self.row2slot.pop(r))  # (its blocks may go to another request: scratch rows)
         live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
+        if self.spec is not None:
+            s = self.spec
+            if s["row"] not in live:  # (finished)
+                self.spec = None
+            elif live == [s["row"]] and self.row2slot[s["row"]] == 0 and kwargs.get("sampling_params") is not None:
+                return self._spec_decode(s["row"], int(tok[s["row"]]), int(pos[s["row"]]), R, kwargs)
+            else:
+                self._spec_exit(int(pos[s["row"]]))
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
         if TIMING and W != getattr(self, "_last_w", None):
@@ -443,6 +491,78 @@ class Inkling2ForCausalLM:
                             f"{acc[4] / n * 1e3:.1f}")
                 self._tacc = [0.0] * 5
         return out
+
+    # ------------------------------------------------------------------ speculative decode
+    def _spec_warm(self):
+        """Every eager program of speculative decode, compiled before the trace captures (the drafter warmed its own when
+        built)."""
+        R = SPEC + 1
+        self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
+        self.topk(self.ver.step(), R)
+        for j in range(1, R):  # leaving speculative decode from row j
+            self.ver.move_row(j, 0)
+
+    def _dr_commit(self, taps, p0, valid):
+        """A prefill chunk's taps [1, 4, T, H] (rows past `valid`: padding) into the drafter, <= 512 rows per call."""
+        for c0 in range(0, valid, 512):
+            c1 = min(valid, c0 + 512)
+            T = (c1 - c0 + 63) // 64 * 64
+            self.dr.commit(ttnn.slice(taps, [0, 0, c0, 0], [1, 4, c0 + T, self.m.H]), p0 + c0, valid=c1 - c0)
+
+    def _spec_decode(self, r, t, p, nrows, kwargs):
+        """The speculative request's call (token t at position p): the next accepted token, a pass when none is left.
+        A pass: the drafter's trace (commit the last pass's rows vLLM kept, draft d), then the verify trace."""
+        s, out = self.spec, torch.zeros((nrows, 1), dtype=torch.int32)
+        commit = None  # (rows of the last pass's taps the drafter commits: (first position, count))
+        if s["n"] is not None:
+            i = p - 1 - s["n"]  # (vLLM holds tokens up to position p - 1)
+            if 0 <= i < s["k"] and t == s["em"][i]:
+                out[r, 0] = s["em"][i + 1]
+                s["handed"] = i + 1
+                return out
+            if not (i == s["k"] and t == s["em"][s["k"]]):  # vLLM went another way: resume from row i of the pass
+                assert 0 <= i <= s["k"], (p, s["n"], s["k"])
+                logger.warning(f"speculative decode: resync at position {p}")
+                self.ver.set_accept([i])
+            commit = (s["n"], i + 1)
+        d, R = SPEC, SPEC + 1
+        pt = kwargs.get("page_table")
+        if pt is not None and self.m.pages.paged:
+            pt = pt if isinstance(pt, torch.Tensor) else torch.as_tensor(pt)
+            self.m.pages.set_row(0, pt[r], p // 64 + 1)
+        self.m.pages.sync(self.ver.table_key)
+        if commit is None:  # (right after the prefill, whose commit is done)
+            _, drafts = self.dr.draft(t, p, d=d)
+        else:
+            self.dr.set_inputs(t, *commit)
+            self.dr.replay()
+            drafts = [int(x) for x in torch.as_tensor(self.dr.tokens_host()).reshape(-1)[:d]]
+        self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
+        self.vtr.step()
+        idx, vals = self.topk.host(self.vtr.extra)
+        # (the KV of an accepted row must land in a block vLLM allocated: up to the end of position p's block)
+        cap = min(d, (p // 64 + 1) * 64 - 1 - p) if self.m.pages.paged else d
+        em, k = self.hs.spec(idx, vals, r, drafts[:cap], kwargs["sampling_params"],
+                             outs=_row(kwargs.get("output_tokens"), r), prompt=_row(kwargs.get("prompt_tokens"), r))
+        self.ver.set_accept([k])
+        s.update(n=p, k=k, em=em, handed=0)
+        st = self.sp_stats
+        st[0], st[1] = st[0] + 1, st[1] + k
+        if TIMING and st[0] % 100 == 0:
+            logger.info(f"speculative decode: {st[1] / st[0]:.2f} drafts kept per pass over {st[0]} passes")
+        out[r, 0] = em[0]
+        return out
+
+    def _spec_exit(self, p=None):
+        """Back to plain decode: the speculative request's state to its slot's row (rewound to what vLLM holds: the
+        position p it decodes next, or every token handed out so far)."""
+        s, self.spec = self.spec, None
+        if s["n"] is None:
+            return
+        i = (p - 1 - s["n"]) if p is not None else s.get("handed", s["k"])
+        if i > 0:
+            self.ver.move_row(i, 0)
+        self.ver.set_accept([0])
 
     def read_decode_output(self, tt_out, async_read=False, **kwargs):
         return (tt_out, []) if async_read else tt_out
