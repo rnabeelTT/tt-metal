@@ -63,8 +63,11 @@ class MixKernel:
 
     def __call__(self, S, lg, n, nq, out_mc=ttnn.L1_MEMORY_CONFIG):
         """S [1, n, T, H] fp32 interleaved, lg [1, n, T, nq*32] fp32 interleaved -> nq fp32 [1, 1, T, H]
-        (T <= 32, or a multiple of 32: one softmax per row tile)."""
-        T, H = int(S.shape[2]), int(S.shape[3])
+        (T <= 32, or a multiple of 32: one softmax per row tile). Or S / lg: lists of n [1, 1, T, H] / [1, 1, T, nq*32]
+        (no stacking copy; the sources share one memory config, the logits another)."""
+        stacked = not isinstance(S, (list, tuple))
+        S0, lg0 = (S, lg) if stacked else (S[0], lg[0])
+        T, H = int(S0.shape[2]), int(S0.shape[3])
         assert n <= MAX_N and (T <= 32 or T % 32 == 0)
         RT = max(1, T // 32)
         outs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
@@ -76,9 +79,13 @@ class MixKernel:
         nbuf = 2 if RT > 1 else 1  # double-buffer the row tiles' logits
         cbs = [_cb(crs, cb_lg, f32, F32, nbuf * n * nq), _cb(crs, cb_s, f32, F32, n * min(per, 4)),
                _cb(crs, cb_w, f32, F32, n * nq), _cb(crs, cb_out, f32, F32, 2)]
-        rd_ct = [cb_lg, cb_s, n, nq, self.Ht, RT] + ttnn.TensorAccessorArgs(S).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(lg).get_compile_time_args()
-        rd_rt = [[S.buffer_address(), lg.buffer_address(), t0, per, r0, nr] for t0, r0, nr in work]
+        rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S0).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(lg0).get_compile_time_args()
+        if stacked:
+            src = [v for i in range(n) for v in (S.buffer_address(), i * RT * self.Ht, lg.buffer_address(), i * RT * nq)]
+        else:
+            src = [v for s_, l_ in zip(S, lg) for v in (s_.buffer_address(), 0, l_.buffer_address(), 0)]
+        rd_rt = [[t0, per, r0, nr] + src for t0, r0, nr in work]
         wr_ct = [cb_out, nq] + ttnn.TensorAccessorArgs(outs[0]).get_compile_time_args()
         wr_rt = [[t0, per, r0, nr, self.Ht] + [o.buffer_address() for o in outs] for t0, r0, nr in work]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
@@ -99,9 +106,9 @@ class MixKernel:
                                   defines=_rows_def(T)),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_mixw2", n, nq, T, H, len(cores), repr(S.memory_config()), repr(lg.memory_config()), repr(out_mc))
+        key = ("i2m_mixw3", n, nq, T, H, len(cores), repr(S0.memory_config()), repr(lg0.memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([S, lg] + outs, prog)
+        ttnn.generic_op(([S, lg] if stacked else list(S) + list(lg)) + outs, prog)
         return outs
 
     def multi(self, srcs, lgs, nq, out_mc=ttnn.L1_MEMORY_CONFIG):

@@ -177,6 +177,11 @@ class Ops:
                 self.mixk = MixKernel(self.mesh, int(srcs_normed[0].shape[3]))
             mc = ttnn.L1_MEMORY_CONFIG if T <= 32 else DRAM  # (prefill chunks: the stacked sources are tens of MB)
             src = [ttnn.sharded_to_interleaved(s, mc) if s.is_sharded() else s for s in srcs_normed]
+            if T > 32 and len({repr(s.memory_config()) for s in src}) == 1:
+                # prefill: per-source logits, the kernel reads the sources in place (no stacking copy)
+                lgs = [ttnn.matmul(s, self.qrep[id(Q)], compute_kernel_config=self.ckc, dtype=ttnn.float32,
+                                   memory_config=mc) for s in src]
+                return self.mixk(src, lgs, n, nq, out_mc=mc)
             S = src[0] if n == 1 else ttnn.concat(src, dim=1, memory_config=mc)
             lg = dmm(S, self.qrep[id(Q)], self.ckc, dtype=ttnn.float32, memory_config=mc)  # [1, n, T, nq*32]
             return self.mixk(S, lg, n, nq, out_mc=mc)
