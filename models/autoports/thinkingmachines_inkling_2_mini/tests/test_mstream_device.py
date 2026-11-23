@@ -17,11 +17,12 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.weights import Checkpoi
 
 def main():
     N = int(os.environ.get("MESH", "4"))
-    ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N))
     cfg, ck = load_config(), Checkpoint()
-    rep = ttnn.ReplicateTensorToMesh(mesh)
-    d0 = lambda t: ttnn.get_device_tensors(t)[0]  # noqa: E731
+    rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
+    d0 = (lambda t: ttnn.get_device_tensors(t)[0]) if N > 1 else (lambda t: t)  # noqa: E731
     worst = 0.0
     torch.manual_seed(0)
     for li in (0, 5):

@@ -79,7 +79,7 @@ def _host_tensor(t):
 # prefill chunks (the sliding rings hold the window + one chunk): +1.29 GiB per die at 4 dies x 32 slots. One die:
 # 7 x 8K tokens, so the fused decode glue (MixPlan / pre / post programs) fits: 0.29 GiB free after the trace captures.
 KV_POOL_CAP = {4: 2_064_384, 2: 647_168, 1: 57_344}
-KV_POOL_CAP_2048 = {4: 1_878_912}  # (-16K tokens: the streamed q / k / v weight copies, ~130 MB per die)
+KV_POOL_CAP_2048 = {4: 1_895_296}
 
 
 def kv_pool_tokens(num_devices, max_model_len, max_num_seqs):

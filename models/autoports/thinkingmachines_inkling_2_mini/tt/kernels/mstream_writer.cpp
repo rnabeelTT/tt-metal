@@ -6,6 +6,9 @@
 // whole tiles), then each output column tile (FP32 or BF16) the compute packs to page out_col0 + i (columns past
 // n_tiles: bank padding, not written).
 //
+// Output column i of this core goes to page out_col0 + i * ostride (1: the per-bank copy's contiguous columns; 8: an
+// interleaved weight's bank columns, n = bank + 8 c).
+//
 // runtime args: [x_addr, out_addr, out_col0, ncols]
 
 #include <stdint.h>
@@ -24,7 +27,8 @@ void kernel_main() {
     constexpr uint32_t rows = get_compile_time_arg_val(3);
     constexpr uint32_t n_tiles = get_compile_time_arg_val(4);
     constexpr uint32_t OB = get_compile_time_arg_val(5);  // an output tile: FP32 4096 or BF16 2048
-    constexpr auto x_args = TensorAccessorArgs<6>();
+    constexpr uint32_t ostride = get_compile_time_arg_val(6);  // output page stride between this core's columns
+    constexpr auto x_args = TensorAccessorArgs<7>();
     constexpr auto o_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     static_assert(rows <= 32, "one tile row");
     constexpr uint32_t row_bytes = rows * 32;
@@ -50,8 +54,8 @@ void kernel_main() {
     const auto s_o = TensorAccessor(o_args, out_addr, OB);
     for (uint32_t i = 0; i < ncols; ++i) {
         cb_wait_front(cb_out, 1);
-        if (out_col0 + i < n_tiles) {
-            noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i), OB);
+        if (out_col0 + i * ostride < n_tiles) {
+            noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i * ostride), OB);
             noc_async_writes_flushed();
         }
         cb_pop_front(cb_out, 1);

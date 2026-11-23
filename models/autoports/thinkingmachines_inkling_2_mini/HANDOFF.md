@@ -348,6 +348,11 @@ sliding layers (I2M_SDPA_K_CHUNK_SW): -0.8 ms on one die, op-level pcc unchanged
 the cross-core reduction. Streamed q / k / v on one die (I2M_MSTREAM_1DIE): -1.2 ms, but its weight copies (~530 MB)
 need room: prefill through the streamed copies instead of the interleaved ones (I2M_MSTREAM_PREFILL, one call per
 32-row tile) costs 368 -> 423 ms per 512-row chunk (+15 %): not taken; a smaller one-die KV pool would be the way.
+The streamed q / k / v now read the model's own interleaved weights in place (kernels/ilstream_reader.cpp): with N a
+multiple of 8 tile columns every column sits in one bank (page k N + n in bank n mod 8, at a stride of N / 8 pages), so
+no per-bank copies (the q block zero-padded to a multiple of 8 tiles per die: +0.5 MB per layer). One die gets it too:
+B=1 / 4 23.4 / 41.9 -> 22.5 / 41.0 ms (0.28 GiB free at 8 x 8K, unchanged); TP2 17.7 / 28.6, TP4 14.3 / 22.1 ms (as the
+copies; the 4-die pool cap is back at 1,895,296). Outputs vs the interleaved matmuls: k / v bitwise, q max rel 1e-7.
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
