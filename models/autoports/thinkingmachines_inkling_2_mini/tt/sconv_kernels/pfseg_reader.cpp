@@ -6,9 +6,11 @@
 // [ks[s], ke[s]); the rows before its first tile come from its state st[s] (not from the previous segment's rows). Two
 // state points per segment are written out: n[s] (the commit: the state after its first n rows -> stn[s]) and, when
 // snap[s] != NONE, snap[s] (a prefix-cache snapshot -> sb[s]). A state point P takes seq_s[P .. P + 2]
-// (seq_s = [st_s rows, the segment's rows]). Same work split / compute / writer as the single-sequence kernel.
+// (seq_s = [st_s rows, the segment's rows]). Same work split / writer as the single-sequence kernel; the compute
+// (pfseg_compute.cpp) shifts the rows itself: per row tile k this pushes x_k and p_k, the 32 rows before it (x_{k-1},
+// or at a segment start a tile holding the state's 3 rows at rows 29 .. 31, zeros above).
 //
-// common args: x_addr, taps_addr, nseg, then per segment (MAXSEG slots): ks, ke, st, stn, n, sb, snap
+// common args: x_addr, taps_addr, nseg, then per segment (MAXSEG slots): ks, ke, st, stn, n, sb, snap; shift_addr
 
 #include <stdint.h>
 
@@ -24,7 +26,7 @@ void kernel_main() {
     const uint32_t nseg = get_common_arg_val<uint32_t>(2);
 
     constexpr uint32_t cb_x = get_compile_time_arg_val(0);
-    constexpr uint32_t cb_s = get_compile_time_arg_val(1);
+    constexpr uint32_t cb_p = get_compile_time_arg_val(1);
     constexpr uint32_t cb_t = get_compile_time_arg_val(2);
     constexpr uint32_t cb_scr = get_compile_time_arg_val(3);
     constexpr uint32_t cols = get_compile_time_arg_val(4);
@@ -33,9 +35,11 @@ void kernel_main() {
     constexpr uint32_t GY = get_compile_time_arg_val(7);
     constexpr uint32_t TB = 2048;          // bf16 tile
     constexpr uint32_t ROWB = cols * 128;  // one fp32 state row (C channels)
-    constexpr auto x_args = TensorAccessorArgs<8>();
+    constexpr uint32_t cb_m = get_compile_time_arg_val(8);
+    constexpr auto x_args = TensorAccessorArgs<9>();
     constexpr auto st_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto taps_args = TensorAccessorArgs<st_args.next_compile_time_args_offset()>();
+    constexpr auto m_args = TensorAccessorArgs<taps_args.next_compile_time_args_offset()>();
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
     if (item >= cols * G) {
@@ -50,13 +54,11 @@ void kernel_main() {
     const auto s_x = TensorAccessor(x_args, x_addr, TB);
     const auto s_taps = TensorAccessor(taps_args, taps_addr, TB);
 
-    // scratch: carried rows (3 x 32 fp32), one output row (32 fp32), one bf16 tile (x_{k0-1})
+    // scratch: a segment's state rows (3 x 32 fp32), one output row (32 fp32)
     const uint32_t scr = get_write_ptr(cb_scr);
     volatile uint32_t* prev = reinterpret_cast<volatile uint32_t*>(scr);
     const uint32_t orow = scr + 384;
     volatile uint32_t* orw = reinterpret_cast<volatile uint32_t*>(orow);
-    const uint32_t tmp = scr + 768;
-    volatile uint32_t* tmpw = reinterpret_cast<volatile uint32_t*>(tmp);
 
     auto arg = [&](uint32_t s, uint32_t f) { return get_common_arg_val<uint32_t>(3 + s * 7 + f); };
     auto seg_of = [&](uint32_t k) {
@@ -86,21 +88,19 @@ void kernel_main() {
     for (uint32_t j = 0; j < 4; ++j) {
         noc_async_read(s_taps.get_noc_addr(j * cols + c), t + j * TB, TB);
     }
+    cb_reserve_back(cb_m, 6);
+    {
+        const auto s_m = TensorAccessor(m_args, get_common_arg_val<uint32_t>(3 + 7 * MAXSEG), TB);
+        const uint32_t m = get_write_ptr(cb_m);
+        for (uint32_t j = 0; j < 6; ++j) {
+            noc_async_read(s_m.get_noc_addr(j), m + j * TB, TB);
+        }
+    }
     noc_async_read_barrier();
     cb_push_back(cb_t, 4);
+    cb_push_back(cb_m, 6);
     if (k0 >= k1) {
         return;
-    }
-    // the rows before tile k0 (a segment start: its state, else the last rows of x_{k0-1})
-    {
-        const uint32_t s = seg_of(k0);
-        if (k0 != arg(s, 0)) {
-            noc_async_read(s_x.get_noc_addr((k0 - 1) * cols + c), tmp, TB);
-            noc_async_read_barrier();
-            for (uint32_t r = 0; r < 3; ++r) {
-                sconv::row_to_f32(prev + r * 32, tmpw, 29 + r);
-            }
-        }
     }
 
     for (uint32_t k = k0; k < k1; ++k) {
@@ -126,23 +126,23 @@ void kernel_main() {
             }
         }
         cb_reserve_back(cb_x, 1);
-        cb_reserve_back(cb_s, 3);
+        cb_reserve_back(cb_p, 1);
         const uint32_t x = get_write_ptr(cb_x);
-        const uint32_t sp = get_write_ptr(cb_s);
+        const uint32_t pp = get_write_ptr(cb_p);
         noc_async_read(s_x.get_noc_addr(k * cols + c), x, TB);
-        noc_async_read_barrier();
-        volatile uint32_t* xw = reinterpret_cast<volatile uint32_t*>(x);
-        for (uint32_t j = 0; j < 3; ++j) {
-            volatile uint32_t* tw = reinterpret_cast<volatile uint32_t*>(sp + j * TB);
-            for (uint32_t r = 0; r < 32; ++r) {
-                const uint32_t q = r + j;  // index into [carried rows, x_k rows]
-                if (q < 3) {
-                    sconv::f32_to_row(tw, r, prev + q * 32);
-                } else {
-                    sconv::copy_row(tw, r, xw, q - 3);
-                }
+        if (k != ks) {
+            noc_async_read(s_x.get_noc_addr((k - 1) * cols + c), pp, TB);
+        } else {
+            volatile uint32_t* pw = reinterpret_cast<volatile uint32_t*>(pp);
+            for (uint32_t w = 0; w < TB / 4; ++w) {
+                pw[w] = 0;
+            }
+            for (uint32_t r = 0; r < 3; ++r) {
+                sconv::f32_to_row(pw, 29 + r, prev + r * 32);
             }
         }
+        noc_async_read_barrier();
+        volatile uint32_t* xw = reinterpret_cast<volatile uint32_t*>(x);
         // state rows that are rows of this tile: seq_s[P + r] = segment row P + r - 3
         for (uint32_t pt = 0; pt < 2; ++pt) {
             const uint32_t P = pt == 0 ? arg(s, 4) : arg(s, 6);
@@ -160,10 +160,7 @@ void kernel_main() {
                 }
             }
         }
-        for (uint32_t r = 0; r < 3; ++r) {
-            sconv::row_to_f32(prev + r * 32, xw, 29 + r);
-        }
         cb_push_back(cb_x, 1);
-        cb_push_back(cb_s, 3);
+        cb_push_back(cb_p, 1);
     }
 }

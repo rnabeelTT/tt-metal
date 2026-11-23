@@ -310,6 +310,10 @@ class ShortConv:
             if n != R:
                 self.commit_final(n)
             return y
+        if self.snap_row is None:  # one segment of the packed kernel (the row shifts on the FPU)
+            y = self.prefill_packed(x, [(0, R, n, self)])
+            self._last_seq = None
+            return y
         pr = self._pf_program(R)
         cols, Rt, G, gy = pr["ct"]
         cr, stn = pr["cr"], self._pf_stn
@@ -384,10 +388,11 @@ class ShortConv:
             snap = lc.snap_row
             args += [row0 // 32, (row0 + R) // 32, lc.st.buffer_address(), lc._pf_stn.buffer_address(), int(n),
                      lc.snap_buf.buffer_address() if snap is not None else 0, int(snap) if snap is not None else NONE]
-        args += [0] * (3 + 7 * PF_MAXSEG - len(args))
-        cb_x, cb_s, cb_t, cb_scr, cb_o = 0, 1, 2, 3, 16
-        rd_ct = [cb_x, cb_s, cb_t, cb_scr, cols, Rt, G, gy]
-        for t in (x, self.st, self.taps_tiles):
+        shift = self._shift_tiles()
+        args += [0] * (3 + 7 * PF_MAXSEG - len(args)) + [shift.buffer_address()]
+        cb_x, cb_p, cb_t, cb_scr, cb_m, cb_o = 0, 1, 2, 3, 4, 16
+        rd_ct = [cb_x, cb_p, cb_t, cb_scr, cols, Rt, G, gy, cb_m]
+        for t in (x, self.st, self.taps_tiles, shift):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
 
@@ -402,18 +407,33 @@ class ShortConv:
                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
             kd("pf_writer.cpp", wr_ct, [y.buffer_address()],
                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
-            kd("pf_compute.cpp", [cb_x, cb_s, cb_t, cb_o, cols, Rt, G, gy], [],
+            kd("pfseg_compute.cpp", [cb_x, cb_p, cb_t, cb_o, cols, Rt, G, gy, cb_m], [],
                ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                            math_approx_mode=False)),
+                                            dst_full_sync_en=True, math_approx_mode=False)),
         ]
-        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=pr["cbs"])
-        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg", self.C, T, G, gy)
-        ttnn.generic_op([x, self.st, self.taps_tiles, y], prog)
+        cbs = pr["cbs"] + [_cb(cr, cb_m, ttnn.bfloat16, 2048, 6)]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg2", self.C, T, G, gy)
+        ttnn.generic_op([x, self.st, self.taps_tiles, shift, y], prog)
         for row0, R, n, lc in segs:
             ttnn.copy(lc._pf_stn, lc.st)
             if lc.snap_row is not None:
                 lc.snap_out = lc.snap_buf
         return y
+
+    def _shift_tiles(self):
+        """6 bf16 tiles [P_0 P_1 P_2 Q_0 Q_1 Q_2] (pfseg_compute.cpp): (P_j x)[r] = x[r + j - 3], (Q_j p)[r] = p[r + j + 29]
+        (0/1 matrices: the shifted rows exact on the FPU)."""
+        if getattr(self, "_shift", None) is None:
+            m = torch.zeros(32, 6 * 32)
+            for j in range(3):
+                for r in range(32):
+                    i = r + j - 3
+                    m[r, (j if i >= 0 else 3 + j) * 32 + (i % 32)] = 1.0
+            self._shift = ttnn.from_torch(m.reshape(1, 1, 32, 192).to(torch.bfloat16), dtype=ttnn.bfloat16,
+                                          layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                                          mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        return self._shift
 
     def _commit_kernel(self, seq, n):
         cores, cr, cols = self.cores, _range_set(self.cores), self.cols
