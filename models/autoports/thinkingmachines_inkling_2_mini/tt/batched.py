@@ -109,6 +109,8 @@ class MixPlan:
 BCONV_KERNEL = __import__("os").environ.get("I2M_BCONV_KERNEL", "1") == "1"
 # I2M_APREP (default 1): the decode attention prep (clips / rms / tau / sink / KV layout) as one program (tt/aprep.py)
 APREP = __import__("os").environ.get("I2M_APREP", "1") == "1"
+# I2M_KV_PAIR (default 1): a sliding layer's k and v convs in one program (tt/bconv.py bconv_pair)
+KV_PAIR = __import__("os").environ.get("I2M_KV_PAIR", "1") == "1"
 APREP_OLD = __import__("os").environ.get("I2M_APREP_OLD", "")  # (debug) letters of q r k v s from the op path
 APREP_DRAM = __import__("os").environ.get("I2M_APREP_DRAM", "0") == "1"  # (debug) SDPA inputs moved to DRAM
 L1 = ttnn.L1_MEMORY_CONFIG
@@ -289,7 +291,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
             from models.autoports.thinkingmachines_inkling_2_mini.tt.aprep import AttnPrep
 
             ba.aprep = AttnPrep(w, B, ba.kv_shard)
-        if w.sliding:
+        if w.sliding and KV_PAIR and ba.k.kernel is not None and ba.v.kernel is not None:  # (both convs, one program)
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.bconv import bconv_pair
+
+            k, v = bconv_pair(ba.k.kernel, pk, ba.k.s, ba.v.kernel, pv, ba.v.s)
+        elif w.sliding:
             k, v = ba.k.step(pk), ba.v.step(pv)
         else:
             k, v = ba.k.step(pk, xk), ba.v.step(pv, xv)

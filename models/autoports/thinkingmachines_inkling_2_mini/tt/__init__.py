@@ -12,7 +12,7 @@ _os.environ.setdefault("QWEN35_MOE_DN_READERS", "3")
 _os.environ.setdefault("QWEN35_MOE_DN_READERS_WIDE", "9")
 # reader placement of the fused MoE rows ops (traced sweep 2026-11-22, P150, layer 7, bfp8: per MoE layer at 1 / 4 rows
 # 364 / 1162 us default -> 294 / 703 us with these three)
-_os.environ.setdefault("QWEN35_MOE_GU_READERS", "2")
+_os.environ.setdefault("QWEN35_MOE_GU_READERS", "3")  # (3 with GU_OFFROW=2: 1 / 4 rows 217 / 641 -> 202 / 555 us)
 _os.environ.setdefault("QWEN35_MOE_DN_OFFROW", "1")
 _os.environ.setdefault("QWEN35_MOE_DN_CHUNK", "2")
 # the gate|up readers of the two banks sharing a NOC row spread over the free rows (traced, P150, layer 0, bfp8, the

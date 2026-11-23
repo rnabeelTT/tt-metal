@@ -33,6 +33,15 @@ def main():
                                   layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep) for _ in range(3)]
             got = w.ms(xs, w.ms_w, R)
             ref = [proj(w, "q", xs[0], ttnn.float32), proj(w, "k", xs[1]), proj(w, "v", xs[2])]
+            # exact q: the bf16 input times the dequantized bfp8 weight in float64; each path's error against it
+            wq = ttnn.to_torch(d0(w.w_q)).double().reshape(cfg.hidden_size, -1)
+            xq = ttnn.to_torch(d0(xs[0])).double().reshape(-1, cfg.hidden_size)[:R]
+            exact = xq @ wq
+            gq = ttnn.to_torch(d0(got[0])).double().reshape(-1, wq.shape[1])[:R]
+            rq = ttnn.to_torch(d0(ref[0])).double().reshape(-1, wq.shape[1])[:R]
+            print(f"layer {li} R={R} q vs exact: streamed mean |err| {(gq - exact).abs().mean():.3e} max "
+                  f"{(gq - exact).abs().max():.3e}; interleaved matmul mean {(rq - exact).abs().mean():.3e} max "
+                  f"{(rq - exact).abs().max():.3e}", flush=True)
             for name, g, r in zip("qkv", got, ref):
                 g = ttnn.to_torch(d0(g)).float()[..., :R, :]
                 r = ttnn.to_torch(d0(r)).float()[..., :R, : g.shape[-1]]

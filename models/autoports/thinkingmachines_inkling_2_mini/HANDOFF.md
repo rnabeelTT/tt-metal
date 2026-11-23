@@ -353,6 +353,16 @@ multiple of 8 tile columns every column sits in one bank (page k N + n in bank n
 no per-bank copies (the q block zero-padded to a multiple of 8 tiles per die: +0.5 MB per layer). One die gets it too:
 B=1 / 4 23.4 / 41.9 -> 22.5 / 41.0 ms (0.28 GiB free at 8 x 8K, unchanged); TP2 17.7 / 28.6, TP4 14.3 / 22.1 ms (as the
 copies; the 4-die pool cap is back at 1,895,296). Outputs vs the interleaved matmuls: k / v bitwise, q max rel 1e-7.
+MoE gate|up readers 2 -> 3 per column group (with GU_OFFROW=2; 4 / 6 slower): MoE layer 1 / 4 rows 217 / 641 -> 202 / 555
+us; one die B=1 / 4 / 8 22.5 / 41.0 / - -> 21.9 / 38.1 / 52.1 ms; TP2 B=4 28.6 -> 28.0. A sliding layer's k and v convs in
+one program (tt/bconv.py bconv_pair): 21.9 -> 21.7 ms. Both bitwise neutral (decode eval with the streamed q / k / v off
+identical to the last digit). One-die decode eval with the streamed q / k / v: 0.9672 / 0.9957 / 0.0184 vs 0.9708 /
+0.9959 / 0.0142 off (code_mbpp KL 0.049 -> 0.085; KL lower on 4 of 8 texts): against the exact fp64 product of the same
+bf16 input and dequantized bfp8 weight, both paths have the SAME error (mean |err| 2.676e-3, max 2.844e-2, layer 0;
+tests/test_mstream_device.py), their difference ~1e-7: argmax noise of a last-bit change, kept.
+Measured, not kept: gate|up + down in one program (the down weights streamed during gate|up, qwen36 union.py fused
+rows): 1 / 4 / 8 rows 210 / 623 / 1073 -> 212 / 639 / 1037 us, one die 22.5 -> 22.8 ms: the MoE reads compete for the
+same bandwidth; down readers 1 / 9, chunk 4 / 8: no gain; the one-row MoE kernels (I2M_MOE_ROW1): equal.
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
