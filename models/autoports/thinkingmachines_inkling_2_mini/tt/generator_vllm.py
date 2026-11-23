@@ -29,6 +29,7 @@ from loguru import logger
 
 from models.autoports.thinkingmachines_inkling_2_mini.tt.batched import BatchedDecoder, TracedDecoder
 from models.autoports.thinkingmachines_inkling_2_mini.tt.model import Inkling2Model
+from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import _param
 
 HF_MODEL = "thinkingmachines/Inkling-2-Mini"
 DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
@@ -272,7 +273,8 @@ class Inkling2ForCausalLM:
                 R = SPEC + 1
                 self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
                 self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R))
-                self.dr.capture(self.ver.taps, SPEC)  # (its taps buffer: the verify trace's taps output)
+                # (its taps buffer: the verify trace's taps output; sampled drafts: zero noise = greedy)
+                self.dr.capture(self.ver.taps, SPEC, sample=True)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
                 tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
@@ -539,17 +541,23 @@ class Inkling2ForCausalLM:
             pt = pt if isinstance(pt, torch.Tensor) else torch.as_tensor(pt)
             self.m.pages.set_row(0, pt[r], (p + R - 1) // 64 + 1)
         self.m.pages.sync(self.ver.table_key)
+        sp = kwargs["sampling_params"]
+        self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))  # (the drafter samples from its q at the request's T)
         if commit is None:  # (right after the prefill, whose commit is done)
-            _, drafts = self.dr.draft(t, p, d=d)
+            _, drafts = self.dr.draft(t, p, d=d, sample=True)
         else:
             self.dr.set_inputs(t, *commit)
             self.dr.replay()
             drafts = [int(x) for x in torch.as_tensor(self.dr.tokens_host()).reshape(-1)[:d]]
+        q = None
+        if float(_param(sp, "temperature", r, 0.0)) > 0.0:
+            ci, cl = self.dr.cand_host(d)
+            q = [(ci[j], cl[j]) for j in range(d)]
         self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
         self.vtr.step()
         idx, vals = self.topk.host(self.vtr.extra)
-        em, k = self.hs.spec(idx, vals, r, drafts, kwargs["sampling_params"],
-                             outs=_row(kwargs.get("output_tokens"), r), prompt=_row(kwargs.get("prompt_tokens"), r))
+        em, k = self.hs.spec(idx, vals, r, drafts, sp, outs=_row(kwargs.get("output_tokens"), r),
+                             prompt=_row(kwargs.get("prompt_tokens"), r), q=q)
         self.ver.set_accept([k])
         if SPEC_DEBUG:
             logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")

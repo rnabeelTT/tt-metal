@@ -172,12 +172,22 @@ class HostSampler:
             out[r] = int(ids[int(torch.multinomial(p, 1, generator=gen))])
         return out
 
-    def spec(self, idx, vals, r, drafts, sp, outs=None, prompt=None):
-        """Speculative acceptance of a greedy drafter's drafts (a point-mass proposal). idx / vals [d + 1, K]: verify
-        row j scores the token after drafts[:j]. Draft j is kept with probability p_j(draft) (greedy: iff it is the
-        argmax); the first rejection draws from p_j without the draft, renormalised; all kept: a draw from row d. The
-        emitted tokens follow the target's distribution exactly. -> (tokens emitted, drafts kept)."""
+    def gumbel(self, r, sp, d, k):
+        """[d, k] T * Gumbel noise for a sampled draft (zeros at temperature 0: the drafter's argmax)."""
+        temp = float(_param(sp, "temperature", r, 0.0))
+        if temp <= 0.0:
+            return torch.zeros(d, k)
+        u = torch.rand(d, k, generator=self._gen(r, _param(sp, "seed", r, None)), dtype=torch.float64)
+        return (temp * -torch.log(-torch.log(u.clamp(1e-12, 1 - 1e-12)))).float()
+
+    def spec(self, idx, vals, r, drafts, sp, outs=None, prompt=None, q=None):
+        """Speculative acceptance. idx / vals [d + 1, K]: verify row j scores the token after drafts[:j]. q: per draft,
+        the drafter's (ids, logits) candidates it was sampled from (q_j = softmax(logits / T)); None: a point-mass
+        (greedy) proposal. Draft j is kept with probability min(1, p_j / q_j) (greedy target: iff it is the argmax); the
+        first rejection draws from max(p_j - q_j, 0) renormalised; all kept: a draw from row d. The emitted tokens follow
+        the target's distribution exactly. -> (tokens emitted, drafts kept)."""
         gen = self._gen(r, _param(sp, "seed", r, None))
+        temp = float(_param(sp, "temperature", r, 0.0))
         hist = outs[outs >= 0].to(torch.int64) if outs is not None else torch.zeros(0, dtype=torch.int64)
         emitted = []
         for j in range(len(drafts) + 1):
@@ -190,13 +200,23 @@ class HostSampler:
                     continue
                 return emitted + [int(ids[0])], j
             if not last:
+                pq = torch.zeros_like(p)  # q_j on p's support
+                qd = 1.0
+                if q is not None:
+                    qi, ql = q[j]
+                    qp = torch.softmax(ql.double() / temp, -1)
+                    qd = float(qp[qi == drafts[j]].sum())
+                    m = ids[:, None] == qi[None, :]
+                    pq = (m.double() * qp[None, :]).sum(-1)
+                else:
+                    pq = (ids == drafts[j]).double()
                 hit = ids == drafts[j]
                 pd = float(p[hit].sum())
-                if pd > 0.0 and float(torch.rand(1, generator=gen, dtype=torch.float64)) < pd:
+                if pd > 0.0 and qd > 0.0 and float(torch.rand(1, generator=gen, dtype=torch.float64)) < min(1.0, pd / qd):
                     emitted.append(drafts[j])
                     continue
-                if pd > 0.0:
-                    p = torch.where(hit, torch.zeros_like(p), p)
-                    p = p / p.sum()
+                res = (p - pq).clamp(min=0.0)
+                if float(res.sum()) > 0.0:
+                    p = res / res.sum()
             return emitted + [int(ids[int(torch.multinomial(p, 1, generator=gen))])], j
         raise AssertionError("unreachable")

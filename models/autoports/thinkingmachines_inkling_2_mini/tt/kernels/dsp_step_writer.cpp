@@ -8,11 +8,20 @@
 // ids >= V skipped). Every core sends (key, id) to the reducer's cb_cand slot and bumps its semaphore; the reducer
 // picks the global max (ties: lowest id) and writes the token to `prev` (uint32 [1, 1] ROW_MAJOR).
 //
-// runtime args: [x_addr, base_addr, prev_addr, col0, ncols, slot]
+// SAMPLE (sampled drafts): each core keeps its top TOPK (key, id) instead of the max; the reducer merges them into the
+// step's top TOPK (descending, ties: lowest id), softcaps them (c tanh(x / c) interpolated in a host-made FP32 table on
+// the grid -CAP_L + i / CAP_INV_H, i < NTAB: error ~1e-5), writes their ids / capped logits to row KS of cand_id /
+// cand_lg ([d, TOPK] uint32 / FP32 ROW_MAJOR) and draws the token as argmax_j (logit_j + tg_j), tg = row KS of the
+// host-written T * Gumbel noise ([d, TOPK] FP32; all zero = the top-1).
+//
+// The reducer also writes w1[token] as row 0 of the next step's input wp ([1, 1, 1, 256] bf16 TILE).
+//
+// runtime args: [x_addr, base_addr, prev_addr, col0, ncols, slot, w1_addr, wp_addr (, gum, cid, clg, tab addrs)]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "dsp_w1row.hpp"
 
 static inline uint32_t fkey(uint32_t u) { return (u & 0x80000000u) ? ~u : (u | 0x80000000u); }
 
@@ -39,6 +48,18 @@ void kernel_main() {
     constexpr auto x_args = TensorAccessorArgs<12>();
     constexpr auto b_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto p_args = TensorAccessorArgs<b_args.next_compile_time_args_offset()>();
+    constexpr auto w_args = TensorAccessorArgs<p_args.next_compile_time_args_offset()>();
+    constexpr auto wp_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
+#ifdef SAMPLE
+    constexpr uint32_t K = TOPK;
+    constexpr auto g_args = TensorAccessorArgs<wp_args.next_compile_time_args_offset()>();
+    constexpr auto ci_args = TensorAccessorArgs<g_args.next_compile_time_args_offset()>();
+    constexpr auto cl_args = TensorAccessorArgs<ci_args.next_compile_time_args_offset()>();
+    constexpr auto t_args = TensorAccessorArgs<cl_args.next_compile_time_args_offset()>();
+    constexpr uint32_t KS = get_compile_time_arg_val(t_args.next_compile_time_args_offset());
+    constexpr uint32_t NTAB = get_compile_time_arg_val(t_args.next_compile_time_args_offset() + 1);
+    uint32_t tk[K], ti[K], cnt = 0;
+#endif
 
     const uint32_t sem = get_semaphore(0);
     const uint32_t cand = get_write_ptr(cb_cand);
@@ -86,14 +107,109 @@ void kernel_main() {
                     break;
                 }
                 const uint32_t key = fkey(t[j < 16 ? j : 240 + j]);
+#ifdef SAMPLE
+                if (cnt < K || key > tk[K - 1]) {  // (ascending ids: an equal key stays behind the earlier id)
+                    uint32_t pos = cnt < K ? cnt++ : K - 1;
+                    while (pos > 0 && tk[pos - 1] < key) {
+                        tk[pos] = tk[pos - 1];
+                        ti[pos] = ti[pos - 1];
+                        --pos;
+                    }
+                    tk[pos] = key;
+                    ti[pos] = v;
+                }
+#else
                 if (key > best_key) {
                     best_key = key;
                     best_id = v;
                 }
+#endif
             }
             cb_pop_front(cb_out, 1);
         }
     }
+#ifdef SAMPLE
+    // top K -> the reducer (slot * 8 K bytes)
+    volatile tt_l1_ptr uint32_t* mine = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cand + ncores * 8 * K);
+    for (uint32_t j = 0; j < K; ++j) {
+        mine[2 * j] = j < cnt ? tk[j] : 0;
+        mine[2 * j + 1] = j < cnt ? ti[j] : 0xFFFFFFFFu;
+    }
+    noc_async_write(cand + ncores * 8 * K, get_noc_addr(red_x, red_y, cand + slot * 8 * K), 8 * K);
+    noc_async_write_barrier();
+    noc_semaphore_inc(get_noc_addr(red_x, red_y, sem), 1);
+    noc_async_atomic_barrier();
+    if (slot != 0) {
+        return;
+    }
+    noc_semaphore_wait_min(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sem), ncores);
+    noc_semaphore_set(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sem), 0);
+    volatile tt_l1_ptr uint32_t* c = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cand);
+    // merge: the lists' heads in local arrays (L1 reads only on a pop)
+    uint32_t hk[ncores], hid[ncores];
+    uint8_t head[ncores];
+    for (uint32_t q = 0; q < ncores; ++q) {
+        head[q] = 0;
+        hk[q] = c[q * K * 2];
+        hid[q] = c[q * K * 2 + 1];
+    }
+    // out rows: ids at mine[0 .. K), logits at mine[K .. 2K), the T * Gumbel row at mine[2K .. 3K)
+    const auto s_g = TensorAccessor(g_args, get_arg_val<uint32_t>(8), 4 * K);
+    noc_async_read(s_g.get_noc_addr(KS), cand + ncores * 8 * K + 8 * K, 4 * K);
+    const uint32_t tab = cand + ncores * 8 * K + 12 * K;
+    noc_async_read(TensorAccessor(t_args, get_arg_val<uint32_t>(11), 4 * NTAB).get_noc_addr(0), tab, 4 * NTAB);
+    for (uint32_t j = 0; j < K; ++j) {
+        uint32_t bq = 0, bk = hk[0], bi = hid[0];
+        for (uint32_t q = 1; q < ncores; ++q) {
+            const uint32_t k = hk[q];
+            if (k > bk || (k == bk && hid[q] < bi)) {
+                bq = q;
+                bk = k;
+                bi = hid[q];
+            }
+        }
+        const uint32_t h = ++head[bq];
+        hk[bq] = h < K ? c[(bq * K + h) * 2] : 0;  // (exhausted: key 0, id ~0 never wins over a live entry)
+        hid[bq] = h < K ? c[(bq * K + h) * 2 + 1] : 0xFFFFFFFFu;
+        tk[j] = (bk & 0x80000000u) ? (bk & 0x7FFFFFFFu) : ~bk;  // the FP32 bits back
+        ti[j] = bi;
+    }
+    noc_async_read_barrier();
+    volatile tt_l1_ptr float* tg = reinterpret_cast<volatile tt_l1_ptr float*>(cand + ncores * 8 * K + 8 * K);
+    volatile tt_l1_ptr float* ct = reinterpret_cast<volatile tt_l1_ptr float*>(tab);
+    uint32_t best = 0;
+    float bv = 0.0f;
+    for (uint32_t j = 0; j < K; ++j) {
+        union {
+            uint32_t u;
+            float f;
+        } cv;
+        cv.u = tk[j];
+        float x = (cv.f + CAP_L) * CAP_INV_H;
+        x = x < 0.0f ? 0.0f : (x > (float)(NTAB - 2) ? (float)(NTAB - 2) : x);
+        const uint32_t i = (uint32_t)x;
+        const float fr = x - (float)i;
+        cv.f = ct[i] + fr * (ct[i + 1] - ct[i]);
+        mine[j] = ti[j];
+        mine[K + j] = cv.u;
+        const float v = cv.f + tg[j];
+        if (j == 0 || v > bv) {
+            bv = v;
+            best = j;
+        }
+    }
+    noc_async_write(cand + ncores * 8 * K, TensorAccessor(ci_args, get_arg_val<uint32_t>(9), 4 * K).get_noc_addr(KS),
+                    4 * K);
+    noc_async_write(cand + ncores * 8 * K + 4 * K,
+                    TensorAccessor(cl_args, get_arg_val<uint32_t>(10), 4 * K).get_noc_addr(KS), 4 * K);
+    noc_async_write_barrier();
+    mine[0] = ti[best];
+    const auto s_p = TensorAccessor(p_args, prev_addr, 4);
+    noc_async_write(cand + ncores * 8 * K, s_p.get_noc_addr(0), 4);
+    noc_async_write_barrier();
+    w1_row(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 512), TensorAccessor(wp_args, get_arg_val<uint32_t>(7), 2048),
+           ti[best], cand + W1_OFF);
+#else
     // candidate -> the reducer
     volatile tt_l1_ptr uint32_t* mine = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cand + ncores * 16);
     mine[0] = best_key;
@@ -120,4 +236,7 @@ void kernel_main() {
     const auto s_p = TensorAccessor(p_args, prev_addr, 4);
     noc_async_write(cand + ncores * 16, s_p.get_noc_addr(0), 4);
     noc_async_write_barrier();
+    w1_row(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 512), TensorAccessor(wp_args, get_arg_val<uint32_t>(7), 2048),
+           bi, cand + W1_OFF);
+#endif
 }

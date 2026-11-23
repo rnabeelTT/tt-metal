@@ -115,7 +115,7 @@ def main():
     faulthandler.register(signal.SIGUSR1, all_threads=True)
     torch.manual_seed(0)
     fx = torch.load(FIXTURE)
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1), trace_region_size=256 << 20)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, int(os.environ.get("MESH", "1"))), trace_region_size=256 << 20)
     try:
         run(mesh, fx)
     finally:
@@ -170,7 +170,7 @@ def run(mesh, fx):
             last = p
             _, got, h = dr.draft(int(ids[p]), p, None, gamma, return_hidden=True)
             rows.append((name, j, p, got))
-            hd = dr._host(h).float().reshape(32, -1)[: dr.B]
+            hd = dr._host(h).float().reshape(-1, dr.H)[: dr.B]
             hr = r["hidden"][j].float()
             herr.append(((hd - hr).abs().max().item(),
                          torch.corrcoef(torch.stack([hd.flatten(), hr.flatten()]))[0, 1].item()))
@@ -187,7 +187,7 @@ def run(mesh, fx):
     dr.window = 256
     dr.commit(taps[:p], 0)
     _, _, h = dr.draft(int(ids[p]), p, None, gamma, return_hidden=True)
-    hd = dr._host(h).float().reshape(32, -1)[: dr.B]
+    hd = dr._host(h).float().reshape(-1, dr.H)[: dr.B]
     hw = cpu_block_ref(fx["cfg"], taps, ids, p, 256).float()
     print(f"window 256 at p={p}: |dev - ref(256)| max {(hd - hw).abs().max():.4f}, "
           f"|ref(256) - ref(1024)| max {(hw - r['hidden'][-1].float()).abs().max():.4f}", flush=True)
@@ -200,12 +200,14 @@ def run_traced(mesh, dr, fx, eager):
     # ---- 3. traced step: commit the 4 rows before the anchor + draft
     RCm = drafter_mod.RC
     tb = ttnn.from_torch(torch.zeros(1, 4, 8, dr.H), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
+                         mesh_mapper=dr.rep,
                          memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
     def put_taps(rows_):
         x = torch.zeros(1, 4, 8, dr.H, dtype=torch.bfloat16)
         x[0, :, : rows_.shape[0]] = rows_.transpose(0, 1)
-        ttnn.copy_host_to_device_tensor(ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT), tb)
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                                        mesh_mapper=dr.rep), tb)
 
     name0, r0 = next(iter(r_of.items()))
     dr.commit(r0["taps"][: 64], 0)
@@ -263,14 +265,86 @@ def run_traced(mesh, dr, fx, eager):
     for k, v in ph.items():
         print(f"  phase {k:28s} {v:7.3f} ms", flush=True)
     for li in range(dr.L):
-        q = ttnn.from_torch(torch.zeros(1, dr.NH, 32, dr.D), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh)
-        kv = ttnn.from_torch(torch.zeros(1, dr.NKV, 32, dr.D), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
-                             device=mesh)
+        q = ttnn.from_torch(torch.zeros(1, dr.NH, dr.B, dr.D), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
+                            mesh_mapper=dr.rep)
+        kv = ttnn.from_torch(torch.zeros(1, dr.NKV, dr.B, dr.D), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                             device=mesh, mesh_mapper=dr.rep)
         print(f"  phase attention layer {li} (S={dr.S[li]}) {timed(mesh, lambda: dr._attention(li, q, kv, kv)):7.3f} ms",
               flush=True)
     ops = count_ops(lambda: dr._traced_body(tb, DTR, True))
     print(f"ops per traced step: {sum(ops.values())}  {dict(sorted(ops.items(), key=lambda x: -x[1]))}", flush=True)
+    run_sampled(mesh, dr, fx, tb, put_taps)
     print("RESULT done", flush=True)
+
+
+def run_sampled(mesh, dr, fx, tb, put_taps):
+    """4. sampled drafts (capture(sample=True)): zero noise = the top-1 of the softcapped logits (vs the greedy
+    reference), candidates vs the reference's top-16 step logits, the empirical token distribution under T = 1 Gumbel
+    noise vs q = softmax(candidate logits), traced time."""
+    RCm = drafter_mod.RC
+    r_of = fx["texts"]
+    name0, r0 = next(iter(r_of.items()))
+    p = int(r0["anchors"][0]) + 1
+    dr.commit(r0["taps"][: p - RCm], 0)
+    put_taps(r0["taps"][p - RCm:p])
+    dr.set_inputs(int(r0["ids"][p]), p - RCm, RCm)
+    dr.set_gumbel(torch.zeros(DTR, drafter_mod.TOPK))
+    dr.capture(tb, DTR, sample=True)
+    same, n, vdiff, idmatch = 0, 0, 0.0, []
+    for name, r in r_of.items():
+        ids, taps = r["ids"], r["taps"]
+        for j, a in enumerate(r["anchors"]):
+            p = a + 1
+            dr.commit(taps[: p - RCm], 0)
+            put_taps(taps[p - RCm:p])
+            dr.set_inputs(int(ids[p]), p - RCm, RCm)
+            dr.set_gumbel(torch.zeros(DTR, drafter_mod.TOPK))
+            dr.replay()
+            got = dr.tokens_host()
+            ref = r["markov"][j].tolist()[:DTR]
+            same += sum(g == x for g, x in zip(got, ref))
+            n += DTR
+            ci, cl = dr.cand_host(DTR)
+            for k in range(DTR):
+                if got[:k] != ref[:k]:
+                    break
+                ti, tv = r["top_i"][j][k], r["top_v"][j][k].float()
+                m = min(len(ti), 8)
+                idmatch.append(int((ci[k, :m] == ti[:m]).sum()) / m)
+                vdiff = max(vdiff, (cl[k, 0] - tv[0]).abs().item())
+    print(f"[sampled, zero noise] tokens identical to the reference: {same}/{n}; top-8 candidate ids matching the "
+          f"reference's (steps on the reference path): {sum(idmatch) / len(idmatch):.3f}; |top-1 logit - ref| max "
+          f"{vdiff:.4f}", flush=True)
+    # distribution: one anchor, T = 1, N draws: first token frequency vs q
+    N = 400
+    p = int(r0["anchors"][-1]) + 1
+    dr.commit(r0["taps"][: p - RCm], 0)
+    put_taps(r0["taps"][p - RCm:p])
+    cnt = {}
+    g = torch.Generator().manual_seed(1)
+    t0 = time.time()
+    for _ in range(N):
+        dr.set_inputs(int(r0["ids"][p]), p - RCm, RCm)
+        u = torch.rand(DTR, drafter_mod.TOPK, generator=g).clamp_(1e-12, 1 - 1e-7)
+        dr.set_gumbel(-torch.log(-torch.log(u)))
+        dr.replay()
+        tok = dr.tokens_host()[0]
+        cnt[tok] = cnt.get(tok, 0) + 1
+    ci, cl = dr.cand_host(DTR)
+    q = torch.softmax(cl[0].double(), -1)
+    emp = torch.tensor([cnt.get(int(i), 0) / N for i in ci[0]], dtype=torch.float64)
+    tv = 0.5 * (q - emp).abs().sum().item() + 0.5 * sum(v for t, v in cnt.items() if t not in set(ci[0].tolist())) / N
+    print(f"[sampled, T=1, {N} draws] first token: q top-3 {[round(x, 3) for x in q[:3].tolist()]} empirical "
+          f"{[round(x, 3) for x in emp[:3].tolist()]}; total variation {tv:.3f} (sampling noise ~{(1 / N) ** 0.5:.3f})",
+          flush=True)
+    nrep = 50
+    ttnn.synchronize_device(mesh)
+    t1 = time.time()
+    for _ in range(nrep):
+        dr.replay()
+    ttnn.synchronize_device(mesh)
+    print(f"TRACED sampled step (d={DTR}): {(time.time() - t1) / nrep * 1e3:.3f} ms", flush=True)
+    dr.release()
 
 
 if __name__ == "__main__":
