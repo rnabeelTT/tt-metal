@@ -20,7 +20,8 @@ class PreKernel:
         self.post = post  # (shares its cores, ones, zeros and selection tiles)
         self.mesh, self.H, self.PER, self.eps = post.mesh, post.H, post.PER, post.eps
 
-    def __call__(self, x, blocks, logits, qrows, nws=None, tail=None, bound=False, out_mc=ttnn.L1_MEMORY_CONFIG):
+    def __call__(self, x, blocks, logits, qrows, nws=None, tail=None, bound=False, out_mc=ttnn.L1_MEMORY_CONFIG,
+                 rows=None):
         """x [1, 1, T, H] bf16 (the layer input) or, with tail = (mo, resid, conv), the previous application's MoE
         output (bf16) + residual (fp32) + its MoE-output BatchedConv; blocks n fp32 with logits [(tensor, first tile)]
         (NQ consecutive tiles each); qrows NQ query rows ([1, 1, 32, H] fp32); nws NQ norm weight rows (None: return
@@ -28,7 +29,7 @@ class PreKernel:
         from .ccl import PackedAR
 
         pk, PER = self.post, self.PER
-        T = int(x.shape[-2])
+        T = rows or int(x.shape[-2])  # (rows: x may be a wider buffer whose first rows are live, e.g. the MoE's)
         packed = tail is not None and isinstance(tail[0], PackedAR)  # (mo: the packed all-reduce rows, in place)
         if packed:
             tail = (tail[0].t,) + tuple(tail[1:])

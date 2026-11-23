@@ -507,7 +507,10 @@ class BatchedDecoder:
         """A deferred tail -> the layer output x = bf16(resid + conv(mo)) (the ops path)."""
         if not isinstance(x, Tail):
             return x
-        out = _bf(ttnn.add(x.resid, _f32(x.conv.step(unpacked(x.mo)))))
+        mo = unpacked(x.mo)
+        if int(mo.shape[-2]) != int(x.resid.shape[-2]):  # (one die, one row: the MoE's shared 2-row buffer, in place)
+            mo = ttnn.slice(mo, [0, 0, 0, 0], [1, 1, int(x.resid.shape[-2]), int(mo.shape[-1])])
+        out = _bf(ttnn.add(x.resid, _f32(x.conv.step(mo))))
         return ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out
 
     def _mix(self, key, blocks_n, ids, D, cur, Q, nq):
@@ -554,10 +557,11 @@ class BatchedDecoder:
                 nws = None
             lgs = [(D[b], self.plan.off[(b, ("attn", a))]) for b in ids]
             if isinstance(x, Tail):
-                xin = x.mo if isinstance(x.mo, PackedAR) or x.mo.memory_config() == L1 else \
-                    ttnn.to_memory_config(x.mo, L1)
+                # (the MoE output read where it is: the packed all-reduce rows, or the MoE's shared buffer, whose
+                # first rows are live)
+                xin = x.mo
                 x, xn, outs = self.pre(xin, blocks_n, lgs, self.aq_rows[li], nws, tail=(xin, x.resid, x.conv),
-                                       bound=L.boundary)
+                                       bound=L.boundary, rows=int(x.resid.shape[-2]))
             else:
                 x, xn, outs = self.pre(x, blocks_n, lgs, self.aq_rows[li], nws, bound=L.boundary)
             fused = outs
@@ -603,8 +607,7 @@ class BatchedDecoder:
         if self.post is not None and ba.attn.kernel is not None:
             # conv + residual + norm + mix (+ the MoE-input norm) in one program (tt/post.py)
             if not isinstance(att, PackedAR):
-                att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att
-                att = att if att.memory_config() == L1 else ttnn.to_memory_config(att, L1)
+                att = ttnn.sharded_to_interleaved(att, L1) if att.is_sharded() else att  # (DRAM: read in place)
             lgs = [(D[b], self.plan.off[(b, ("mlp", a))]) for b in ids]
             lg, dup = None, False
             T = int(att.shape[-2])

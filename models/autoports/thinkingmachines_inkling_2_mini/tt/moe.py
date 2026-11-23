@@ -124,7 +124,7 @@ class MoE:
                           sparse_matmul_program_config(PF_CHUNK, H, W, target_cores=32, in0_block_w_cap=kc(W)))
                          for (op, ug, dn), (_, W) in zip(self.fe.subs, self.fe.widths)]
             # merged decode layout (moe_fused MERGE): one stacked tensor pair, sub-shard s = virtual experts e * S + s
-            self.wsub = [(1, 0)]
+            self.wsub = [(1, 0)] * len(self.subs)
             if self.fe.merged:
                 S = len(self.fe.sub_widths)
                 self.subs = self.subs * S
@@ -164,7 +164,8 @@ class MoE:
         rows = None
         if self.fused and T <= self.fe.rows_max:
             # packed all-reduce: it reads the shared expert-output buffer's live rows directly (no clone / slice)
-            raw = self.N > 1 and len(self.fe.subs) == 1 and packed_rows(T)
+            # (one die: the next pre program reads row 0 of the shared buffer in place too: no clone / slice)
+            raw = len(self.fe.subs) == 1 and ((self.N > 1 and packed_rows(T)) or (self.N == 1 and packed_out and T == 1))
             out = self.fe.forward(x, logits=logits, dup=dup, raw=raw)
             rows = T if raw else None
         elif self.fused and T <= 2 * self.fe.rows_max and SPLIT_DECODE:

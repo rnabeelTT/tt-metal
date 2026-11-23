@@ -114,6 +114,12 @@ def main():
         key = f"{f}::{fn}"
         comp[key][0] += us
         comp[key][1] += 1
+    if os.environ.get("SEQ"):  # (the step's programs in order, rows a..b: "a,b")
+        a, b = (int(v) for v in os.environ["SEQ"].split(","))
+        print("-- sequence: #, programs, us, op, site")
+        for i, (name, site, n, us) in enumerate(rows[a:b], a):
+            if n:
+                print(f"{i:5d} {n:3d} {us:8.1f}  {name:28s} {site}")
     print("-- by function (file::function): ms, ops")
     for k, (us, c) in sorted(comp.items(), key=lambda kv: -kv[1][0])[:25]:
         print(f"{us / 1e3:9.2f} ms {c:6d}  {k}")

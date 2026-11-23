@@ -311,7 +311,17 @@ message gates) was off on one die (DRAM).
 | start | 34.2 | 52.5 | 15.7 | 24.2 |
 | fused glue on one die too (KV pool cap 7 x 8K tokens: 0.29 GiB free after the trace captures); 1,378 programs | 26.9 | 47.7 | | |
 | the three 384-column MoE sub-shards as virtual experts e * 3 + s (qwen36 union.py `subs`, kernels MOE_SUBS): one route + one gate/up + one down program per layer, the sub-shard sum in the down kernel's fp32 accumulation; prefill's grouped matmul reads the stacked weights by id * 3 + s (gmm wsub) | 25.8 | 46.5 | | |
-| QWEN35_MOE_GU_OFFROW=2 (MoE layer at 1 / 4 / 8 rows: 223 / 691 / 1215 -> 218 / 641 / 1110 us) | | | 15.4 | 23.3 |
+| QWEN35_MOE_GU_OFFROW=2 (MoE layer at 1 / 4 / 8 rows: 223 / 691 / 1215 -> 218 / 641 / 1110 us) | | 43.5 | 15.4 | 23.3 |
+| LM head streamed per DRAM bank with the softcap in the same program (tt/head.py: the qwen36 DecodeLinear placement + this port's FP32 / softcap kernels; one die, or each die's vocab slice; its weight copy replaces the interleaved one); one die: the MoE's shared output buffer and the o_proj output read in place by pre / post (no clone / slice / L1 moves) | 23.8 | 42.7 | 15.1 | 23.1 |
+
+TP2 at the end: B=1 18.6 ms (19.3 before the round), B=4 29.6 ms. Quality after these rows: TP1 prefill 0.9703 / 0.9966
+/ 0.0139, TP1 decode 0.9708 / 0.9959 / 0.0142, TP4 prefill (2048) 0.9720 / 0.9970 / 0.0151, TP4 decode 0.9711 / 0.9955
+/ 0.0165, TP2 prefill 0.9691 / 0.9962 / 0.0158 (all in band). One die at 8 x 8K (KV pool 57,344): 0.29 GiB free after
+the trace captures. Fixed here: the merged-MoE commit's prefill sub-shard map had one entry, so TP2's second sub-shard
+was skipped in prefill (TP2 decode test pcc 0.92; TP1 / TP4 unaffected).
+Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
+columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
+different inputs), ~0.2-0.4 ms per token, and the merged weight did not fit beside 8 x 8K on one die.
 
 Quality: TP1 prefill 0.9703 / 0.9966 / 0.0142 (unchanged), TP1 decode (8 x 736) 0.9708 / 0.9959 / 0.0145, TP4 decode
 0.9711 / 0.9955 / 0.0168 (unchanged); merged vs per-sub-shard MoE pcc 0.999994 (tests/dbg_moe_merge.py).

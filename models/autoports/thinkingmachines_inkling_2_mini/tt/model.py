@@ -412,9 +412,20 @@ class Inkling2Model:
         Vp = (V + q - 1) // q * q
         un = ck.get("model.llm.unembed.weight")[:V].float()
         un = torch.nn.functional.pad(un, (0, 0, 0, Vp - V))
-        self.lm_head = ttnn.as_tensor(un.T.contiguous().reshape(1, 1, H, Vp).to(torch.bfloat16), dtype=HEAD_DT,
-                                      layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM,
-                                      mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=3) if self.head_shard else ops.rep)
+        # I2M_HEAD_STREAM (default 1; one die, or each die's vocab slice): the head streamed per DRAM bank with the
+        # softcap in the same program (tt/head.py; its per-bank weight copy replaces the interleaved one)
+        self.shead = None
+        if (N == 1 or self.head_shard) and os.environ.get("I2M_HEAD_STREAM", "1") == "1":
+            from .head import StreamHead
+
+            Vs = Vp // N
+            self.shead = StreamHead(mesh, H, Vs, HEAD_DT, cfg.final_logit_softcapping)
+            self.lm_head = self.shead.weight([un.T[:, d * Vs : (d + 1) * Vs].contiguous().to(torch.bfloat16)
+                                              for d in range(N)])
+        else:
+            self.lm_head = ttnn.as_tensor(un.T.contiguous().reshape(1, 1, H, Vp).to(torch.bfloat16), dtype=HEAD_DT,
+                                          layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM,
+                                          mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=3) if self.head_shard else ops.rep)
         self.Vp = Vp  # all dies' columns
         self.Vs = Vp // N if self.head_shard else Vp  # one die's logits columns
         self.softcap = cfg.final_logit_softcapping
@@ -517,6 +528,12 @@ class Inkling2Model:
         """The final mix's output h -> logits (norm, LM head, softcap)."""
         ops = self.ops
         h = _bf(ops.rms(h, self.final_norm))
+        if self.shead is not None:  # (one call per tile row of 32)
+            T = int(h.shape[-2])
+            if T <= 32:
+                return self.shead(h, self.lm_head, T)
+            return ttnn.concat([self.shead(ttnn.slice(h, [0, 0, r, 0], [1, 1, min(T, r + 32), int(h.shape[-1])]),
+                                           self.lm_head, min(32, T - r)) for r in range(0, T, 32)], dim=2)
         lg = dmm(h, self.lm_head, ops.ckc, dtype=ttnn.float32, memory_config=DRAM, linear=True)
         return ttnn.multiply(ttnn.tanh(ttnn.multiply(lg, 1.0 / self.softcap)), self.softcap)
 
