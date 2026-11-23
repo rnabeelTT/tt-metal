@@ -162,7 +162,7 @@ void kernel_main() {
     constexpr uint32_t GT = GP * NSEL;
     static_assert(ET <= 4, "router tiles");
     static_assert(R == 2, "rank tiles");
-    const bool root = get_arg_val<uint32_t>(0) == 0;
+    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
 
     compute_kernel_hw_startup(cb_h, cb_out);
     DeviceZoneScopedN("G2_C_ALL");

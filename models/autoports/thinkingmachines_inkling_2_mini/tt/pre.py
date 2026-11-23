@@ -12,7 +12,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, _bits
+from .post import BF, CX, CY, C, F32, _bits, red_k
 
 
 class PreKernel:
@@ -36,7 +36,7 @@ class PreKernel:
         NB, NQ = len(blocks), len(qrows)
         norm = nws is not None
         assert T <= 16 and 1 <= NB and NQ <= 3 and len(logits) == NB
-        NSEL, sel = pk._sel(T)
+        NSEL, sel = pk.red(T)
         shape = ttnn.Shape([1, 1, T, self.H])
         alloc = lambda dt: ttnn.allocate_tensor_on_device(shape, dt, ttnn.TILE_LAYOUT, self.mesh, out_mc)  # noqa: E731
         xo = alloc(ttnn.bfloat16) if tail is not None else x
@@ -84,7 +84,7 @@ class PreKernel:
         for t in (states[0], outs[0], pk.zeros):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_common = [s.buffer_address() for s in states] + [xo.buffer_address(), (xn or xo).buffer_address()] \
-            + [o.buffer_address() for o in outs] + pk.mc + [pk.zeros.buffer_address()]
+            + [o.buffer_address() for o in outs] + pk.mc + [pk.zeros.buffer_address()] + pk.roots[:2 * T]
         cp_ct = [cb_in, cb_rp, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_sel, cb_so, cb_xo, cb_x, cb_sq, cb_sum,
                  cb_part, cb_gath, cb_tout, cb_tot, cb_red, cb_wt, cb_h, cb_xn, cb_part2, cb_gath2, cb_tot2, cb_out, PER,
                  NB, NQ, int(tail is not None), int(norm), int(bound), NSEL, _bits(1.0 / self.H), _bits(self.eps)]
@@ -94,7 +94,7 @@ class PreKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))] + sdefs
+        defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -109,7 +109,7 @@ class PreKernel:
                                   runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T))]),
         ]
-        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
         key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))

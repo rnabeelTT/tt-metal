@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Fused decode post-attention section (tt/post.py), writer: the conv's new states, the two cross-core rounds and the
-// outputs. A round: every core writes the live rows (t < T) of its P partial tiles (hi / lo halves) to row c T + t of
-// the root's gather tiles and increments the root's semaphore; the root's compute reduces them (0 / 1 matrices) into
-// totals, which the root multicasts (rows t < T) into every core's totals buffer, then increments every core's done
-// semaphore. Start: every core tells the root it is running; the root's go releases the writes into it.
+// outputs. A round, one root per row (core t for row t < T): every core writes row t of its P partial tiles (hi / lo
+// halves) to row c of root t's gather tiles and increments root t's semaphore; each root's compute reduces them (0 / 1
+// matrices) into its totals (row 0), which root t writes into row t of core 0's totals buffer; core 0 multicasts the T
+// rows (one multicast per face: concurrent multicasts from several roots serialize) to every core's, then increments
+// every core's done semaphore. Start: every core tells core 0 it is running; its go releases the writes.
 //
-// runtime args: t0, c, s0, s1, s2, resid, out, mcast x0, y0, x1, y1, root x, root y
+// common args: s0, s1, s2, resid, out, mcast x0, y0, x1, y1, zeros, logits, root t x, y (t < T)
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 #include "tools/profiler/kernel_profiler.hpp"
+#include "red.hpp"
 
 template <uint32_t T, uint32_t E>
 inline void write_rows(uint32_t src, uint64_t dst) {
@@ -56,16 +58,15 @@ void kernel_main() {
     const auto ro = TensorAccessor(r_args, ca(3), F32);
     const auto oo = TensorAccessor(o_args, ca(4), OUTB);
     const uint32_t mx0 = ca(5), my0 = ca(6), mx1 = ca(7), my1 = ca(8);
-    const uint32_t rx = ca(9), ry = ca(10);
-    const auto zz = TensorAccessor(z_args, ca(11), 2048);
-    const bool root = c == 0;
+    const auto zz = TensorAccessor(z_args, ca(9), 2048);
+    auto rxy = [&](uint32_t t, uint32_t a) { return get_noc_addr(ca(11 + 2 * t), ca(12 + 2 * t), a); };
+    const bool root = c < T;  // root of row c
 
     const uint32_t s_ready = get_semaphore(0), s_go = get_semaphore(1), s_g = get_semaphore(2);
-    const uint32_t s_done = get_semaphore(3);
+    const uint32_t s_done = get_semaphore(3), s_t = get_semaphore(4);
     auto sem = [](uint32_t a) { return reinterpret_cast<volatile tt_l1_ptr uint32_t*>(a); };
     auto mc = [&](uint32_t addr) { return get_noc_multicast_addr(mx0, my0, mx1, my1, addr); };
     auto row_off = [](uint32_t i) { return (i < 16 ? 0u : 2048u) + (i % 16) * 64; };
-    constexpr uint32_t USED = C * T;
 
     // receive buffers (the same addresses on every core)
     cb_reserve_back(cb_tot, 2);
@@ -91,8 +92,8 @@ void kernel_main() {
     }
     {
         DeviceZoneScopedN("P_W_HS");
-        noc_semaphore_inc(get_noc_addr(rx, ry, s_ready), 1);
-        if (root) {
+        noc_semaphore_inc(rxy(0, s_ready), 1);
+        if (c == 0) {
             noc_semaphore_wait(sem(s_ready), C);
             *sem(s_go) = 1;
             noc_semaphore_set_multicast(s_go, mc(s_go), C - 1);
@@ -100,10 +101,8 @@ void kernel_main() {
         noc_semaphore_wait(sem(s_go), 1);
     }
     if (root) {
-        // zero the rows past C T of every part's last tile (the 0 / 1 matrices skip them; 0 x NaN would not): a zero
-        // block (2 KB, read once) copied over the contiguous face-row spans
-        constexpr uint32_t r0 = USED % 32;
-        if constexpr (r0 != 0) {
+        // zero the unused gather rows (red.hpp): a zero block (2 KB, read once) copied over them
+        {
             cb_reserve_back(cb_zero, 1);
             const uint32_t z = get_write_ptr(cb_zero);
             noc_async_read(zz.get_noc_addr(0), z, 2048);
@@ -116,19 +115,8 @@ void kernel_main() {
             const uint32_t g3 = 0;
 #endif
             for (uint32_t p = 0; p < 4 + (NORM ? 2 : 0) + P3; ++p) {
-                const uint32_t tile = (p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
-                                                                  : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32) +
-                                      (NQ - 1) * F32;
-                if (r0 < 16) {  // faces 0 / 1 rows r0..15, faces 2 / 3 whole
-                    const uint32_t n = (16 - r0) * 64;
-                    noc_async_write(z, get_noc_addr(tile + r0 * 64), n);
-                    noc_async_write(z, get_noc_addr(tile + 1024 + r0 * 64), n);
-                    noc_async_write(z, get_noc_addr(tile + 2048), 2048);
-                } else {  // faces 2 / 3 rows r0-16..15
-                    const uint32_t n = (32 - r0) * 64;
-                    noc_async_write(z, get_noc_addr(tile + 2048 + (r0 - 16) * 64), n);
-                    noc_async_write(z, get_noc_addr(tile + 3072 + (r0 - 16) * 64), n);
-                }
+                red_zero<POST_RK, C, NQ>(z, p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
+                                                                    : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32);
             }
             noc_async_write_barrier();
         }
@@ -148,39 +136,63 @@ void kernel_main() {
         cb_pop_front(cb_rout, 1);
     }
 
-    // one round: parts -> root, root totals (ntot tiles) -> everyone
-    auto round = [&](uint32_t cb_p, uint32_t parts, uint32_t cb_g, uint32_t g, uint32_t cb_t, uint32_t tb,
-                     uint32_t ntot, uint32_t done_val) {
-        cb_wait_front(cb_p, parts);
-        const uint32_t src = get_read_ptr(cb_p);
-        for (uint32_t p = 0; p < parts; ++p) {
-            for (uint32_t t = 0; t < T; ++t) {
-                const uint32_t rho = c * T + t;
-                const uint32_t d = g + (p * NQ + rho / 32) * F32 + row_off(rho % 32);
+    // parts' row t -> row c of root t's gather (rho = c), then root t's semaphore
+    auto send = [&](uint32_t src, uint32_t parts, uint32_t g) {
+        const uint32_t d = g + red_off<POST_RK>(c);
+        for (uint32_t t = 0; t < T; ++t) {
+            for (uint32_t p = 0; p < parts; ++p) {
                 const uint32_t s = src + p * F32 + row_off(t);
-                noc_async_write(s, get_noc_addr(rx, ry, d), 64);
-                noc_async_write(s + 1024, get_noc_addr(rx, ry, d + 1024), 64);
+                noc_async_write(s, rxy(t, d + p * NQ * F32), 64);
+                noc_async_write(s + 1024, rxy(t, d + p * NQ * F32 + 1024), 64);
             }
         }
         noc_async_write_barrier();
-        noc_semaphore_inc(get_noc_addr(rx, ry, s_g), 1);
+        for (uint32_t t = 0; t < T; ++t) {
+            noc_semaphore_inc(rxy(t, s_g), 1);
+        }
+    };
+    // one round: parts -> the roots, root t's totals (ntot tiles, row 0) -> row t of everyone's
+    auto round = [&](uint32_t cb_p, uint32_t parts, uint32_t cb_g, uint32_t g, uint32_t cb_t, uint32_t tb,
+                     uint32_t ntot, uint32_t done_val) {
+        cb_wait_front(cb_p, parts);
+        send(get_read_ptr(cb_p), parts, g);
         cb_pop_front(cb_p, parts);
         if (root) {
             noc_semaphore_wait(sem(s_g), C * done_val);
             cb_push_back(cb_g, parts * NQ);
             cb_wait_front(cb_tout, ntot);
             const uint32_t ts = get_read_ptr(cb_tout);
-            for (uint32_t k = 0; k < ntot; ++k) {
-                for (uint32_t t = 0; t < T; ++t) {
-                    const uint32_t o = k * F32 + row_off(t);
-                    noc_async_write_multicast_loopback_src(ts + o, mc(tb + o), 64, C);
-                    noc_async_write_multicast_loopback_src(ts + o + 1024, mc(tb + o + 1024), 64, C);
+            if constexpr (T == 1) {
+                for (uint32_t k = 0; k < ntot; ++k) {
+                    noc_async_write_multicast_loopback_src(ts + k * F32, mc(tb + k * F32), 64, C);
+                    noc_async_write_multicast_loopback_src(ts + k * F32 + 1024, mc(tb + k * F32 + 1024), 64, C);
+                }
+            } else {  // row 0 -> row c of core 0's totals
+                for (uint32_t k = 0; k < ntot; ++k) {
+                    const uint32_t o = tb + k * F32 + row_off(c);
+                    noc_async_write(ts + k * F32, rxy(0, o), 64);
+                    noc_async_write(ts + k * F32 + 1024, rxy(0, o + 1024), 64);
                 }
             }
             noc_async_write_barrier();
             cb_pop_front(cb_tout, ntot);
-            noc_semaphore_inc_multicast(mc(s_done), 1, C - 1);
-            noc_semaphore_inc(get_noc_addr(s_done), 1);
+            if constexpr (T > 1) {
+                if (c != 0) {
+                    noc_semaphore_inc(rxy(0, s_t), 1);
+                } else {  // rows 0..T-1 (contiguous per face) -> everyone
+                    noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
+                    for (uint32_t k = 0; k < ntot; ++k) {
+                        const uint32_t o = tb + k * F32;
+                        noc_async_write_multicast(o, mc(o), T * 64, C - 1);
+                        noc_async_write_multicast(o + 1024, mc(o + 1024), T * 64, C - 1);
+                    }
+                    noc_async_write_barrier();
+                }
+            }
+            if (c == 0) {
+                noc_semaphore_inc_multicast(mc(s_done), 1, C - 1);
+                noc_semaphore_inc(get_noc_addr(s_done), 1);
+            }
         }
         noc_semaphore_wait(sem(s_done), done_val);
         cb_push_back(cb_t, ntot);
@@ -203,36 +215,24 @@ void kernel_main() {
         cb_pop_front(cb_out, 1);
     }
 #if POST_RT
-    {  // router round: the partial logits' live rows -> the root's gather; the root writes the logits rows
+    {  // router round: the partial logits' row t -> root t's gather; root t writes logits row t
         constexpr uint32_t ET = POST_RT, parts = 2 * ET;
         constexpr auto l_args = TensorAccessorArgs<z_args.next_compile_time_args_offset()>();
-        const uint32_t g3 = get_write_ptr(POST_CB_G3);
         cb_wait_front(POST_CB_P3, parts);
-        const uint32_t src = get_read_ptr(POST_CB_P3);
-        for (uint32_t p = 0; p < parts; ++p) {
-            for (uint32_t t = 0; t < T; ++t) {
-                const uint32_t rho = c * T + t;
-                const uint32_t d = g3 + (p * NQ + rho / 32) * F32 + row_off(rho % 32);
-                const uint32_t s = src + p * F32 + row_off(t);
-                noc_async_write(s, get_noc_addr(rx, ry, d), 64);
-                noc_async_write(s + 1024, get_noc_addr(rx, ry, d + 1024), 64);
-            }
-        }
-        noc_async_write_barrier();
-        noc_semaphore_inc(get_noc_addr(rx, ry, s_g), 1);
+        send(get_read_ptr(POST_CB_P3), parts, get_write_ptr(POST_CB_G3));
         cb_pop_front(POST_CB_P3, parts);
         if (root) {
             cb_reserve_back(POST_CB_G3, parts * NQ);
             noc_semaphore_wait(sem(s_g), C * (NORM ? 3 : 2));
             cb_push_back(POST_CB_G3, parts * NQ);
-            const auto al = TensorAccessor(l_args, ca(12), F32);
+            const auto al = TensorAccessor(l_args, ca(10), F32);
             cb_wait_front(POST_CB_T3, ET);
             const uint32_t ts = get_read_ptr(POST_CB_T3);
             for (uint32_t e = 0; e < ET; ++e) {
-                const uint64_t dl = al.get_noc_addr(e);
-                write_rows<T, 4>(ts + e * F32, dl);
+                const uint64_t dl = al.get_noc_addr(e) + c * 64;
+                write_rows<1, 4>(ts + e * F32, dl);
 #if POST_DUP
-                write_rows<T, 4>(ts + e * F32, dl + 64);
+                write_rows<1, 4>(ts + e * F32, dl + 64);
 #endif
             }
             noc_async_write_barrier();
@@ -244,4 +244,5 @@ void kernel_main() {
     *sem(s_go) = 0;
     *sem(s_g) = 0;
     *sem(s_done) = 0;
+    *sem(s_t) = 0;
 }

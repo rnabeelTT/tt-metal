@@ -16,6 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .post import red_k, red_sel
 
 F32, BF = 4096, 2048
 ROWS = __import__("os").environ.get("I2M_GATE_ROWS", "1") == "1"  # SFPU passes on the live rows only (<= 16 rows)
@@ -93,7 +94,7 @@ class GateKernel:
 
 class _Rect:
     """A core rectangle for GateKernel2: origin (x0, y0), CX x CY cores, Ht / C hidden tiles each; its multicast range
-    (NOC coordinates; the root is the first core) and 0 / 1 selection tiles per row count."""
+    (NOC coordinates; core t is the root of row t) and 0 / 1 selection tiles per row count."""
 
     def __init__(self, pk, x0, y0, CX, CY):
         self.pk, self.x0, self.y0, self.CX, self.CY, self.C = pk, x0, y0, CX, CY, CX * CY
@@ -104,20 +105,14 @@ class _Rect:
         lo = pk.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
         hi = pk.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + CX - 1, y0 + CY - 1))
         self.mc = [lo.x, lo.y, hi.x, hi.y]
-        self.sel = {}
+        self.roots = [v for cc in self.cores[:16] for w in [pk.mesh.worker_core_from_logical_core(cc)] for v in (w.x, w.y)]
+        self.reds = {}
 
-    def _sel(self, T):
-        if T not in self.sel:
-            import torch
-
-            C = self.C
-            nq = -(-C * T // 32)
-            a = torch.zeros(nq, 32, 32)
-            for rho in range(C * T):
-                a[rho // 32, rho % T, rho % 32] = 1.0
-            self.sel[T] = (nq, ttnn.from_torch(a.permute(1, 0, 2).reshape(1, 1, 32, nq * 32), dtype=ttnn.bfloat16,
-                                               layout=ttnn.TILE_LAYOUT, device=self.pk.mesh, mesh_mapper=self.pk.rep))
-        return self.sel[T]
+    def red(self, T):
+        K = red_k(T)
+        if K not in self.reds:
+            self.reds[K] = red_sel(self.pk.mesh, self.pk.rep, self.C, K)
+        return self.reds[K]
 
 
 class GateKernel2:
@@ -128,7 +123,7 @@ class GateKernel2:
     into row 1 of the outputs (the MoE's two-row path). multi(): up to three gates in one program, each on its own
     rectangle (columns 0..8: rows 0..3, 4..7, 8..9), their rounds in parallel."""
 
-    ROUTER_ROWS = 8  # (the gather buffer: 2 E / 32 parts of ceil(C T / 32) tiles)
+    ROUTER_ROWS = 8  # (the gather buffer: 2 E / 32 parts of ceil(C / 4 red_k) tiles, a root per row)
 
     def __init__(self, post, R: int):
         from .post import CX, CY
@@ -155,7 +150,7 @@ class GateKernel2:
         ET = int(router[0].shape[-1]) // 32 if rt else 4
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             pk.mesh, out_mc) if rt else None
-        NSEL, sel = rc._sel(T)
+        NSEL, sel = rc.red(T)  # (a root per row)
         PER, R, C, crs = rc.PER, self.R, rc.C, rc.crs
         GP = 2 * ET if rt else 4
         (cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
@@ -185,7 +180,8 @@ class GateKernel2:
                  int(rt), ET, int(dup)] + ttnn.TensorAccessorArgs(out).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(lg if rt else out).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(pk.zeros).get_compile_time_args()
-        wr_common = [out.buffer_address(), (lg if rt else out).buffer_address()] + rc.mc + [pk.zeros.buffer_address()]
+        wr_common = [out.buffer_address(), (lg if rt else out).buffer_address()] + rc.mc + [pk.zeros.buffer_address()] \
+            + rc.roots[:2 * T]
         cp_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
                  cb_gath, cb_tot2, cb_g, cb_fa, cb_out, PER, R, NSEL, _bits(1.0 / self.H), _bits(self.eps), GP,
                  int(norm), int(rt), ET, cb_o32, cb_tot3, cb_nw, cb_xb, cb_rw]
@@ -195,7 +191,7 @@ class GateKernel2:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0))]
+        defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -224,7 +220,7 @@ class GateKernel2:
             io += i
             keys.append(key)
             res.append(r)
-        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(("i2m_gate2", self.R, keys)).encode()).digest()[:8],
                                                   "little") & ((1 << 63) - 1)

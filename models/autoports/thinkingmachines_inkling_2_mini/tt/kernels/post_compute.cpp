@@ -145,11 +145,11 @@ void kernel_main() {
     constexpr uint32_t inv_h = get_compile_time_arg_val(28);
     constexpr uint32_t eps = get_compile_time_arg_val(29);
     constexpr uint32_t cb_sel = get_compile_time_arg_val(30);  // row-select matrices (bf16 0 / 1), NQ tiles
-    constexpr uint32_t NQ = get_compile_time_arg_val(31);      // tiles of gathered rows per part (C T rows)
+    constexpr uint32_t NQ = get_compile_time_arg_val(31);      // tiles of gathered rows per part (C rows)
     constexpr uint32_t cb_tout = get_compile_time_arg_val(32);  // root: totals -> writer
     constexpr uint32_t cb_tot = get_compile_time_arg_val(33);   // round 1 totals (received)
     constexpr uint32_t cb_tot2 = get_compile_time_arg_val(34);  // round 2 totals (received)
-    const bool root = get_arg_val<uint32_t>(0) == 0;
+    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
     constexpr uint32_t n = NB + 1;
     static_assert(n <= 6, "DST: max + n weights + sum");
 
@@ -264,7 +264,7 @@ void kernel_main() {
     {
     DeviceZoneScopedN("P_C_R1");
     // ---- reduce round 1 -> r, lg
-    if (root) {  // [sq hi | sq lo | dot hi | dot lo] x NQ tiles, row c T + t = core c's row t -> totals
+    if (root) {  // [sq hi | sq lo | dot hi | dot lo] x NQ tiles, row c = core c's row (this root's) -> totals row 0
         cb_wait_front(cb_gath, 4 * NQ);
         cb_wait_front(cb_sel, NQ);
         tile_regs_acquire();

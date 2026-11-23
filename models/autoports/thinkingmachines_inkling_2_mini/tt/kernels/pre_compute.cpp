@@ -158,7 +158,7 @@ void kernel_main() {
     constexpr uint32_t n = NB + 1;
     constexpr uint32_t K1 = 1 + NQ;  // round 1 quantities: sum x^2, x . q_j
     static_assert(n <= 6 && NQ <= 3, "DST budget");
-    const bool root = get_arg_val<uint32_t>(0) == 0;
+    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
 
     compute_kernel_hw_startup(cb_in, cb_out);
 
