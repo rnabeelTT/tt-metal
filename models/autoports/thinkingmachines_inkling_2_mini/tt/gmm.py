@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Grouped expert matmul for the sorted prefill MoE (tt/kernels/gmm_*.cpp): A [1, G, gs, K] bf16 (the dispatched
 rows, groups sorted by expert), W [1, E, K, N] (this die's expert weights) and the groups' expert ids [1, G] uint16
--> C [1, G, gs, N] bf16. Core (b, s): output columns [b nb, (b + 1) nb) of a contiguous slice s of the groups; the
-weight block is re-read only when the slice moves to the next expert. Same math as ttnn.sparse_matmul with the whole
+-> C [1, G, gs, N] bf16. Core (b, s): output columns [b nb, (b + 1) nb) of the groups of a contiguous range s of the
+experts (each expert's weight block read once per column block). Same math as ttnn.sparse_matmul with the whole
 K in one in0 block (the program's fidelity, FP32 DST, K accumulated in order); ttnn's 1D config puts the N / 32 output
-tiles of gate|up (24 at TP4) on that many cores, this one spreads (column block, group slice) over the grid."""
+tiles of gate|up (24 at TP4) on that many cores, this one spreads (column block, expert range) over the grid."""
 
 from __future__ import annotations
 
@@ -39,15 +39,15 @@ class GroupedMM:
             nb = max(d for d in range(1, 5 if rm else 9) if Nt % d == 0 and fits(d, 1))
         nbuf = 2 if fits(nb, 2) else 1
         NB = Nt // nb
-        # a group slice's NB cores: a w x h rectangle (b = 0 at its corner multicasts the A tiles to the others)
+        # a slice's NB cores: a w x h rectangle (b = 0 at its corner multicasts the A tiles to the others)
         gy = self.ncores // self.gx
         # (the rectangle that fits the most slices)
         w_ = max((d for d in range(1, self.gx + 1) if NB % d == 0 and NB // d <= gy),
                  key=lambda d: (self.gx // d) * (gy // (NB // d)))
         h_ = NB // w_
         per_row = self.gx // w_
-        S = max(1, min(G, per_row * (gy // h_)))  # group slices
-        bounds = [G * s // S for s in range(S + 1)]
+        S = max(1, min(E, per_row * (gy // h_)))  # slices: contiguous expert ranges (each expert's weights read once)
+        bounds = [E * s // S for s in range(S + 1)]
         cores, rt = [], []
         for s in range(S):
             x0, y0 = (s % per_row) * w_, (s // per_row) * h_
@@ -55,7 +55,7 @@ class GroupedMM:
             hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
             for b in range(NB):
                 cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
-                rt.append([b, bounds[s], bounds[s + 1], snoc.x, snoc.y, snoc.x, snoc.y, hi.x, hi.y])
+                rt.append([b, bounds[s], bounds[s + 1], snoc.x, snoc.y, snoc.x, snoc.y, hi.x, hi.y, G])
         crs = _range_set(cores)
         cb_a, cb_w, cb_ids, cb_out = 0, 1, 2, 3
         ids_bytes = (G * 2 + 63) // 64 * 64
@@ -79,10 +79,10 @@ class GroupedMM:
                                            math_approx_mode=False)
         cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
                                    compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt, cb_ids, E],
-                                   runtime_args=_rt(cores, [[r[1], r[2]] for r in rt]), config=cfg)
+                                   runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
-        key = ("i2m_gmm3", G, gs, K, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid,
+        key = ("i2m_gmm4", G, gs, K, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid,
                tuple(repr(t.memory_config()) for t in (a, w, ids, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids, out], prog)

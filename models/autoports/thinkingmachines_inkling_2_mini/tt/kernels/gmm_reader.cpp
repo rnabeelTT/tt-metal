@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Grouped expert matmul (tt/gmm.py), reader: this core's column block b of groups [g0, g1). Per group: its expert's
+// Grouped expert matmul (tt/gmm.py), reader: this core's column block b of the groups of experts [e0, e1) (the ids are
+// sorted: each expert's weights are read by one slice only). Per group: its expert's
 // [Kt x nb] weight block, pushed once per run of groups of one expert (the CB holds two blocks: the next expert's
 // loads while the compute works on the current one), then the group's mt row tiles of A ([Kt] tiles each). Padding
 // groups (id >= E) are skipped (by the compute and the writer too: they read the ids this pushes to cb_ids). The NB cores of a group slice form a rectangle: the b = 0
@@ -9,7 +10,7 @@
 // every core: they consume in lockstep); semaphore 0 (on the sender): receivers ready, 1 (on the receivers): the tile
 // row landed.
 //
-// runtime args: b, g0, g1, sender x / y, multicast x0 y0 x1 y1 (NOC 0)      common args: a, w, ids
+// runtime args: b, e0, e1, sender x / y, multicast x0 y0 x1 y1 (NOC 0), G      common args: a, w, ids
 
 #include <stdint.h>
 
@@ -30,7 +31,8 @@ void kernel_main() {
     constexpr auto w_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();
     constexpr auto i_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
     constexpr uint32_t NB = Nt / nb;
-    const uint32_t b = get_arg_val<uint32_t>(0), g0 = get_arg_val<uint32_t>(1), g1 = get_arg_val<uint32_t>(2);
+    const uint32_t b = get_arg_val<uint32_t>(0), e0 = get_arg_val<uint32_t>(1), e1 = get_arg_val<uint32_t>(2);
+    const uint32_t G = get_arg_val<uint32_t>(9);
     const uint32_t sx = get_arg_val<uint32_t>(3), sy = get_arg_val<uint32_t>(4);
     const uint64_t mc_base = get_noc_multicast_addr(get_arg_val<uint32_t>(5), get_arg_val<uint32_t>(6),
                                                     get_arg_val<uint32_t>(7), get_arg_val<uint32_t>(8), 0);
@@ -52,10 +54,13 @@ void kernel_main() {
     volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(il);
 
     uint32_t prev = 0xFFFFFFFF;
-    for (uint32_t g = g0; g < g1; ++g) {
+    for (uint32_t g = 0; g < G; ++g) {
         const uint32_t e = ids[g];
-        if (e >= E) {
+        if (e < e0) {
             continue;
+        }
+        if (e >= e1) {
+            break;  // (sorted; padding groups carry ids >= E >= e1)
         }
         if (e != prev) {
             cb_reserve_back(cb_w, Kt * nb);

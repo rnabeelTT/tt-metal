@@ -4,8 +4,8 @@
 // Grouped expert matmul (tt/gmm.py), compute: per group, per row tile: [1 x Kt] @ [Kt x nb] accumulated in DST over
 // the whole K (the program's fidelity, FP32 DST), packed to nb output tiles.
 //
-// runtime args: g0, g1 (this core's groups). The weight block stays at the CB front for a run of groups of one expert
-// (the ids from cb_ids); padding groups (id >= E) are skipped.
+// runtime args: e0, e1 (this core's experts), G. The weight block stays at the CB front for a run of groups of one
+// expert (the ids from cb_ids, sorted); padding groups (id >= E) end the scan.
 
 #include <cstdint>
 
@@ -26,7 +26,7 @@ void kernel_main() {
     constexpr uint32_t mt = get_compile_time_arg_val(5);
     constexpr uint32_t cb_ids = get_compile_time_arg_val(6);
     constexpr uint32_t E = get_compile_time_arg_val(7);
-    const uint32_t g0 = get_arg_val<uint32_t>(0), g1 = get_arg_val<uint32_t>(1);
+    const uint32_t e0 = get_arg_val<uint32_t>(0), e1 = get_arg_val<uint32_t>(1), G = get_arg_val<uint32_t>(2);
     compute_kernel_hw_startup<SrcOrder::Reverse>(cb_a, cb_w, cb_out);  // (matmul: in1 -> srcA, the stock bmm's order)
     matmul_block_init(cb_a, cb_w, false, nb, 1, Kt);
 #if GMM_RM
@@ -34,10 +34,13 @@ void kernel_main() {
 #endif
     cb_wait_front(cb_ids, 1);
     uint32_t prev = 0xFFFFFFFF;
-    for (uint32_t g = g0; g < g1; ++g) {
+    for (uint32_t g = 0; g < G; ++g) {
         const uint32_t e = (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF;
-        if (e >= E) {
+        if (e < e0) {
             continue;
+        }
+        if (e >= e1) {
+            break;
         }
         if (e != prev) {
             if (prev != 0xFFFFFFFF) {

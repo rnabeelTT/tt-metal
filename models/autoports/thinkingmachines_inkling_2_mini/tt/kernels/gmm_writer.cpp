@@ -4,7 +4,7 @@
 // Grouped expert matmul (tt/gmm.py), writer: the nb output tiles of each (group, row tile) -> C tiles
 // (g mt + mi) Nt + b nb + j.
 //
-// runtime args: b, g0, g1      common args: c
+// runtime args: b, e0, e1 (this core's experts), ..., G (index 9)      common args: c
 
 #include <stdint.h>
 
@@ -18,7 +18,8 @@ void kernel_main() {
     constexpr uint32_t cb_ids = get_compile_time_arg_val(4);
     constexpr uint32_t E = get_compile_time_arg_val(5);
     constexpr auto c_args = TensorAccessorArgs<6>();
-    const uint32_t b = get_arg_val<uint32_t>(0), g0 = get_arg_val<uint32_t>(1), g1 = get_arg_val<uint32_t>(2);
+    const uint32_t b = get_arg_val<uint32_t>(0), e0 = get_arg_val<uint32_t>(1), e1 = get_arg_val<uint32_t>(2);
+    const uint32_t G = get_arg_val<uint32_t>(9);
 #if GMM_RM
     const auto ac = TensorAccessor(c_args, get_common_arg_val<uint32_t>(0), Nt * 64);
 #else
@@ -26,9 +27,12 @@ void kernel_main() {
 #endif
     cb_wait_front(cb_ids, 1);  // (the reader's copy of the group ids)
     volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_read_ptr(cb_ids));
-    for (uint32_t g = g0; g < g1; ++g) {
-        if (ids[g] >= E) {
-            continue;  // (padding group: never computed, its rows never read back)
+    for (uint32_t g = 0; g < G; ++g) {
+        if (ids[g] < e0) {
+            continue;
+        }
+        if (ids[g] >= e1) {
+            break;  // (sorted; padding groups: never computed, their rows never read back)
         }
         for (uint32_t mi = 0; mi < mt; ++mi) {
             cb_wait_front(cb_out, nb);
