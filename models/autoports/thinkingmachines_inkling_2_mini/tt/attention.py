@@ -320,6 +320,31 @@ def _rms_unweighted(x, eps):
     return ttnn.multiply(x, ttnn.rsqrt(ttnn.add(ms, eps)))
 
 
+# I2M_PREFILL_PREP (default 1): a prefill chunk's q / r / sink prep and K / V cache writes in one program (tt/aprep.py
+# with the chunk's rows as its units): the slices, l2 clips, RMS, tau, casts, transposes and paged_fill_cache
+PREFILL_PREP = __import__("os").environ.get("I2M_PREFILL_PREP", "1") == "1"
+_PREP = {}
+
+
+def _prefill_prep(w, c, pq, k, v, tau_rows, fill):
+    """-> (q [1, T, NH, HD], rq [1, T, NH, 32], sk [1, T, NH, 32]) bf16; the K / V rows written into the caches."""
+    from .aprep import AttnPrep
+
+    T = int(pq.shape[-2])
+    key = (id(w), T)
+    if key not in _PREP:
+        _PREP[key] = AttnPrep(w, T, None)
+    tau_t = None
+    if not w.sliding:  # (the log scaling: 1 before n_floor)
+        tau_t = ttnn.from_torch(tau_rows.reshape(1, T, 1, 1).float(), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT,
+                                device=w.mesh,
+                                mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if w.N > 1 else None)
+    q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill))
+    if tau_t is not None:
+        ttnn.deallocate(tau_t)
+    return q, rq, sk
+
+
 def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | None = None, tt_ccl=None, slot: int = 0):
     """One sequence, rows at positions p0 .. p0 + R - 1 (consecutive). xq / xk / xv [1, 1, R, H] bf16 (normed).
     R <= 32 // G: decode / verify rows (any p0); otherwise a prefill chunk (p0 % 64 == 0, R % 64 == 0; the first
@@ -343,7 +368,9 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.rd)); o0 += w.rd
     s = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + NH)); o0 += w.sd
     g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.gd))
-    ttnn.deallocate(pq)
+    pq_full = pq if (PREFILL_PREP and not rows_mode and R > 32) else None
+    if pq_full is None:
+        ttnn.deallocate(pq)
     # convs
     if w.sliding:
         if rows_mode:
@@ -357,8 +384,19 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
         v = c.v_conv.rows(pv, xv, commit_n=nvalid)
     ttnn.deallocate(pk)
     ttnn.deallocate(pv)
-    # per-head norms (fp32)
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
+    if PREFILL_PREP and not rows_mode and R > 32 and c.kv_dtype == ttnn.bfloat16 and pq_full is not None:
+        b0, nb = p0 // c.block, R // c.block
+        fill_pt = c._up_i32(c.read_host[slot, b0 : b0 + nb].reshape(1, -1))
+        tau_rows = tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha)
+        q, rq, sk = _prefill_prep(w, c, pq_full, k, v, tau_rows, fill_pt)
+        ttnn.deallocate(pq_full)
+        ttnn.deallocate(fill_pt)
+        ttnn.deallocate(k)
+        ttnn.deallocate(v)
+        return _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl)
+    # per-head norms (fp32)
     q = _l2clip(f32(ttnn.reshape(q, (1, R, NH, HD))), w.qk_clip, w.q_scale)
     r = _l2clip(f32(ttnn.reshape(r, (1, R, NH, DR))), w.rel_clip, w.r_scale)
     k = _l2clip(f32(ttnn.reshape(k, (1, R, NKV, HD))), w.qk_clip)
@@ -398,6 +436,14 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     rq = ttnn.pad(bf(r), [1, R, NH, 32], [0, 0, 0, 0], 0.0)
     sk = ttnn.multiply(f32(ttnn.reshape(s, (1, R, NH, 1))), w.sink_bcast)  # [1, R, NH, 32]
     sk = bf(sk)
+    return _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl)
+
+
+def _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl):
+    """attention()'s SDPA, output gate, o_proj and all-reduce."""
+    NH, HD, N = w.NH, w.HD, w.N
+    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
     if rows_mode:
         positions = c._up_i32(torch.arange(p0, p0 + R).reshape(1, R) if R > 1 else torch.tensor([p0]))
     else:
@@ -469,7 +515,9 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.rd)); o0 += w.rd
     s = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + NH)); o0 += w.sd
     g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))
-    ttnn.deallocate(pq)
+    prep = PREFILL_PREP and T > 32 and c.kv_dtype == ttnn.bfloat16
+    if not prep:
+        ttnn.deallocate(pq)
     sk_ = [(row0, R, valid, lanes[lane][0]) for row0, R, p0, valid, slot, lane in ctx.segs]
     sv_ = [(row0, R, valid, lanes[lane][1]) for row0, R, p0, valid, slot, lane in ctx.segs]
     if w.sliding:
@@ -481,6 +529,13 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     ttnn.deallocate(pk)
     ttnn.deallocate(pv)
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
+    if prep:  # the q / r / sink prep and the K / V writes in one program
+        tau = torch.cat([tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha) for _, R, p0, _, _, _ in ctx.segs])
+        q, rq, sk = _prefill_prep(w, c, pq, k, v, tau, ctx.fill[w.sliding])
+        for t in (pq, k, v):
+            ttnn.deallocate(t)
+        return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
     q = _l2clip(f32(ttnn.reshape(q, (1, T, NH, HD))), w.qk_clip, w.q_scale)
     r = _l2clip(f32(ttnn.reshape(r, (1, T, NH, DR))), w.rel_clip, w.r_scale)
     k = _l2clip(f32(ttnn.reshape(k, (1, T, NKV, HD))), w.qk_clip)
@@ -503,6 +558,14 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     ttnn.deallocate(v)
     rq = ttnn.pad(bf(r), [1, T, NH, 32], [0, 0, 0, 0], 0.0)
     sk = bf(ttnn.multiply(f32(ttnn.reshape(s, (1, T, NH, 1))), w.sink_bcast))
+    return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
+
+
+def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
+    """attention_packed()'s SDPA, output gate, o_proj and all-reduce."""
+    NH, HD, N = w.NH, w.HD, w.N
+    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, ctx.positions, ctx.pt[w.sliding], rq, w.table, w.scale, w.W, w.E,
                             sink=sk, out_memory_config=DRAM, pt_per_item=True)
     for t in (q, rq, sk):

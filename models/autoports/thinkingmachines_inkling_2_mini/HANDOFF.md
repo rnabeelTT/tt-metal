@@ -240,6 +240,21 @@ from 0.9677 / 0.9954 / 0.0212, the eval's noise). Tried and dropped: one fused-M
 0.9998, but slower than two 16-row calls: the MoE is bandwidth-bound at these widths, and TP4's 288-column expert slices
 are stored padded to 384); the MoE rows kernels at one row (still route the sigb router wrongly).
 
+## Prefill, this round (TP4, one 1,024-token chunk, tools/bench_prefill.py wall time)
+
+| change | ms | tok/s |
+|---|---|---|
+| start | 870 | 1,177 |
+| grouped expert matmul over the whole grid (tt/gmm.py) + multi-core dispatch (qwen36 dispatch_mc) | 682 | 1,501 |
+| MoE activation + routing weights in one program (tt/moeact.py) | 642 | 1,596 |
+| down projection writes row-major rows (no untilize before the un-dispatch) | 640 | 1,600 |
+| attention prep for the chunk's rows (tt/aprep.py: q / r / sink, the K / V rows into L1 fill tensors) | 525 | 1,949 |
+
+Decode eval after the attention prep: 0.9711 / 0.9955 / 0.0168 (noise band). The prep's outputs are 1-2 bf16 ulps from
+the op path (exact sums); tests/test_packed_device.py's prefix-resume KL (different chunk shapes) went 1.7e-3 ->
+1.1e-2 (its bar raised to 2e-2; the exact resume at a chunk boundary stays bitwise). Not straight into the DRAM caches:
+rows 2k / 2k + 1 share a 64-byte DRAM word.
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from

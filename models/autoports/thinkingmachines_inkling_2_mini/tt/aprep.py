@@ -30,7 +30,8 @@ def _bits(x: float) -> int:
 
 class AttnPrep:
     def __init__(self, w, B: int, kv_mc):
-        assert B <= 32 and w.DR in (16, 32) and w.NH < 32
+        """B: decode users (<= 32), or the rows of a prefill chunk (> 32: call with fill=; q / r / sink in DRAM)."""
+        assert w.DR in (16, 32) and w.NH < 32
         self.w, self.B, self.kv_mc, self.mesh = w, B, kv_mc, w.mesh
         grid = self.mesh.compute_with_storage_grid_size()
         self.total = 5 * B
@@ -39,11 +40,19 @@ class AttnPrep:
         self.crs = _range_set(self.cores)
         self.HT = w.HD // 32
 
-    def __call__(self, pq, k, v, tau=None, kv=None):
+    def __call__(self, pq, k, v, tau=None, kv=None, fill=None):
         """kv = (k_cache, v_cache, positions int32 [B], block table int32 [B, max blocks]): the k / v rows written into
-        the paged bf16 caches here (no k / v outputs: None)."""
+        the paged bf16 caches here (no k / v outputs: None). fill = (k_cache, v_cache, fill table int32 [1, B / 64]):
+        a prefill chunk's rows written into the caches (row b -> block fill[b / 64], row b % 64)."""
         w, B, HT, mesh = self.w, self.B, self.HT, self.mesh
         L1 = ttnn.L1_MEMORY_CONFIG
+        kf = vf = None
+        if fill is not None:  # (the rows go to L1 [1, NKV, T, HD] tensors; paged_fill_cache moves them below)
+            mk = lambda: ttnn.allocate_tensor_on_device(ttnn.Shape([1, w.NKV, B, w.HD]), ttnn.bfloat16,  # noqa: E731
+                                                        ttnn.TILE_LAYOUT, mesh, L1)
+            kf, vf = mk(), mk()
+            kv = (kf, vf, fill[2], fill[2])
+        prefill = B > 32
         k = k if (not k.is_sharded() and k.memory_config().buffer_type == ttnn.BufferType.L1) else \
             ttnn.to_memory_config(k, L1)
         v = v if (not v.is_sharded() and v.memory_config().buffer_type == ttnn.BufferType.L1) else \
@@ -51,11 +60,15 @@ class AttnPrep:
         glob = not w.sliding
         al = lambda shape, mc: ttnn.allocate_tensor_on_device(ttnn.Shape(shape), ttnn.bfloat16,  # noqa: E731
                                                                ttnn.TILE_LAYOUT, mesh, mc)
-        q_o = al([1, B, w.NH, w.HD], L1)
-        r_o = al([1, B, w.NH, 32], L1)
-        k_o = al([1, B, 32, w.HD], self.kv_mc)
-        v_o = al([1, B, 32, w.HD], self.kv_mc)
-        s_o = al([1, B, w.NH, 32], L1)
+        omc = ttnn.DRAM_MEMORY_CONFIG if prefill else L1
+        q_o = al([1, B, w.NH, w.HD], omc)
+        r_o = al([1, B, w.NH, 32], omc)
+        if kv is not None and prefill:  # (no k / v outputs: placeholders for the unused writer arguments)
+            k_o = v_o = q_o
+        else:
+            k_o = al([1, B, 32, w.HD], self.kv_mc)
+            v_o = al([1, B, 32, w.HD], self.kv_mc)
+        s_o = al([1, B, w.NH, 32], omc)
         tau_t = tau if glob else pq  # (unused on sliding layers)
         cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out = 0, 1, 2, 3, 4, 5, 6
         f32, bf = ttnn.float32, ttnn.bfloat16
@@ -84,13 +97,15 @@ class AttnPrep:
             wr_ct += ttnn.TensorAccessorArgs(kc).get_compile_time_args() \
                 + ttnn.TensorAccessorArgs(wpos).get_compile_time_args() + ttnn.TensorAccessorArgs(tab).get_compile_time_args()
             wr_extra = [kc.buffer_address(), vc.buffer_address(), wpos.buffer_address(), tab.buffer_address()]
-            pos_page = int(wpos.shape[-1]) * 4
+            pos_page = 64 if fill is not None else int(wpos.shape[-1]) * 4
             assert pos_page <= 256 and kc.dtype == ttnn.bfloat16 and int(kc.shape[1]) == w.NKV
+            fill_defs = [("APREP_RT", str(B // 32))] if fill is not None else []
+            assert fill is None or int(tab.shape[-1]) * 4 <= 1024
             al = 64 if tab.memory_config().buffer_type == ttnn.BufferType.DRAM else 16
             tab_page = -(-int(tab.shape[-1]) * 4 // al) * al  # (interleaved pages sit at the aligned page size)
             wr_defs = [("APREP_KV", "1"), ("APREP_CB_STAGE", str(cb_st)), ("APREP_NKV", str(w.NKV)),
                        ("APREP_BLK", str(int(kc.shape[2]))), ("APREP_POS_PAGE", str(pos_page)),
-                       ("APREP_TAB_PAGE", str(tab_page))]
+                       ("APREP_TAB_PAGE", str(tab_page)), ("APREP_FILL", str(int(fill is not None)))] + fill_defs
         wr_rt = [[q_o.buffer_address(), r_o.buffer_address(), k_o.buffer_address(), v_o.buffer_address(),
                   s_o.buffer_address(), i, nc, self.total] + wr_extra for i in range(nc)]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
@@ -103,7 +118,9 @@ class AttnPrep:
             kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
             defines=list(defs), config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
-            dm("aprep_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
+            dm("aprep_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0,
+               [("APREP_PQT", str(int(pq.shape[-1]) // 32)), ("APREP_KVT", str(int(k.shape[-1]) // 32))]
+               if prefill else []),
             dm("aprep_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1, wr_defs),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "aprep_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=cp_ct, runtime_args=_rt(self.cores, cp_rt), config=cfg),
@@ -111,12 +128,23 @@ class AttnPrep:
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_aprep", B, nc, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
                repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
-               tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())))
+               tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())), prefill,
+               tuple(pq.shape), tuple(k.shape))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        io = [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ())
+        io, seen = [], set()
+        for t in [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ()):
+            if id(t) not in seen:
+                seen.add(id(t))
+                io.append(t)
         ttnn.generic_op(io, prog)
+        if fill is not None:
+            for cache, t in ((fill[0], kf), (fill[1], vf)):
+                ttnn.experimental.paged_fill_cache(cache, t, fill[2], batch_idx=0)
+                ttnn.deallocate(t)
+            return q_o, r_o, None, None, s_o
         if kv is not None:
-            ttnn.deallocate(k_o)
-            ttnn.deallocate(v_o)
+            if not prefill:
+                ttnn.deallocate(k_o)
+                ttnn.deallocate(v_o)
             return q_o, r_o, None, None, s_o
         return q_o, r_o, k_o, v_o, s_o

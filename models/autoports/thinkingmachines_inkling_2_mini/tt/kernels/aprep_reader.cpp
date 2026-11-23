@@ -28,16 +28,22 @@ inline void zero(uint32_t l1, uint32_t bytes) {
         noc_async_read(zeros, l1 + o, bytes - o < MEM_ZEROS_SIZE ? bytes - o : MEM_ZEROS_SIZE);
     }
 }
-// row b of src tiles (off + h * nt + c), h < heads, into row h of nt zeroed tiles at l1
+#ifndef APREP_PQT
+#define APREP_PQT 0  // (tiles per row of pq / k / v: prefill rows past the first tile row; decode B <= 32 needs none)
+#define APREP_KVT 0
+#endif
+// row b of src tiles (off + h * nt + c), h < heads, into row h of nt zeroed tiles at l1 (row b: row b % 32 of tile row
+// b / 32, rowt tiles per row)
 template <typename Acc>
 inline void gather(const Acc& src, uint32_t l1, uint32_t off, uint32_t heads, uint32_t nt, uint32_t b, uint32_t face,
-                   uint32_t row, uint32_t tile) {
+                   uint32_t row, uint32_t tile, uint32_t rowt) {
     zero(l1, nt * tile);
     noc_async_read_barrier();
+    const uint32_t base = (b >> 5) * rowt, br = b & 31;
     for (uint32_t h = 0; h < heads; ++h) {
         for (uint32_t c = 0; c < nt; ++c) {
             for (uint32_t half = 0; half < 2; ++half) {
-                noc_async_read(src.get_noc_addr(off + h * nt + c, row_off(b, half, face, row)),
+                noc_async_read(src.get_noc_addr(base + off + h * nt + c, row_off(br, half, face, row)),
                                l1 + c * tile + row_off(h, half, face, row), row);
             }
         }
@@ -89,13 +95,14 @@ void kernel_main() {
             const uint32_t nt = type == 0 ? HT : 1;
             cb_reserve_back(cb_xf, nt);
             if (type == 0 || DR == 32) {
-                gather(apq, get_write_ptr(cb_xf), type == 0 ? 0 : R0, NH, nt, b, F32_FACE, F32_ROW, F32_TILE);
+                gather(apq, get_write_ptr(cb_xf), type == 0 ? 0 : R0, NH, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT);
             } else {  // DR 16: head h = face half h % 2 of pq tile R0 + h / 2 -> columns 0..15 of row h (16..31 zero)
                 const uint32_t l1 = get_write_ptr(cb_xf);
                 zero(l1, F32_TILE);
                 noc_async_read_barrier();
                 for (uint32_t h = 0; h < NH; ++h) {
-                    noc_async_read(apq.get_noc_addr(R0 + h / 2, row_off(b, h % 2, F32_FACE, F32_ROW)),
+                    noc_async_read(apq.get_noc_addr((b >> 5) * APREP_PQT + R0 + h / 2,
+                                                    row_off(b & 31, h % 2, F32_FACE, F32_ROW)),
                                    l1 + row_off(h, 0, F32_FACE, F32_ROW), F32_ROW);
                 }
             }
@@ -110,7 +117,7 @@ void kernel_main() {
             }
         } else if (type == 2 || type == 3) {
             cb_reserve_back(cb_xb, HT);
-            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, NKV, HT, b, BF_FACE, BF_ROW, BF_TILE);
+            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, NKV, HT, b, BF_FACE, BF_ROW, BF_TILE, APREP_KVT);
             noc_async_read_barrier();
             cb_push_back(cb_xb, HT);
         } else {
@@ -121,7 +128,7 @@ void kernel_main() {
             noc_async_read_barrier();
             // stage row b (32 values) in row 31 of the tile (rows >= NH are zeroed again below)
             for (uint32_t half = 0; half < 2; ++half) {
-                noc_async_read(apq.get_noc_addr(S0, row_off(b, half, F32_FACE, F32_ROW)),
+                noc_async_read(apq.get_noc_addr((b >> 5) * APREP_PQT + S0, row_off(b & 31, half, F32_FACE, F32_ROW)),
                                l1 + row_off(31, half, F32_FACE, F32_ROW), F32_ROW);
             }
             noc_async_read_barrier();
