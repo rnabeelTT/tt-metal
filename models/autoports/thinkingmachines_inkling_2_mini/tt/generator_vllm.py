@@ -62,10 +62,11 @@ if SPEC:
     mtp_plugin_shim.apply(SPEC + 1)
 SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
 SPEC_DEBUG = os.environ.get("I2M_SPEC_DEBUG", "0") == "1"
+SPEC_DUMP = os.environ.get("I2M_SPEC_DUMP")  # (a path: every pass's verify / draft candidates, for offline study)
 # I2M_SPEC_MIN: a request whose tokens per pass (running mean, over >= 16 passes) fall below this goes back to plain
-# decode for the rest of its generation. Default per die count, ~ a pass's time / a one-row step's: one die 45 / 23.5,
-# TP2 29.5 / 18.5, TP4 23 / 13.9
-SPEC_MIN_DEFAULT = {1: 2.0, 2: 1.7, 4: 1.6}  # (log every pass: position, anchor, drafts, emitted)
+# decode for the rest of its generation. Default per die count: a served pass's time / a served plain token's
+# (one die 41.6 / 24.7, TP2 ~29 / 20.1, TP4 24.5 / 15.5)
+SPEC_MIN_DEFAULT = {1: 1.7, 2: 1.5, 4: 1.6}  # (log every pass: position, anchor, drafts, emitted)
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 
 
@@ -159,6 +160,7 @@ class Inkling2ForCausalLM:
             self.ver = BatchedDecoder(model, SPEC + 1, shared=self.dec, verify=SPEC + 1)
             self.vtr = TracedDecoder(self.ver)
             self.sp_stats = [0, 0]  # passes, drafts kept
+            self._dump = []
             logger.info(f"speculative decoding: {SPEC} drafts per pass (sequences up to {SPEC_MAX_LEN} tokens)")
         self._captured = False
         self.already_warmed_up_prefill = False
@@ -560,6 +562,11 @@ class Inkling2ForCausalLM:
         em, k = self.hs.spec(idx, vals, r, drafts, sp, outs=_row(kwargs.get("output_tokens"), r),
                              prompt=_row(kwargs.get("prompt_tokens"), r), q=q)
         self.ver.set_accept([k])
+        if SPEC_DUMP and q is not None:  # (offline acceptance study: the target's candidates / the drafter's per step)
+            self._dump.append({"idx": idx[: d + 1].clone(), "vals": vals[: d + 1].clone(), "drafts": list(drafts),
+                               "q": [(qi.clone(), ql.clone()) for qi, ql in q], "temp": float(_param(sp, "temperature", r, 0.0))})
+            if len(self._dump) % 50 == 0:
+                torch.save(self._dump, SPEC_DUMP)
         if SPEC_DEBUG:
             logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")
         s.update(n=p, k=k, em=em)
