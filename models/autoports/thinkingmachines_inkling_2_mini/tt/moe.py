@@ -37,6 +37,10 @@ SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
 # rows per expert group in the sorted dispatch (32 | 64 | 128): larger groups re-read each expert's weights fewer
 # times (one weight read per group) at more padding; long prefill chunks favour larger groups
 GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
+# I2M_MOE_GMM (default 1): the sorted prefill's expert matmuls as tt/gmm.py (every core) instead of ttnn.sparse_matmul
+# (its 1D config puts gate|up's 24 output tiles on 24 cores)
+GMM = os.environ.get("I2M_MOE_GMM", "1") == "1"
+_GMM = __import__("types").SimpleNamespace()
 assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
 # I2M_MOE_LAYOUT=fused (default): ONE copy of the experts in the fused decode kernels' layout (tt/moe_fused.py: per
@@ -207,17 +211,23 @@ class MoE:
             cgu, cdn = self._cfg_sorted[("gs", gs)][W]
             alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
                                                              ttnn.TILE_LAYOUT, self.mesh, DRAM)
-            fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,
-                                       program_config=cgu, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
-                                       optional_output_tensor=alloc(2 * W))  # compact [1, G, 32, 2W]
+            if GMM:  # the grouped expert matmul over the whole grid (tt/gmm.py)
+                fused = self._gmm(x_disp, ug, m["group_ids"], alloc(2 * W), E)
+            else:
+                fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,
+                                           program_config=cgu, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
+                                           optional_output_tensor=alloc(2 * W))  # compact [1, G, 32, 2W]
             din = inkling_act_fused(ttnn.slice(fused, [0, 0, 0, 0], [1, G, gs, W]),
                                     ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
             ttnn.deallocate(fused)
             din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
-            down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
-                                      is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
-                                      compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
-                                      optional_output_tensor=alloc(H))  # compact [1, G, 32, H]
+            if GMM:
+                down = self._gmm(din, dn, m["group_ids"], alloc(H), E)
+            else:
+                down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
+                                          is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
+                                          compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
+                                          optional_output_tensor=alloc(H))  # compact [1, G, 32, H]
             ttnn.deallocate(din)
             y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
             ttnn.deallocate(down)
@@ -227,6 +237,14 @@ class MoE:
             if m.get(key) is not None:
                 ttnn.deallocate(m[key])
         return out
+
+    def _gmm(self, a, w, ids, out, E):
+        if getattr(_GMM, "op", None) is None:
+            from .gmm import GroupedMM
+
+            _GMM.op = GroupedMM(self.mesh, ttnn.MathFidelity.HiFi2 if w.dtype != ttnn.bfloat16 else
+                                ttnn.MathFidelity.HiFi4)
+        return _GMM.op(a, w, ids, out, E)
 
     def _gather(self, x, w, ids, T):
         k, Il, H = self.k, self.Il, self.H

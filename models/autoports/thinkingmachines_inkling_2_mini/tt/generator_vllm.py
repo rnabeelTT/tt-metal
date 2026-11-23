@@ -73,8 +73,10 @@ def _host_tensor(t):
 
 # The global layers' KV pool (tokens), shared by the slots through vLLM's block manager: slots x max_model_len, capped
 # at what fits beside the weights (bf16 KV: 8 global applications x 2 x 8 kv heads x 128 x 2 B = 32 KiB per token,
-# / dies; mem_probe after the build). I2M_KV_POOL_TOKENS overrides the cap.
-KV_POOL_CAP = {4: 2_359_296, 2: 851_968, 1: 81_920}
+# / dies). tools/mem_probe.py with POOL=65536 at the card's slots x context, after the warm-ups and trace captures,
+# free DRAM per die: 4 dies 16.55 GiB (32 x 1M), 2 dies 10.16 GiB (16 x 512K), 1 die 0.29 GiB (8 x 64K); the caps keep
+# ~1.25 GiB free for prefill transients (the Ornith port's headroom). I2M_KV_POOL_TOKENS overrides the cap.
+KV_POOL_CAP = {4: 2_064_384, 2: 647_168, 1: 65_536}
 
 
 def kv_pool_tokens(num_devices, max_model_len, max_num_seqs):

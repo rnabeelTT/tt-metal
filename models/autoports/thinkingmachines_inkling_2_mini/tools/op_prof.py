@@ -73,18 +73,20 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N))
     REC["mesh"] = mesh
     dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
-    m = Inkling2Model(mesh, max_seq_len=1024, expert_dtype=dt[os.environ.get("EXPERT_DT", "bfp8")],
+    P0 = int(os.environ.get("P0", "0"))  # (prefill: the chunk's first position; the earlier KV is not filled)
+    m = Inkling2Model(mesh, max_seq_len=max(1024, P0 + int(os.environ.get("PREFILL", "0")) + 64),
+                      expert_dtype=dt[os.environ.get("EXPERT_DT", "bfp8")],
                       kv_dtype=dt[os.environ.get("KV_DT", "bf16")], prefill_chunk=int(os.environ.get("CHUNK", "256")), slots=B)
     T = int(os.environ.get("PREFILL", "0"))
     if T:  # one prefill chunk of T rows (slot 0) instead of a decode step
         ids = torch.arange(1000, 1000 + T)
         for _ in range(2):
             m.reset()
-            m.forward(ids, 0, valid=T, slot=0, last_only=True)
+            m.forward(ids, P0, valid=T, slot=0, last_only=True)
         m.reset()
         _read()
         REC["on"] = True
-        m.forward(ids, 0, valid=T, slot=0, last_only=True)
+        m.forward(ids, P0, valid=T, slot=0, last_only=True)
     else:
         dec = BatchedDecoder(m, B)
         dec.set_inputs(torch.arange(100, 100 + B), torch.arange(300, 300 + B))

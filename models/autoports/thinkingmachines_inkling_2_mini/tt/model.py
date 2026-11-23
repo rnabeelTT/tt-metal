@@ -368,7 +368,8 @@ class Inkling2Model:
         self.slots = slots
         # the global layers' block tables (shared; vLLM's block ids when vLLM pages the global KV)
         self.pages = GlobalPages(mesh, slots, math.ceil(max_seq_len / 64),
-                                 pool_blocks=math.ceil(kv_pool_tokens / 64) if kv_pool_tokens else None)
+                                 pool_blocks=math.ceil(kv_pool_tokens / 64) + 64 if kv_pool_tokens else None)
+        # (+ 64 blocks: the TT plugin allocates a few blocks past the budget it is given)
         self.lanes = LANES or (4 if mesh.get_num_devices() == 1 else 8)
         self.apps = [AppState(self.layers[li], max_seq_len, kv_dtype, prefill_chunk, slots, self.pages, self.lanes)
                      if li in self.layers else None
