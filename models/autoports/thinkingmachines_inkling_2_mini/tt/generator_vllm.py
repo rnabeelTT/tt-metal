@@ -75,14 +75,17 @@ def _host_tensor(t):
 # at what fits beside the weights (bf16 KV: 8 global applications x 2 x 8 kv heads x 128 x 2 B = 32 KiB per token,
 # / dies). tools/mem_probe.py with POOL=65536 at the card's slots x context, after the warm-ups and trace captures,
 # free DRAM per die: 4 dies 16.55 GiB (32 x 1M), 2 dies 10.16 GiB (16 x 512K), 1 die 0.29 GiB (8 x 64K); the caps keep
-# ~1.25 GiB free for prefill transients (the Ornith port's headroom). I2M_KV_POOL_TOKENS overrides the cap.
+# ~1.25 GiB free for prefill transients (the Ornith port's headroom). I2M_KV_POOL_TOKENS overrides the cap. 2048-row
+# prefill chunks (the sliding rings hold the window + one chunk): +1.29 GiB per die at 4 dies x 32 slots.
 KV_POOL_CAP = {4: 2_064_384, 2: 647_168, 1: 65_536}
+KV_POOL_CAP_2048 = {4: 1_895_296}
 
 
 def kv_pool_tokens(num_devices, max_model_len, max_num_seqs):
     want = max_model_len * max_num_seqs
     env = os.environ.get("I2M_KV_POOL_TOKENS")
-    cap = int(env) if env else KV_POOL_CAP.get(num_devices, want)
+    caps = KV_POOL_CAP_2048 if PREFILL_CHUNK == 2048 else KV_POOL_CAP
+    cap = int(env) if env else caps.get(num_devices, want)
     return (max(max_model_len, min(want, cap)) + 63) // 64 * 64
 
 class Inkling2ForCausalLM:

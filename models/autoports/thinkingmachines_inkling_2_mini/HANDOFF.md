@@ -257,6 +257,10 @@ are stored padded to 384); the MoE rows kernels at one row (still route the sigb
 | grouped matmul: padding groups skipped, the weight block double-buffered when it fits | 352 | 2,913 |
 | prefill SDPA: 4 items per work unit (their Q tiles stacked; each K / V chunk read once for the 4) | 346 | 2,958 |
 
+Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), tools/needle_serve.py, depths 0.1 / 0.5 /
+0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
+760 s (1,350 tok/s over the whole prompt).
+
 At 128K positions (op_prof P0=131072, one 1024-row chunk, device): SDPA 377 -> 111 ms (2 items: 228; the stream bound:
 linear in items per unit), the chunk 709 -> 443 ms. 8 items: the CBs (1.56 MB) clash with L1; the tree reduction's
 code compiles only for one-item units (4 items overflowed the kernel config buffer by 320 bytes).

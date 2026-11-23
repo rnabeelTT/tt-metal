@@ -75,13 +75,18 @@ serve:
 
 serve_profiles:
   - name: p300x2
-    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences, 65536-token context. The fastest profile.
+    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences sharing a 1.9M-token KV pool, up to 1,048,576
+      tokens per request. The fastest profile.
     hardware: p300x2
     mesh_device: P300x2
+    max_model_len: 1048576
+    env: {I2M_PREFILL_CHUNK: "2048"}   # 2048-row prefill chunks: +14% prefill, the pool 2.06M -> 1.9M tokens
   - name: p150x4
     description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 boards (the identical (1,4) mesh).
     hardware: p150x4
     mesh_device: P150x4
+    max_model_len: 1048576
+    env: {I2M_PREFILL_CHUNK: "2048"}
   - name: p300
     description: One p300 board (2 dies, tensor parallel 2), 16 sequences, 32768-token context.
     hardware: p300
