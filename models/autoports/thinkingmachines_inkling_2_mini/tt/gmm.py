@@ -30,8 +30,9 @@ class GroupedMM:
         N = int(w.shape[-1])
         Kt, Nt, mt = K // 32, N // 32, gs // 32
         w_page = TILE_BYTES[w.dtype]
+        rm = out.layout == ttnn.ROW_MAJOR_LAYOUT  # (row-major C: untilized blocks of <= 4 tiles with FP32 DST)
         if nb is None:  # the column block: DST (8 FP32 tiles), Nt % nb == 0, the weight block <= ~512 KB of L1
-            nb = max(d for d in range(1, 9) if Nt % d == 0 and Kt * d * w_page <= 512 * 1024)
+            nb = max(d for d in range(1, 5 if rm else 9) if Nt % d == 0 and Kt * d * w_page <= 512 * 1024)
         NB = Nt // nb
         S = max(1, min(G, self.ncores // NB))  # group slices
         bounds = [G * s // S for s in range(S + 1)]
@@ -47,6 +48,7 @@ class GroupedMM:
         cbs = [_cb(crs, cb_a, ttnn.bfloat16, 2048, 2 * Kt), _cb(crs, cb_w, w.dtype, w_page, Kt * nb),
                _cb(crs, cb_ids, ttnn.uint16, ids_bytes, 1), _cb(crs, cb_out, ttnn.bfloat16, 2048, 2 * nb)]
         dm = ttnn.DataMovementConfigDescriptor
+        defs = [("GMM_RM", str(int(rm)))]
         rd = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs,
             compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page]
@@ -55,17 +57,17 @@ class GroupedMM:
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
         rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address()]
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs,
+            kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, Nt, nb, mt] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
         wr.common_runtime_args = [out.buffer_address()]
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
                                            math_approx_mode=False)
-        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs,
+        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
                                    compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt],
                                    runtime_args=_rt(cores, [[r[2] - r[1]] for r in rt]), config=cfg)
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
-        key = ("i2m_gmm", G, gs, K, N, E, nb, S, str(w.dtype), self.fid,
+        key = ("i2m_gmm", G, gs, K, N, E, nb, S, rm, str(w.dtype), self.fid,
                tuple(repr(t.memory_config()) for t in (a, w, ids, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids, out], prog)

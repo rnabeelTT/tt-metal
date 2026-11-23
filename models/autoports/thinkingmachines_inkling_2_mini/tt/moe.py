@@ -230,8 +230,9 @@ class MoE:
                                         ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
                 ttnn.deallocate(fused)
                 din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
-            if GMM:
-                down = self._gmm(din, dn, m["group_ids"], alloc(H), E)
+            if GMM:  # (row-major rows: the un-dispatch gathers them without an untilize)
+                down = self._gmm(din, dn, m["group_ids"], ttnn.allocate_tensor_on_device(
+                    ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E)
             else:
                 down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
                                           is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,

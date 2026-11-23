@@ -17,14 +17,25 @@ void kernel_main() {
     constexpr uint32_t mt = get_compile_time_arg_val(3);
     constexpr auto c_args = TensorAccessorArgs<4>();
     const uint32_t b = get_arg_val<uint32_t>(0), g0 = get_arg_val<uint32_t>(1), g1 = get_arg_val<uint32_t>(2);
+#if GMM_RM
+    const auto ac = TensorAccessor(c_args, get_common_arg_val<uint32_t>(0), Nt * 64);
+#else
     const auto ac = TensorAccessor(c_args, get_common_arg_val<uint32_t>(0), 2048);
+#endif
     for (uint32_t g = g0; g < g1; ++g) {
         for (uint32_t mi = 0; mi < mt; ++mi) {
             cb_wait_front(cb_out, nb);
             const uint32_t l = get_read_ptr(cb_out);
+#if GMM_RM
+            // row-major C (pages = rows of Nt * 64 bytes): this block's 32 rows, nb * 64 bytes each at column b nb
+            for (uint32_t r = 0; r < 32; ++r) {
+                noc_async_write(l + r * nb * 64, ac.get_noc_addr((g * mt + mi) * 32 + r) + b * nb * 64, nb * 64);
+            }
+#else
             for (uint32_t j = 0; j < nb; ++j) {
                 noc_async_write(l + j * 2048, ac.get_noc_addr((g * mt + mi) * Nt + b * nb + j), 2048);
             }
+#endif
             noc_async_write_barrier();
             cb_pop_front(cb_out, nb);
         }
