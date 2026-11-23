@@ -97,9 +97,27 @@ def _largest_div(n, cap):
 
 _W_TILE = {ttnn.bfloat16: 2048, ttnn.bfloat8_b: 1088, ttnn.bfloat4_b: 576}
 MM_L1_BUDGET = 1_440_000  # CB bytes per core of the 2D-multicast factory (bench 2026-11-23: 1.436 MB ran, 1.52 failed)
+_L1_ROOM = {}
 
 
-def _full_grid_cfg(device, M, K, N, wdt):
+def l1_cb_room(device, refresh: bool = False) -> int:
+    """Bytes per core a program's static CBs can take: from the L1 allocator base (where the CB region starts) up to the
+    lowest allocated L1 buffer (L1 buffers are placed top-down). The served engine holds L1 residents after warm-up
+    (fabric / decode buffers, trace intermediates) that the engine-only benches never had: a CB plan sized for the empty
+    L1 failed there (`Statically allocated dataflow buffers ... clash with L1 buffers`, 2026-11-23). Cached per device;
+    Hy4Model.forward refreshes it once per prefill chunk."""
+    k = id(device)
+    v = _L1_ROOM.get(k)
+    if v is None or refresh:
+        # the block table's addresses are offsets from the allocator base (an L1 buffer at 1507328 lists at 1394752 over
+        # the base 112576 on Blackhole): the lowest allocated offset is the room itself
+        mv = ttnn.get_memory_view(device, ttnn.BufferType.L1)
+        v = _L1_ROOM[k] = min([int(b["address"]) for b in mv.block_table if b.get("allocated") == "yes"],
+                              default=int(mv.total_bytes_per_bank))
+    return v
+
+
+def _full_grid_cfg(device, M, K, N, wdt, budget=MM_L1_BUDGET):
     """HY4_PF_MCAST_FULL (default 1, FP32 DST only): the whole worker grid (11 x 10 on Blackhole: per-core M / N rounded
     up, the last row / column of cores partly idle) and the largest K block (<= 16 tiles) whose CBs fit L1, instead of
     the <= 8 x 11 divisor grid with K blocks of <= 8. With FP32 DST the K sum runs tile by tile in the same order
@@ -117,7 +135,7 @@ def _full_grid_cfg(device, M, K, N, wdt):
     sh = _largest_div(pm, 4 // sw)
     for ib in sorted((d for d in range(1, 17) if Kt % d == 0), reverse=True):
         l1 = 2 * pm * ib * 2048 + 2 * pn * ib * wt + pm * pn * (2048 + 4096)
-        if l1 <= MM_L1_BUDGET:
+        if l1 <= budget:
             return ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
                 compute_with_storage_grid_size=(gx, gy), in0_block_w=ib, out_subblock_h=sh, out_subblock_w=sw,
                 per_core_M=pm, per_core_N=pn, transpose_mcast=False, fused_activation=None, fuse_batch=True)
@@ -136,22 +154,27 @@ def mm(x, w, ck, mem=None, **kw):
         fp32 = bool(getattr(ck, "fp32_dest_acc_en", True))
         full = (os.environ.get("HY4_PF_MCAST_FULL", "1") == "1" and fp32
                 and not bool(getattr(ck, "packer_l1_acc", False)))
-        key = (M, K, N, fp32, full, w.dtype)
+        # the CBs must fit below the L1 buffers allocated now (l1_cb_room): the budget is part of the key
+        budget = min(MM_L1_BUDGET, l1_cb_room(x.device()))
+        key = (M, K, N, fp32, full, w.dtype, budget)
         cfg = _PF_CFG.get(key, False)
         if cfg is False and full:
-            cfg = _full_grid_cfg(x.device(), M, K, N, w.dtype)
+            cfg = _full_grid_cfg(x.device(), M, K, N, w.dtype, budget)
             _PF_CFG[key] = cfg
         if cfg is False:
             Mt, Kt, Nt = M // TILE, K // TILE, N // TILE
             gy, gx = _largest_div(Mt, 8), _largest_div(Nt, 11)
             pm, pn = Mt // gy, Nt // gx
             cfg = None
-            if gy >= 4 and gx >= 4 and pm <= 8 and pn <= 16:
+            ib = _largest_div(Kt, 8)
+            wt = _W_TILE.get(w.dtype, 2048)
+            cbs = 2 * pm * ib * 2048 + 2 * pn * ib * wt + pm * pn * (2048 + (4096 if fp32 else 0))
+            if gy >= 4 and gx >= 4 and pm <= 8 and pn <= 16 and cbs <= budget:
                 lim = 4 if fp32 else 8
                 sw = _largest_div(pn, lim)
                 sh = _largest_div(pm, lim // sw)
                 cfg = ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
-                    compute_with_storage_grid_size=(gx, gy), in0_block_w=_largest_div(Kt, 8), out_subblock_h=sh,
+                    compute_with_storage_grid_size=(gx, gy), in0_block_w=ib, out_subblock_h=sh,
                     out_subblock_w=sw, per_core_M=pm, per_core_N=pn, transpose_mcast=False, fused_activation=None,
                     fuse_batch=True)
             _PF_CFG[key] = cfg

@@ -27,6 +27,7 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     RMSNorm,
     StreamLinear,
     ckc,
+    l1_cb_room,
     num_devices,
     stream_enabled,
     to_torch_cat,
@@ -706,6 +707,7 @@ class Hy4Model:
         min_rows: pad the chunk to at least this many rows (a prefill bucket: every prompt length then runs one of a few
         compiled program sets; padding rows run as real rows past the prompt, their KV / keys rewritten by decode)."""
         cfg, mesh = self.cfg, self.mesh
+        l1_cb_room(mesh, refresh=True)  # the prefill matmuls' CB budget: below the L1 buffers allocated now
         T = int(ids.numel())
         p0 = self.pos
         assert p0 + T <= self.max_ctx, f"context {p0 + T} > max_ctx {self.max_ctx}"
@@ -782,6 +784,7 @@ class Hy4Model:
         slot is reset and left at its prompt's length (pos, Engram history, indexer state); -> each prompt's last-row
         logits fp32 [V], in order. The prompts must be ordinary text (no Engram-masked tokens)."""
         cfg, mesh = self.cfg, self.mesh
+        l1_cb_room(mesh, refresh=True)  # (as forward)
         B, Tb = plan
         Tp = B * Tb
         tok = torch.zeros(1, Tp, dtype=torch.int32)
