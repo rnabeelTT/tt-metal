@@ -18,6 +18,7 @@ import os
 import ttnn
 
 from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
+from models.autoports.tencent_hy4_flash.tt.gather_mm import GatherMM
 from models.autoports.tencent_hy4_flash.tt.swiglu_pf import SwigluPF
 
 GS = 32
@@ -89,6 +90,18 @@ def _grouped_cfg(device, k_dim, n_tiles, w_tile_bytes, in0_cap=8, sub_w=4, fp32_
     )
 
 
+def _resident(pc, k_dim, n_dim, w_tile_bytes) -> bool:
+    """The grouped factory picks its resident-in1 program for this config (sparse_matmul_multicore_reuse_grouped.cpp:
+    in0 x 2 + the whole [K, N] block + out + interm <= its 1.3 MB CB budget; bf16 output, bf16 DEST)."""
+    if os.environ.get("TT_SPARSE_GROUPED_RESIDENT_IN1", "1") == "0":
+        return False
+    kt, nt = k_dim // 32, n_dim // 32
+    in0 = 2 * pc.per_core_M * pc.in0_block_w * 2048
+    in1 = kt * nt * (-(-w_tile_bytes // 64) * 64)
+    out = pc.per_core_M * nt * 2048
+    return in0 + in1 + 2 * out <= 1_300_000
+
+
 class SortedExperts:
     """Per-MoE-layer helper (shares the layer's weights); built lazily on the first prefill call."""
 
@@ -101,6 +114,12 @@ class SortedExperts:
         L, Il = moe.L, moe.Il
         self.cfg_gu = _grouped_cfg(mesh, L, (2 * Il) // 32, self.TILE_BYTES.get(moe.up_gate.dtype, 2048))
         self.cfg_dn = _grouped_cfg(mesh, Il, L // 32, self.TILE_BYTES.get(moe.down.dtype, 2048))
+        # the gather-matmul reproduces the grouped factory's resident-in1 program (its in0 rows read by index)
+        from models.autoports.minimaxai_minimax_m2_7.tt import moe_dispatch as md
+
+        self.gather_mm = (md.GATHER_KERNEL and GatherMM.supports(self.cfg_gu, moe.up_gate, L)
+                          and not moe.ckc_e.fp32_dest_acc_en and not moe.ckc_e.packer_l1_acc
+                          and _resident(self.cfg_gu, L, 2 * Il, self.TILE_BYTES.get(moe.up_gate.dtype, 2048)))
         # HY4_PF_DOWN_RM (default 1): the down projection writes ROW_MAJOR rows (grouped factory untilize_out: the
         # resident compute kernel's pack-untilize) straight into the gather-add un-dispatch: no untilize op (~0.7 ms per
         # MoE layer at 2K rows). Same values (layout only; needs the 8-tile pack-untilize chunk of
@@ -169,12 +188,21 @@ class SortedExperts:
         E, L, Il = moe.E, moe.L, moe.Il
         m = self._build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
-        x_disp = gather_rows(xl, m["src_tok"], Rd, GS, group_ids=m["group_ids"], num_experts=E)  # [1,G,32,L]
-        ttnn.deallocate(m["src_tok"])
-        fused = ttnn.sparse_matmul(x_disp, moe.up_gate, sparsity=m["group_mask"], indices=m["group_ids"],
-                                   memory_config=DRAM, program_config=self.cfg_gu, compute_kernel_config=moe.ckc_e,
-                                   dtype=ttnn.bfloat16)  # [1,G,32,2Il] = [up | gate] per die
-        ttnn.deallocate(x_disp)
+        if self.gather_mm and os.environ.get("HY4_PF_GATHER_MM", "1") == "1":
+            # HY4_PF_GATHER_MM (default 1): the gate|up grouped matmul reads its rows by index from the row-major latent
+            # (tt/gather_mm: PR 61548 row 35), no [G, 32, L] gathered copy (moe_gather_rows). Bit-identical.
+            x_rm = ttnn.to_layout(ttnn.reshape(xl, (T, L)), ttnn.ROW_MAJOR_LAYOUT)
+            fused = GatherMM.get(moe.mesh)(x_rm, m["src_tok"], m["group_ids"], moe.up_gate, self.cfg_gu, moe.ckc_e, E,
+                                           DRAM)  # [1,G,32,2Il] = [up | gate] per die
+            ttnn.deallocate(x_rm)
+            ttnn.deallocate(m["src_tok"])
+        else:
+            x_disp = gather_rows(xl, m["src_tok"], Rd, GS, group_ids=m["group_ids"], num_experts=E)  # [1,G,32,L]
+            ttnn.deallocate(m["src_tok"])
+            fused = ttnn.sparse_matmul(x_disp, moe.up_gate, sparsity=m["group_mask"], indices=m["group_ids"],
+                                       memory_config=DRAM, program_config=self.cfg_gu, compute_kernel_config=moe.ckc_e,
+                                       dtype=ttnn.bfloat16)  # [1,G,32,2Il] = [up | gate] per die
+            ttnn.deallocate(x_disp)
         if os.environ.get("HY4_PF_SWIGLU", "1") == "1" and SwigluPF.supports(Il):
             # one program for slice x 2, clamp x 2, multiply(silu), routing-weight multiply (tt/swiglu_pf: the same
             # SFPU calls in the same order on a 16-bit DEST: bit-identical)
