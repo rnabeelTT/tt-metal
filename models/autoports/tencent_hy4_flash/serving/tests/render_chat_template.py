@@ -7,7 +7,7 @@ usage (inside the serving image, this directory's parent on PYTHONPATH for the c
 
 Prints each rendered prompt (repr, so the special tokens and newlines are visible) and its token count, and checks the
 facts the parsers and the engine rely on (asserted):
-  - the generation prompt ends with `<think:opensource>` when reasoning_effort is high / max (default high) and does
+  - the generation prompt ends with `<think:opensource>` when reasoning_effort is high (default) and does
     NOT open a think block for no_think;
   - bos is `<｜hy_start:opensource｜>` (120000), the end of turn is `<｜hy_end:opensource｜>` (120025, the eos);
   - every structural token the parsers use is a single vocabulary token.
@@ -67,7 +67,7 @@ def main():
     cases = [
         ("user, default effort (high)", user, {}, None),
         ("user, no_think", user, {"reasoning_effort": "no_think"}, None),
-        ("system + user, max", sysu, {"reasoning_effort": "max"}, None),
+        ("system + user, high", sysu, {"reasoning_effort": "high"}, None),
         ("multi-turn, high (earlier reasoning dropped?)", multi, {}, None),
         ("tools, high", user, {}, TOOLS),
         ("tool call + tool response, high", tool_turn, {}, TOOLS),

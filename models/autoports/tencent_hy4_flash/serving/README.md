@@ -30,9 +30,9 @@ docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e HF_HUB_OFFLINE=1 --entr
 
 - Turn = `<｜hy_start:opensource｜>{role}<｜hy_middle:opensource｜>{content}<｜hy_end:opensource｜>`; bos 120000,
   eos / end of turn 120025, pad 120002. The template writes the turn tokens itself; the tokenizer adds no BOS.
-- The system turn always exists and ends with `<｜reasoning_mode:opensource｜>reasoning_effort:{high|max|no_think}`.
-  Only `high` (default), `max`, `no_think` are accepted; any other value raises in the template (an OpenAI
-  `reasoning_effort: "low"/"medium"` request would fail).
+- The system turn always exists and ends with `<｜reasoning_mode:opensource｜>reasoning_effort:{high|no_think}`.
+  Only `high` (default) and `no_think` are accepted; any other value raises in the template (an OpenAI
+  `reasoning_effort: "low"/"medium"` request would fail; `max` was dropped upstream at weights revision b2498eb).
 - Generation prompt: `...assistant<｜hy_middle:opensource｜><think:opensource>` (thinking) or
   `...<think:opensource></think:opensource>` (no_think). Earlier assistant turns are rendered with an empty think
   block (reasoning dropped) unless tools are present (`preserved_thinking` defaults to true with tools).

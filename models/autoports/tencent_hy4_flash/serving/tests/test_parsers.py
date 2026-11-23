@@ -101,7 +101,7 @@ def _rparser(tokenizer, effort=None):
     return cls(tokenizer, chat_template_kwargs={"reasoning_effort": effort} if effort else {})
 
 
-@pytest.mark.parametrize("effort", [None, "high", "max"])
+@pytest.mark.parametrize("effort", [None, "high"])
 def test_reasoning_thinking(tokenizer, effort):
     p = _rparser(tokenizer, effort)
     req = _request(tools=None)
