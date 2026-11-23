@@ -457,7 +457,8 @@ def _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl):
                             sink=sk, out_memory_config=DRAM, mi=SDPA_MI)
     for t in (q, rq, sk, positions):
         ttnn.deallocate(t)
-    o = ttnn.reshape(o, (1, 1, R, NH * HD))
+    if int(o.shape[-1]) != NH * HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
+        o = ttnn.reshape(o, (1, 1, R, NH * HD))
     gate = ttnn.sigmoid(f32(g))
     o = bf(ttnn.multiply(f32(o), gate))
     out = proj(w, "o", o)
@@ -577,7 +578,8 @@ def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
                             sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI)
     for t in (q, rq, sk):
         ttnn.deallocate(t)
-    o = ttnn.reshape(o, (1, 1, T, NH * HD))
+    if int(o.shape[-1]) != NH * HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
+        o = ttnn.reshape(o, (1, 1, T, NH * HD))
     o = bf(ttnn.multiply(f32(o), ttnn.sigmoid(f32(g))))
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:

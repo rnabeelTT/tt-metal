@@ -320,6 +320,51 @@ void kernel_main() {
     CircularBuffer cb_out_buf(cb_out);
     cb_out_buf.wait_front(MI * out_chunk_tiles);
     const uint32_t res_l1 = cb_out_buf.get_read_ptr();
+    if constexpr (MI * R == 32) {
+        // the unit's 32 rows are one tile row of the [1, 1, T, NH * HD] output: whole tiles for its G heads, assembled
+        // in L1 (tile row r*G+i of result tile (mi, d) -> row mi*R + r of head i's tile d), then written as tiles
+        const uint8_t noc_id = noc.get_noc_id();
+        const uint32_t my_noc_x = my_x[noc_id], my_noc_y = my_y[noc_id];
+        UnicastEndpoint self;
+        CircularBuffer cb_stage(cb_intermed_out);
+        cb_stage.reserve_back(G * vDHt);
+        const uint32_t st_l1 = cb_stage.get_write_ptr();
+        for (uint32_t i = 0; i < G; ++i) {
+            for (uint32_t d = 0; d < vDHt; ++d) {
+                const uint32_t dst_tile = st_l1 + (i * vDHt + d) * tile_bytes;
+                for (uint32_t mi = 0; mi < MI; ++mi) {
+                    const uint32_t src_tile = res_l1 + (mi * vDHt + d) * tile_bytes;
+                    for (uint32_t r = 0; r < R; ++r) {
+                        for (uint32_t half = 0; half < 2; ++half) {
+                            noc.async_read(
+                                self,
+                                CoreLocalMem<uint32_t>(dst_tile + rows_sdpa_row_off(mi * R + r) + half * 512),
+                                32,
+                                {.noc_x = my_noc_x,
+                                 .noc_y = my_noc_y,
+                                 .addr = src_tile + rows_sdpa_row_off(r * G + i) + half * 512},
+                                {});
+                        }
+                    }
+                }
+            }
+        }
+        noc.async_read_barrier();
+        const uint32_t row_tile = item / MI, tiles_per_row = num_kv_heads_w * G * vDHt;
+        for (uint32_t i = 0; i < G; ++i) {
+            for (uint32_t d = 0; d < vDHt; ++d) {
+                noc.async_write(
+                    CoreLocalMem<uint32_t>(st_l1 + (i * vDHt + d) * tile_bytes),
+                    out_writer,
+                    tile_bytes,
+                    {},
+                    {.page_id = row_tile * tiles_per_row + (cur_head * G + i) * vDHt + d});
+            }
+        }
+        noc.async_write_barrier();
+        cb_out_buf.pop_front(MI * out_chunk_tiles);
+        continue;
+    }
     for (uint32_t mi = 0; mi < MI; ++mi) {
     for (uint32_t d = 0; d < vDHt; ++d) {
         for (uint32_t r = 0; r < R; ++r) {

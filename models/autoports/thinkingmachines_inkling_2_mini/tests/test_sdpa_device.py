@@ -147,7 +147,7 @@ def run_case(dev, W, E, pos, seed, items_r=0, users=0):
         q, K, V, cur, ptt, rq, table, SCALE, W, E, sink=sk, pt_per_item=bool(users), k_chunk_size=256 if users else 0,
         mi=MI if items_r else 1,
     )
-    got = ttnn.to_torch(out).float()[0]
+    got = ttnn.to_torch(out).float().reshape(R, NH, HD)  # ([1, 1, R, NH * HD] when mi items fill a tile row)
     want = reference(qf, Kpos, Vpos, rf, proj_eff, sink_eff, pos, W)
     nob = reference(qf, Kpos, Vpos, rf, proj_eff, sink_eff, pos, W, use_bias=False)
     nos = reference(qf, Kpos, Vpos, rf, proj_eff, sink_eff, pos, W, use_sink=False)

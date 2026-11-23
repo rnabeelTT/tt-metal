@@ -117,8 +117,9 @@ def inkling_sdpa_decode(
     pt_per_item=False,
     mi=1,
 ):
-    """-> [1, n_items * R, NH, HD] bf16 (freshly allocated; the caller frees it). window: 0 (global) or the sliding
-    window; extent: rel_extent E (the table must be relbias.build_tables(proj, scale) for this E).
+    """-> [1, n_items * R, NH, HD] bf16, or [1, 1, n_items * R, NH * HD] when mi * R == 32 (freshly allocated; the
+    caller frees it). window: 0 (global) or the sliding window; extent: rel_extent E (the table must be
+    relbias.build_tables(proj, scale) for this E).
 
     cur_pos [R] (one item: decode / spec verify; the K span of each kv head is split over many cores) or [n_items, R]
     (prefill: n_items Q tiles of R consecutive rows each, q / rq / out rows stacked by item; one core per (item, kv
@@ -289,7 +290,8 @@ def _build_and_run(
     cr = _range_set(cores)
     rounds = (cpk - 1).bit_length() if cpk > 1 else 0
 
-    out_shape = ttnn.Shape([1, n_items * R, NH, HD])
+    # mi items of R rows = one 32-row tile row: the writer assembles whole tiles of [1, 1, T, NH * HD] (no reshape after)
+    out_shape = ttnn.Shape([1, 1, n_items * R, NH * HD] if mi * R == TILE else [1, n_items * R, NH, HD])
     out_mc = out_memory_config or (ttnn.L1_MEMORY_CONFIG if n_items == 1 else ttnn.DRAM_MEMORY_CONFIG)
     out = (
         None
@@ -332,6 +334,8 @@ def _build_and_run(
     ] + [_cb(cr, i, bf, bt, mi) for i in range(27, 32)]
     if rounds:
         cbs.append(_cb(cr, 19, bf, bt, rounds * (DHt + 2)))  # children's (l, m, o), one slot per round
+    elif mi * R == TILE:
+        cbs.append(_cb(cr, 19, bf, bt, G * DHt))  # the output tiles of a unit's G heads (assembled)
 
     rd_ct = [R, G, DHt, DHt, Sk_fixed, DST_TILES, NKV, block // TILE, cpk, pos_stick, n_cores, window, extent, M_tiles]
     rd_ct += [int(bool(pt_per_item))]

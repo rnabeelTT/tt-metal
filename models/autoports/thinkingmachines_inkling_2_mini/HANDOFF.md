@@ -257,6 +257,7 @@ are stored padded to 384); the MoE rows kernels at one row (still route the sigb
 | grouped matmul: padding groups skipped, the weight block double-buffered when it fits | 352 | 2,913 |
 | prefill SDPA: 4 items per work unit (their Q tiles stacked; each K / V chunk read once for the 4) | 346 | 2,958 |
 | grouped matmul: slices take contiguous expert ranges (each expert's weights read once per column block) | 344 | 2,976 |
+| SDPA writes whole [1, 1, T, NH * HD] tiles (4 items x 8 rows = one tile row; no reshape of the padded output) | 336 | 3,044 |
 
 Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), tools/needle_serve.py, depths 0.1 / 0.5 /
 0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
