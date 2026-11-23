@@ -107,6 +107,9 @@ class HostSampler:
     def __init__(self, V: int):
         self.V = V
         self.gens: dict[int, tuple[int, torch.Generator]] = {}
+        # sampled drafts: the drafter's temperature = qt x the request's (any q keeps the acceptance exact; qt tunes
+        # how well q matches the target's p: I2M_SPEC_QT)
+        self.qt = float(__import__("os").environ.get("I2M_SPEC_QT", "1.0"))
 
     def forget(self, row: int):
         self.gens.pop(row, None)
@@ -178,7 +181,7 @@ class HostSampler:
         if temp <= 0.0:
             return torch.zeros(d, k)
         u = torch.rand(d, k, generator=self._gen(r, _param(sp, "seed", r, None)), dtype=torch.float64)
-        return (temp * -torch.log(-torch.log(u.clamp(1e-12, 1 - 1e-12)))).float()
+        return (self.qt * temp * -torch.log(-torch.log(u.clamp(1e-12, 1 - 1e-12)))).float()
 
     def spec(self, idx, vals, r, drafts, sp, outs=None, prompt=None, q=None):
         """Speculative acceptance. idx / vals [d + 1, K]: verify row j scores the token after drafts[:j]. q: per draft,
@@ -204,7 +207,7 @@ class HostSampler:
                 qd = 1.0
                 if q is not None:
                     qi, ql = q[j]
-                    qp = torch.softmax(ql.double() / temp, -1)
+                    qp = torch.softmax(ql.double() / (self.qt * temp), -1)
                     qd = float(qp[qi == drafts[j]].sum())
                     m = ids[:, None] == qi[None, :]
                     pq = (m.double() * qp[None, :]).sum(-1)
