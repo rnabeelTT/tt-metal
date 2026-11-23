@@ -92,7 +92,8 @@ def main():
         run()
     else:
         dec = BatchedDecoder(m, B)
-        dec.set_inputs(torch.arange(100, 100 + B), torch.arange(300, 300 + B))
+        dp = int(os.environ.get("DPOS", "300"))  # (decode: the first slot's position)
+        dec.set_inputs(torch.arange(100, 100 + B), torch.arange(dp, dp + B))
         dec.step()
         dec.step()
         _read()

@@ -388,6 +388,9 @@ class Inkling2ForCausalLM:
         live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
+        if TIMING and W != getattr(self, "_last_w", None):
+            logger.info(f"decode width {W} ({len(live)} live rows, top slot {top})")
+            self._last_w = W
         tok_s = torch.zeros(W, dtype=torch.long)
         pos_s = torch.full((W,), -1, dtype=torch.long)
         pt = kwargs.get("page_table", args[2] if len(args) > 2 else None)
