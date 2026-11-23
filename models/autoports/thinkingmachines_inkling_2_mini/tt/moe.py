@@ -36,6 +36,7 @@ PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
 SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
 # rows per expert group in the sorted dispatch (32 | 64 | 128): larger groups re-read each expert's weights fewer
 # times (one weight read per group) at more padding; long prefill chunks favour larger groups
+GATHER_L1 = os.environ.get("I2M_GATHER_L1", "1") == "1"
 GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
 # I2M_MOE_GMM (default 1): the sorted prefill's expert matmuls as tt/gmm.py (every core) instead of ttnn.sparse_matmul
 # (its 1D config puts gate|up's 24 output tiles on 24 cores)
@@ -206,7 +207,13 @@ class MoE:
         w, ids = self.route(x)
         m = self._dispatches[gs].build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
         Rd, G = m["Rd"], m["G"]
-        x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
+        if GATHER_L1 and T <= 2048:  # the rows gathered from an L1 row-major copy of x (from DRAM: 2x slower)
+            x_rm = ttnn.to_layout(ttnn.reshape(x, (T, H)), ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
+            x_disp = ttnn.reshape(ttnn.embedding(m["src_tok"], x_rm, layout=ttnn.TILE_LAYOUT, memory_config=DRAM),
+                                  (1, Rd // gs, gs, H))
+            ttnn.deallocate(x_rm)
+        else:
+            x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
         out = None
         for ug, dn, W, _, _ in self.subs:
             cgu, cdn = self._cfg_sorted[("gs", gs)][W]
