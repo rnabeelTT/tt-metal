@@ -78,12 +78,15 @@ void kernel_main() {
     const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t sink_addr = get_arg_val<uint32_t>(arg_idx++);
+    // the page-table row (an L1 buffer: the CB is never consumed), read per unit up to the blocks the unit attends (a
+    // 1M-token row is 64 KB: reading it whole on every core cost ~5 ms per decode step)
     CircularBuffer cb_page_table(cb_id_page_table);
     cb_page_table.reserve_back(1);
     volatile tt_l1_ptr uint32_t* page_table_ptr =
-        read_page_table_for_batch(noc, cb_id_page_table, 0, page_table_args, page_table_addr, page_table_page_size);
+        reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cb_page_table.get_write_ptr());
     cb_page_table.push_back(1);
-    uint32_t pt_item = 0;  // the item whose page-table row is in L1
+    const auto pt_reader = TensorAccessor(page_table_args, page_table_addr, page_table_page_size);
+    uint32_t pt_item = 0xFFFFFFFF, pt_bytes = 0;  // the row in L1 and how much of it
 
     // Work units: unit = item * num_kv_heads + kv head. A unit is one 32-row Q tile (item = R consecutive rows of the
     // sequence x the G query heads of one kv head), computed by the num_cores_per_head cores of a group (decode: one
@@ -293,11 +296,16 @@ void kernel_main() {
         noc.async_read_barrier();
     }
     cb_sinkc.push_back(MI);
-    if constexpr (PT_PER_ITEM) {
-        if (item != pt_item) {
-            read_page_table_for_batch(
-                noc, cb_id_page_table, item, page_table_args, page_table_addr, page_table_page_size);
-            pt_item = item;
+    {
+        const uint32_t row = PT_PER_ITEM ? item : 0;
+        const uint32_t need = (max_pos / (block_size_t * 32) + 1) * 4;
+        uint32_t nbytes = (need + 63) & ~63u;
+        nbytes = nbytes < page_table_page_size ? nbytes : page_table_page_size;
+        if (row != pt_item || nbytes > pt_bytes) {
+            noc_async_read(pt_reader.get_noc_addr(row), reinterpret_cast<uint32_t>(page_table_ptr), nbytes);
+            noc_async_read_barrier();
+            pt_item = row;
+            pt_bytes = nbytes;
         }
     }
 
