@@ -22,6 +22,12 @@
 #include "inkling_sdpa_common.hpp"
 
 #define MAX_TREE_REDUCTION_ROUNDS 6
+#ifndef SDPA_MI
+#define SDPA_MI 1  // prefill: consecutive items per unit (no tree reduction then)
+#endif
+#ifndef SDPA_POS_WORDS
+#define SDPA_POS_WORDS 16  // the cur_pos stick in uint32 words
+#endif
 
 void kernel_main() {
     Noc noc;
@@ -52,6 +58,7 @@ void kernel_main() {
     constexpr uint32_t cb_intermed_out = tt::CBIndex::c_19;
     constexpr uint32_t cb_out = tt::CBIndex::c_20;
     constexpr uint32_t PNHt = 1;
+    constexpr uint32_t MI = SDPA_MI;
 
     uint32_t arg_idx = 0;
     const uint32_t out_addr = get_arg_val<uint32_t>(arg_idx++);
@@ -90,28 +97,28 @@ void kernel_main() {
     // item i = sequence row i * R + r.
     for (uint32_t unit = group; unit < n_units; unit += n_groups) {
     const uint32_t cur_head = unit % num_kv_heads_w;
-    const uint32_t item = unit / num_kv_heads_w;
-    uint32_t raw_pos[R];
-    uint32_t lim[R];
+    const uint32_t item = (unit / num_kv_heads_w) * MI;  // the unit's first item
+    uint32_t raw_pos[MI * R];
+    uint32_t lim[MI * R];
     uint32_t max_pos = 0, min_lim = 0;
     bool any = false;
     {
         CircularBuffer cb_index(cb_cur_pos);
-        cb_index.wait_front(1);
+        cb_index.wait_front(MI);
         volatile tt_l1_ptr uint32_t* index_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cb_index.get_read_ptr());
-        for (uint32_t j = 0; j < R; ++j) {
-            raw_pos[j] = index_ptr[j];
+        for (uint32_t j = 0; j < MI * R; ++j) {
+            raw_pos[j] = index_ptr[(j / R) * SDPA_POS_WORDS + j % R];
         }
-        cb_index.pop_front(1);
-        any = rows_sdpa_limits<R>([&](uint32_t j) { return raw_pos[j]; }, lim, max_pos, min_lim);
+        cb_index.pop_front(MI);
+        any = rows_sdpa_limits<MI * R>([&](uint32_t j) { return raw_pos[j]; }, lim, max_pos, min_lim);
     }
     if (!any) {
         continue;
     }
 
-    uint32_t lo[R];
+    uint32_t lo[MI * R];
     uint32_t min_lo = max_pos, max_lo = 0;
-    for (uint32_t j = 0; j < R; ++j) {
+    for (uint32_t j = 0; j < MI * R; ++j) {
         lo[j] = inkling_lo(lim[j], W);
         min_lo = lo[j] < min_lo ? lo[j] : min_lo;
         max_lo = lo[j] > max_lo ? lo[j] : max_lo;
@@ -142,7 +149,7 @@ void kernel_main() {
     const bool should_send_to_parent = (parent_core_in_group != UINT32_MAX);
 
 
-    // per-row causal masks, one Sk-tile block per masked chunk, in chunk order
+    // per-row causal masks, one Sk-tile block per masked chunk and item, in chunk order
     constexpr uint32_t mask_tile_bytes = get_tile_size(cb_mask_in);
     static_assert(mask_tile_bytes == 2048, "bf16 32x32 mask tiles");
     constexpr uint32_t NEG2 = mask_neg_bf16 | (mask_neg_bf16 << 16);
@@ -151,6 +158,7 @@ void kernel_main() {
         if (!inkling_chunk_masked(k_chunk, k_chunk_size_dynamic, min_lim, W, max_lo)) {
             continue;
         }
+        for (uint32_t mi = 0; mi < MI; ++mi) {
         cb_mask.reserve_back(Sk_chunk_t_dynamic);
         volatile tt_l1_ptr uint32_t* m = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cb_mask.get_write_ptr());
         for (uint32_t t = 0; t < Sk_chunk_t_dynamic; ++t) {
@@ -163,8 +171,8 @@ void kernel_main() {
                 }
             } else {
                 for (uint32_t rho = 0; rho < 32; ++rho) {
-                    const uint32_t l = rho < R * G ? lim[rho / G] : max_pos;
-                    const uint32_t lw = rho < R * G ? lo[rho / G] : min_lo;
+                    const uint32_t l = rho < R * G ? lim[mi * R + rho / G] : max_pos;
+                    const uint32_t lw = rho < R * G ? lo[mi * R + rho / G] : min_lo;
                     // row rho attends columns [c_lo, n) of this tile (positions [lo, lim]); the rest get the mask value
                     const uint32_t n = l < base ? 0 : (l - base >= 31 ? 32 : l - base + 1);
                     const uint32_t c_lo = lw <= base ? 0 : (lw - base > 32 ? 32 : lw - base);
@@ -183,6 +191,7 @@ void kernel_main() {
         }
         noc.write_zeros_l1_barrier();
         cb_mask.push_back(Sk_chunk_t_dynamic);
+        }  // items
     }
 
     constexpr uint32_t out_chunk_tiles = PNHt * vDHt;
@@ -191,8 +200,8 @@ void kernel_main() {
         reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(reducer_semaphore_id));
     noc.async_write_barrier();  // #19201 BH hang workaround (stock op)
 
-    // tree reduction: receive each round's child (l, m, o), for compute to combine
-    if (num_active_children > 0) {
+    // tree reduction: receive each round's child (l, m, o), for compute to combine (decode only, MI == 1)
+    if (MI == 1 && num_active_children > 0) {
         for (uint32_t round = 0; round < num_active_rounds; ++round) {
             if (active_children_per_round[round] == UINT32_MAX) {
                 continue;
@@ -252,6 +261,7 @@ void kernel_main() {
         }
     }
 
+    if constexpr (MI == 1) {  // (MI > 1: every unit's core is a root)
     if (!is_tree_root) {
         if (!should_send_to_parent) {
             continue;
@@ -300,6 +310,7 @@ void kernel_main() {
         noc.async_atomic_barrier();
         continue;
     }
+    }
 
     // root: tile row r*G+i of each result tile -> row cur_head*G+i of verify row r's output tile (two face rows)
     constexpr uint32_t barrier_threshold = get_barrier_read_threshold<tile_bytes, num_cores>();
@@ -307,14 +318,15 @@ void kernel_main() {
     static_assert(tile_bytes == 2048, "bf16 output tiles");
     const auto out_writer = TensorAccessor(out_args, out_addr, tile_bytes);
     CircularBuffer cb_out_buf(cb_out);
-    cb_out_buf.wait_front(out_chunk_tiles);
+    cb_out_buf.wait_front(MI * out_chunk_tiles);
     const uint32_t res_l1 = cb_out_buf.get_read_ptr();
+    for (uint32_t mi = 0; mi < MI; ++mi) {
     for (uint32_t d = 0; d < vDHt; ++d) {
         for (uint32_t r = 0; r < R; ++r) {
-            if (static_cast<int32_t>(raw_pos[r]) < 0) {
+            if (static_cast<int32_t>(raw_pos[mi * R + r]) < 0) {
                 continue;
             }
-            const uint32_t src_tile = res_l1 + d * tile_bytes;
+            const uint32_t src_tile = res_l1 + (mi * vDHt + d) * tile_bytes;
             rows_sdpa_row_runs(r * G, cur_head * G, G, [&](uint32_t s, uint32_t t, uint32_t k) {
                 for (uint32_t half = 0; half < 2; ++half) {
                     noc.async_write(
@@ -322,7 +334,8 @@ void kernel_main() {
                         out_writer,
                         k * 32,
                         {},
-                        {.page_id = (item * R + r) * vDHt + d, .offset_bytes = rows_sdpa_row_off(t) + half * 512});
+                        {.page_id = ((item + mi) * R + r) * vDHt + d,
+                         .offset_bytes = rows_sdpa_row_off(t) + half * 512});
                     if (++barrier_count == barrier_threshold) {
                         noc.async_writes_flushed();
                         barrier_count = 0;
@@ -331,7 +344,8 @@ void kernel_main() {
             });
         }
     }
+    }  // items
     noc.async_write_barrier();
-    cb_out_buf.pop_front(out_chunk_tiles);
+    cb_out_buf.pop_front(MI * out_chunk_tiles);
     }  // units
 }

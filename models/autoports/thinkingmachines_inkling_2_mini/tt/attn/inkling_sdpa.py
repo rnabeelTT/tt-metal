@@ -115,6 +115,7 @@ def inkling_sdpa_decode(
     out_memory_config=None,
     sink=None,
     pt_per_item=False,
+    mi=1,
 ):
     """-> [1, n_items * R, NH, HD] bf16 (freshly allocated; the caller frees it). window: 0 (global) or the sliding
     window; extent: rel_extent E (the table must be relbias.build_tables(proj, scale) for this E).
@@ -126,6 +127,9 @@ def inkling_sdpa_decode(
     Inkling-2: ``sink`` [1, n_items * R, NH, 32] bf16 TILE holds each row's per-head sink logit DIVIDED BY ``scale`` in
     every column (the kernel works on unscaled logits, see the table); a zero-value extra key per row and head.
     ``pt_per_item``: item i reads page-table row i (n_items independent sequences, multi-user decode) instead of row 0.
+    ``mi`` (prefill): consecutive items per work unit (one sequence: with pt_per_item, groups of mi items must not
+    straddle sequences); each K / V chunk is read once for the mi items' stacked Q tiles (long contexts: the K / V
+    stream, not the compute, bounds the one-item units).
     """
     n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
     R = int(cur_pos.shape[-1])
@@ -165,6 +169,8 @@ def inkling_sdpa_decode(
     G = NH // NKV
     DHt = HD // TILE
     mesh = q.device()
+    if n_items == 1 or n_items % mi:
+        mi = 1
     if n_items > 1 and _PF_CACHE_ON:  # prefill: the program's static parts per shape (see _PF_CACHE)
         key = (
             id(mesh),
@@ -184,6 +190,7 @@ def inkling_sdpa_decode(
             float(scale),
             repr(out_memory_config),
             bool(pt_per_item),
+            mi,
             tuple(repr(t.memory_config()) for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)),
         )
         st = _PF_CACHE.get(key)
@@ -205,6 +212,7 @@ def inkling_sdpa_decode(
                 key,
                 sink,
                 pt_per_item,
+                mi,
             )
         return _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)
     return _build_and_run(
@@ -232,6 +240,7 @@ def inkling_sdpa_decode(
         mesh,
         sink=sink,
         pt_per_item=pt_per_item,
+        mi=mi,
     )
 
 
@@ -261,10 +270,11 @@ def _build_and_run(
     static_only=False,
     sink=None,
     pt_per_item=False,
+    mi=1,
 ):
     """The program for one call (static_only: its static parts, no launch; _pf_static)."""
     grid = mesh.compute_with_storage_grid_size()
-    n_units = n_items * NKV
+    n_units = n_items // mi * NKV
     if n_items == 1:  # decode / verify: groups = kv heads, cpk cores per group split the K span (tree reduction)
         cpk = min((grid.x * grid.y) // NKV, 1 << MAX_TREE_ROUNDS)  # cores per kv head
         if cpk < 1:
@@ -293,33 +303,33 @@ def _build_and_run(
     pos_stick = _align(R * 4)
     pt_stick = _align(int(page_table.shape[-1]) * 4)
     cbs = [
-        _cb(cr, 0, bf, bt, DHt),  # q (gathered)
+        _cb(cr, 0, bf, bt, mi * DHt),  # q (gathered; mi items' tile rows)
         _cb(cr, 1, k_cache.dtype, kt, Sk_cb * DHt * 2),  # K chunks, double-buffered
         _cb(cr, 2, v_cache.dtype, vt, Sk_cb * DHt * 2),  # V chunks
         _cb(cr, 3, bf, bt, Sk_cb * 2),  # per-row mask blocks
-        _cb(cr, 4, bf, bt, R),  # Rq tiles (one per verify row)
+        _cb(cr, 4, bf, bt, mi * R),  # Rq tiles (one per verify row)
         _cb(cr, 11, bf, bt, R * Sk_cb * 2),  # bias-table tiles, double-buffered
-        _cb(cr, 13, bf, bt, Sk_cb),  # bias (+ mask) block
-        _cb(cr, 14, bf, bt, 1),  # Inkling-2: per-row sinks
+        _cb(cr, 13, bf, bt, mi * Sk_cb),  # bias (+ mask) block
+        _cb(cr, 14, bf, bt, mi),  # Inkling-2: per-row sinks
         _cb(cr, 5, bf, bt, 1),  # reduce scaler
         _cb(cr, 6, bf, bt, 1),  # child max
         _cb(cr, 7, bf, bt, 1),  # child sum
-        _cb(cr, 8, ttnn.uint32, pos_stick, 1),  # cur_pos (writer)
+        _cb(cr, 8, ttnn.uint32, pos_stick, mi),  # cur_pos (writer)
         _cb(cr, 9, ttnn.uint32, pt_stick, 1),  # page-table row
         _cb(cr, 10, bf, bt, R * DHt + 1),  # q scratch (every row's tile row; + 64-byte alignment slack)
         _cb(cr, 12, bf, bt, 1),  # zero tile
-        _cb(cr, 15, ttnn.uint32, pos_stick, 1),  # cur_pos (compute)
+        _cb(cr, 15, ttnn.uint32, pos_stick, mi),  # cur_pos (compute)
         _cb(cr, 16, bf, bt, DHt),  # O to the parent / from a child
         _cb(cr, 17, bf, bt, 1),
         _cb(cr, 18, bf, bt, 1),
-        _cb(cr, 20, bf, bt, DHt),  # root result
-        _cb(cr, 21, bf, bt, 1),
-        _cb(cr, 22, bf, bt, 1),
+        _cb(cr, 20, bf, bt, mi * DHt),  # root result
+        _cb(cr, 21, bf, bt, mi),
+        _cb(cr, 22, bf, bt, mi),
         _cb(cr, 23, bf, bt, DHt),
-        _cb(cr, 24, bf, bt, Sk_cb),  # QK / P
-        _cb(cr, 25, bf, bt, DHt),
-        _cb(cr, 26, bf, bt, DHt),
-    ] + [_cb(cr, i, bf, bt, 1) for i in range(27, 32)]
+        _cb(cr, 24, bf, bt, mi * Sk_cb),  # QK / P
+        _cb(cr, 25, bf, bt, mi * DHt),
+        _cb(cr, 26, bf, bt, mi * DHt),
+    ] + [_cb(cr, i, bf, bt, mi) for i in range(27, 32)]
     if rounds:
         cbs.append(_cb(cr, 19, bf, bt, rounds * (DHt + 2)))  # children's (l, m, o), one slot per round
 
@@ -366,6 +376,7 @@ def _build_and_run(
             n_units=n_units,
             out_shape=out_shape,
             out_mc=out_mc,
+            defs=_mi_defines(mi, pos_stick),
         )
     rd_rt, wr_rt, cp_rt = [], [], []
     for i in range(n_cores):
@@ -398,6 +409,8 @@ def _build_and_run(
         )
         cp_rt.append([c, int(is_root), parent] + children + [g, n_groups, n_units])
 
+    defs = _mi_defines(mi, pos_stick)
+
     def dm(source, ct, rt, riscv, noc_id):
         return ttnn.KernelDescriptor(
             kernel_source=str(KERNEL_DIR / source),
@@ -405,6 +418,7 @@ def _build_and_run(
             compile_time_args=ct,
             runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc_id),
+            defines=defs,
         )
 
     gran = min(DHt, DST_TILES)
@@ -426,7 +440,8 @@ def _build_and_run(
                 ("DHT_GRANULARITY", str(gran)),
                 ("LOG2_DHT_GRANULARITY", str(log2g)),
                 ("DYNAMIC_CHUNK_SIZE", "1"),
-            ],
+            ]
+            + defs,
             runtime_args=_rt(cores, cp_rt),
             config=cfg,
         ),
@@ -443,6 +458,10 @@ def _build_and_run(
 # program as before: ~1.5 ms of Python per call (473 calls per 16K prompt) was its construction.
 _PF_CACHE_ON = __import__("os").environ.get("INKLING_SDPA_PF_CACHE", "1") == "1"
 _PF_CACHE = {}
+
+
+def _mi_defines(mi, pos_stick):
+    return [("SDPA_MI", str(mi)), ("SDPA_POS_WORDS", str(pos_stick // 4))]
 
 
 def _stable_hash(key):
@@ -468,6 +487,7 @@ def _pf_static(
     key,
     sink,
     pt_per_item,
+    mi=1,
 ):
     n_items, R = int(cur_pos.shape[0]), int(cur_pos.shape[-1])
     NH, HD = int(q.shape[2]), int(q.shape[3])
@@ -498,6 +518,7 @@ def _pf_static(
         static_only=True,
         sink=sink,
         pt_per_item=pt_per_item,
+        mi=mi,
     )
     cores = st["cores"]
     st["cp_rtargs"] = _rt(cores, [pc[2] for pc in st["per_core"]])
@@ -514,7 +535,8 @@ def _pf_static(
             ("DHT_GRANULARITY", str(gran)),
             ("LOG2_DHT_GRANULARITY", str(log2g)),
             ("DYNAMIC_CHUNK_SIZE", "1"),
-        ],
+        ]
+        + st["defs"],
         runtime_args=st["cp_rtargs"],
         config=ttnn.ComputeConfigDescriptor(
             math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=False, math_approx_mode=True
@@ -548,6 +570,7 @@ def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink):
             compile_time_args=ct,
             runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc_id),
+            defines=st["defs"],
         )
 
     kernels = [

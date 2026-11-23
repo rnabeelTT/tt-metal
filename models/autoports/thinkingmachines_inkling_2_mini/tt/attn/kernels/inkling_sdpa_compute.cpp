@@ -34,6 +34,57 @@
 #include "ttnn/operations/transformer/sdpa/device/kernels/compute/compute_common.hpp"
 #include "inkling_sdpa_common.hpp"
 
+#ifndef SDPA_MI
+#define SDPA_MI 1
+#endif
+
+// matmul_blocks (stock compute_common.hpp) for one 1 x N subblock per in0 tile row (subblock_h 1, one in1 subblock,
+// one K block), with in0 starting at tile in0_off and the added mask block offset by row * mask_row_stride: the band
+// bias of item m (in0 = its R Rq tiles) and the QK of MI stacked Q tile rows (each row adds its own bias row).
+ALWI void inkling_matmul_rows(
+    uint32_t in0_cb, uint32_t in1_cb, uint32_t out_cb, uint32_t M, uint32_t N, uint32_t K, bool transpose,
+    bool add_mask, uint32_t mask_cb, uint32_t zero_cb, uint32_t in0_off, uint32_t mask_row_stride) {
+    CircularBuffer cb_in0(in0_cb);
+    CircularBuffer cb_in1(in1_cb);
+    CircularBuffer cb_out(out_cb);
+    CircularBuffer cb_mask(mask_cb);
+    CircularBuffer cb_zero(zero_cb);
+    matmul_block_init(in0_cb, in1_cb, transpose, N, 1, K);
+    reconfig_data_format(in1_cb, in0_cb);
+    cb_in1.wait_front(K * N);
+    for (uint32_t row = 0; row < M; ++row) {
+        cb_out.reserve_back(N);
+        cb_in0.wait_front(in0_off + (row + 1) * K);
+        tile_regs_acquire();
+        uint32_t in0_index = in0_off + row * K, in1_index = 0;
+        for (uint32_t k = 0; k < K; ++k) {
+            matmul_block(in0_cb, in1_cb, in0_index, in1_index, 0, transpose, N, 1, K);
+            in0_index++;
+            in1_index += N;
+        }
+        if (add_mask) {
+            const uint32_t m0 = row * mask_row_stride;
+            cb_mask.wait_front(m0 + N);
+            cb_zero.wait_front(1);
+            reconfig_data_format(zero_cb, mask_cb);
+            add_init(zero_cb, mask_cb, true);
+            for (uint32_t i = 0; i < N; i++) {
+                add_tiles(zero_cb, mask_cb, 0, m0 + i, i);
+            }
+            reconfig_data_format(in1_cb, in0_cb);
+            matmul_block_init(in0_cb, in1_cb, transpose, N, 1, K);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        for (uint32_t c = 0; c < N; c++) {
+            pack_tile<true>(c, out_cb, c);  // (relative to the write pointer: each row is pushed as it completes)
+        }
+        tile_regs_release();
+        cb_out.push_back(N);
+    }
+    cb_in1.pop_front(K * N);
+}
+
 void kernel_main() {
     constexpr uint32_t DHt = get_compile_time_arg_val(0);
     constexpr uint32_t vDHt = get_compile_time_arg_val(1);
@@ -46,15 +97,16 @@ void kernel_main() {
     constexpr uint32_t W = get_compile_time_arg_val(8);  // sliding window (0 = global layer)
     constexpr uint32_t E = get_compile_time_arg_val(9);  // rel_extent: bias band
 
-    constexpr uint32_t Sq_chunk_t = 1;  // one 32-row Q tile (PNHt)
+    // SDPA_MI (prefill): MI consecutive items per unit, their Q tiles stacked as MI tile rows: each K / V chunk is read
+    // once for all of them (per-row max / sum as in the stock prefill SDPA; band bias and masks per item)
+    constexpr uint32_t MI = SDPA_MI;
+    constexpr uint32_t Sq_chunk_t = MI;
     constexpr uint32_t q_chunk_tiles = Sq_chunk_t * DHt;
     constexpr uint32_t out_chunk_tiles = Sq_chunk_t * vDHt;
-    constexpr uint32_t qk_in0_block_w = DHt;
-    constexpr uint32_t qk_num_blocks = 1;
     // P . V: one tile row, out subblock = min(vDHt, dst) wide (the stock factory's out_* configuration)
     constexpr uint32_t out_subblock_w = vDHt < dst_size ? vDHt : dst_size;
     constexpr uint32_t out_subblock_h = 1;
-    constexpr uint32_t out_in0_num_subblocks = 1;
+    constexpr uint32_t out_in0_num_subblocks = Sq_chunk_t;
     constexpr uint32_t out_in1_num_subblocks = vDHt / out_subblock_w;
     static_assert(vDHt % out_subblock_w == 0, "V head dim tiles split into whole subblocks");
     constexpr VectorMode vector_mode = VectorMode::RC;  // full 32x32 Q tiles
@@ -108,21 +160,21 @@ void kernel_main() {
     // over the groups round-robin, no reduction). Positions page `item` = that item's R rows; q / rq / out row r of
     // item i = sequence row i * R + r.
     for (uint32_t unit = group; unit < n_units; unit += n_groups) {
-    // the rows' positions (mailbox-synchronized reads, stock op #27979)
-    uint32_t pos[R];
-    CircularBuffer(cb_cur_pos).wait_front(1);
-    for (uint32_t j = 0; j < R; ++j) {
-        pos[j] = read_tile_value(cb_cur_pos, 0, j);
+    // the rows' positions (mailbox-synchronized reads, stock op #27979): item m's R rows in page m
+    uint32_t pos[MI * R];
+    CircularBuffer(cb_cur_pos).wait_front(MI);
+    for (uint32_t j = 0; j < MI * R; ++j) {
+        pos[j] = read_tile_value(cb_cur_pos, j / R, j % R);
     }
-    CircularBuffer(cb_cur_pos).pop_front(1);
-    uint32_t lim[R];
+    CircularBuffer(cb_cur_pos).pop_front(MI);
+    uint32_t lim[MI * R];
     uint32_t max_pos = 0, min_lim = 0;
-    if (!rows_sdpa_limits<R>([&](uint32_t j) { return pos[j]; }, lim, max_pos, min_lim)) {
+    if (!rows_sdpa_limits<MI * R>([&](uint32_t j) { return pos[j]; }, lim, max_pos, min_lim)) {
         continue;
     }
 
     uint32_t min_lo = max_pos, max_lo = 0;
-    for (uint32_t j = 0; j < R; ++j) {
+    for (uint32_t j = 0; j < MI * R; ++j) {
         const uint32_t l = inkling_lo(lim[j], W);
         min_lo = l < min_lo ? l : min_lo;
         max_lo = l > max_lo ? l : max_lo;
@@ -154,10 +206,6 @@ void kernel_main() {
     CircularBuffer(cb_q_in).wait_front(q_chunk_tiles);
 
     // dynamic matmul configuration (stock DYNAMIC_CHUNK_SIZE path; also exact for a fixed Sk <= dst)
-    const uint32_t qk_subblock_h_dynamic = 1;
-    const uint32_t qk_subblock_w_dynamic = Sk_chunk_t_dynamic;
-    const uint32_t qk_in0_num_subblocks_dynamic = 1;
-    const uint32_t qk_in1_num_subblocks_dynamic = 1;
     const uint32_t out_in0_block_w_dynamic = Sk_chunk_t_dynamic;
     const uint32_t out_num_blocks_dynamic = 1;
     const uint32_t qk_chunk_tiles_dynamic = Sq_chunk_t * Sk_chunk_t_dynamic;
@@ -175,52 +223,26 @@ void kernel_main() {
         const bool band = inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E);
 
         if (band) {
-            /* BIAS = sum_j RQ_j @ TBL_j (+ the writer's causal / window mask): [1 x R] @ [R x Sk] tiles */
+            /* per item m: BIAS_m = sum_j RQ_{m,j} @ TBL_{m,j} (+ the writer's causal / window mask for its rows):
+               [1 x R] @ [R x Sk] tiles (the reader's tables and the writer's masks arrive item by item) */
             reconfig_data_format(cb_tbl, cb_rq);
             pack_reconfig_data_format(cb_bias);
-            matmul_blocks(
-                cb_rq,
-                cb_tbl,
-                cb_bias,
-                Sq_chunk_t,
-                Sk_chunk_t_dynamic,
-                R,
-                1,
-                1,
-                1,
-                R,
-                1,
-                Sk_chunk_t_dynamic,
-                false,
-                masked,
-                cb_mask_in,
-                cb_zero_in);
-            if (masked) {
-                CircularBuffer(cb_mask_in).pop_front(qk_chunk_tiles_dynamic);
+            for (uint32_t m = 0; m < MI; ++m) {
+                inkling_matmul_rows(
+                    cb_rq, cb_tbl, cb_bias, 1, Sk_chunk_t_dynamic, R, false, masked, cb_mask_in, cb_zero_in, m * R, 0);
+                if (masked) {
+                    CircularBuffer(cb_mask_in).pop_front(Sk_chunk_t_dynamic);
+                }
             }
             CircularBuffer(cb_bias).wait_front(qk_chunk_tiles_dynamic);
             reconfig_data_format(cb_k_in, cb_q_in);
             pack_reconfig_data_format(cb_qk_im);
         }
 
-        /* QK = Q_CHUNK @ K_CHUNK (+ this chunk's bias block, added on DST) */
-        matmul_blocks(
-            cb_q_in,
-            cb_k_in,
-            cb_qk_im,
-            Sq_chunk_t,
-            Sk_chunk_t_dynamic,
-            DHt,
-            qk_num_blocks,
-            qk_in0_num_subblocks_dynamic,
-            qk_in1_num_subblocks_dynamic,
-            qk_in0_block_w,
-            qk_subblock_h_dynamic,
-            qk_subblock_w_dynamic,
-            true,
-            band,
-            cb_bias,
-            cb_zero_in);
+        /* QK = Q_CHUNK @ K_CHUNK (+ each Q tile row's bias block, added on DST) */
+        inkling_matmul_rows(
+            cb_q_in, cb_k_in, cb_qk_im, Sq_chunk_t, Sk_chunk_t_dynamic, DHt, true, band, cb_bias, cb_zero_in, 0,
+            Sk_chunk_t_dynamic);
         if (band) {
             CircularBuffer(cb_bias).pop_front(qk_chunk_tiles_dynamic);
         }
@@ -294,7 +316,9 @@ void kernel_main() {
         move_block<true>(cb_cur_sum, cb_prev_sum, Sq_chunk_t);
     }
 
-    // tree reduction (stock): combine each round's child into the local (O, max, sum)
+    // tree reduction (stock): combine each round's child into the local (O, max, sum) (decode only: MI > 1 units run
+    // on one core each)
+    if constexpr (MI == 1) {
     if (num_active_children > 0) {
         for (uint32_t round = 0; round < num_active_rounds; ++round) {
             if (active_children_per_round[round] == UINT32_MAX) {
@@ -321,8 +345,9 @@ void kernel_main() {
             move_block<true>(cb_cur_sum, cb_prev_sum, Sq_chunk_t);
         }
     }
+    }
 
-    CircularBuffer(cb_sink).wait_front(1);
+    CircularBuffer(cb_sink).wait_front(Sq_chunk_t);
     if (is_tree_root) {
         /* Inkling-2 sink (the stock op's attention-sink step with a per-row sink): m' = max(m, s);
            SUM = SUM * exp((m - m') * scale) + exp((s - m') * scale); OUT_ACC *= exp((m - m') * scale) */
@@ -356,12 +381,14 @@ void kernel_main() {
         CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
         move_block<true>(cb_out_accumulate_im, cb_out_final, out_chunk_tiles);
     } else if (has_parent) {
-        move_block<true>(cb_out_accumulate_im, cb_out_o, out_chunk_tiles);
-        move_block<true>(cb_prev_max, cb_out_m, Sq_chunk_t);
-        move_block<true>(cb_prev_sum, cb_out_l, Sq_chunk_t);
+        if constexpr (MI == 1) {
+            move_block<true>(cb_out_accumulate_im, cb_out_o, out_chunk_tiles);
+            move_block<true>(cb_prev_max, cb_out_m, Sq_chunk_t);
+            move_block<true>(cb_prev_sum, cb_out_l, Sq_chunk_t);
+        }
     }
     CircularBuffer(cb_q_in).pop_front(q_chunk_tiles);
-    CircularBuffer(cb_rq).pop_front(R);
-    CircularBuffer(cb_sink).pop_front(1);
+    CircularBuffer(cb_rq).pop_front(MI * R);
+    CircularBuffer(cb_sink).pop_front(Sq_chunk_t);
     }  // units
 }

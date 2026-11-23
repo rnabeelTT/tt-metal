@@ -19,6 +19,10 @@
 #include "ttnn/operations/transformer/sdpa_decode/device/kernels/dataflow/dataflow_common.hpp"
 #include "inkling_sdpa_common.hpp"
 
+#ifndef SDPA_MI
+#define SDPA_MI 1  // prefill: consecutive items per unit (their Q tiles stacked; see the compute)
+#endif
+
 void kernel_main() {
     Noc noc;
 
@@ -47,6 +51,7 @@ void kernel_main() {
     constexpr auto tbl_args = TensorAccessorArgs<rq_args.next_compile_time_args_offset()>();
     constexpr auto sink_args = TensorAccessorArgs<tbl_args.next_compile_time_args_offset()>();
     static_assert(R * G <= 32, "the rows' query heads of one kv head share one tile");
+    constexpr uint32_t MI = SDPA_MI;
 
     constexpr uint32_t cb_q_in = tt::CBIndex::c_0;
     constexpr uint32_t cb_k_in = tt::CBIndex::c_1;
@@ -87,14 +92,18 @@ void kernel_main() {
     // item i = sequence row i * R + r.
     for (uint32_t unit = group; unit < n_units; unit += n_groups) {
     const uint32_t cur_head = unit % num_kv_heads;
-    const uint32_t item = unit / num_kv_heads;
-    // cur_pos stick -> the writer's CB and (L1 -> L1) the compute's CB (the stock op's #44366 split)
+    const uint32_t item = (unit / num_kv_heads) * MI;  // the unit's first item (items item .. item + MI - 1)
+    // cur_pos sticks (one per item) -> the writer's CB and (L1 -> L1) the compute's CB (the stock op's #44366 split)
     CircularBuffer cb_writer(cb_writer_cur_pos);
-    cb_writer.reserve_back(1);
+    cb_writer.reserve_back(MI);
     const uint32_t pos_l1 = cb_writer.get_write_ptr();
     {
         const auto pos_reader = TensorAccessor(pos_args, pos_addr);
-        noc.async_read(pos_reader, CoreLocalMem<uint32_t>(pos_l1), pos_stick_bytes, {.page_id = item}, {});
+        for (uint32_t m = 0; m < MI; ++m) {
+            noc.async_read(
+                pos_reader, CoreLocalMem<uint32_t>(pos_l1 + m * pos_stick_bytes), pos_stick_bytes,
+                {.page_id = item + m}, {});
+        }
         noc.async_read_barrier();
     }
     const uint8_t noc_id = noc.get_noc_id();
@@ -102,26 +111,27 @@ void kernel_main() {
     const uint32_t my_noc_y = my_y[noc_id];
     UnicastEndpoint self;
     CircularBuffer cb_compute(cb_compute_cur_pos);
-    cb_compute.reserve_back(1);
+    cb_compute.reserve_back(MI);
     noc.async_read(
         self,
         CoreLocalMem<uint32_t>(cb_compute.get_write_ptr()),
-        pos_stick_bytes,
+        MI * pos_stick_bytes,
         {.noc_x = my_noc_x, .noc_y = my_noc_y, .addr = pos_l1},
         {});
     noc.async_read_barrier();
-    cb_writer.push_back(1);
-    cb_compute.push_back(1);
+    cb_writer.push_back(MI);
+    cb_compute.push_back(MI);
 
     volatile tt_l1_ptr uint32_t* pos_ptr = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(pos_l1);
-    uint32_t lim[R];
+    constexpr uint32_t PW = pos_stick_bytes / 4;
+    uint32_t lim[MI * R];
     uint32_t max_pos = 0, min_lim = 0;
-    if (!rows_sdpa_limits<R>([&](uint32_t j) { return pos_ptr[j]; }, lim, max_pos, min_lim)) {
+    if (!rows_sdpa_limits<MI * R>([&](uint32_t j) { return pos_ptr[(j / R) * PW + j % R]; }, lim, max_pos, min_lim)) {
         continue;  // every row skipped
     }
 
     uint32_t min_lo = max_pos;
-    for (uint32_t j = 0; j < R; ++j) {
+    for (uint32_t j = 0; j < MI * R; ++j) {
         const uint32_t lo = inkling_lo(lim[j], W);
         min_lo = lo < min_lo ? lo : min_lo;
     }
@@ -146,15 +156,16 @@ void kernel_main() {
     // rows r*G+i of a zeroed tile (two 32-byte face rows per tile row, L1 -> L1)
     CircularBuffer cb_q(cb_q_in);
     CircularBuffer cb_scr(cb_q_scratch);
-    cb_q.reserve_back(DHt);
+    cb_q.reserve_back(MI * DHt);
     cb_scr.reserve_back(R * DHt + 1);
-    const uint32_t q_l1 = cb_q.get_write_ptr();
     const uint32_t scr_l1 = (cb_scr.get_write_ptr() + 63) & ~63u;  // the scratch CB has one spare tile
+    for (uint32_t m = 0; m < MI; ++m) {
+    const uint32_t q_l1 = cb_q.get_write_ptr() + m * DHt * q_tile_bytes;  // item m: Q tile row m
     {
         const auto q_reader = TensorAccessor(q_args, q_addr, q_tile_bytes);
         const uint32_t r0 = cur_head * G, r1 = cur_head * G + G;  // tile rows [r0, r1)
         for (uint32_t t = 0; t < R * DHt; ++t) {
-            const uint64_t src = q_reader.get_noc_addr(item * R * DHt + t);
+            const uint64_t src = q_reader.get_noc_addr((item + m) * R * DHt + t);
             for (uint32_t top = 0; top < 32; top += 16) {  // face rows 0-15 (faces 0, 1), 16-31 (faces 2, 3)
                 const uint32_t a = r0 > top ? r0 : top;
                 const uint32_t b = r1 < top + 16 ? r1 : top + 16;
@@ -170,7 +181,7 @@ void kernel_main() {
         }
     }
     for (uint32_t d = 0; d < DHt; ++d) {
-        fill_tile_zeros<q_tile_bytes, false>(noc, cb_q_in, d);
+        fill_tile_zeros<q_tile_bytes, false>(noc, cb_q_in, m * DHt + d);
     }
     noc.write_zeros_l1_barrier();
     noc.async_read_barrier();
@@ -190,18 +201,21 @@ void kernel_main() {
         }
     }
     noc.async_read_barrier();
-    cb_q.push_back(DHt);
+    }  // items
+    cb_q.push_back(MI * DHt);
 
     // Rq: tile j = row j's G query heads of this kv head (tile rows j*G .. j*G+G-1, the r vector in columns 0..15),
-    // every other row zero, so sum_j Rq_j @ T[phi_j][m_j] gives each row its own bias (tt/relbias.py)
+    // every other row zero, so sum_j Rq_j @ T[phi_j][m_j] gives each row its own bias (tt/relbias.py); item m's at
+    // tiles m * R ..
     CircularBuffer cb_rqc(cb_rq);
-    cb_rqc.reserve_back(R);
-    const uint32_t rq_l1 = cb_rqc.get_write_ptr();
+    cb_rqc.reserve_back(MI * R);
+    for (uint32_t m = 0; m < MI; ++m) {
+    const uint32_t rq_l1 = cb_rqc.get_write_ptr() + m * R * q_tile_bytes;
     {
         const auto rq_reader = TensorAccessor(rq_args, rq_addr, q_tile_bytes);
         const uint32_t r0 = cur_head * G, r1 = cur_head * G + G;
         for (uint32_t t = 0; t < R; ++t) {
-            const uint64_t src = rq_reader.get_noc_addr(item * R + t);
+            const uint64_t src = rq_reader.get_noc_addr((item + m) * R + t);
             for (uint32_t top = 0; top < 32; top += 16) {
                 const uint32_t a = r0 > top ? r0 : top;
                 const uint32_t b = r1 < top + 16 ? r1 : top + 16;
@@ -217,7 +231,7 @@ void kernel_main() {
         }
     }
     for (uint32_t j = 0; j < R; ++j) {
-        fill_tile_zeros<q_tile_bytes, false>(noc, cb_rq, j);
+        fill_tile_zeros<q_tile_bytes, false>(noc, cb_rq, m * R + j);
     }
     noc.write_zeros_l1_barrier();
     noc.async_read_barrier();
@@ -235,16 +249,18 @@ void kernel_main() {
         });
     }
     noc.async_read_barrier();
-    cb_rqc.push_back(R);
-    // Inkling-2 sink: row j's G sink values (every column) at tile rows j*G .. j*G+G-1 of ONE tile, zero elsewhere
+    }  // items
+    cb_rqc.push_back(MI * R);
+    // Inkling-2 sink: row j's G sink values (every column) at tile rows j*G .. j*G+G-1 of ONE tile per item, zero
+    // elsewhere
     CircularBuffer cb_sinkc(cb_sink);
-    cb_sinkc.reserve_back(1);
-    {
-        const uint32_t sink_l1 = cb_sinkc.get_write_ptr();
+    cb_sinkc.reserve_back(MI);
+    for (uint32_t m = 0; m < MI; ++m) {
+        const uint32_t sink_l1 = cb_sinkc.get_write_ptr() + m * q_tile_bytes;
         const auto sink_reader = TensorAccessor(sink_args, sink_addr, q_tile_bytes);
         const uint32_t r0 = cur_head * G, r1 = cur_head * G + G;
         for (uint32_t t = 0; t < R; ++t) {
-            const uint64_t src = sink_reader.get_noc_addr(item * R + t);
+            const uint64_t src = sink_reader.get_noc_addr((item + m) * R + t);
             for (uint32_t top = 0; top < 32; top += 16) {
                 const uint32_t a = r0 > top ? r0 : top;
                 const uint32_t b = r1 < top + 16 ? r1 : top + 16;
@@ -258,7 +274,7 @@ void kernel_main() {
                 }
             }
         }
-        fill_tile_zeros<q_tile_bytes, false>(noc, cb_sink, 0);
+        fill_tile_zeros<q_tile_bytes, false>(noc, cb_sink, m);
         noc.write_zeros_l1_barrier();
         noc.async_read_barrier();
         for (uint32_t j = 0; j < R; ++j) {
@@ -276,7 +292,7 @@ void kernel_main() {
         }
         noc.async_read_barrier();
     }
-    cb_sinkc.push_back(1);
+    cb_sinkc.push_back(MI);
     if constexpr (PT_PER_ITEM) {
         if (item != pt_item) {
             read_page_table_for_batch(
@@ -295,13 +311,14 @@ void kernel_main() {
     CircularBuffer cb_tblc(cb_tbl);
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
         const uint32_t k_chunk_start_row_num = k_chunk * Sk_chunk_t_dynamic;
-        if (inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E)) {
-            // R x Sk table tiles: row j, key tile b = k_chunk * Sk + t -> T[phi_j][m = a_j - b] (zero outside [0, M))
+        // per item: R x Sk table tiles: row j, key tile b = k_chunk * Sk + t -> T[phi_j][m = a_j - b] (zero outside
+        // [0, M))
+        for (uint32_t mi = 0; mi < MI && inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E); ++mi) {
             const uint32_t n = R * Sk_chunk_t_dynamic;
             cb_tblc.reserve_back(n);
             uint32_t idx = 0;
             for (uint32_t j = 0; j < R; ++j) {
-                const uint32_t a = lim[j] >> 5, phi = lim[j] & 31;
+                const uint32_t a = lim[mi * R + j] >> 5, phi = lim[mi * R + j] & 31;
                 for (uint32_t t = 0; t < Sk_chunk_t_dynamic; ++t, ++idx) {
                     const uint32_t b = k_chunk_start_row_num + t;
                     if (b <= a && a - b < M_tiles) {

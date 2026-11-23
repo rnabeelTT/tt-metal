@@ -8,7 +8,7 @@ tables), against an fp32 torch reference of Inkling-2 attention on the same (dty
 
 Shapes: NH / NKV per die from TP (env TP, default 1: 24 q / 8 kv heads; TP 4: 6 / 2), head dim 128, scale 1/sqrt(128),
 E = 1024 on both layer kinds, W = 1024 on sliding layers. Modes: decode / verify rows of one sequence (R = 1..8),
-prefill (items of 8 rows of one sequence), multi-user (B items of 1 row, each its own page-table row). Controls: the
+prefill (items of 8 rows of one sequence; env MI: items per work unit), multi-user (B items of 1 row, each its own page-table row). Controls: the
 reference without the bias and without the sink must both be far from the op.
 
 usage (in the image): tools/run_dev.sh python models/autoports/thinkingmachines_inkling_2_mini/tests/test_sdpa_device.py
@@ -144,7 +144,8 @@ def run_case(dev, W, E, pos, seed, items_r=0, users=0):
     cur = ttnn.from_torch(pos_t, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     ptt = ttnn.from_torch(page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=dev, memory_config=dram)
     out = inkling_sdpa_decode(
-        q, K, V, cur, ptt, rq, table, SCALE, W, E, sink=sk, pt_per_item=bool(users), k_chunk_size=256 if users else 0
+        q, K, V, cur, ptt, rq, table, SCALE, W, E, sink=sk, pt_per_item=bool(users), k_chunk_size=256 if users else 0,
+        mi=MI if items_r else 1,
     )
     got = ttnn.to_torch(out).float()[0]
     want = reference(qf, Kpos, Vpos, rf, proj_eff, sink_eff, pos, W)
@@ -181,7 +182,8 @@ CASES = [  # (W, positions)
     (0, [2000 + j for j in range(32 // G)]),
     (W_SWA, [3000 + j for j in range(32 // G)]),
 ]
-PREFILL = [(0, 0, 640), (W_SWA, 0, 640), (0, 1000, 256), (W_SWA, 2040, 256)]
+PREFILL = [(0, 0, 640), (W_SWA, 0, 640), (0, 1000, 256), (W_SWA, 2040, 256), (0, 4000, 256)]
+MI = int(os.environ.get("MI", "1"))  # prefill items per SDPA work unit
 MULTI = [(0, [0, 17, 300, 1100, 2047, 64, 5, 999]), (W_SWA, [0, 17, 300, 1100, 2047, 64, 5, 999, 3000, 1024])]
 
 

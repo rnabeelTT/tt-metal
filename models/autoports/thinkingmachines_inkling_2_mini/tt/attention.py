@@ -20,6 +20,7 @@ here; o_proj for the post-attention conv): the convs are linear in their input. 
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 
@@ -40,6 +41,9 @@ FUSED_OPS = __import__("os").environ.get("I2M_OPS", "fused") == "fused"
 DRAM_SHARDED = __import__("os").environ.get("I2M_DRAM_SHARDED", "0") == "1"
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
+# prefill SDPA items per work unit (inkling_sdpa_decode mi; I2M_SDPA_MI): each K / V chunk read once for 4 items' Q tiles
+# (128K positions: the SDPA 377 -> 111 ms per 1024-row chunk; 8 items: the CBs clash with L1)
+SDPA_MI = int(os.environ.get("I2M_SDPA_MI", "4"))
 
 
 def tau_of(positions: torch.Tensor, n_floor: int, alpha: float) -> torch.Tensor:
@@ -450,7 +454,7 @@ def _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl):
     else:
         positions = c._up_i32(torch.arange(p0, p0 + R).reshape(-1, R_ITEM))
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, c.read_slot[slot], rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM)
+                            sink=sk, out_memory_config=DRAM, mi=SDPA_MI)
     for t in (q, rq, sk, positions):
         ttnn.deallocate(t)
     o = ttnn.reshape(o, (1, 1, R, NH * HD))
@@ -570,7 +574,7 @@ def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
     bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, ctx.positions, ctx.pt[w.sliding], rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM, pt_per_item=True)
+                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI)
     for t in (q, rq, sk):
         ttnn.deallocate(t)
     o = ttnn.reshape(o, (1, 1, T, NH * HD))

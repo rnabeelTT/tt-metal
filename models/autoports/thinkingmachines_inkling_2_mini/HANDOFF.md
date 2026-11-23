@@ -249,6 +249,24 @@ are stored padded to 384); the MoE rows kernels at one row (still route the sigb
 | MoE activation + routing weights in one program (tt/moeact.py) | 642 | 1,596 |
 | down projection writes row-major rows (no untilize before the un-dispatch) | 640 | 1,600 |
 | attention prep for the chunk's rows (tt/aprep.py: q / r / sink, the K / V rows into L1 fill tensors) | 525 | 1,949 |
+| block mix over (row tile, H column block) cores, one softmax per row tile per core; the sources read in place | 477 | 2,148 |
+| short conv: the row shifts on the FPU (0/1 shift-matrix matmuls), not 3 shifted tiles per tile in the reader | 428 | 2,394 |
+| message gates: the fused gate tail over the chunk's tiles (tt/gatet.py) | 397 | 2,581 |
+| MoE row gather from an L1 row-major copy of x (chunks <= 2048 rows) | 384 | 2,666 |
+| grouped matmul: A multicast within each group slice (read from DRAM once, not once per column block) | 355 | 2,887 |
+| grouped matmul: padding groups skipped, the weight block double-buffered when it fits | 352 | 2,913 |
+| prefill SDPA: 4 items per work unit (their Q tiles stacked; each K / V chunk read once for the 4) | 346 | 2,958 |
+
+At 128K positions (op_prof P0=131072, one 1024-row chunk, device): SDPA 377 -> 111 ms (2 items: 228; the stream bound:
+linear in items per unit), the chunk 709 -> 443 ms. 8 items: the CBs (1.56 MB) clash with L1; the tree reduction's
+code compiles only for one-item units (4 items overflowed the kernel config buffer by 320 bytes).
+
+2048-token chunks: 3,072 tok/s (4096: 2,912 before the gather change), at +1.29 GiB DRAM per die (the sliding rings
+hold the window + one chunk for 32 slots: 2,064,384 -> ~1,895,000 pool tokens); not switched on yet. The 1024-row
+profile (op_prof PACKED=1, 357 ms device): gmm 65, rms_norm 29, SDPA 22, mix 19 + its logit matmuls 19, q|k|v|g
+projections 15, the row gather 14, gate tail 13 + gate matmuls 15, all-reduces 25, prep 12, dispatch 10. The grouped
+matmul's CBs stay within ~800 KB: double-buffered 6-tile weight blocks (1.37 MB of CBs) clashed with the packed
+prefill's L1 buffers (from 1.34 MB; tests/test_packed_device.py threw, the bench did not).
 
 Decode eval after the attention prep: 0.9711 / 0.9955 / 0.0168 (noise band). The prep's outputs are 1-2 bf16 ulps from
 the op path (exact sums); tests/test_packed_device.py's prefix-resume KL (different chunk shapes) went 1.7e-3 ->
@@ -273,5 +291,6 @@ default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, 
 
 1. Decode glue: a persistent width-sharded layout for the one-row activations (the norms' reshards and casts are ~1/3
    of the remaining glue), then fused mix + norm / gate rounds; the one-row MoE without the duplicated row.
-2. Prefill MoE: fewer weight re-reads per 32-row group (larger groups at long chunks); prefill attention prep.
+2. Prefill: long-context SDPA past 4 items per stream (smaller CBs: single-buffered tables), 2048-token chunks in the served config (pool cap),
+   the block-mix logits once per block (MixPlan for prefill), the gate head (rms / concat / matmuls).
 3. DSpark speculative decoding (acceptance 1.2 per pass measured: low priority).
