@@ -49,6 +49,9 @@ RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-s
 # I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
 RMS_CAST = os.environ.get("I2M_RMS_CAST", "1") == "1"
 MIX_KERNEL = os.environ.get("I2M_MIX_KERNEL", "1") == "1"  # fused block mix for one tile row (tt/mixw.py)
+# I2M_MIX_PLAN (default 1): prefill block mixes take each block's logits from one matmul per block against every later
+# query (tt/batched.py MixPlan), not one matmul per source per mix
+MIX_PLAN = os.environ.get("I2M_MIX_PLAN", "1") == "1"
 HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 # packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
 # (default 8; 4 on one die: each lane's conv states take ~32 MB of DRAM over the 48 applications)
@@ -419,9 +422,19 @@ class Inkling2Model:
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
         return _bf(self.ops.rms(e, self.embed_norm))
 
-    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0, ctx=None):
+    def _pmix(self, key, blocks_n, ids, D, cur, Q, nq):
+        """Prefill mix(blocks_n + [cur], Q, nq) with the blocks' logits from D (each block's against every later query,
+        computed once: MixPlan) and only the current source's here."""
+        ops = self.ops
+        lg = ttnn.matmul(cur, ops.qrep[id(Q)], compute_kernel_config=ops.ckc, dtype=ttnn.float32, memory_config=DRAM)
+        plan = self._pf_plan
+        lgs = [(D[b], plan.off[(b, key)], int(D[b].shape[-1]) // 32) for b in ids] + [lg]
+        return ops.mixk(blocks_n + [cur], lgs, len(blocks_n) + 1, nq, out_mc=DRAM)
+
+    def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0, ctx=None, ids=None, D=None):
         """Application a on x [1,1,T,H] bf16 (block partial sum) at positions p0..; blocks_n = rms-normed fp32 blocks.
-        messages: 4 fp32 [1,1,T,H] (q, k, v, mlp) on passes > 1. Returns the bf16 output."""
+        messages: 4 fp32 [1,1,T,H] (q, k, v, mlp) on passes > 1. Returns the bf16 output; at a block boundary the new
+        block (the normed input) is left in self._blk. D (prefill MixPlan): the blocks' logits by block id (ids)."""
         li, _ = self.sched[a]
         L, st, ops = self.layers[li], self.apps[a], self.ops
         T = int(x.shape[2])
@@ -430,7 +443,8 @@ class Inkling2Model:
         xn = None
         if L.nq:
             xn = ops.rms(x)
-            ins = ops.mix(blocks_n + [xn], L.attn_Q, L.nq)
+            ins = (self._pmix(("attn", a), blocks_n, ids, D, xn, L.attn_Q, L.nq) if D is not None
+                   else ops.mix(blocks_n + [xn], L.attn_Q, L.nq))
         else:
             ins = [_f32(x)]
         if L.sliding:
@@ -455,10 +469,16 @@ class Inkling2Model:
             att = st.conv("attn", att, rows_mode, nvalid)
         if L.boundary:
             resid = _f32(att)
-            blocks_n = blocks_n + [xn if xn is not None else ops.rms(x)]
+            self._blk = blk = xn if xn is not None else ops.rms(x)
+            blocks_n = blocks_n + [blk]
+            if D is not None:
+                D[a] = ttnn.matmul(blk, self._pf_plan.qcat[a], compute_kernel_config=ops.ckc, dtype=ttnn.float32,
+                                   memory_config=DRAM)
+                ids = list(ids) + [a]
         else:
             resid = ttnn.add(_f32(x), _f32(att))
-        m = ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1)[0]
+        m = (self._pmix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1) if D is not None
+             else ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1))[0]
         if messages is not None:
             m = L.gates["mlp"](m, messages[3])
         mo = L.moe.forward(_bf(ops.rms(m, L.mlp_norm)))
@@ -525,6 +545,14 @@ class Inkling2Model:
         x = self.embed_tokens(ids)
         if valid is not None and valid < int(ids.numel()):
             pass  # padded rows ride along; their K/V lands past the prompt and conv states stop at `valid`
+        T = int(ids.numel())
+        D = None
+        if MIX_PLAN and MIX_KERNEL and FUSED_OPS and T > 32 and T % 32 == 0:  # each block's mix logits once (MixPlan)
+            if getattr(self, "_pf_plan", None) is None:
+                from .batched import MixPlan
+                self._pf_plan = MixPlan(self)
+            D = {}
+        bids, pre_bids = [], None
         blocks_n = []
         pre_x = pre_blocks = None
         prev_src = None
@@ -533,16 +561,15 @@ class Inkling2Model:
             L = self.layers[li]
             if li == cfg.loop_start:
                 if p == 0:
-                    pre_x, pre_blocks = x, list(blocks_n)
+                    pre_x, pre_blocks, pre_bids = x, list(blocks_n), list(bids)
                 else:
-                    x, blocks_n = pre_x, list(pre_blocks)
+                    x, blocks_n, bids = pre_x, list(pre_blocks), list(pre_bids)
             msgs = None
             if L.loop and p > 0:
                 msgs = self.messages(li - cfg.loop_start, prev_src)
-            xin = x
-            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid, slot=slot, ctx=ctx)
-            if L.boundary:
-                blocks_n = blocks_n + [ops.rms(xin)]
+            x = self.layer_forward(a, x, blocks_n, p0, messages=msgs, valid=valid, slot=slot, ctx=ctx, ids=bids, D=D)
+            if L.boundary:  # (the block layer_forward normed)
+                blocks_n, bids = blocks_n + [self._blk], bids + [a]
             if capture is not None:
                 capture(a, x)
             if L.loop and li == cfg.loop_end - 1:

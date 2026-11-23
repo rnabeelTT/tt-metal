@@ -4,7 +4,8 @@
 // Block attention residual mix (tt/mixw.py), reader: per row tile, every logit tile (n sources x nq queries; each
 // query's logit in every column of its tile), then this core's H tiles of the n sources (fp32), column by column.
 // Source i: its own tensors (or slices of stacked ones) at (s_addr_i, s_off_i) / (lg_addr_i, lg_off_i) in tiles;
-// row tile r, column t at s_off_i + r * Ht + t, query q's logits at lg_off_i + r * nq + q.
+// row tile r, column t at s_off_i + r * Ht + t, query q's logits at lg_off_i + r * lg_stride_i + q (a block's logits
+// against every later query: this mix's queries at a column offset of a wider tensor).
 
 #include <stdint.h>
 
@@ -24,15 +25,15 @@ void kernel_main() {
     constexpr uint32_t F32 = 4096;
     constexpr auto s_args = TensorAccessorArgs<5>();
     constexpr auto lg_args = TensorAccessorArgs<s_args.next_compile_time_args_offset()>();
-    // per source: s_addr, s_off, lg_addr, lg_off
-    auto src_arg = [](uint32_t i, uint32_t k) { return get_arg_val<uint32_t>(4 + 4 * i + k); };
+    // per source: s_addr, s_off, lg_addr, lg_off, lg_stride
+    auto src_arg = [](uint32_t i, uint32_t k) { return get_arg_val<uint32_t>(4 + 5 * i + k); };
 
     for (uint32_t r = r0; r < r0 + nr; ++r) {
         cb_reserve_back(cb_lg, n * nq);
         const uint32_t l = get_write_ptr(cb_lg);
         for (uint32_t i = 0; i < n; ++i) {
             const auto alg = TensorAccessor(lg_args, src_arg(i, 2), F32);
-            const uint32_t base = src_arg(i, 3) + r * nq;
+            const uint32_t base = src_arg(i, 3) + r * src_arg(i, 4);
             for (uint32_t q = 0; q < nq; ++q) {
                 noc_async_read(alg.get_noc_addr(base + q), l + (i * nq + q) * F32, F32);
             }
