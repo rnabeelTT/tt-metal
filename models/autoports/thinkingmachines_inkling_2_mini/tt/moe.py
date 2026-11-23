@@ -40,6 +40,7 @@ GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
 # I2M_MOE_GMM (default 1): the sorted prefill's expert matmuls as tt/gmm.py (every core) instead of ttnn.sparse_matmul
 # (its 1D config puts gate|up's 24 output tiles on 24 cores)
 GMM = os.environ.get("I2M_MOE_GMM", "1") == "1"
+ACT_KERNEL = os.environ.get("I2M_MOE_ACT_KERNEL", "1") == "1"  # the sorted prefill's activation in one program
 _GMM = __import__("types").SimpleNamespace()
 assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
@@ -217,10 +218,18 @@ class MoE:
                 fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,
                                            program_config=cgu, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
                                            optional_output_tensor=alloc(2 * W))  # compact [1, G, 32, 2W]
-            din = inkling_act_fused(ttnn.slice(fused, [0, 0, 0, 0], [1, G, gs, W]),
-                                    ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
-            ttnn.deallocate(fused)
-            din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
+            if ACT_KERNEL:  # the activation and the routing weights in one program (tt/moeact.py)
+                if getattr(_GMM, "act", None) is None:
+                    from .moeact import MoEAct
+
+                    _GMM.act = MoEAct(self.mesh)
+                din = _GMM.act(fused, m["weights"], alloc(W))
+                ttnn.deallocate(fused)
+            else:
+                din = inkling_act_fused(ttnn.slice(fused, [0, 0, 0, 0], [1, G, gs, W]),
+                                        ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
+                ttnn.deallocate(fused)
+                din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
             if GMM:
                 down = self._gmm(din, dn, m["group_ids"], alloc(H), E)
             else:
