@@ -177,6 +177,9 @@ class HYV4FlashForConditionalGeneration:
         from models.experimental.hybrid_moe import engram_store
 
         edir = os.environ.get("HY4_ENGRAM_DIR", os.path.expanduser("~/.cache/hybrid-moe/hy4_engram"))
+        from models.autoports.tencent_hy4_flash.tt import hostmem
+
+        hostmem.check_startup(edir)  # HY4_RAM_CHECK: refuse to start when the host cannot hold the server
         engram_store.OUT = edir
         engram_store._SNAP = checkpoint_dir()
         engram_store.convert()  # first boot: the FP8 tables (~65 GB, idempotent: converted layers are skipped)
