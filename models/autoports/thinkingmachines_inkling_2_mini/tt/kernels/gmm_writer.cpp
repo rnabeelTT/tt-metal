@@ -15,14 +15,21 @@ void kernel_main() {
     constexpr uint32_t Nt = get_compile_time_arg_val(1);
     constexpr uint32_t nb = get_compile_time_arg_val(2);
     constexpr uint32_t mt = get_compile_time_arg_val(3);
-    constexpr auto c_args = TensorAccessorArgs<4>();
+    constexpr uint32_t cb_ids = get_compile_time_arg_val(4);
+    constexpr uint32_t E = get_compile_time_arg_val(5);
+    constexpr auto c_args = TensorAccessorArgs<6>();
     const uint32_t b = get_arg_val<uint32_t>(0), g0 = get_arg_val<uint32_t>(1), g1 = get_arg_val<uint32_t>(2);
 #if GMM_RM
     const auto ac = TensorAccessor(c_args, get_common_arg_val<uint32_t>(0), Nt * 64);
 #else
     const auto ac = TensorAccessor(c_args, get_common_arg_val<uint32_t>(0), 2048);
 #endif
+    cb_wait_front(cb_ids, 1);  // (the reader's copy of the group ids)
+    volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_read_ptr(cb_ids));
     for (uint32_t g = g0; g < g1; ++g) {
+        if (ids[g] >= E) {
+            continue;  // (padding group: never computed, its rows never read back)
+        }
         for (uint32_t mi = 0; mi < mt; ++mi) {
             cb_wait_front(cb_out, nb);
             const uint32_t l = get_read_ptr(cb_out);

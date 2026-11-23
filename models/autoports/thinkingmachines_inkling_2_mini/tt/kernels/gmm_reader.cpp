@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Grouped expert matmul (tt/gmm.py), reader: this core's column block b of groups [g0, g1). Per group: its expert's
-// [Kt x nb] weight block (re-read only when the expert changes: the single-block CB keeps the previous one in place),
-// then the group's mt row tiles of A ([Kt] tiles each). The NB cores of a group slice form a rectangle: the b = 0
+// [Kt x nb] weight block, pushed once per run of groups of one expert (the CB holds two blocks: the next expert's
+// loads while the compute works on the current one), then the group's mt row tiles of A ([Kt] tiles each). Padding
+// groups (id >= E) are skipped (by the compute and the writer too: they read the ids this pushes to cb_ids). The NB cores of a group slice form a rectangle: the b = 0
 // core (a corner) reads each A row tile from DRAM and multicasts it to the rest of the rectangle (same CB slot on
 // every core: they consume in lockstep); semaphore 0 (on the sender): receivers ready, 1 (on the receivers): the tile
 // row landed.
@@ -47,14 +48,17 @@ void kernel_main() {
     const uint32_t il = get_write_ptr(cb_ids);
     noc_async_read(ai.get_noc_addr(0), il, ids_bytes);
     noc_async_read_barrier();
+    cb_push_back(cb_ids, 1);
     volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(il);
 
     uint32_t prev = 0xFFFFFFFF;
     for (uint32_t g = g0; g < g1; ++g) {
-        uint32_t e = ids[g];
-        e = e < E ? e : 0;  // (padding groups: any expert; their rows are never read back)
-        cb_reserve_back(cb_w, Kt * nb);
+        const uint32_t e = ids[g];
+        if (e >= E) {
+            continue;
+        }
         if (e != prev) {
+            cb_reserve_back(cb_w, Kt * nb);
             const uint32_t wl = get_write_ptr(cb_w);
             for (uint32_t kt = 0; kt < Kt; ++kt) {
                 for (uint32_t j = 0; j < nb; ++j) {
@@ -63,9 +67,9 @@ void kernel_main() {
                 }
             }
             noc_async_read_barrier();
+            cb_push_back(cb_w, Kt * nb);
             prev = e;
         }
-        cb_push_back(cb_w, Kt * nb);
         for (uint32_t mi = 0; mi < mt; ++mi) {
             cb_reserve_back(cb_a, Kt);
             const uint32_t al = get_write_ptr(cb_a);
