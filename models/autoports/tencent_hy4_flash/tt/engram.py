@@ -29,6 +29,35 @@ from models.autoports.tencent_hy4_flash.tt.common import StreamLinear, ckc, num_
 NORM_EPS = float(torch.finfo(torch.float32).eps)
 
 
+def _row_sum(x, mem):
+    """ttnn.sum(x, dim=-1, keepdim=True) of a decode pass's [1, c, 32, W] fp32, every real row reduced as at tile rows
+    0..7. The fp32 (SFPU, accurate) row sum adds a tile's rows 8..15 and 24..31 in another order than rows 0..7 and
+    16..23 (last-bit differences in ~60% of those rows): the same token at row 10 of a verify pass got another Engram
+    gate than at row 2 (bf16 flip -> the b8 gate's chat_english diverging at R > 8). Passes of more than 8 real rows
+    (batched spec verify) sum each 8-row block sliced to its own tile (rows 0..7), so every row is bit-identical to the
+    same row in a pass of <= 8 rows; <= 8 rows: the plain sum (unchanged). HY4_ENGRAM_ROWSUM8=0: the plain sum always."""
+    from models.autoports.tencent_hy4_flash.tt.common import DECODE_ROWS
+
+    R = int(DECODE_ROWS[0])
+    if R <= 8 or os.environ.get("HY4_ENGRAM_ROWSUM8", "1") != "1":
+        return ttnn.sum(x, dim=-1, keepdim=True, memory_config=mem)
+    c, W = int(x.shape[1]), int(x.shape[-1])
+    nb = -(-min(R, 32) // 8)
+    parts = []
+    for b in range(nb):
+        p = ttnn.slice(x, (0, 0, 8 * b, 0), (1, c, 8 * b + 8, W), memory_config=mem)
+        parts.append(ttnn.sum(p, dim=-1, keepdim=True, memory_config=mem))  # [1, c, 8, 1]
+        ttnn.deallocate(p)
+    g = ttnn.concat(parts, dim=2, memory_config=mem)
+    for p in parts:
+        ttnn.deallocate(p)
+    if 8 * nb < 32:
+        g2 = ttnn.pad(g, [(0, 0), (0, 0), (0, 32 - 8 * nb), (0, 0)], 0.0)
+        ttnn.deallocate(g)
+        g = g2
+    return g
+
+
 class Hy4EngramDevice:
     def __init__(self, mesh, cfg, sd, li=None):
         """sd: the layer's `engram_layer.` tensors (prefix stripped)."""
@@ -126,9 +155,11 @@ class Hy4EngramDevice:
         kn = ttnn.slice(nw, (0, 1, 0, 0), (1, 1 + hc, 32, H), memory_config=mem)
         qn = ttnn.slice(nw, (0, 1 + hc, 0, 0), (1, 1 + 2 * hc, 32, H), memory_config=mem)
         ttnn.deallocate(nw)
-        g = ttnn.sum(ttnn.multiply(kn, qn, memory_config=mem), dim=-1, keepdim=True, memory_config=mem)  # [1,hc,32,1]
+        kq = ttnn.multiply(kn, qn, memory_config=mem)
         ttnn.deallocate(kn)
         ttnn.deallocate(qn)
+        g = _row_sum(kq, mem)  # [1,hc,32,1]
+        ttnn.deallocate(kq)
         g = ttnn.multiply(g, self.inv_sqrt_h, memory_config=mem)
         mag = ttnn.sqrt(ttnn.clamp(ttnn.abs(g, memory_config=mem), min=1e-6, memory_config=mem), memory_config=mem)
         g = ttnn.sigmoid(ttnn.multiply(mag, ttnn.sign(g, memory_config=mem), memory_config=mem), memory_config=mem)

@@ -479,12 +479,15 @@ def dl_split() -> bool:
 
 
 # batched speculative decoding (tt/engine_batch.py): HY4_BSPEC "u:K,..." = K drafts per verify pass at u live sequences
-# (other u: plain batched steps). Default: the best K per u whose verify pass keeps R = u (K + 1) <= 8 rows (b8 / long3k
-# gates at the floor, exact): 2 users K = 3, 3 and 4 users K = 1 (engine, 96 tokens a user, greedy / t0.9 p0.9, agg
-# tok/s plain -> bspec: u2 74.4 -> 101.5 / 70.9 -> 105.7, u3 103.2 -> 108.3 / 96.6 -> 127.0, u4 129.6 -> 139.9 /
-# 120.2 -> 160.5; 2026-11-23). Verify passes of more than 8 rows (e.g. "2:3,3:2,4:3,8:1"): b8 0.8639 / 0.2266 (floor
-# 0.8650 / 0.2229; one text diverges at one position after a history of > 8-row passes, cause open): opt-in.
-BSPEC_DEFAULT = "2:3,3:1,4:1"
+# (other u: plain batched steps). Every verify row count is exact (tt/engram.py _row_sum: rows past 8 bit-identical to
+# the same rows in passes of <= 8; b8 0.8650 / 0.2229 and long3k 0.8263 / 0.3009 at R 12 / 15 / 16 / 32). Default: the
+# best K per u by device time (engine, 96 tokens a user, greedy / t0.9 p0.9; tok/s = tokens per step / (draft + verify
+# pass + accept + a 3.5 ms host floor), plain: pass + 2 ms; 2026-11-23, MoE r2): u2 K = 3; u3 K = 1 (plain 106 -> 132;
+# K2 136 within noise); u4 K = 2 (135 -> 179; K1 170, K3 173-177); u5 K = 2 (160 -> 207 / 204; K1 192); u6-u8 K = 1
+# (186 -> 222 / 216, 210 -> 250 / 242, 232 -> 280 / 269; K2 crosses 16 rows: 50-54 ms verify passes, 193-246). The
+# verify pass's host part (Engram rows of u (K + 1) rows) is not in that: on a host whose Engram tables page in from
+# disk (no RAM copy) it measured 4-99 ms and the spec steps of 5-8 users lost to plain; HY4_BSPEC overrides.
+BSPEC_DEFAULT = "2:3,3:1,4:2,5:2,6:1,7:1,8:1"
 
 
 def bspec_policy(k_max: int = 5) -> dict:
