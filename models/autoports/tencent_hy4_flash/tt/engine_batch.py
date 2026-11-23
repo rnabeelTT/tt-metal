@@ -31,6 +31,8 @@ from models.autoports.tencent_hy4_flash.tt.engine import HostSampler, sample_row
 # the next step() takes that pass's logits for every slot it continues with the same token (any other slot: undone on
 # the host, recomputed). Same passes, same inputs: identical outputs.
 RUNAHEAD = os.environ.get("HY4_RUNAHEAD", "1") == "1"
+# HY4_TIME_BSPEC=1: batched spec step breakdown (draft inputs, draft wait, verify host / device, accept) logged per 32 steps
+TIME_BSPEC = os.environ.get("HY4_TIME_BSPEC", "0") == "1"
 
 
 def _accept(smp, lgs, drafts):
@@ -567,9 +569,15 @@ class Hy4BatchEngine:
             hrow, orow, opos = self._hn[s]
             users.append({"bonus": q["tok"], "anchor": q["pos"], "hrow": hrow, "orow": orow, "opos": opos, "slot": s,
                           "base": d.lanes[q["lane"]]["base"]["sparse"]})
-        drafts = d.draft_lanes(users, K, then=lambda: d.prebuild({self.seqs[s]["lane"]: K + 1 for s in order}))
+        tb = [time.perf_counter()] if TIME_BSPEC else None
+        drafts = d.draft_lanes(users, K, then=lambda: d.prebuild({self.seqs[s]["lane"]: K + 1 for s in order}), tb=tb)
         feed = {s: [self.seqs[s]["tok"]] + dr for s, dr in zip(order, drafts)}
-        lo = d.run_batch({self.seqs[s]["lane"]: feed[s] for s in order})
+        hd = d.launch({self.seqs[s]["lane"]: feed[s] for s in order})
+        if tb is not None:
+            tb.append(time.perf_counter())
+        lo = d.collect(hd)
+        if tb is not None:
+            tb.append(time.perf_counter())
         eng = self.model.engram
         keep = int(getattr(eng, "keep", 2))
         res, hn, emitted = {}, {}, 0
@@ -602,6 +610,15 @@ class Hy4BatchEngine:
             emitted += len(emit)
         d._pre = None  # (prebuilt for one row per lane at the unaccepted positions)
         self._hn = hn
+        if tb is not None:
+            tb.append(time.perf_counter())
+            self._tb = getattr(self, "_tb", [])
+            self._tb.append(np.diff(tb) * 1e3)
+            if len(self._tb) % 32 == 0:
+                m = np.median(np.array(self._tb[-32:]), axis=0)
+                logger.info(f"bspec u={u} K={K} step {m.sum():.2f} ms: draft inputs+copy {m[0]:.2f}, launch {m[1]:.2f}, "
+                            f"verify prebuild {m[2]:.2f}, draft wait+read {m[3]:.2f}, verify host+copy+launch {m[4]:.2f}, "
+                            f"verify device+read {m[5]:.2f}, accept {m[6]:.2f}")
         st = self.stats
         st["t_step"] += time.time() - t0
         st["steps"] += 1

@@ -621,7 +621,7 @@ class Hy4BatchSpecDecoder(Hy4BatchDecoder, Hy4SpecDecoder):
                 L["tgt"].lane_idx_buf = u32(1, 1, R, self.K_dense)
         self.dltraces, self.dlout = {}, {}
 
-    def draft_lanes(self, users: list, k: int, then=None) -> list:
+    def draft_lanes(self, users: list, k: int, then=None, tb=None) -> list:
         """One batched draft pass (tt/dfly.py step_lanes) after a batched pass: users (in that pass's row order) dicts
         {bonus, anchor (the bonus's position), hrow (last_hn row of its last accepted row), orow (its first row in the
         pass), opos (that row's position), slot, base (its sparse cache base)}. -> k greedy drafts per user. then():
@@ -685,6 +685,8 @@ class Hy4BatchSpecDecoder(Hy4BatchDecoder, Hy4SpecDecoder):
         c_ = ttnn.copy_host_to_device_tensor
         for name, t in h.items():
             c_(t, getattr(self.dsl, name))
+        if tb is not None:
+            tb.append(time.perf_counter())
         orows = tuple(int(us["orow"]) for us in users)
         key = ("dl", u, int(k), orows, sparse)
         D = self.dfly
@@ -704,9 +706,15 @@ class Hy4BatchSpecDecoder(Hy4BatchDecoder, Hy4SpecDecoder):
             else:
                 ttnn.execute_trace(self.mesh, self.dltraces[key], cq_id=0, blocking=False)
                 out = self.dlout[key]
+        if tb is not None:
+            tb.append(time.perf_counter())
         if then is not None:
             then()
+        if tb is not None:
+            tb.append(time.perf_counter())
         v = ttnn.to_torch(ttnn.get_device_tensors(out)[0]).reshape(-1)[: k * u].tolist()
+        if tb is not None:
+            tb.append(time.perf_counter())
         v = [int(x) & 0xFFFFFFFF for x in v]
         return [[v[(kk - 1) * u + i] for kk in range(1, k + 1)] for i in range(u)]
 
@@ -769,11 +777,13 @@ def _eng_batched(eng, eli, order, lanes, h):
         idss.append(a)
     ng = np.concatenate(ngs)
     T = ng.shape[0]
-    for li in eli:  # (the n-grams depend on the tokens only; hashing / offsets are per layer)
+    # (the n-grams depend on the tokens only; hashing / offsets are per layer)
+    rows = {li: store.hashers[li].rows(ng).reshape(-1) for li in eli}
+    got = store.gather(rows) if hasattr(store, "gather") else {li: (store.q[li][r], store.s[li][r]) for li, r in rows.items()}
+    for li in eli:
         hs = store.hashers[li]
-        rows = hs.rows(ng).reshape(-1)
-        q8 = torch.from_numpy(store.q[li][rows])
-        sc = torch.from_numpy(store.s[li][rows].astype(np.uint16)).view(torch.bfloat16)[:, None]
+        q8 = torch.from_numpy(got[li][0])
+        sc = torch.from_numpy(got[li][1].astype(np.uint16)).view(torch.bfloat16)[:, None]
         # (per layer: one [T x 16, 96] block stays under torch's intra-op threading threshold; a stacked 4-layer block
         # spun up the thread pool: 0.3 -> 3.5 ms on a loaded host)
         xf = dequant(q8, sc).view(T, hs.moduli.shape[0], -1).float()

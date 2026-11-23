@@ -246,10 +246,21 @@ class EngramStore:
             # through the page cache; warm = page cache only (this host's page cache was dropped repeatedly while the
             # device model loaded: lookups went back to NVMe); 0 = cold memory map
             in_ram = {"1": "anon", "anon": "anon", "warm": "warm"}.get(os.environ.get("HY4_ENGRAM_RAM", "anon"), False)
+        # HY4_ENGRAM_MADV (default random): the memory maps advised MADV_RANDOM. Rows are 96 B at hashed offsets, so
+        # the default fault read-around (up to 128 KB per fault) is ~all waste: it costs NVMe time per fault and evicts
+        # useful pages. Cold R = 32 verify rows (8 users x 4, host without room for the RAM copy, 2026-11-23): serial
+        # 139 -> 68 ms; with the threaded gathers (gather()) 39 -> 9 ms. The RAM copy, once loaded, replaces the maps.
+        madv = os.environ.get("HY4_ENGRAM_MADV", "random")
         for li in self.layers:
             mm = "r" if in_ram in (False, "warm", "anon") else None
             self.q[li] = np.load(os.path.join(OUT, f"L{li}_fp8.npy"), mmap_mode=mm)
             self.s[li] = np.load(os.path.join(OUT, f"L{li}_scale.npy"), mmap_mode=mm)
+            if madv == "random" and in_ram != "warm":
+                import mmap as _mm
+
+                for a in (self.q[li], self.s[li]):
+                    if getattr(a, "_mmap", None) is not None and hasattr(_mm, "MADV_RANDOM"):
+                        a._mmap.madvise(_mm.MADV_RANDOM)
         self.loaders = []
         self.mode = in_ram
         if in_ram == "anon":
@@ -393,18 +404,43 @@ class EngramStore:
         ids = np.asarray(ids)
         return (ids != IMAGE_TOKEN_ID) & (ids != VIDEO_TOKEN_ID) & (ids != self.pad_id)
 
+    _POOL = []
+
+    def gather(self, rows):
+        """{layer: flat table rows} -> {layer: (fp8 bytes [n, 96] uint8, scales [n] uint16)}. Tables still memory-mapped
+        (no RAM copy: the host had no room, or it is loading): the gathers split over threads (HY4_ENG_THREADS,
+        default 32; 0 or 1: serial). The cost there is page faults, which overlap across threads (numpy's gather
+        releases the GIL); cold R = 32 verify rows 68 -> 9 ms (MADV_RANDOM maps). In RAM: serial (~0.5 ms for 32
+        rows; a pool round trip costs more). Same rows either way, so bit-identical."""
+        lis = list(rows)
+        nt = int(os.environ.get("HY4_ENG_THREADS", "32"))
+        if nt > 1 and any(isinstance(self.q[li], np.memmap) for li in lis):
+            if not EngramStore._POOL:
+                from concurrent.futures import ThreadPoolExecutor
+
+                EngramStore._POOL.append(ThreadPoolExecutor(nt, thread_name_prefix="engram-rows"))
+            pool = EngramStore._POOL[0]
+            nc = max(1, nt // len(lis))
+            q, s = self.q, self.s
+            futs = {li: [pool.submit(lambda li=li, p=p: (q[li][p], s[li][p]))
+                         for p in np.array_split(rows[li], min(nc, max(1, rows[li].size // 16)))] for li in lis}
+            out = {}
+            for li in lis:
+                parts = [f.result() for f in futs[li]]
+                out[li] = (np.concatenate([a for a, _ in parts]), np.concatenate([b for _, b in parts]))
+            return out
+        return {li: (self.q[li][rows[li]], self.s[li][rows[li]]) for li in lis}
+
     def lookup(self, ids, start=0, history=None, layers=None):
         """Rows for `ids` (positions start ..): {layer: bf16 [T, 16, 96]} and the engram mask [T] (bool)."""
         out = {}
-        ng = None
-        for li in layers or self.layers:
-            h = self.hashers[li]
-            if ng is None:
-                ng = h.ngram_tokens(ids, start, history)  # the same for every layer
-            rows = h.rows(ng)  # [T, 16]
-            q8 = torch.from_numpy(self.q[li][rows.reshape(-1)])  # [T*16, 96] uint8
-            sc = torch.from_numpy(self.s[li][rows.reshape(-1)].astype(np.uint16)).view(torch.bfloat16)[:, None]
-            out[li] = dequant(q8, sc).view(len(ids), h.moduli.shape[0], -1)
+        lis = list(layers or self.layers)
+        ng = self.hashers[lis[0]].ngram_tokens(ids, start, history)  # the same for every layer
+        got = self.gather({li: self.hashers[li].rows(ng).reshape(-1) for li in lis})
+        for li in lis:
+            q8 = torch.from_numpy(got[li][0])  # [T*16, 96] uint8
+            sc = torch.from_numpy(got[li][1].astype(np.uint16)).view(torch.bfloat16)[:, None]
+            out[li] = dequant(q8, sc).view(len(ids), self.hashers[li].moduli.shape[0], -1)
         return out, self.mask(ids)
 
 
