@@ -65,10 +65,8 @@ void kernel_main() {
     constexpr uint32_t kv_split = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::KV_SPLIT);
     constexpr bool split = kv_split > 1;
     constexpr uint32_t cb_split_ctl = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_SPLIT_CTL);
-    constexpr uint32_t cb_rmax = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_RMAX);
-    constexpr uint32_t cb_rsum = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_RSUM);
-    constexpr uint32_t cb_rout = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_ROUT);
-    constexpr uint32_t vDHt = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::V_DHT);
+    constexpr uint32_t cb_pmax = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_PMAX);
+    constexpr uint32_t cb_xin = get_compile_time_arg_val(sparse_sdpa::reader_ct_arg::CB_XIN);
 
     // kv carries a RUNTIME tensor shape (its T dim is common runtime args, not compile-time), so its accessor
     // spans both the compile-time AND common-runtime arg streams. Thread both offsets through all three.
@@ -138,14 +136,14 @@ void kernel_main() {
         const uint32_t n_active = (nv + k_chunk - 1) / k_chunk;
 
         // Key split: participants p = min(KV_SPLIT, n_active); this core's chunk range and role.
-        uint32_t chunk_begin = 0, chunk_end = n_active, role = sparse_sdpa::split_role::REDUCER, parts = 1;
+        uint32_t chunk_begin = 0, chunk_end = n_active, role = sparse_sdpa::split_role::LAST, parts = 1;
         if constexpr (split) {
             parts = n_active < kv_split ? n_active : kv_split;
             if (split_j >= parts) {
                 role = sparse_sdpa::split_role::IDLE;
                 chunk_begin = chunk_end = 0;
             } else {
-                role = split_j == 0 ? sparse_sdpa::split_role::REDUCER : sparse_sdpa::split_role::WORKER;
+                role = split_j == parts - 1 ? sparse_sdpa::split_role::LAST : sparse_sdpa::split_role::WORKER;
                 chunk_begin = sparse_sdpa::split_chunk_begin(n_active, parts, split_j);
                 chunk_end = sparse_sdpa::split_chunk_end(n_active, parts, split_j);
             }
@@ -181,6 +179,7 @@ void kernel_main() {
                 cp[sparse_sdpa::control_message::CHUNK_END] = chunk_end;
                 cp[sparse_sdpa::control_message::ROLE] = role;
                 cp[sparse_sdpa::control_message::PARTS] = parts;
+                cp[sparse_sdpa::control_message::SPLIT_J] = split_j;
             }
         }
         ctrl_cb.push_back(1);
@@ -308,19 +307,23 @@ void kernel_main() {
         }
 
         if constexpr (split) {
-            if (role == sparse_sdpa::split_role::REDUCER) {
-                // Every participant (this core's writer included) wrote its slot and bumped the arrival count.
-                volatile tt_l1_ptr uint32_t* arrivals =
-                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(sparse_sdpa::SPLIT_ARRIVAL_SEMAPHORE));
-                noc_semaphore_wait_min(arrivals, parts);
-                noc_semaphore_set(arrivals, 0);
-                experimental::CB rmax_cb(cb_rmax), rsum_cb(cb_rsum), rout_cb(cb_rout);
-                rmax_cb.reserve_back(kv_split);
-                rsum_cb.reserve_back(kv_split);
-                rout_cb.reserve_back(kv_split * vDHt);
-                rmax_cb.push_back(kv_split);
-                rsum_cb.push_back(kv_split);
-                rout_cb.push_back(kv_split * vDHt);
+            if (role != sparse_sdpa::split_role::IDLE && split_j > 0) {
+                // 1. The local maxes of participants 0..j-1 landed in cb_pmax slots 0..j-1: hand them to compute.
+                volatile tt_l1_ptr uint32_t* pmax_sem =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(sparse_sdpa::SPLIT_PMAX_SEMAPHORE));
+                noc_semaphore_wait_min(pmax_sem, split_j);
+                noc_semaphore_set(pmax_sem, 0);
+                experimental::CB pmax_cb(cb_pmax);
+                pmax_cb.reserve_back(kv_split);
+                pmax_cb.push_back(kv_split);
+                // 2. Participant j-1 wrote the flash state after chunk chunk_begin-1 into slot 0 of cb_xo / cb_xs.
+                volatile tt_l1_ptr uint32_t* xin_sem =
+                    reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(sparse_sdpa::SPLIT_XIN_SEMAPHORE));
+                noc_semaphore_wait_min(xin_sem, 1);
+                noc_semaphore_set(xin_sem, 0);
+                experimental::CB xin_cb(cb_xin);
+                xin_cb.reserve_back(1);
+                xin_cb.push_back(1);
             }
         }
     }

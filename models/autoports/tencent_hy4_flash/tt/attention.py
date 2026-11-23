@@ -53,6 +53,13 @@ from models.autoports.tencent_hy4_flash.tt.rope import DeviceRope, rkey, rpos
 SKF = getattr(ttnn.transformer, "SparseKVFormat", None) or getattr(ttnn, "SparseKVFormat", None)
 SENTINEL = 0xFFFFFFFF
 _SPLIT_OK = [True]  # sparse_sdpa accepts kv_split / active_tokens (HY4_SDPA_SPLIT; cleared on a TypeError)
+# The key split is used by default only with a ttnn whose split is bit-identical to the one-core op (older builds had a
+# non-exact merge: HY4_SDPA_SPLIT then has to be set explicitly).
+_SPLIT_EXACT = any(
+    getattr(m, "SPARSE_SDPA_EXACT_KV_SPLIT", False)
+    for m in (getattr(getattr(getattr(ttnn, "_ttnn", None), "operations", None), "transformer", None),
+              getattr(ttnn, "transformer", None), ttnn))
+SDPA_SPLIT_DEFAULT = 8
 K_CHUNK = 128  # sparse_sdpa key chunk; index lists are padded to a multiple of it
 SINK_COLS = 32
 SINK_KEY = 16.0
@@ -483,10 +490,11 @@ class Hy4Attention:
 
             glue = AttnGlue.get(self.mesh)
             q_rm = glue.qprep(q_lat, q_rope, self._qs32, self.Hp, int(R))
-            # HY4_SDPA_SPLIT=C (opt-in, default 0; not exact, gates mixed): each real row's selected keys over up to C
-            # cores (partial flash states merged on one core per row, FP32 DEST); only the R real rows are computed
-            # (otile reads rows < R only). Off or a ttnn without the kv_split argument: one core per row.
-            split = int(os.environ.get("HY4_SDPA_SPLIT", "0"))
+            # HY4_SDPA_SPLIT=C (default SDPA_SPLIT_DEFAULT with an exact-split ttnn, else 0; 0/1 = off): each real
+            # row's selected key chunks in order over up to C cores, bit-identical to one core per row (running max
+            # and flash combine chained across the cores in chunk order); only the R real rows are computed (otile
+            # reads rows < R only). Off or a ttnn without the kv_split argument: one core per row.
+            split = int(os.environ.get("HY4_SDPA_SPLIT", str(SDPA_SPLIT_DEFAULT if _SPLIT_EXACT else 0)))
             kw = {"kv_split": split, "active_tokens": int(R)} if split > 1 and self.Hp == TILE and _SPLIT_OK[0] else {}
             try:
                 o = ttnn.transformer.sparse_sdpa(q_rm, self.cache, idx, self.kvl, kv_format=SKF.BF16, scale=self.scale,

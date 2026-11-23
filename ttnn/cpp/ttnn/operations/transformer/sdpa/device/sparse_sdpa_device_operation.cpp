@@ -295,7 +295,12 @@ uint32_t SparseSDPAOperation::effective_kv_split(const SparseSDPAParams& attrs, 
         return 1;
     }
     const uint32_t split = std::min(attrs.kv_split, static_cast<uint32_t>(attrs.worker_core_grid.num_cores()) / active);
-    return split >= 2 ? split : 1;
+    if (split < 2) {
+        return 1;
+    }
+    // A participant keeps all its chunks' K tiles resident (L1): at most SPLIT_MAX_LOCAL_CHUNKS of them.
+    const uint32_t chunks = (t.indices.logical_shape()[3] + attrs.k_chunk_size - 1) / attrs.k_chunk_size;
+    return ::sparse_sdpa::split_max_local_chunks(chunks, split) <= ::sparse_sdpa::SPLIT_MAX_LOCAL_CHUNKS ? split : 1;
 }
 
 Tensor sparse_sdpa(

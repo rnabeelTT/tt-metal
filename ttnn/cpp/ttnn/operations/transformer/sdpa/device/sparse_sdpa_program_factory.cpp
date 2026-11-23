@@ -50,14 +50,15 @@ enum SparseCB : uint32_t {
     cb_attention_sink,  // persistent first-column vector: one sink scalar per head
     cb_sink_scratch,    // writer scratch for gathering sink scalars
     cb_split_ctl,       // key split: reader -> writer per-token role / participants / local chunk count
-    cb_split_done,      // key split: compute -> writer "final local state packed" signal
-    cb_rmax,            // key split (reducer): partial maxes, one tile per participant slot
-    cb_rsum,            // key split (reducer): partial row-sums
-    cb_rout,            // key split (reducer): partial unnormalized outs [slot, vDHt]
-    cb_gmax,            // key split (reducer): global max
-    cb_corr_all,        // key split (reducer): exp(m_j - M) per slot
-    cb_diag,            // key split (reducer): diag(corr_j) per slot
-    cb_identity,        // key split (reducer): identity tile (writer-built)
+    cb_split_done,      // key split: compute -> writer "chain state after the local chunks is packed" signal
+    cb_xo,              // key split: running out rows [1 + local chunks, vDHt] (row 0 from participant j-1)
+    cb_xs,              // key split: running row-sum rows [1 + local chunks] (row 0 from participant j-1)
+    cb_xm,              // key split: running max rows [1 + local chunks] (row 0 = prefix max)
+    cb_lm,              // key split: per-local-chunk row max
+    cb_lmax,            // key split: this participant's local max (compute -> writer -> higher participants)
+    cb_pmax,            // key split: local maxes of the lower participants (slot = participant)
+    cb_xcorr,           // key split: SALAD corrections, one per local chunk
+    cb_xin,             // key split: reader -> compute "row 0 of cb_xo / cb_xs landed" signal
     cb_count
 };
 
@@ -126,6 +127,10 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     // Key split: the first `active` tokens only, kv_split cores each (one token per core group).
     const uint32_t kv_split = SparseSDPAOperation::effective_kv_split(attrs, t);
     const uint32_t active = std::min(attrs.active_tokens.value_or(S), S);
+    const bool split = kv_split > 1;
+    // Most chunks one participant holds (its K tiles and scores stay resident until its prefix max is known).
+    const uint32_t split_local =
+        split ? ::sparse_sdpa::split_max_local_chunks((topk + k_chunk - 1) / k_chunk, kv_split) : 1;
 
     // ---- CBs (fixed ids = SparseCB enum; descriptor insertion order is irrelevant) ----
     const auto cb = [&](uint32_t id, uint32_t page_size, uint32_t num_pages, tt::DataFormat df) {
@@ -160,17 +165,17 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     } else {
         cb(cb_k_rm, k_row_bytes, k_chunk, native_kv_df);
     }
-    cb(cb_k_in, k_in_tile_bytes, Skt * k_in_width_tiles, k_in_df);
+    cb(cb_k_in, k_in_tile_bytes, Skt * k_in_width_tiles * split_local, k_in_df);
     cb(cb_neginf, tile_bytes, 1, bf);
     cb(cb_mask_part, tile_bytes, 1, bf);
     cb(cb_scale, tile_bytes, 1, bf);
-    cb(cb_qk_im, tile_bytes, Sqt * Skt, bf);
+    cb(cb_qk_im, tile_bytes, Sqt * Skt * (split ? split_local + 1 : 1), bf);
     cb(cb_max_a, tile_bytes, Sqt, bf);
     cb(cb_max_b, tile_bytes, Sqt, bf);
     cb(cb_sum_a, tile_bytes, Sqt, bf);
     cb(cb_sum_b, tile_bytes, Sqt, bf);
-    cb(cb_out_a, tile_bytes, Sqt * vDHt, bf);
-    cb(cb_out_b, tile_bytes, Sqt * vDHt, bf);
+    cb(cb_out_a, tile_bytes, split ? 1 : Sqt * vDHt, bf);  // (unused by the key split)
+    cb(cb_out_b, tile_bytes, split ? 1 : Sqt * vDHt, bf);
     cb(cb_corr, tile_bytes, Sqt, bf);
     cb(cb_out_im, tile_bytes, Sqt * vDHt, bf);
     cb(cb_out_rm, out_tile_bytes, Sqt * vDHt, out_df);
@@ -190,21 +195,21 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
         cb(cb_attention_sink, tile_bytes, Sqt, bf);
         cb(cb_sink_scratch, H * sizeof(uint16_t), 1, bf);
     }
-    if (kv_split > 1) {
+    if (split) {
         cb(cb_split_ctl, ::sparse_sdpa::split_message::PAGE_BYTES, ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, bf);
         cb(cb_split_done, ::sparse_sdpa::CB_PAGE_ALIGNMENT, ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, bf);
-        cb(cb_rmax, tile_bytes, kv_split, bf);
-        cb(cb_rsum, tile_bytes, kv_split, bf);
-        cb(cb_rout, tile_bytes, kv_split * vDHt, bf);
-        cb(cb_gmax, tile_bytes, 1, bf);
-        cb(cb_corr_all, tile_bytes, kv_split, bf);
-        cb(cb_diag, tile_bytes, kv_split, bf);
-        cb(cb_identity, tile_bytes, 1, bf);
-        desc.semaphores.push_back(tt::tt_metal::SemaphoreDescriptor{
-            .id = ::sparse_sdpa::SPLIT_ARRIVAL_SEMAPHORE,
-            .core_type = tt::CoreType::WORKER,
-            .core_ranges = core_grid,
-            .initial_value = 0});
+        cb(cb_xo, tile_bytes, (split_local + 1) * vDHt, bf);
+        cb(cb_xs, tile_bytes, split_local + 1, bf);
+        cb(cb_xm, tile_bytes, split_local + 1, bf);
+        cb(cb_lm, tile_bytes, split_local, bf);
+        cb(cb_lmax, tile_bytes, 1, bf);
+        cb(cb_pmax, tile_bytes, kv_split, bf);
+        cb(cb_xcorr, tile_bytes, split_local, bf);
+        cb(cb_xin, ::sparse_sdpa::CB_PAGE_ALIGNMENT, ::sparse_sdpa::CB_DOUBLE_BUFFER_DEPTH, bf);
+        for (uint32_t sem : {::sparse_sdpa::SPLIT_PMAX_SEMAPHORE, ::sparse_sdpa::SPLIT_XIN_SEMAPHORE}) {
+            desc.semaphores.push_back(tt::tt_metal::SemaphoreDescriptor{
+                .id = sem, .core_type = tt::CoreType::WORKER, .core_ranges = core_grid, .initial_value = 0});
+        }
     }
 
     // ---- compile-time args ----
@@ -240,7 +245,7 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     reader_ct.insert(
         reader_ct.end(),
         {static_cast<uint32_t>(scaled_kv), v_dim, cb_k_scale_bcast, packed_page_bytes, cb_kreq, cb_kack});
-    reader_ct.insert(reader_ct.end(), {kv_split, cb_split_ctl, cb_rmax, cb_rsum, cb_rout, vDHt});
+    reader_ct.insert(reader_ct.end(), {kv_split, cb_split_ctl, cb_pmax, cb_xin});
     TT_FATAL(
         reader_ct.size() == ::sparse_sdpa::reader_ct_arg::END,
         "sparse_sdpa reader compile-time argument layout is out of sync");
@@ -260,21 +265,7 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
         writer_ct.end(),
         {static_cast<uint32_t>(scaled_kv), k_dim, kv_elem_bytes, cb_idx, cb_kreq, cb_kack, packed_page_bytes});
     writer_ct.insert(writer_ct.end(), {static_cast<uint32_t>(use_attention_sink), cb_attention_sink, cb_sink_scratch});
-    writer_ct.insert(
-        writer_ct.end(),
-        {kv_split,
-         cb_split_ctl,
-         cb_split_done,
-         cb_rmax,
-         cb_rsum,
-         cb_rout,
-         cb_max_a,
-         cb_max_b,
-         cb_sum_a,
-         cb_sum_b,
-         cb_out_a,
-         cb_out_b,
-         cb_identity});
+    writer_ct.insert(writer_ct.end(), {kv_split, cb_split_ctl, cb_split_done, cb_lmax, cb_pmax, cb_xo, cb_xs});
     TT_FATAL(
         writer_ct.size() == ::sparse_sdpa::writer_ct_arg::END,
         "sparse_sdpa writer compile-time argument layout is out of sync");
@@ -355,7 +346,7 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     compute_ct.insert(compute_ct.end(), {static_cast<uint32_t>(use_attention_sink), cb_attention_sink});
     compute_ct.insert(
         compute_ct.end(),
-        {kv_split, cb_split_done, cb_rmax, cb_rsum, cb_rout, cb_gmax, cb_corr_all, cb_diag, cb_identity});
+        {kv_split, cb_split_done, cb_xo, cb_xs, cb_xm, cb_lm, cb_lmax, cb_pmax, cb_xcorr, cb_xin});
     TT_FATAL(
         compute_ct.size() == ::sparse_sdpa::compute_ct_arg::END,
         "sparse_sdpa compute compile-time argument layout is out of sync");
@@ -399,16 +390,22 @@ tt::tt_metal::ProgramDescriptor SparseSDPAOperation::SparseSDPAProgramFactory::c
     reader_desc.common_runtime_args.insert(reader_desc.common_runtime_args.end(), reader_crt.begin(), reader_crt.end());
     writer_desc.common_runtime_args.insert(writer_desc.common_runtime_args.end(), writer_crt.begin(), writer_crt.end());
 
-    if (kv_split > 1) {
-        // Core i -> token i / kv_split, participant j = i % kv_split; the group's j = 0 core reduces.
+    if (split) {
+        // Core i -> token i / kv_split, participant j = i % kv_split. The writer gets the NoC x/y of its group's cores
+        // (local max fan-out to the higher participants, chain state to participant j + 1).
         for (uint32_t i = 0; i < num_cores; ++i) {
             const auto& core = cores[i];
             const uint32_t tok = i / kv_split, j = i % kv_split;
             const uint32_t tok_count = tok < active ? 1u : 0u;
-            const CoreCoord reducer = device->worker_core_from_logical_core(cores[tok_count ? tok * kv_split : i]);
             reader_desc.emplace_runtime_args(core, {tok, tok_count, j});
-            writer_desc.emplace_runtime_args(
-                core, {tok, tok_count, j, static_cast<uint32_t>(reducer.x), static_cast<uint32_t>(reducer.y)});
+            std::vector<std::variant<uint32_t, tt::tt_metal::Buffer*>> wargs = {tok, tok_count, j};
+            for (uint32_t g = 0; g < kv_split; ++g) {
+                const uint32_t gi = tok * kv_split + g;
+                const CoreCoord c = device->worker_core_from_logical_core(cores[gi < num_cores ? gi : i]);
+                wargs.push_back(static_cast<uint32_t>(c.x));
+                wargs.push_back(static_cast<uint32_t>(c.y));
+            }
+            writer_desc.emplace_runtime_args(core, wargs);
             compute_desc.emplace_runtime_args(core, {tok, tok_count});
         }
     } else {
