@@ -153,6 +153,7 @@ class Inkling2ForCausalLM:
             logger.info(f"prefix cache: {PREFIX_SLOTS} state snapshots, prompts >= {PREFIX_MIN} tokens")
         self.px_stats = {"hits": 0, "hit_tokens": 0, "saves": 0, "fallbacks": 0}
         self.dr = self.spec = None
+        self.dr_seen = []  # the tokens the drafter's caches hold, by position
         if SPEC and TRACE and model is not None and B >= SPEC + 1:
             from models.autoports.thinkingmachines_inkling_2_mini.tt.drafter import DSparkDrafter
 
@@ -355,8 +356,11 @@ class Inkling2ForCausalLM:
 
     def _prefill_group(self, reqs, out):
         """Up to LANES requests, one prefill lane each, packed into shared chunks until every prompt is done."""
-        spec = (self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and not reqs[0]["b0"]
-                and reqs[0]["P"] + 64 <= SPEC_MAX_LEN)
+        # a prompt resumed from the prefix cache at b0 keeps speculative decoding when the drafter's caches still hold
+        # those b0 tokens (its caches are positional, one sequence: e.g. the previous turn of the same chat)
+        b0 = reqs[0]["b0"] if reqs else 0
+        spec = (self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and reqs[0]["P"] + 64 <= SPEC_MAX_LEN
+                and (not b0 or self.dr_seen[:b0] == reqs[0]["ids"][:b0].tolist()))
         if spec:
             self.dr.reset()
         for lane, r in enumerate(reqs):
@@ -424,6 +428,7 @@ class Inkling2ForCausalLM:
                     self.dec.load_slot(r["slot"], r["lane"])
                     if spec:
                         self.ver.set_accept([0])
+                        self.dr_seen = r["ids"].tolist()
                         self.spec = dict(row=next(k for k, v in self.row2slot.items() if v == 0), n=None)
                     out[r["u"], 0, : self.V] = lgh[i]
                     live.remove(r)
@@ -538,6 +543,7 @@ class Inkling2ForCausalLM:
                 logger.warning(f"speculative decode: resync at position {p}")
                 self.ver.set_accept([i])
             commit = (s["n"], i + 1)
+            self.dr_seen = self.dr_seen[: s["n"]] + s["rows"][: i + 1]
         d, R = SPEC, SPEC + 1
         pt = kwargs.get("page_table")
         if pt is not None and self.m.pages.paged:  # (the verify window's blocks: the shim's lookahead reserved them)
@@ -569,7 +575,7 @@ class Inkling2ForCausalLM:
                 torch.save(self._dump, SPEC_DUMP)
         if SPEC_DEBUG:
             logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")
-        s.update(n=p, k=k, em=em)
+        s.update(n=p, k=k, em=em, rows=[t] + drafts)
         s["np"], s["nt"] = s.get("np", 0) + 1, s.get("nt", 0) + len(em)
         smin = float(os.environ.get("I2M_SPEC_MIN", SPEC_MIN_DEFAULT.get(self.N, 2.0)))
         if s["np"] >= 16 and s["nt"] / s["np"] < smin:  # (not paying off for this request: plain decode from here)

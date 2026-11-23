@@ -2,7 +2,7 @@
 # Dev vLLM server for Inkling-2-Mini from this checkout (the image's vLLM 0.26 + TT plugin; the port, its bundle and the
 # shared code it imports mounted over the image's copies). Detached container i2m-serve (not the stall watcher's i2m-dev / i2m-job prefixes: an idle server is silent).
 #
-# usage: tools/serve_dev.sh     env: MESH_DEVICE (P150 | P300 | P300x2), SEQS (max-num-seqs, 4), CTX (4096), PORT (8000),
+# usage: tools/serve_dev.sh     env: MESH_DEVICE (P150 | P300 | P300x2), SEQS (max-num-seqs, 4), CTX (4096), PORT (8000), SERVE_NAME (i2m-serve),
 #        I2M_EXPERT_DT (bfp8), I2M_KV_DT (bf16), TRACE_MIB (300), I2M_IMAGE, SAMPLE_DEVICE (1: decode sampling on device)
 set -e
 P=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -20,7 +20,7 @@ for d in models/demos/blackhole/qwen36 models/autoports/minimaxai_minimax_m2_7 m
 M+=(-v "$REPO/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:/opt/tt-metal/tt_metal/impl/dispatch/kernels/cq_prefetch.cpp:ro")
 mkdir -p "$CACHE/tt" "$CACHE/logs" "$CACHE/wcache" "$CACHE/generated"
 docker rm -f i2m-serve >/dev/null 2>&1 || true
-exec docker run -d --name i2m-serve \
+exec docker run -d --name ${SERVE_NAME:-i2m-serve} \
   --device /dev/tenstorrent --ipc host --ulimit memlock=-1:-1 \
   --mount type=bind,src=/dev/hugepages-1G,dst=/dev/hugepages-1G \
   "${M[@]}" -v "$HF_HOST:/hf" -v "$CACHE:/cache" -v "$CACHE/generated:/opt/tt-metal/generated" \
