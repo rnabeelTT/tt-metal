@@ -115,7 +115,7 @@ class _Packed:
 
 
 class PackedAR:
-    """A packed all-reduce result: T rows of [1, 1, T, H] bf16 as chunk c = (tile, row, face) at byte 32 c of t."""
+    """A packed all-reduce result: T rows of [1, 1, T, H] bf16 as chunk c = (tile, face, row) at byte 32 c of t."""
 
     def __init__(self, t, T, H, op):
         self.t, self.T, self.H, self.op = t, T, H, op

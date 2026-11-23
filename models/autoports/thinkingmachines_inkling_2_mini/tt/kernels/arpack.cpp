@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Packed decode all-reduce (tt/ccl.py): the T live rows of a [1, 1, 32, H] bf16 TILE tensor <-> K width-sharded tiles
-// (the all-reduce's input / output). Chunk c (32 B: 16 values) = (tile c / 2T, row (c / 2) % T, face c % 2) of the
-// tensor <-> byte 32 c of the packed tiles. Core j (row-major over the shard grid) owns packed tiles [j KJ, (j+1) KJ):
-// PACK reads its chunks from the tensor into its shard, UNPACK writes its shard's chunks to the tensor.
+// (the all-reduce's input / output). Chunk c (32 B: 16 values) = (tile c / 2T, face (c / T) % 2, row c % T) of the
+// tensor <-> byte 32 c of the packed tiles (face-major: a face's T rows are T consecutive chunks, contiguous on both
+// sides). Core j (row-major over the shard grid) owns packed tiles [j KJ, (j+1) KJ): PACK reads its chunks from the
+// tensor into its shard, UNPACK writes its shard's chunks to the tensor, a face's run of chunks per transfer.
 //
 // common args: tensor address, shard address (the same L1 address on every shard core)
 
@@ -36,14 +37,18 @@ void kernel_main() {
         }
         noc_async_read_barrier();
     }
-    for (uint32_t c = c0; c < c1; ++c) {
-        const uint32_t off = (c / (2 * T) - tile0) * PREFIX + (c & 1) * 512 + ((c >> 1) % T) * 32;
-        noc_async_read(get_noc_addr(stage + off), shard + (c - c0) * 32, 32);
+    for (uint32_t c = c0; c < c1;) {
+        const uint32_t e = (c / T + 1) * T < c1 ? (c / T + 1) * T : c1;  // the run: to the face's end
+        const uint32_t off = (c / (2 * T) - tile0) * PREFIX + ((c / T) % 2) * 512 + (c % T) * 32;
+        noc_async_read(get_noc_addr(stage + off), shard + (c - c0) * 32, (e - c) * 32);
+        c = e;
     }
 #else
-    for (uint32_t c = c0; c < c1; ++c) {
-        const uint32_t off = (c & 1) * 512 + ((c >> 1) % T) * 32;
-        noc_async_write(shard + (c - c0) * 32, at.get_noc_addr(c / (2 * T)) + off, 32);
+    for (uint32_t c = c0; c < c1;) {
+        const uint32_t e = (c / T + 1) * T < c1 ? (c / T + 1) * T : c1;
+        const uint32_t off = ((c / T) % 2) * 512 + (c % T) * 32;
+        noc_async_write(shard + (c - c0) * 32, at.get_noc_addr(c / (2 * T)) + off, (e - c) * 32);
+        c = e;
     }
 #endif
 #ifdef ARP_PACK
