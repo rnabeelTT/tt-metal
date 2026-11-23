@@ -22,7 +22,7 @@ class GroupedMM:
     def __init__(self, mesh, ckc_fidelity=ttnn.MathFidelity.HiFi2, max_cores=None):
         self.mesh, self.fid = mesh, ckc_fidelity
         g = mesh.compute_with_storage_grid_size()
-        self.gx, self.ncores = g.x, max_cores or g.x * g.y
+        self.gx, self.ncores = g.x, max_cores or g.x * g.y  # (whole rows of the grid)
 
     def __call__(self, a, w, ids, out, E, nb=None):
         """a [1, G, gs, K] bf16, w [1, E, K, N] (bfp8 / bf16 tiles), ids [1, G] uint16 ROW_MAJOR, out [1, G, gs, N]."""
@@ -34,14 +34,20 @@ class GroupedMM:
         if nb is None:  # the column block: DST (8 FP32 tiles), Nt % nb == 0, the weight block <= ~512 KB of L1
             nb = max(d for d in range(1, 5 if rm else 9) if Nt % d == 0 and Kt * d * w_page <= 512 * 1024)
         NB = Nt // nb
-        S = max(1, min(G, self.ncores // NB))  # group slices
+        # a group slice's NB cores: a w x h rectangle (b = 0 at its corner multicasts the A tiles to the others)
+        w_ = max(d for d in range(1, self.gx + 1) if NB % d == 0)
+        h_ = NB // w_
+        per_row = self.gx // w_
+        S = max(1, min(G, per_row * (self.ncores // self.gx // h_)))  # group slices
         bounds = [G * s // S for s in range(S + 1)]
         cores, rt = [], []
         for s in range(S):
+            x0, y0 = (s % per_row) * w_, (s // per_row) * h_
+            snoc = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
+            hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
             for b in range(NB):
-                i = len(cores)
-                cores.append(ttnn.CoreCoord(i % self.gx, i // self.gx))
-                rt.append([b, bounds[s], bounds[s + 1]])
+                cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
+                rt.append([b, bounds[s], bounds[s + 1], snoc.x, snoc.y, snoc.x, snoc.y, hi.x, hi.y])
         crs = _range_set(cores)
         cb_a, cb_w, cb_ids, cb_out = 0, 1, 2, 3
         ids_bytes = (G * 2 + 63) // 64 * 64
@@ -66,8 +72,9 @@ class GroupedMM:
         cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
                                    compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt],
                                    runtime_args=_rt(cores, [[r[2] - r[1]] for r in rt]), config=cfg)
-        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
-        key = ("i2m_gmm", G, gs, K, N, E, nb, S, rm, str(w.dtype), self.fid,
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
+        key = ("i2m_gmm2", G, gs, K, N, E, nb, S, rm, str(w.dtype), self.fid,
                tuple(repr(t.memory_config()) for t in (a, w, ids, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids, out], prog)

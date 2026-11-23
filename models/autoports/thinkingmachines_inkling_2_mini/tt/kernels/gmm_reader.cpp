@@ -3,9 +3,12 @@
 //
 // Grouped expert matmul (tt/gmm.py), reader: this core's column block b of groups [g0, g1). Per group: its expert's
 // [Kt x nb] weight block (re-read only when the expert changes: the single-block CB keeps the previous one in place),
-// then the group's mt row tiles of A ([Kt] tiles each).
+// then the group's mt row tiles of A ([Kt] tiles each). The NB cores of a group slice form a rectangle: the b = 0
+// core (a corner) reads each A row tile from DRAM and multicasts it to the rest of the rectangle (same CB slot on
+// every core: they consume in lockstep); semaphore 0 (on the sender): receivers ready, 1 (on the receivers): the tile
+// row landed.
 //
-// runtime args: b, g0, g1      common args: a, w, ids
+// runtime args: b, g0, g1, sender x / y, multicast x0 y0 x1 y1 (NOC 0)      common args: a, w, ids
 
 #include <stdint.h>
 
@@ -25,7 +28,17 @@ void kernel_main() {
     constexpr auto a_args = TensorAccessorArgs<10>();
     constexpr auto w_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();
     constexpr auto i_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
+    constexpr uint32_t NB = Nt / nb;
     const uint32_t b = get_arg_val<uint32_t>(0), g0 = get_arg_val<uint32_t>(1), g1 = get_arg_val<uint32_t>(2);
+    const uint32_t sx = get_arg_val<uint32_t>(3), sy = get_arg_val<uint32_t>(4);
+    const uint64_t mc_base = get_noc_multicast_addr(get_arg_val<uint32_t>(5), get_arg_val<uint32_t>(6),
+                                                    get_arg_val<uint32_t>(7), get_arg_val<uint32_t>(8), 0);
+    const uint32_t s_ready = get_semaphore(0), s_valid = get_semaphore(1);
+    volatile tt_l1_ptr uint32_t* ready = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(s_ready);
+    volatile tt_l1_ptr uint32_t* valid = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(s_valid);
+    if (b == 0) {
+        *valid = 1;  // (the value the multicast copies to the receivers)
+    }
     const auto aa = TensorAccessor(a_args, get_common_arg_val<uint32_t>(0), 2048);
     const auto aw = TensorAccessor(w_args, get_common_arg_val<uint32_t>(1), w_page);
     const auto ai = TensorAccessor(i_args, get_common_arg_val<uint32_t>(2), ids_bytes);
@@ -56,10 +69,23 @@ void kernel_main() {
         for (uint32_t mi = 0; mi < mt; ++mi) {
             cb_reserve_back(cb_a, Kt);
             const uint32_t al = get_write_ptr(cb_a);
-            for (uint32_t kt = 0; kt < Kt; ++kt) {
-                noc_async_read(aa.get_noc_addr((g * mt + mi) * Kt + kt), al + kt * 2048, 2048);
+            if (b == 0) {
+                for (uint32_t kt = 0; kt < Kt; ++kt) {
+                    noc_async_read(aa.get_noc_addr((g * mt + mi) * Kt + kt), al + kt * 2048, 2048);
+                }
+                noc_async_read_barrier();
+                if constexpr (NB > 1) {
+                    noc_semaphore_wait(ready, NB - 1);
+                    noc_semaphore_set(ready, 0);
+                    noc_async_write_multicast(al, mc_base | al, Kt * 2048, NB - 1, true);
+                    noc_semaphore_set_multicast(s_valid, mc_base | s_valid, NB - 1);
+                    noc_async_writes_flushed();  // (the slot is not refilled before the multicast has read it)
+                }
+            } else {
+                noc_semaphore_set(valid, 0);
+                noc_semaphore_inc(get_noc_addr(sx, sy, s_ready), 1);
+                noc_semaphore_wait(valid, 1);
             }
-            noc_async_read_barrier();
             cb_push_back(cb_a, Kt);
         }
     }

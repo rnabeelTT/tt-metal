@@ -20,7 +20,7 @@ def main():
     gmm = GroupedMM(mesh)
     ok = True
     torch.manual_seed(0)
-    for K, N in ((2304, 768), (384, 2304)):
+    for K, N, rm in ((2304, 768, False), (384, 2304, False), (384, 2304, True)):  # (rm: row-major C, nb <= 4)
         experts = sorted(torch.randint(0, E, (300,)).tolist())
         ids = torch.tensor(experts + [E])  # (a padding group)
         G = len(ids)
@@ -31,7 +31,8 @@ def main():
         tw = ttnn.from_torch(w, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=dram)
         tid = ttnn.from_torch(ids.reshape(1, G).to(torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT,
                               device=mesh, memory_config=dram)
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, N]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, dram)
+        lay = ttnn.ROW_MAJOR_LAYOUT if rm else ttnn.TILE_LAYOUT
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, N]), ttnn.bfloat16, lay, mesh, dram)
         print(f"K={K} N={N}: gmm launch", flush=True)
         gmm(ta, tw, tid, out, E)
         ttnn.synchronize_device(mesh)
@@ -52,7 +53,7 @@ def main():
         ttnn.synchronize_device(mesh)
         ms = (time.perf_counter() - t0) / 10 * 1e3
         ok &= rel < 1e-2
-        print(f"K={K} N={N} G={G}: rel err vs torch {rel:.2e}; gmm {ms:.2f} ms", flush=True)
+        print(f"K={K} N={N} rm={rm} G={G}: rel err vs torch {rel:.2e}; gmm {ms:.2f} ms", flush=True)
     ttnn.close_mesh_device(mesh)
     print("PASS" if ok else "FAIL")
 
