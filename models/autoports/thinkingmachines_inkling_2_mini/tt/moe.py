@@ -123,6 +123,12 @@ class MoE:
                                                                      in0_block_w_cap=kc(W)),
                           sparse_matmul_program_config(PF_CHUNK, H, W, target_cores=32, in0_block_w_cap=kc(W)))
                          for (op, ug, dn), (_, W) in zip(self.fe.subs, self.fe.widths)]
+            # merged decode layout (moe_fused MERGE): one stacked tensor pair, sub-shard s = virtual experts e * S + s
+            self.wsub = [(1, 0)]
+            if self.fe.merged:
+                S = len(self.fe.sub_widths)
+                self.subs = self.subs * S
+                self.wsub = [(S, s) for s in range(S)]
         else:
             self.up_gate = cached(make_ug, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("ug"), mesh_mapper=mm)
             self.down = cached(make_dn, expert_dtype, ttnn.TILE_LAYOUT, mesh, cname("dn"), mesh_mapper=mm2)
@@ -215,12 +221,12 @@ class MoE:
         else:
             x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
         out = None
-        for ug, dn, W, _, _ in self.subs:
+        for (ug, dn, W, _, _), wsub in zip(self.subs, self.wsub):
             cgu, cdn = self._cfg_sorted[("gs", gs)][W]
             alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
                                                              ttnn.TILE_LAYOUT, self.mesh, DRAM)
             if GMM:  # the grouped expert matmul over the whole grid (tt/gmm.py)
-                fused = self._gmm(x_disp, ug, m["group_ids"], alloc(2 * W), E)
+                fused = self._gmm(x_disp, ug, m["group_ids"], alloc(2 * W), E, wsub)
             else:
                 fused = ttnn.sparse_matmul(x_disp, ug, sparsity=m["group_mask"], nnz=G, memory_config=DRAM,
                                            program_config=cgu, compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
@@ -239,7 +245,7 @@ class MoE:
                 din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
             if GMM:  # (row-major rows: the un-dispatch gathers them without an untilize)
                 down = self._gmm(din, dn, m["group_ids"], ttnn.allocate_tensor_on_device(
-                    ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E)
+                    ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E, wsub)
             else:
                 down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
                                           is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
@@ -255,13 +261,13 @@ class MoE:
                 ttnn.deallocate(m[key])
         return out
 
-    def _gmm(self, a, w, ids, out, E):
+    def _gmm(self, a, w, ids, out, E, wsub=(1, 0)):
         if getattr(_GMM, "op", None) is None:
             from .gmm import GroupedMM
 
             _GMM.op = GroupedMM(self.mesh, ttnn.MathFidelity.HiFi2 if w.dtype != ttnn.bfloat16 else
                                 ttnn.MathFidelity.HiFi4)
-        return _GMM.op(a, w, ids, out, E)
+        return _GMM.op(a, w, ids, out, E, wsub=wsub)
 
     def _gather(self, x, w, ids, T):
         k, Il, H = self.k, self.Il, self.H

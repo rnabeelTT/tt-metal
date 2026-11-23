@@ -33,6 +33,9 @@ DUPROW = os.environ.get("I2M_MOE_DUPROW", "1") == "1"
 _SHARED = __import__("types").SimpleNamespace()  # the fused ops / buffers cache, shared by every layer (one set)
 SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (real, stored) widths per sub-shard
 # I2M_MOE_SUBS1 (one die): "768,384" -> two sub-shards (m = 6 and 3 column tiles per bank: both supported) instead of 3
+# I2M_MOE_MERGE (default 1): equal-width sub-shards stacked as virtual experts e * S + s (one gate|up and one down
+# program for all of them, the sub-shard sum in the down kernel's fp32 accumulation; qwen36 union.py `subs`)
+MERGE = os.environ.get("I2M_MOE_MERGE", "1") == "1"
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -52,6 +55,45 @@ class FusedExperts:
         w13 = w2 = None
         self.subs = []
         self.widths = subs
+        S = len(subs)
+        self.sub_widths = subs
+        # (the prefill paths read the stacked tensors through the grouped matmul's virtual expert ids: tt/moe.py wsub)
+        self.merged = (MERGE and S > 1 and len(set(subs)) == 1 and subs[0][0] == subs[0][1]
+                       and os.environ.get("I2M_MOE_GMM", "1") == "1" and os.environ.get("I2M_MOE_SORTED", "1") == "1")
+        if self.merged:
+            W = subs[0][1]
+
+            def make_ug():
+                w13 = ck.experts(li, "w13")  # [E, 2I, H] rows [gate | up]
+                t = torch.zeros(E, S, H, N * 2 * W)
+                for s in range(S):
+                    for d in range(N):
+                        a = d * Il + s * W
+                        t[:, s, :, d * 2 * W : d * 2 * W + W] = w13[:, a : a + W].transpose(1, 2)
+                        t[:, s, :, d * 2 * W + W : (d + 1) * 2 * W] = w13[:, I + a : I + a + W].transpose(1, 2) / 25.0
+                return t.reshape(1, E * S, H, N * 2 * W).to(torch.bfloat16)
+
+            def make_dn():
+                w2 = ck.experts(li, "w2")  # [E, H, I]
+                t = torch.zeros(E, S, N * W, H)
+                for s in range(S):
+                    for d in range(N):
+                        a = d * Il + s * W
+                        t[:, s, d * W : (d + 1) * W] = w2[:, :, a : a + W].transpose(1, 2) * (
+                            100.0 * moe.route_scale / math.sqrt(5.0))
+                return t.reshape(1, E * S, N * W, H).to(torch.bfloat16)
+
+            ug = cached(make_ug, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"ugm{S}x{W}"), mesh_mapper=mm(-1))
+            dn = cached(make_dn, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"dnm{S}x{W}"), mesh_mapper=mm(-2))
+            op = FusedMoEDecode(
+                self.mesh, _SHARED, hidden=H, inter_local=W, num_experts=E, k=moe.k, tp=N, dtype=dtype,
+                router_weight=None, shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None,
+                shared_down_proj=None, cache_name=lambda n: None, router_ckc=moe.rckc, router="sigb",
+                selection_bias=ck.L(li, "mlp.gate.bias").float(), router_logits=self._logits, gate_first=True, subs=S,
+            )
+            self.subs = [(op, ug, dn)]
+            self.widths = [(W, W)]
+            subs = []
         off = 0
         for si, (real, W) in enumerate(subs):
             def make_ug(off=off, real=real, W=W):
@@ -139,7 +181,7 @@ class FusedExperts:
         acc = None
         for (op, ug, dn), (_, W) in zip(self.subs, self.widths):
             _, gu, dnop, b = op.rows_ops(m)
-            act = act_buffer(self.mesh, W, self.moe.E, self.moe.k, m)
+            act = act_buffer(self.mesh, W, self.moe.E, self.moe.k, m, subs=op.subs)
             gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None)
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)

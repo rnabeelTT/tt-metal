@@ -111,12 +111,12 @@ void kernel_main() {
     invalidate_l1_cache();
 
     const uint16_t* table = reinterpret_cast<const uint16_t*>(tab);
-    uint16_t uni[rows * topk];
+    uint16_t uni[rows * topk * MOE_SUBS];
 #ifdef EP_EXPERTS
     const uint32_t ep_off = moe_topk::read_ep_offset(get_arg_val<uint32_t>(5), tab + 64 * rows);
     const uint32_t U = moe_topk::window_union(uni, moe_topk::route_union<topk>(table, rows, uni), ep_off, EP_EXPERTS);
 #else
-    const uint32_t U = moe_topk::route_union<topk>(table, rows, uni);
+    const uint32_t U = moe_topk::expand_subs<MOE_SUBS>(uni, moe_topk::route_union<topk>(table, rows, uni));
 #endif
     uint32_t mine = 0;
     for (uint32_t s = slot0; s < U + 1; s += step) {
@@ -197,7 +197,7 @@ void kernel_main() {
             }
             const uint32_t e = table[32 * r + j] - ep_off;
 #else
-            const uint32_t e = table[32 * r + j];
+            const uint32_t e = table[32 * r + j] * MOE_SUBS;  // (MOE_SUBS: its first virtual slot)
 #endif
             uint32_t lo = 0, hi = U;  // uni is ascending
             while (lo < hi) {
@@ -208,7 +208,9 @@ void kernel_main() {
                     hi = mid;
                 }
             }
-            put(1 + lo, r, table[32 * r + 17 + j]);
+            for (uint32_t v = 0; v < MOE_SUBS; ++v) {
+                put(1 + lo + v, r, table[32 * r + 17 + j]);
+            }
         }
     }
 

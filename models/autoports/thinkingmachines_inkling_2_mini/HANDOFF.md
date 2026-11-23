@@ -300,6 +300,27 @@ the op path (exact sums); tests/test_packed_device.py's prefix-resume KL (differ
 1.1e-2 (its bar raised to 2e-2; the exact resume at a chunk boundary stays bitwise). Not straight into the DRAM caches:
 rows 2k / 2k + 1 share a 64-byte DRAM word.
 
+## One die decode (2026-11-23; traced step, tests/test_batched_device.py; tools/op_prof.py, tools/bench_moe.py)
+
+Floor: bfp8 attention ~30 MB + 8 experts ~68 MB per application x 48 + the LM head ~0.5 GB = ~5.2 GB/token, ~10 ms at
+512 GB/s. Start: 34.2 ms (B=1), 2,899 programs per step (~60 per application): the fused glue (MixPlan / pre / post /
+message gates) was off on one die (DRAM).
+
+| change | TP1 B=1 | TP1 B=4 | TP4 B=1 | TP4 B=4 |
+|---|---|---|---|---|
+| start | 34.2 | 52.5 | 15.7 | 24.2 |
+| fused glue on one die too (KV pool cap 7 x 8K tokens: 0.29 GiB free after the trace captures); 1,378 programs | 26.9 | 47.7 | | |
+| the three 384-column MoE sub-shards as virtual experts e * 3 + s (qwen36 union.py `subs`, kernels MOE_SUBS): one route + one gate/up + one down program per layer, the sub-shard sum in the down kernel's fp32 accumulation; prefill's grouped matmul reads the stacked weights by id * 3 + s (gmm wsub) | 25.8 | 46.5 | | |
+| QWEN35_MOE_GU_OFFROW=2 (MoE layer at 1 / 4 / 8 rows: 223 / 691 / 1215 -> 218 / 641 / 1110 us) | | | 15.4 | 23.3 |
+
+Quality: TP1 prefill 0.9703 / 0.9966 / 0.0142 (unchanged), TP1 decode (8 x 736) 0.9708 / 0.9959 / 0.0145, TP4 decode
+0.9711 / 0.9955 / 0.0168 (unchanged); merged vs per-sub-shard MoE pcc 0.999994 (tests/dbg_moe_merge.py).
+Measured, not taken: more gate/up readers per column group (3: +3 %, 4 / 6: +30 %), down readers 3 / 9 and chunk 4
+(no change); DecodeLinear for the attention projections (q|r|s|g 49.7 -> 42.8 us, k equal, o 23.0 -> 28.2 us;
+q|k|v in one matmul on the sliding layers 76 -> 65 us with dmm, 54 us streamed: ~0.5-0.9 ms per token, later).
+Per application now (TP1 B=1): MoE ~218 us (59 % of its floor), attention projections ~100 us, SDPA ~32 us, glue
+~140 us over ~20 programs; LM head + softcap ~2 ms per token.
+
 ## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
 
 Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from

@@ -61,7 +61,7 @@ void kernel_main() {
     }
     noc_async_read_barrier();
     invalidate_l1_cache();
-    uint16_t uni[rows * topk];
+    uint16_t uni[rows * topk * MOE_SUBS];
 #ifdef NO_SHARED
     constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
 #else
@@ -72,7 +72,8 @@ void kernel_main() {
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni),
         moe_topk::read_ep_offset(get_arg_val<uint32_t>(5), tab + 64 * rows), EP_EXPERTS);
 #else
-    const uint32_t slots = 1 - S0 + moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni);
+    const uint32_t slots = 1 - S0 + moe_topk::expand_subs<MOE_SUBS>(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni));
 #endif
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, slots);

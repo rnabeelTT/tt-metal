@@ -74,13 +74,14 @@ void kernel_main() {
     noc_async_read_barrier();
     cb_push_back(cb_id, 2);
     invalidate_l1_cache();
-    uint16_t uni[rows * topk];
+    uint16_t uni[rows * topk * MOE_SUBS];
 #ifdef EP_EXPERTS
     const uint32_t U = moe_topk::window_union(
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni),
         moe_topk::read_ep_offset(get_arg_val<uint32_t>(7), scr + 64 * rows), EP_EXPERTS);
 #else
-    const uint32_t U = moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni);
+    const uint32_t U = moe_topk::expand_subs<MOE_SUBS>(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni));
 #endif
 
     constexpr uint32_t extra_in_flight = num_buffers - 2;

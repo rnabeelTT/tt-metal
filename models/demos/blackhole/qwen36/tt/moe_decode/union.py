@@ -59,13 +59,13 @@ def row_groups(m):
 ACT_PAGE = 64 * 8  # one [8, 32] BF16 tile: every width's [Mp, 32] tile fits a page
 
 
-def act_buffer(mesh_device, inter, num_experts, k, rows):
+def act_buffer(mesh_device, inter, num_experts, k, rows, subs=1):
     """The activations of a `rows`-row step (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
     interleaved: every down core reads all of it, which from DRAM cost more than the weights at 32 rows (2.7 MB x 64
     cores per device on 2 chips). Allocated per step on the device (ttnn.empty: no host upload, trace-safe) and freed
     after the down op: a persistent buffer of the 32-row size (2.7 MB per device on 2 chips) left too little L1 for the
     model's other programs' circular buffers. Every page the down op reads is written by the gate|up op first."""
-    slots = min(num_experts, rows * k) + 1
+    slots = min(num_experts * subs, rows * k * subs) + 1
     return ttnn.empty(
         [slots * inter // TILE * row_groups(rows), ACT_PAGE // 2],
         ttnn.bfloat16,
@@ -298,8 +298,11 @@ class ExpertGateUpRows:
         shared=True,
         ep_experts=None,
         gate_first=False,
+        subs=1,
     ):
-        """shared False: routed experts only (no union slot 0). ep_experts / gate_first: as ExpertGateUp. readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
+        """subs > 1: each expert stored as `subs` sub-shards of `inter` columns (virtual experts e * subs + s, weights
+        stacked [E * subs, ...]; kernels' MOE_SUBS), one program for all of them.
+        shared False: routed experts only (no union slot 0). ep_experts / gate_first: as ExpertGateUp. readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
         SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
         their reads collapse (8 rows, 4-chip shapes: 51 us median at 4 per pair, 89 at 22, 217 max at 8)."""
         self.banks = len(bank_workers(mesh_device))
@@ -308,10 +311,11 @@ class ExpertGateUpRows:
         self.pairs = self.n_tiles // 2
         self.m, self.nb, self.ngroups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
         self.E, self.k, self.inter, self.rows = num_experts, k, inter, rows
-        assert not ep_experts or not shared
+        self.subs = subs
+        assert subs == 1 or (not ep_experts and not shared)
         self.shared, self.ep_experts, self.gate_first = shared, ep_experts, gate_first
         self.trows, self.groups = tile_rows(rows), row_groups(rows)
-        self.max_slots = min(num_experts, rows * k) + 1
+        self.max_slots = min(num_experts * subs, rows * k * subs) + 1
         # split-pair (QWEN35_MOE_SPLIT_PAIR=1, m = 1: a pair's up / gate columns in banks q / q + banks / 2): one bank per
         # core, `readers` cores per bank on its row; the gate cores send w * silu(g) to their up partners (gur_writer.cpp)
         self.split = (
@@ -491,6 +495,7 @@ class ExpertGateUpRows:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
+        defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -565,6 +570,7 @@ class ExpertDownRows:
         chunk=8,
         shared=True,
         ep_experts=None,
+        subs=1,
     ):
         """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
         assert not ep_experts or not shared
@@ -596,7 +602,9 @@ class ExpertDownRows:
         # two chunks of [chunk * K, cols] weight tiles in cb_w: <= RING_BYTES (GLM-4.5-Air: hidden 4096, 8 slots = 835 KB)
         chunk = max(2, min(chunk, RING_BYTES // (2 * self.kt * self.cols * self.tile_bytes)))
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
-        self.max_slots = min(num_experts, rows * k) + 1
+        self.subs = subs  # (as ExpertGateUpRows: the slots of every sub-shard summed in one program)
+        assert subs == 1 or (not ep_experts and not shared)
+        self.max_slots = min(num_experts * subs, rows * k * subs) + 1
         self.weight_dtype = weight_dtype
         # QWEN35_MOE_DN_OFFROW=1: a bank whose optimal reader row is an earlier bank's (banks 0 / 4 on row 9 here) gets its
         # readers on the next row inward, reading on NOC1 (place_banks_offrow, as DecodeLinear): on the shared row the
@@ -662,6 +670,7 @@ class ExpertDownRows:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
+        defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

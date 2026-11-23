@@ -76,8 +76,9 @@ def _host_tensor(t):
 # / dies). tools/mem_probe.py with POOL=65536 at the card's slots x context, after the warm-ups and trace captures,
 # free DRAM per die: 4 dies 16.55 GiB (32 x 1M), 2 dies 10.16 GiB (16 x 512K), 1 die 0.29 GiB (8 x 64K); the caps keep
 # ~1.25 GiB free for prefill transients (the Ornith port's headroom). I2M_KV_POOL_TOKENS overrides the cap. 2048-row
-# prefill chunks (the sliding rings hold the window + one chunk): +1.29 GiB per die at 4 dies x 32 slots.
-KV_POOL_CAP = {4: 2_064_384, 2: 647_168, 1: 65_536}
+# prefill chunks (the sliding rings hold the window + one chunk): +1.29 GiB per die at 4 dies x 32 slots. One die:
+# 7 x 8K tokens, so the fused decode glue (MixPlan / pre / post programs) fits: 0.29 GiB free after the trace captures.
+KV_POOL_CAP = {4: 2_064_384, 2: 647_168, 1: 57_344}
 KV_POOL_CAP_2048 = {4: 1_895_296}
 
 

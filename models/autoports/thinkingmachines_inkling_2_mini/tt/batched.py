@@ -413,7 +413,7 @@ class BatchedDecoder:
         self.plan = None
         self.post = None
         self.pre = None
-        if (MIX_CACHE == "1") if MIX_CACHE is not None else mesh.get_num_devices() > 1:
+        if MIX_CACHE != "0":  # (one die too: its KV pool cap leaves room for the plan's query copies)
             if getattr(model, "_mixplan", None) is None:
                 model._mixplan = MixPlan(model)
             self.plan = model._mixplan

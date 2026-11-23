@@ -10,7 +10,8 @@
 // every core: they consume in lockstep); semaphore 0 (on the sender): receivers ready, 1 (on the receivers): the tile
 // row landed.
 //
-// runtime args: b, e0, e1, sender x / y, multicast x0 y0 x1 y1 (NOC 0), G      common args: a, w, ids
+// runtime args: b, e0, e1, sender x / y, multicast x0 y0 x1 y1 (NOC 0), G      common args: a, w, ids, ws, wo
+// (expert e's weights are w's expert e * ws + wo: a sub-shard of experts stacked as virtual experts, tt/moe_fused.py)
 
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ void kernel_main() {
     const auto aa = TensorAccessor(a_args, get_common_arg_val<uint32_t>(0), 2048);
     const auto aw = TensorAccessor(w_args, get_common_arg_val<uint32_t>(1), w_page);
     const auto ai = TensorAccessor(i_args, get_common_arg_val<uint32_t>(2), ids_bytes);
+    const uint32_t ws = get_common_arg_val<uint32_t>(3), wo = get_common_arg_val<uint32_t>(4);
 
     cb_reserve_back(cb_ids, 1);
     const uint32_t il = get_write_ptr(cb_ids);
@@ -67,7 +69,7 @@ void kernel_main() {
             const uint32_t wl = get_write_ptr(cb_w);
             for (uint32_t kt = 0; kt < Kt; ++kt) {
                 for (uint32_t j = 0; j < nb; ++j) {
-                    noc_async_read(aw.get_noc_addr((e * Kt + kt) * Nt + b * nb + j), wl + (kt * nb + j) * w_page,
+                    noc_async_read(aw.get_noc_addr(((e * ws + wo) * Kt + kt) * Nt + b * nb + j), wl + (kt * nb + j) * w_page,
                                    w_page);
                 }
             }

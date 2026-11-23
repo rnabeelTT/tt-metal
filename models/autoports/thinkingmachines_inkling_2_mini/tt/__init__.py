@@ -15,6 +15,9 @@ _os.environ.setdefault("QWEN35_MOE_DN_READERS_WIDE", "9")
 _os.environ.setdefault("QWEN35_MOE_GU_READERS", "2")
 _os.environ.setdefault("QWEN35_MOE_DN_OFFROW", "1")
 _os.environ.setdefault("QWEN35_MOE_DN_CHUNK", "2")
+# the gate|up readers of the two banks sharing a NOC row spread over the free rows (traced, P150, layer 0, bfp8, the
+# merged sub-shards: 1 / 4 / 8 rows 223 / 691 / 1215 -> 218 / 641 / 1110 us per MoE layer)
+_os.environ.setdefault("QWEN35_MOE_GU_OFFROW", "2")
 # the sigb router's top-k split over 8 cores per row (4 at 8 rows; <= 32 cores): the same selection and weights;
 # TP4 traced B = 1 16.6 -> 16.1 ms, B = 8 29.2 -> 28.8
 _os.environ.setdefault("QWEN35_ROUTE_SPLIT", "8")

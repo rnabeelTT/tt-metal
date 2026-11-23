@@ -381,4 +381,24 @@ inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni)
     }
     return u;
 }
+
+// MOE_SUBS = S > 1: every expert's columns are stored as S sub-shards, virtual expert e * S + s (the weight tensors
+// stacked [E * S, ...]); the union of U experts becomes U * S ascending virtual slots, expanded in place (uni must
+// hold rows * topk * S entries).
+template <uint32_t S>
+inline uint32_t expand_subs(uint16_t* uni, uint32_t U) {
+    if constexpr (S > 1) {
+        for (uint32_t i = U; i-- > 0;) {
+            const uint32_t e = uni[i];
+            for (uint32_t s = 0; s < S; ++s) {
+                uni[i * S + s] = static_cast<uint16_t>(e * S + s);
+            }
+        }
+    }
+    return U * S;
+}
 }  // namespace moe_topk
+
+#ifndef MOE_SUBS
+#define MOE_SUBS 1
+#endif
