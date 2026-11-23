@@ -18,6 +18,7 @@ import os
 import ttnn
 
 from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
+from models.autoports.tencent_hy4_flash.tt.swiglu_pf import SwigluPF
 
 GS = 32
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -141,14 +142,20 @@ class SortedExperts:
                                    memory_config=DRAM, program_config=self.cfg_gu, compute_kernel_config=moe.ckc_e,
                                    dtype=ttnn.bfloat16)  # [1,G,32,2Il] = [up | gate] per die
         ttnn.deallocate(x_disp)
-        up = ttnn.slice(fused, (0, 0, 0, 0), (1, G, GS, Il), memory_config=DRAM)
-        gate = ttnn.slice(fused, (0, 0, 0, Il), (1, G, GS, 2 * Il), memory_config=DRAM)
-        ttnn.deallocate(fused)
-        din = moe._swiglu(up, gate, DRAM)
-        ttnn.deallocate(up)
-        ttnn.deallocate(gate)
-        din2 = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Il)), m["weights"], memory_config=DRAM)
-        ttnn.deallocate(din)
+        if os.environ.get("HY4_PF_SWIGLU", "1") == "1" and SwigluPF.supports(Il):
+            # one program for slice x 2, clamp x 2, multiply(silu), routing-weight multiply (tt/swiglu_pf: the same
+            # SFPU calls in the same order on a 16-bit DEST: bit-identical)
+            din2 = SwigluPF.get(moe.mesh)(fused, m["weights"], float(moe.limit), DRAM)
+            ttnn.deallocate(fused)
+        else:
+            up = ttnn.slice(fused, (0, 0, 0, 0), (1, G, GS, Il), memory_config=DRAM)
+            gate = ttnn.slice(fused, (0, 0, 0, Il), (1, G, GS, 2 * Il), memory_config=DRAM)
+            ttnn.deallocate(fused)
+            din = moe._swiglu(up, gate, DRAM)
+            ttnn.deallocate(up)
+            ttnn.deallocate(gate)
+            din2 = ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, Il)), m["weights"], memory_config=DRAM)
+            ttnn.deallocate(din)
         ttnn.deallocate(m["weights"])
         din2 = ttnn.reshape(din2, (1, G, GS, Il))
         down = ttnn.sparse_matmul(din2, moe.down, sparsity=m["group_mask"], indices=m["group_ids"],
