@@ -75,6 +75,13 @@ class Hy4Indexer:
         bias = torch.zeros(self.r, 32, 2 * self.d)
         bias[:, :, self.d:] = self.ape[:, None, :]
         self.dvg_bias = upload(mesh, bias.reshape(1, self.r, 32, 2 * self.d), ttnn.float32)
+        # HY4_IDX_POOL_K: the decode pooling tail's elementwise ops as 2 programs with the chain's numerics
+        # (tt/idx_pool_exact; bit-identical keys); "0" = the ttnn chain
+        self.pool_x = None
+        if os.environ.get("HY4_IDX_POOL_K", "1") == "1" and self.d == 128 and self.r == 4:
+            from models.autoports.tencent_hy4_flash.tt.idx_pool_exact import IdxPoolExactOp
+
+            self.pool_x = IdxPoolExactOp.get(mesh)
         # group cache (TILE) + host mirror
         # + 64: the decode group window's two 32-group slabs past the context; + 32: the spare tile scoring reads
         self.gcap = -(-(max_ctx // self.r + 96) // 2048) * 2048  # a multiple of 2048: any power-of-two slab divides it
@@ -775,6 +782,16 @@ class Hy4Indexer:
             ttnn.deallocate(K)
         vg = ttnn.matmul(S, self.dWvgT, dtype=ttnn.float32, compute_kernel_config=self.ckc, memory_config=mem)
         ttnn.deallocate(S)
+        if self.pool_x is not None and n % 32 == 0 and os.environ.get("HY4_IDX_POOL_K", "1") == "1":
+            pooled = self.pool_x.pool(vg, bias, n, d, mem)
+            ttnn.deallocate(vg)
+            nrm = ttnn.rms_norm(pooled, epsilon=self.eps, compute_kernel_config=self.ckc, memory_config=mem)
+            ttnn.deallocate(pooled)
+            keys = self.pool_x.post(nrm, self.dkn, mem)
+            ttnn.deallocate(nrm)
+            out = self.rope.tail(keys, gcos, gsin, mem, keep=True)
+            ttnn.deallocate(keys)
+            return out
         vg = ttnn.add(ttnn.reshape(vg, (1, r, n, 2 * d)), bias, memory_config=mem)
         v = ttnn.slice(vg, (0, 0, 0, 0), (1, r, n, d), memory_config=mem)
         g = ttnn.slice(vg, (0, 0, 0, d), (1, r, n, 2 * d), memory_config=mem)
