@@ -15,6 +15,9 @@
 // host-written T * Gumbel noise ([d, TOPK] FP32; all zero = the top-1).
 //
 // The reducer also writes w1[token] as row 0 of the next step's input wp ([1, 1, 1, 256] bf16 TILE).
+// LOCAL_OUT (vocab-sharded drafter: this program sees one vocab slice): the reducer only writes its result, the best
+// (key, local id) pair (greedy) or its top K pairs (SAMPLE; keys in the order-preserving key form), to row 0 of `loc`
+// ([1, 1, 1, 2 TOPK] uint32 TILE; arg 6 = its address, unused pairs key 0); kernels/dsp_merge.cpp picks the token.
 //
 // runtime args: [x_addr, base_addr, prev_addr, col0, ncols, slot, w1_addr, wp_addr (, gum, cid, clg, tab addrs)]
 
@@ -24,6 +27,26 @@
 #include "dsp_w1row.hpp"
 
 static inline uint32_t fkey(uint32_t u) { return (u & 0x80000000u) ? ~u : (u | 0x80000000u); }
+
+#ifdef LOCAL_OUT
+// pairs (k[j], i[j]), j < n, then (0, ~0) up to LOCAL_OUT pairs -> row 0 of loc (2 LOCAL_OUT uint32: tiles of 32)
+template <typename A>
+inline void write_loc(const A& s_l, const uint32_t* k, const uint32_t* i, uint32_t n, uint32_t st) {
+    volatile tt_l1_ptr uint32_t* v = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(st);
+    for (uint32_t p = 0; p < 2 * LOCAL_OUT; ++p) {
+        const uint32_t j = p >> 1;
+        const uint32_t x = (p & 1) ? (j < n ? i[j] : 0xFFFFFFFFu) : (j < n ? k[j] : 0u);
+        const uint32_t t = p >> 5, c = p & 31;
+        v[t * 32 + c] = x;  // tile t's staging: words [0, 16) = face 0 row 0, [16, 32) = face 1 row 0
+    }
+    for (uint32_t t = 0; t < (2 * LOCAL_OUT + 31) / 32; ++t) {
+        const uint64_t d = s_l.get_noc_addr(t);
+        noc_async_write(st + t * 128, d, 64);
+        noc_async_write(st + t * 128 + 64, d + 1024, 64);
+    }
+    noc_async_write_barrier();
+}
+#endif
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -153,11 +176,13 @@ void kernel_main() {
         hk[q] = c[q * K * 2];
         hid[q] = c[q * K * 2 + 1];
     }
+#ifndef LOCAL_OUT
     // out rows: ids at mine[0 .. K), logits at mine[K .. 2K), the T * Gumbel row at mine[2K .. 3K)
     const auto s_g = TensorAccessor(g_args, get_arg_val<uint32_t>(8), 4 * K);
     noc_async_read(s_g.get_noc_addr(KS), cand + ncores * 8 * K + 8 * K, 4 * K);
     const uint32_t tab = cand + ncores * 8 * K + 12 * K;
     noc_async_read(TensorAccessor(t_args, get_arg_val<uint32_t>(11), 4 * NTAB).get_noc_addr(0), tab, 4 * NTAB);
+#endif
     for (uint32_t j = 0; j < K; ++j) {
         uint32_t bq = 0, bk = hk[0], bi = hid[0];
         for (uint32_t q = 1; q < ncores; ++q) {
@@ -171,9 +196,16 @@ void kernel_main() {
         const uint32_t h = ++head[bq];
         hk[bq] = h < K ? c[(bq * K + h) * 2] : 0;  // (exhausted: key 0, id ~0 never wins over a live entry)
         hid[bq] = h < K ? c[(bq * K + h) * 2 + 1] : 0xFFFFFFFFu;
+#ifdef LOCAL_OUT
+        tk[j] = bk;
+#else
         tk[j] = (bk & 0x80000000u) ? (bk & 0x7FFFFFFFu) : ~bk;  // the FP32 bits back
+#endif
         ti[j] = bi;
     }
+#ifdef LOCAL_OUT
+    write_loc(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 4096), tk, ti, K, cand + W1_OFF);
+#else
     noc_async_read_barrier();
     volatile tt_l1_ptr float* tg = reinterpret_cast<volatile tt_l1_ptr float*>(cand + ncores * 8 * K + 8 * K);
     volatile tt_l1_ptr float* ct = reinterpret_cast<volatile tt_l1_ptr float*>(tab);
@@ -209,6 +241,7 @@ void kernel_main() {
     noc_async_write_barrier();
     w1_row(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 512), TensorAccessor(wp_args, get_arg_val<uint32_t>(7), 2048),
            ti[best], cand + W1_OFF);
+#endif
 #else
     // candidate -> the reducer
     volatile tt_l1_ptr uint32_t* mine = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cand + ncores * 16);
@@ -232,11 +265,15 @@ void kernel_main() {
             bi = id;
         }
     }
+#ifdef LOCAL_OUT
+    write_loc(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 4096), &bk, &bi, 1, cand + W1_OFF);
+#else
     mine[0] = bi;
     const auto s_p = TensorAccessor(p_args, prev_addr, 4);
     noc_async_write(cand + ncores * 16, s_p.get_noc_addr(0), 4);
     noc_async_write_barrier();
     w1_row(TensorAccessor(w_args, get_arg_val<uint32_t>(6), 512), TensorAccessor(wp_args, get_arg_val<uint32_t>(7), 2048),
            bi, cand + W1_OFF);
+#endif
 #endif
 }

@@ -13,7 +13,9 @@ anchors and the CPU reference's block hidden / Markov drafts / top-16 step logit
      reference; traced time per step and per phase (each phase captured alone)
 
 usage: ~/inkling2-work/jobs/die.sh 3 drafter "" python -u models/autoports/thinkingmachines_inkling_2_mini/tests/test_drafter_device.py
-env: DRAFT_W_DT / DRAFT_HEAD_DT / DRAFT_FOLD_DT (bf16 | bfp8, default bfp8), FIXTURE, DRAFT_D (traced d, default 3)
+env: DRAFT_W_DT / DRAFT_HEAD_DT / DRAFT_FOLD_DT (bf16 | bfp8, default bfp8), FIXTURE, DRAFT_D (traced d, default 3),
+     MESH=N (a 1 x N mesh: the drafter replicated, its vocab sharded unless DRAFT_VSHARD=0), DRAFT_VSHARD_SIM=N (one
+     die, N simulated vocab slices), DRAFT_SKIP_EAGER=1
 """
 
 import faulthandler
@@ -115,7 +117,10 @@ def main():
     faulthandler.register(signal.SIGUSR1, all_threads=True)
     torch.manual_seed(0)
     fx = torch.load(FIXTURE)
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, int(os.environ.get("MESH", "1"))), trace_region_size=256 << 20)
+    n = int(os.environ.get("MESH", "1"))
+    if n > 1:  # (the vocab-sharded drafter's all-gather)
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, n), trace_region_size=256 << 20)
     try:
         run(mesh, fx)
     finally:

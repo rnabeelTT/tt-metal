@@ -26,6 +26,10 @@ Device state (every shape fixed; positions live in device tensors, so the whole 
                              FP32 buffer (the LM head streamed per DRAM bank, kernels/dsp_head_writer.cpp); d Markov
                              steps: the RNN on one row, then one program per step for [lat, 1] @ [fold W; fold b] + base
                              row -> argmax -> the next token (kernels/dsp_step_*.cpp, the fold weight streamed per bank)
+  vocab sharding             N > 1 dies (DRAFT_VSHARD=1): die d streams vocab columns [d Vs, (d + 1) Vs) of the LM head
+                             and the fold weight; per Markov step each die's best pair / top 32 goes to a small tensor,
+                             one all_gather, then kernels/dsp_merge.cpp (same on every die) picks the token; the block
+                             stays replicated. DRAFT_VSHARD_SIM=n: n slices simulated on one die (concat, no gather)
   sampled drafts             capture(..., sample=True): per step the top TOPK = 32 of the softcapped step logits
                              (ids / logits in cand_id / cand_lg, host: cand_host()), token = argmax_j (logit_j + tg_j)
                              with tg = T * Gumbel noise the host writes before each replay (set_gumbel; zeros = top-1);
@@ -209,21 +213,37 @@ class DSparkDrafter:
             self.embed = ttnn.as_tensor(ck.get("model.llm.embed.weight").to(torch.bfloat16), dtype=BF16, layout=RM,
                                         device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
             self.embed_norm = vec(ck.get("model.llm.embed_norm.weight"))
+        # vocab sharding (N > 1, DRAFT_VSHARD=1 default): die d streams vocab columns [d Vs, (d + 1) Vs) of the LM head
+        # and the fold weight; each Markov step's per-die result is all-gathered and merged (kernels/dsp_merge.cpp).
+        # DRAFT_VSHARD_SIM=n on one die: the n slices as n programs, a concat instead of the all-gather (validation).
+        sim = int(os.environ.get("DRAFT_VSHARD_SIM", "0"))
+        self.NS = N if N > 1 and os.environ.get("DRAFT_VSHARD", "1") == "1" else (sim if N == 1 and sim > 1 else 1)
+        self.vsim = N == 1 and self.NS > 1
+        assert self.NT % self.NS == 0
+        self.Vs, self.NTs = Vp // self.NS, self.NT // self.NS
+        Vs, NS = self.Vs, self.NS
+
+        def per_slice(dl, full):  # [K, Vp] -> the per-slice weight list
+            if NS == 1:
+                return [dl.weight([full] * N)]
+            parts = [full[:, s * Vs:(s + 1) * Vs].contiguous() for s in range(NS)]
+            return [dl.weight([p]) for p in parts] if self.vsim else [dl.weight(parts)]
+
         un = ck.get("model.llm.unembed.weight")[: self.V]
-        if model is not None and N == 1 and model.shead is not None and model.shead.n == Vp:
-            self.dl_head, self.lm_head = model.shead, model.lm_head
+        if model is not None and N == 1 and NS == 1 and model.shead is not None and model.shead.n == Vp:
+            self.dl_head, self.lm_heads = model.shead, [model.lm_head]
         else:
-            self.dl_head = DecodeLinear(mesh, H, Vp, head_dtype, readers=int(os.environ.get("DRAFT_HEAD_READERS", "4")),
+            self.dl_head = DecodeLinear(mesh, H, Vs, head_dtype, readers=int(os.environ.get("DRAFT_HEAD_READERS", "4")),
                                         fidelity=fid(head_dtype))
             wt = torch.nn.functional.pad(un.T.contiguous(), (0, Vp - self.V)).to(torch.bfloat16)
-            self.lm_head = self.dl_head.weight([wt] * N)
+            self.lm_heads = per_slice(self.dl_head, wt)
         fw, fb = self._fold(un, w["markov_head.hidden_out.weight"], w["markov_head.hidden_out.bias"])
         wf = torch.zeros(R + 32, Vp)
         wf[:R, : self.V] = fw.T.float()
         wf[R, : self.V] = fb.float()
-        self.dl_fold = DecodeLinear(mesh, R + 32, Vp, fold_dtype, readers=int(os.environ.get("DRAFT_FOLD_READERS", "8")),
+        self.dl_fold = DecodeLinear(mesh, R + 32, Vs, fold_dtype, readers=int(os.environ.get("DRAFT_FOLD_READERS", "8")),
                                     fidelity=fid(fold_dtype))
-        self.fold = self.dl_fold.weight([wf.to(torch.bfloat16)] * N)
+        self.folds = per_slice(self.dl_fold, wf.to(torch.bfloat16))
         del w
 
         # RoPE tables (fp32, neox): C = [c, c], S = [-s, s]; rope(x) = x C + [x2, x1] S
@@ -265,7 +285,7 @@ class DSparkDrafter:
         self.idx_b = self._u32([[0] * self.B])
         self.cpos = ttnn.from_torch(torch.zeros(self.NKV, dtype=torch.int32), dtype=ttnn.int32, layout=RM,
                                     device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
-        self.base = self._zeros([1, 8, self.NT, 32], F32, RM)
+        self.bases = [self._zeros([1, 8, self.NTs, 32], F32, RM) for _ in range(self.NS if self.vsim else 1)]
         self.prev = [self._u32([[0]]) for _ in range(d_max)]
         self.f_rnn = self._zeros([1, 1, 1, H], BF16)
         self.chunk_in = {}  # T -> (p0 tensor, rope index tensor, last-row index tensor)
@@ -547,32 +567,69 @@ class DSparkDrafter:
         ttnn.generic_op([x, w, out], prog)
 
     def _base_logits(self, h, d):
-        """rows 1..d of h [1, 1, 32, H] bf16 @ LM head -> self.base rows 1..d (FP32, compact)."""
+        """rows 1..d of h [1, 1, B, H] bf16 @ LM head -> the base buffer(s) rows 1..d (FP32, compact; per slice)."""
         dl = self.dl_head
         cb_out = 16
-        ct = [0, cb_out, dl.kt, d, self.NT] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(self.base).get_compile_time_args()
-        cp_ct = [0, 1, cb_out, dl.kt, 0, 0]
-        self._stream(dl, "dsp_head_writer.cpp", h, self.lm_head, self.base, ct,
-                     lambda slot, col0, nc: [h.buffer_address(), self.base.buffer_address(), col0, nc],
-                     KDIR / "head_compute.cpp", cp_ct, lambda cores: [_cb(cb_out, cores, F32, 4096, 2)], [], [])
+        for w, base in zip(self.lm_heads, self.bases):
+            ct = [0, cb_out, dl.kt, d, self.NTs] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
+                + ttnn.TensorAccessorArgs(base).get_compile_time_args()
+            cp_ct = [0, 1, cb_out, dl.kt, 0, 0]
+            self._stream(dl, "dsp_head_writer.cpp", h, w, base, ct,
+                         lambda slot, col0, nc: [h.buffer_address(), base.buffer_address(), col0, nc],
+                         KDIR / "head_compute.cpp", cp_ct, lambda cores: [_cb(cb_out, cores, F32, 4096, 2)], [], [])
 
     def _step(self, lat, row, prev, ks=0):
-        """lat [1, 1, 1, R] bf16 -> argmax_v ([lat, 1] @ [fold W; fold b] + base[row])_v into prev (uint32 [1, 1]).
-        Sampled (self.sample): the softcapped logits' top TOPK -> row ks of cand_id / cand_lg, the token
-        argmax_j (logit_j + gum[ks, j])."""
+        """lat [1, 1, 1, R] bf16 -> argmax_v ([lat, 1] @ [fold W; fold b] + base[row])_v into prev (uint32 [1, 1]) and
+        w1[token] into wp[ks + 1]. Sampled (self.sample): the softcapped logits' top TOPK -> row ks of cand_id /
+        cand_lg, the token argmax_j (logit_j + gum[ks, j]). Vocab-sharded (NS > 1): per slice the local result, gathered,
+        then the merge program."""
+        if self.NS == 1:
+            return self._step_prog(lat, row, prev, ks, self.folds[0], self.bases[0], None)
+        locs = []
+        for s, fold in enumerate(self.folds):
+            loc = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, 2 * TOPK]), U32, TILE, self.mesh, DRAM)
+            self._step_prog(lat, row, prev, ks, fold, self.bases[s if self.vsim else 0], loc)
+            locs.append(loc)
+        g = ttnn.concat(locs, dim=3) if self.vsim else \
+            ttnn.all_gather(locs[0], dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
+        self._vmerge(g, prev, ks)
+
+    def _vmerge(self, g, prev, ks):
+        core = ttnn.CoreCoord(0, 0)
+        crs = _crs([core])
+        io = [g, prev, self.w1, self.wp[ks + 1]]
+        defines = []
+        if self.sample:
+            io += [self.gum, self.cand_id, self.cand_lg, self.cap_tab]
+            defines = [("SAMPLE", "1"), ("CAP_L", f"{CAP_L:.1f}f"), ("CAP_INV_H", f"{CAP_INV_H:.1f}f")]
+        ct = [0, self.NS, TOPK, self.Vs, self.V, ks, CAP_NTAB]
+        for t in io:
+            ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_merge.cpp"), core_ranges=crs, compile_time_args=ct,
+                                  runtime_args=_rt({(0, 0): [t.buffer_address() for t in io]}), defines=defines,
+                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                           noc=ttnn.NOC.NOC_0))
+        nb = 8 * self.NS * TOPK + 12 * TOPK + 4 * CAP_NTAB + 4096
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, F32, nb, 1)])
+        prog.custom_program_hash = _hash(("dsp_merge", tuple(ct), tuple(defines)))
+        ttnn.generic_op(io, prog)
+
+    def _step_prog(self, lat, row, prev, ks, fold, base, loc):
+        """One step program over one vocab slice (fold / base); loc: write the local result there (LOCAL_OUT)."""
         dl = self.dl_fold
         cb_base, cb_out, cb_bseg, cb_cand = 2, 16, 3, 4
         n = len(dl.assign)
         red = self.mesh.worker_core_from_logical_core(dl.assign[0][0])
-        ct = [0, cb_out, cb_base, cb_bseg, cb_cand, dl.kt, self.V, self.NT, row, n, red.x, red.y] \
+        wsrc = self.w1 if loc is None else loc
+        ct = [0, cb_out, cb_base, cb_bseg, cb_cand, dl.kt, self.V if self.NS == 1 else self.Vs, self.NTs, row, n,
+              red.x, red.y] \
             + ttnn.TensorAccessorArgs(lat).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(self.base).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(base).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(prev).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(self.w1).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(wsrc).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(self.wp[ks + 1]).get_compile_time_args()
         cp_ct = [0, 1, cb_base, cb_out, dl.kt]
-        extra, cdef, wdef, cand_bytes = [self.w1.buffer_address(), self.wp[ks + 1].buffer_address()], [], [], \
+        extra, cdef, wdef, cand_bytes = [wsrc.buffer_address(), self.wp[ks + 1].buffer_address()], [], [], \
             (n + 2) * 16
         if self.sample:
             K = TOPK
@@ -582,17 +639,19 @@ class DSparkDrafter:
             extra += [t.buffer_address() for t in (self.gum, self.cand_id, self.cand_lg, self.cap_tab)]
             wdef = [("SAMPLE", "1"), ("TOPK", str(K)), ("CAP_L", f"{CAP_L:.1f}f"), ("CAP_INV_H", f"{CAP_INV_H:.1f}f")]
             cand_bytes = (n + 2) * 8 * K + 4 * K + 4 * CAP_NTAB
-        w1_off = -(-cand_bytes // 64) * 64  # (the reducer's w1-row scratch)
+        if loc is not None:
+            wdef = wdef + [("LOCAL_OUT", str(TOPK))]
+        w1_off = -(-cand_bytes // 64) * 64  # (the reducer's w1-row / loc staging scratch)
         wdef = wdef + [("W1_OFF", str(w1_off))]
         cand_bytes = w1_off + 1536
         cbs = lambda cores: [_cb(cb_base, cores, F32, 4096, 2), _cb(cb_out, cores, F32, 4096, 2),  # noqa: E731
                              _cb(cb_bseg, cores, F32, dl.cpc * 128, 1), _cb(cb_cand, cores, F32, cand_bytes, 1)]
         sems = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, dl.cores, 0)]
-        self._stream(dl, "dsp_step_writer.cpp", lat, self.fold, self.base, ct,
-                     lambda slot, col0, nc: [lat.buffer_address(), self.base.buffer_address(), prev.buffer_address(),
+        self._stream(dl, "dsp_step_writer.cpp", lat, fold, base if loc is None else loc, ct,
+                     lambda slot, col0, nc: [lat.buffer_address(), base.buffer_address(), prev.buffer_address(),
                                              col0, nc, slot] + extra,
                      KDIR / "dsp_step_compute.cpp", cp_ct, cbs, sems, [cb_base], defines=cdef, wdefines=wdef)
-        # (prev is written by the program but is not its output tensor: keep it alive in the io list)
+        # (prev / wp / cand rows are written by the program but are not its output tensor: persistent buffers)
 
     # ------------------------------------------------------------------ commit
     def _commit_rows(self, taps, idx, p0_t, last):
