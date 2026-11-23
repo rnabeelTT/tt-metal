@@ -95,6 +95,35 @@ def _largest_div(n, cap):
     return max(d for d in range(1, cap + 1) if n % d == 0)
 
 
+_W_TILE = {ttnn.bfloat16: 2048, ttnn.bfloat8_b: 1088, ttnn.bfloat4_b: 576}
+MM_L1_BUDGET = 1_440_000  # CB bytes per core of the 2D-multicast factory (bench 2026-11-23: 1.436 MB ran, 1.52 failed)
+
+
+def _full_grid_cfg(device, M, K, N, wdt):
+    """HY4_PF_MCAST_FULL (default 1, FP32 DST only): the whole worker grid (11 x 10 on Blackhole: per-core M / N rounded
+    up, the last row / column of cores partly idle) and the largest K block (<= 16 tiles) whose CBs fit L1, instead of
+    the <= 8 x 11 divisor grid with K blocks of <= 8. With FP32 DST the K sum runs tile by tile in the same order
+    whatever the blocking (partials spill and reload in fp32): bit-identical outputs (mm_bench, every prefill
+    projection: 1.2-1.8x faster)."""
+    g = device.compute_with_storage_grid_size()
+    Mt, Kt, Nt = M // TILE, K // TILE, N // TILE
+    gy, gx = min(g.y, Mt), min(g.x, Nt)
+    pm, pn = -(-Mt // gy), -(-Nt // gx)
+    gy, gx = -(-Mt // pm), -(-Nt // pn)
+    wt = _W_TILE.get(wdt)
+    if wt is None or gx * gy < 32:
+        return False
+    sw = _largest_div(pn, 4)
+    sh = _largest_div(pm, 4 // sw)
+    for ib in sorted((d for d in range(1, 17) if Kt % d == 0), reverse=True):
+        l1 = 2 * pm * ib * 2048 + 2 * pn * ib * wt + pm * pn * (2048 + 4096)
+        if l1 <= MM_L1_BUDGET:
+            return ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
+                compute_with_storage_grid_size=(gx, gy), in0_block_w=ib, out_subblock_h=sh, out_subblock_w=sw,
+                per_core_M=pm, per_core_N=pn, transpose_mcast=False, fused_activation=None, fuse_batch=True)
+    return False
+
+
 def mm(x, w, ck, mem=None, **kw):
     """ttnn.matmul for a prefill-sized [1, 1, M, K] x [1, 1, K, N] (M >= HY4_PF_MCAST_MIN rows, default 256): an explicit
     2D-multicast program config (<= 8 x 11 cores, K blocks of up to 8 tiles, FP32 DST subblocks of <= 4 tiles): the
@@ -105,8 +134,13 @@ def mm(x, w, ck, mem=None, **kw):
           and M % TILE == 0 and K % TILE == 0 and N % TILE == 0)
     if ok:
         fp32 = bool(getattr(ck, "fp32_dest_acc_en", True))
-        key = (M, K, N, fp32)
+        full = (os.environ.get("HY4_PF_MCAST_FULL", "1") == "1" and fp32
+                and not bool(getattr(ck, "packer_l1_acc", False)))
+        key = (M, K, N, fp32, full, w.dtype)
         cfg = _PF_CFG.get(key, False)
+        if cfg is False and full:
+            cfg = _full_grid_cfg(x.device(), M, K, N, w.dtype)
+            _PF_CFG[key] = cfg
         if cfg is False:
             Mt, Kt, Nt = M // TILE, K // TILE, N // TILE
             gy, gx = _largest_div(Mt, 8), _largest_div(Nt, 11)
