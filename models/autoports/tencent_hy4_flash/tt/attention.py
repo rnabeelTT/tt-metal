@@ -73,6 +73,30 @@ def ukv_stream_env() -> str:
     return os.environ.get("HY4_UKV_STREAM", "1")
 
 
+def ukv_pf_cfg(name: str, H: int, Tp: int, kd: int, nd: int, ck, grid) -> dict:
+    """HY4_PF_UKV_CFG (default 1): an explicit batched-reuse config for the per-head W_uk / W_uv^T matmuls of prefill
+    rows (Tp >= 256; [1, H, Tp, kd] x [1, H, kd, nd]): whole N per core, per_core_M the largest of 16 (W_uv) / 8 (W_uk)
+    that leaves >= 64 work units, K blocks of 3 / 4 tiles. The default config ran them at ~17 TFLOPS (16 heads at 2048
+    rows: W_uk 366 -> 212 us, W_uv^T 503 -> 248 us). FP32 DST only: the K sum runs tile by tile in the same order
+    whatever the blocking (bit-identical, fl2_bench 2026-11-23)."""
+    if (os.environ.get("HY4_PF_UKV_CFG", "1") != "1" or Tp < 256 or not getattr(ck, "fp32_dest_acc_en", False)
+            or getattr(ck, "packer_l1_acc", False)):
+        return {}
+    Mt, Kt, Nt = Tp // TILE, kd // TILE, nd // TILE
+    pm = 16 if name == "uv" else 8
+    while pm > 1 and (Mt % pm or H * Mt // pm < 64):
+        pm //= 2
+    ib = 4 if name == "uv" else 3
+    while Kt % ib:
+        ib -= 1
+    sw = next(s for s in (4, 2, 1) if Nt % s == 0)
+    if 2 * pm * ib * 2048 + 2 * Nt * ib * 2048 + pm * Nt * 6144 > 1_300_000:
+        return {}
+    return {"program_config": ttnn.MatmulMultiCoreReuseProgramConfig(
+        compute_with_storage_grid_size=grid, in0_block_w=ib, out_subblock_h=1, out_subblock_w=sw, per_core_M=pm,
+        per_core_N=Nt)}
+
+
 class Hy4Attention:
     def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None, slots: int = 1):
         """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity per sequence (sparse layers);
@@ -125,6 +149,7 @@ class Hy4Attention:
         # (HY4_UKV_CFG=1, default; exact): 16 heads W_uk 39.0 -> 18.8 us, W_uv 27.9 -> 21.1 us (2026-11-20 bench)
         self.ukv_pc = {}
         g = mesh.compute_with_storage_grid_size()
+        self._grid = g
         for name, kd, nd in (("uk", self.nope, self.kvl), ("uv", self.kvl, self.vd)):  # (N: the dies, below)
             kt, nt = kd // TILE, nd // TILE
             ibw = int(os.environ.get(f"HY4_UKV_IBW_{name.upper()}", "2"))
@@ -405,7 +430,8 @@ class Hy4Attention:
         q_nope = ttnn.slice(q, (0, 0, 0, 0), (1, self.Hd, Tp, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q, (0, 0, 0, self.nope), (1, self.Hd, Tp, 256), memory_config=mem)
         ttnn.deallocate(q)
-        pc = {"program_config": self.ukv_pc["uk"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1" else {}
+        pc = ({"program_config": self.ukv_pc["uk"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1"
+              else ukv_pf_cfg("uk", self.Hd, Tp, self.nope, self.kvl, self.ckc_ukv, self._grid))
         q_lat = ttnn.matmul(q_nope, self.wuk, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,512]
         ttnn.deallocate(q_nope)
         q_rope = self.rope(q_rope, cos, sin, mem)
@@ -529,7 +555,7 @@ class Hy4Attention:
             ov = self._ukv("uv", o, int(o.shape[-1]) // TILE, mem)  # [1,Hd,Tp,256]
         else:
             pc = ({"program_config": self.ukv_pc["uv"]} if Tp == TILE and os.environ.get("HY4_UKV_CFG", "1") == "1"
-                  else {})
+                  else ukv_pf_cfg("uv", self.Hd, Tp, self.kvl, self.vd, self.ckc_ukv, self._grid))
             ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem, **pc)  # [1,Hd,Tp,256]
         ttnn.deallocate(o)
         if Tp == TILE and os.environ.get("HY4_HEAD_VIEWS", "1") == "1":
@@ -776,7 +802,8 @@ class Hy4Attention:
         q_nope = ttnn.slice(q2, (0, 0, 0, 0), (1, H, Tq, self.nope), memory_config=mem)
         q_rope = ttnn.slice(q2, (0, 0, 0, self.nope), (1, H, Tq, 256), memory_config=mem)
         ttnn.deallocate(q2)
-        q_lat = ttnn.matmul(q_nope, rp["wuk"], compute_kernel_config=self.ckc_ukv, memory_config=mem)
+        q_lat = ttnn.matmul(q_nope, rp["wuk"], compute_kernel_config=self.ckc_ukv, memory_config=mem,
+                            **ukv_pf_cfg("uk", H, Tq, self.nope, self.kvl, self.ckc_ukv, self._grid))
         ttnn.deallocate(q_nope)
         cos_o, sin_o = self._rows_const("rope", p0, T, Tp)
         q_r = self.rope(q_rope, cos_o, sin_o, mem)
@@ -795,7 +822,8 @@ class Hy4Attention:
         ttnn.deallocate(idx)
         ot = ttnn.to_layout(o, ttnn.TILE_LAYOUT, memory_config=mem)
         ttnn.deallocate(o)
-        ov = ttnn.matmul(ot, rp["wuvT"], compute_kernel_config=self.ckc_ukv, memory_config=mem)  # [1, H, Tq, 256]
+        ov = ttnn.matmul(ot, rp["wuvT"], compute_kernel_config=self.ckc_ukv, memory_config=mem,
+                         **ukv_pf_cfg("uv", H, Tq, self.kvl, self.vd, self.ckc_ukv, self._grid))  # [1, H, Tq, 256]
         ttnn.deallocate(ot)
         ov2 = ttnn.experimental.nlp_concat_heads(ov, memory_config=mem)  # [1, 1, Tq, H * 256]
         ttnn.deallocate(ov)
@@ -810,7 +838,8 @@ class Hy4Attention:
     def _out_part(self, x, o, mem):
         """Prefill: the attention output o [1, Hd, Tp, 512] TILE (consumed) -> V-up, output gate, o_proj partial."""
         Tp = int(x.shape[-2])
-        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem)
+        ov = ttnn.matmul(o, self.wuvT, compute_kernel_config=self.ckc_ukv, memory_config=mem,
+                         **ukv_pf_cfg("uv", self.Hd, Tp, self.kvl, self.vd, self.ckc_ukv, self._grid))
         ttnn.deallocate(o)
         if os.environ.get("HY4_PF_NLP_HEADS", "1") == "1":
             ov2 = ttnn.experimental.nlp_concat_heads(ov, memory_config=mem)  # [1, 1, Tp, Hd * 256]
@@ -843,6 +872,23 @@ class Hy4Attention:
             hit = Hy4Attention._BAND[key] = (
                 upload(self.mesh, mask, ttnn.bfloat16, ttnn.TILE_LAYOUT),
                 upload(self.mesh, blk.reshape(1, 1, Tp // qc, (W + Tp) // kc), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT))
+        return hit
+
+    def _band0(self, Tp, qc, kc):
+        """The first chunk's SWA mask [1, 1, Tp, Tp] (0 visible / -inf: key j <= i and j > i - W) and its block map
+        [1, 1, Tp / qc, Tp / kc] uint32 (cached per shape in _BAND)."""
+        W = self.cfg.window
+        key = (id(self.mesh), "first", Tp, W, qc, kc)
+        hit = Hy4Attention._BAND.get(key)
+        if hit is None:
+            i = torch.arange(Tp)[:, None]
+            j = torch.arange(Tp)[None, :]
+            vis = (j <= i) & (j > i - W)
+            mask = torch.where(vis, 0.0, float("-inf")).to(torch.bfloat16).reshape(1, 1, Tp, Tp)
+            blk = vis.reshape(Tp // qc, qc, Tp // kc, kc).any(-1).any(1).to(torch.int32)
+            hit = Hy4Attention._BAND[key] = (
+                upload(self.mesh, mask, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+                upload(self.mesh, blk.reshape(1, 1, Tp // qc, Tp // kc), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT))
         return hit
 
     def _flash_swa_chunk(self, q_lat, q_rope, p0, Tp, mem):
@@ -904,6 +950,22 @@ class Hy4Attention:
         grid = self.mesh.compute_with_storage_grid_size()
         pc = ttnn.SDPAProgramConfig(compute_with_storage_grid_size=ttnn.CoreCoord(grid.x, grid.y), exp_approx_mode=False,
                                     q_chunk_size=max(qc, 32), k_chunk_size=max(kc, 32))
+        if (self.kind == "swa" and Tp >= 2048 and qc >= 32 and kc >= 32
+                and os.environ.get("HY4_PF_FLASH_BAND0", "1") == "1"
+                and os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0") == "0"):
+            # HY4_PF_FLASH_BAND0 (default 1): a full SWA first chunk as the later chunks run it (_flash_swa_chunk): the
+            # banded causal mask + its block map, not is_causal + sliding_window_size (whose kernel walked ~2x the key
+            # blocks: 2.75 -> 1.46 ms per SWA layer at 2048 rows; bit-identical, fl2_bench 2026-11-23; at 1024 rows the
+            # windowed causal kernel is the faster one)
+            mask, bmap = self._band0(Tp, qc, kc)
+            o = ttnn.transformer.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, is_causal=False, scale=self.scale, attention_sink=self.sink_sdpa,
+                attn_mask_block_map=bmap, program_config=pc, compute_kernel_config=self._sdpa_ckc(), memory_config=mem)
+            ttnn.deallocate(q)
+            ttnn.deallocate(k)
+            o2 = ttnn.slice(o, (0, 0, 0, 0), (1, self.Hd, Tp, self.kvl), memory_config=mem)
+            ttnn.deallocate(o)
+            return o2
         o = ttnn.transformer.scaled_dot_product_attention(
             q, k, v, is_causal=True, scale=self.scale,
             sliding_window_size=self.cfg.window + int(os.environ.get("HY4_PF_FLASH_WIN_DELTA", "0")) if self.kind == "swa" else None,
