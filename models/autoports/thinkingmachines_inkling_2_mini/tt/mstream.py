@@ -17,6 +17,7 @@ from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
 from .head import KDIR
 
 OB = {ttnn.float32: 4096, ttnn.bfloat16: 2048}
+TINY = __import__("os").environ.get("I2M_MS_TINY", "1") == "1"
 
 
 class MultiStream:
@@ -41,19 +42,23 @@ class MultiStream:
         [1, 1, rows, n] in the specs' dtypes."""
         assert 1 <= rows <= 32
         cb_x, cb_w, cb_out = 0, 1, 16
+        # activation / output CB tiles 8 / 16 rows tall when `rows` fits (in0 h x 32: 8 rows a partial face, 4 FPU
+        # passes per tile instead of 16; 16 rows: 8): the math scales with the live rows, each row's sum unchanged
+        h = next(v for v in (8, 16, 32) if v >= rows) if TINY else 32
         dm = ttnn.DataMovementConfigDescriptor
         kernels, cbs, outs, io = [], [], [], []
         for (dl, dt), x, w in zip(self.parts, xs, ws):
             out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, dl.n]), dt, ttnn.TILE_LAYOUT, self.mesh, out_mc)
             outs.append(out)
             io += [x, w, out]
-            fmt = lambda i, d, page, pages: ttnn.CBDescriptor(  # noqa: E731
+            fmt = lambda i, d, page, pages, th=32: ttnn.CBDescriptor(  # noqa: E731
                 total_size=page * pages, core_ranges=dl.cores,
-                format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=d, page_size=page)])
-            cbs += [fmt(cb_x, ttnn.bfloat16, 2048, dl.kt), fmt(cb_w, self.wdt, dl.tile_bytes, dl.buffers * dl.kt),
-                    fmt(cb_out, dt, OB[dt], 2)]
+                format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=d, page_size=page,
+                                                            tile=ttnn.TileDescriptor(th, 32) if th < 32 else None)])
+            cbs += [fmt(cb_x, ttnn.bfloat16, 64 * h, dl.kt, h), fmt(cb_w, self.wdt, dl.tile_bytes, dl.buffers * dl.kt),
+                    fmt(cb_out, dt, OB[dt] * h // 32, 2, h)]
             rd_ct = [cb_w, dl.kt, dl.tile_bytes, dl.n_tiles // 8 if self.il else dl.page_bytes, dl.buffers]
-            wr_ct = [cb_x, cb_out, dl.kt, rows, dl.n_tiles, OB[dt], 8 if self.il else 1]
+            wr_ct = [cb_x, cb_out, dl.kt, rows, dl.n_tiles, OB[dt], 8 if self.il else 1, h]
             wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args() + ttnn.TensorAccessorArgs(out).get_compile_time_args()
             cp_rt = ttnn.RuntimeArgs()
             rd_args, wr_args = {}, {}

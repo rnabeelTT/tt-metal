@@ -27,8 +27,8 @@ void kernel_main() {
     if (ncols == 0) {
         return;
     }
-    compute_kernel_hw_startup(cb_x, cb_w, cb_out);
-    reconfig_data_format(cb_w, cb_x);  // matmul: in1 (weights) -> srcA, in0 -> srcB
+    // matmul: in1 (weights) -> srcA, in0 -> srcB (formats and tile shapes: the activation CB may hold h x 32 tiles)
+    compute_kernel_hw_startup<SrcOrder::Reverse>(cb_x, cb_w, cb_out);
     cb_wait_front(cb_x, kt);
     for (uint32_t j = 0; j < ncols; ++j) {
         matmul_init(cb_x, cb_w, 0);
