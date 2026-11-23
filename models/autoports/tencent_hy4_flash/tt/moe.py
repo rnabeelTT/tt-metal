@@ -632,11 +632,12 @@ class Hy4MoE:
         ttnn.deallocate(part)
         return self.norm(full, mem)
 
-    def forward_part(self, x, T: int, mem=None):
-        """Prefill: forward() without the all-reduce and norm (the per-die partial [1, 1, Tp, 3072])."""
+    def forward_part(self, x, T: int, mem=None, routed=None):
+        """Prefill: forward() without the all-reduce and norm (the per-die partial [1, 1, Tp, 3072]). routed: the
+        rows' (scores, ids) when the caller routed them (row-local router, tt/model.py _mlp_part_split)."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
         Tp = int(x.shape[-2])
-        scores, ids = self.route(x, mem)
+        scores, ids = routed if routed is not None else self.route(x, mem)
         xl = mm(x, self.wd, wfid(self.ckc_s, self.wd), mem)
         if getattr(self, "_sorted", None) is None:
             from models.autoports.tencent_hy4_flash.tt.prefill_moe import SortedExperts

@@ -107,10 +107,7 @@ class Hy4Layer:
         f_in, post = self.ffn_hc.pre(X2, mem)
         f_n = self.post_norm(f_in, mem)
         ttnn.deallocate(f_in)
-        f_full = ag(f_n)
-        ttnn.deallocate(f_n)
-        part = self.mlp.forward_part(f_full, T, mem)
-        ttnn.deallocate(f_full)
+        part = self._mlp_part_split(f_n, T, mem, ag)
         f_loc = rs(part)
         ttnn.deallocate(part)
         f = self.mlp.norm(f_loc, mem)
@@ -119,6 +116,28 @@ class Hy4Layer:
         for t_ in (X2, f, post):
             ttnn.deallocate(t_)
         return X3
+
+    def _mlp_part_split(self, f_n, T, mem, ag):
+        """Row-split prefill MLP: f_n this die's rows (normed) -> the per-die partial over all rows. MoE with
+        HY4_PF_ROUTE_LOCAL (default 1): the router (fp32 logits, top-k, weights) runs on this die's rows only and its
+        [rows, k] scores / ids are all-gathered, instead of every die routing all rows (row-wise ops: same values)."""
+        moe = isinstance(self.mlp, Hy4MoE)
+        routed = None
+        if moe and os.environ.get("HY4_PF_ROUTE_LOCAL", "1") == "1":
+            sc, ids = self.mlp.route(f_n, mem)
+            ids32 = ttnn.typecast(ids, ttnn.uint32, memory_config=mem)
+            ttnn.deallocate(ids)
+            routed = (ag(sc), ag(ids32))
+            ttnn.deallocate(sc)
+            ttnn.deallocate(ids32)
+            ids16 = ttnn.typecast(routed[1], ttnn.uint16, memory_config=mem)
+            ttnn.deallocate(routed[1])
+            routed = (routed[0], ids16)
+        f_full = ag(f_n)
+        ttnn.deallocate(f_n)
+        part = self.mlp.forward_part(f_full, T, mem, routed=routed) if moe else self.mlp.forward_part(f_full, T, mem)
+        ttnn.deallocate(f_full)
+        return part
 
     def forward_split_fused(self, X, pend, p0, T, cos_sin, hcf, engram_emb=None, mem=None, engram_keep=None):
         """forward_split() with the hyper-connections as fused programs over this die's rows (tt/hc_fused; one program
@@ -162,10 +181,7 @@ class Hy4Layer:
         X, f_in, w_f = run(X, (a, w_a), self.ffn_hc)
         f_n = self.post_norm(f_in, mem)
         ttnn.deallocate(f_in)
-        f_full = ag(f_n)
-        ttnn.deallocate(f_n)
-        part = self.mlp.forward_part(f_full, T, mem)
-        ttnn.deallocate(f_full)
+        part = self._mlp_part_split(f_n, T, mem, ag)
         f_loc = rs(part)
         ttnn.deallocate(part)
         f = self.mlp.norm(f_loc, mem)
@@ -543,6 +559,14 @@ class Hy4Model:
             out["keep"] = upload(self.mesh, k.reshape(1, 1, Tp, 1), ttnn.bfloat16, mapper=("shard", 2) if split else "rep")
         return out
 
+    def _engram_rows_lazy(self, ids: torch.Tensor, p0: int, Tp: int, split: bool = False):
+        """_engram_rows() computed per layer when the layer asks (HY4_PF_ENG_LAZY, default 1): the host lookups of the
+        Engram layers (1, 11, 21, 31) run after the layers before them are enqueued, while the device runs those,
+        instead of before layer 0 with the device idle. Same rows, same uploads (exact)."""
+        if self.engram is None or os.environ.get("HY4_PF_ENG_LAZY", "1") != "1":
+            return self._engram_rows(ids, p0, Tp, split)
+        return _LazyEngramRows(self, ids, p0, Tp, split)
+
     def prefill(self, ids: torch.Tensor, chunk: int | None = None) -> torch.Tensor:
         """A whole prompt (continuing the sequence) -> the last row's logits. Chunks: up to the 2048-token dense regime
         boundary first (so every later chunk selects with device-built index lists), then HY4_PREFILL_CHUNK tokens
@@ -563,7 +587,12 @@ class Hy4Model:
             if bucketed:  # the chunk's rows padded to a bucket (compiled at warm-up: no programs at serve time)
                 m = min(n, ids.numel() - i)
                 rows = next((b for b in self.PF_BUCKETS if b >= m and p + b <= self.max_ctx), 0)
-            lg = self.forward(ids[i : i + n], min_rows=rows)
+            last = i + n >= ids.numel()
+            # a chunk before the last: no head (its logits are not used) -> no readback / host sync between chunks:
+            # the host prepares and enqueues the next chunk (token upload, RoPE tables, Engram host lookups) while the
+            # device still runs this one (HY4_PF_NOSYNC=0: every chunk's last-row logits, the old path)
+            lg = self.forward(ids[i : i + n], min_rows=rows,
+                              logits_rows="last" if last or os.environ.get("HY4_PF_NOSYNC", "1") != "1" else "none")
             i += n
         return lg
 
@@ -667,7 +696,8 @@ class Hy4Model:
                 layer.attn.indexer.reset()
 
     def forward(self, ids: torch.Tensor, logits_rows: str = "last", mem=None, min_rows: int = 0) -> torch.Tensor:
-        """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows).
+        """ids: [T] int (the next T tokens of the sequence). -> logits fp32 [V] (last row) or [T, V] (all rows); None
+        with logits_rows "none" (no head: nothing waits for the device).
         From HY4_ROW_SPLIT_MIN tokens (default 128) the rows are split over the dies between layers (forward_split).
         min_rows: pad the chunk to at least this many rows (a prefill bucket: every prompt length then runs one of a few
         compiled program sets; padding rows run as real rows past the prompt, their KV / keys rewritten by decode)."""
@@ -690,7 +720,7 @@ class Hy4Model:
         ttnn.deallocate(x)
         pos = rpos(torch.arange(p0, p0 + Tp))
         cos_sin = {k: self.rope.tables(pos, cfg.rope_theta[k]) for k in ("sparse", "swa")}
-        eng = self._engram_rows(ids.reshape(-1), p0, Tp, split=split)
+        eng = self._engram_rows_lazy(ids.reshape(-1), p0, Tp, split=split)
         hcf = self._pf_hcf(split)
         pend = None
         for layer in self.layers:
@@ -710,6 +740,9 @@ class Hy4Model:
         self.pos = p0 + T
         hiw = self.__dict__.setdefault("_hiw", {})  # prefix reuse: the highest position this slot's caches were written
         hiw[self.slot] = max(hiw.get(self.slot, 0), p0 + Tp)
+        if logits_rows == "none":  # (prefill: a chunk before the last)
+            ttnn.deallocate(X)
+            return None
         if split:
             out = self._head_split(X, T, Tp, logits_rows, mem)
             ttnn.deallocate(X)
@@ -945,3 +978,38 @@ class Hy4Model:
         if logits_rows == "last":
             return rows[T - 1]
         return torch.stack([rows[g] for g in range(T)])
+
+
+class _LazyEngramRows:
+    """Hy4Model._engram_rows() as a lazy mapping: get(li) looks up and uploads layer li's rows on first use; values()
+    completes the layers not asked for (each layer's store advances once per pass, in order)."""
+
+    def __init__(self, model, ids, p0, Tp, split):
+        self.m, self.ids, self.p0, self.Tp, self.split = model, ids, p0, Tp, split
+        self.todo = [l.li for l in model.layers if l.engram is not None]
+        self.out = {}
+        if self.todo:
+            keep = model.engram.mask(ids).reshape(-1)
+            if not bool(keep.all()):
+                k = torch.zeros(Tp, 1, dtype=torch.bfloat16)
+                k[: keep.numel(), 0] = keep.to(torch.bfloat16)
+                self.out["keep"] = upload(model.mesh, k.reshape(1, 1, Tp, 1), ttnn.bfloat16,
+                                          mapper=("shard", 2) if split else "rep")
+
+    def _load(self, li):
+        rows = self.m.engram.rows(li, self.ids, self.p0)  # [T, 1536] bf16 (host store, continues the sequence)
+        full = torch.zeros(self.Tp, rows.shape[-1], dtype=torch.bfloat16)
+        full[: rows.shape[0]] = rows
+        self.out[li] = upload(self.m.mesh, full.reshape(1, 1, self.Tp, -1), ttnn.bfloat16,
+                              mapper=("shard", 2) if self.split else "rep")
+        self.todo.remove(li)
+
+    def get(self, k, default=None):
+        if k in self.todo:
+            self._load(k)
+        return self.out.get(k, default)
+
+    def values(self):
+        for li in list(self.todo):
+            self._load(li)
+        return self.out.values()
