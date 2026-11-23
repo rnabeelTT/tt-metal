@@ -124,6 +124,39 @@ BUDGET_VISION_GIB = 0.25  # the ViT's weights
 BUDGET_MULTI_GIB = 0.0  # (calibrated below from the 8-slot run)
 
 
+# HY4_POOL=1 (default): 2..8 users share one context pool (tt/pool.py): one user can take nearly all of it
+POOL = os.environ.get("HY4_POOL", "1") == "1"
+POOL_TOKEN_BYTES = 12 * 1216 + 12 * 256 // 4  # per token per die: the sparse layers' latent row + its group-key share
+
+
+def pool_plan(users: int, max_model_len: int | None = None):
+    """(P pool tokens, vLLM token budget, the largest max_model_len) of the shared pool for `users` (2..8) slots: the
+    cache budget (cache_budget_gib) less the per-slot SWA rings, the indexers' work buffer (sized for max_model_len;
+    default: the largest that fits) and the sink rows, over 15,360 B/token. The vLLM budget leaves each slot its
+    extent's lookahead / rounding (640 tokens) and one prefill's bucket padding (2048) + the plugin's output reservation
+    (512): vLLM preempts before the pool runs out."""
+    S = int(users)
+    budget = cache_budget_gib(S) * 2**30
+    ring = -(-(2048 + 512 + 32) // 32) * 32
+    fixed = S * ring * 1216 * 30 + 12 * 96 * 1216 + 12 * 96 * 256
+
+    def plan(mml):
+        gcap = -(-((mml + 64) // 4 + 96) // 2048) * 2048
+        P = int((budget - fixed - 12 * gcap * 256) // POOL_TOKEN_BYTES) // 2048 * 2048
+        V = (P - S * 640 - 2048 - 512) // BLOCK_SIZE * BLOCK_SIZE
+        return P, V
+
+    if max_model_len is None:
+        mml = 262144
+        for _ in range(4):  # (the work buffer depends on max_model_len: a fixed point)
+            P, V = plan(mml)
+            mml = V
+        P, V = plan(mml)
+        return P, V, min(mml, V) // 2048 * 2048
+    P, V = plan(int(max_model_len))
+    return P, V, V
+
+
 def max_ctx_for(users: int) -> int:
     """The largest max_model_len (a multiple of 2048) the budget allows for `users` slots."""
     c = 2048
@@ -152,6 +185,8 @@ class HYV4FlashForConditionalGeneration:
         self._decode_steps = 0
         self.multi = bool(getattr(engine, "multi", False))
         self._row_slot = {}  # multi: vLLM batch row -> model slot
+        if self.multi:  # (a finished request's slot the engine evicted from the shared pool: no row maps to it)
+            engine.on_evict = lambda s: [self._row_slot.pop(r) for r in [r for r, v in self._row_slot.items() if v == s]]
 
     @classmethod
     def initialize_vllm_model(cls, hf_config, mesh_device, max_batch_size, max_seq_len=None, tt_data_parallel=1,
@@ -160,13 +195,21 @@ class HYV4FlashForConditionalGeneration:
         if int(tt_data_parallel) != 1 or not 1 <= B <= 8:
             raise ValueError(f"{cls.__name__} serves 1..8 users on one (1,4) mesh (--max-num-seqs <= 8, data parallel 1)")
         max_seq_len = int(max_seq_len or 131072)
-        # every slot holds max_model_len tokens: the slots' caches (cache_gib) must leave the DRAM a long prefill's
-        # scratch needs after warm-up (tools/dram_budget.py; HY4_SLOT_TOKENS_MAX: the old users x ctx token cap)
-        need, cap = cache_gib(B, max_seq_len), cache_budget_gib(B)
-        legacy = os.environ.get("HY4_SLOT_TOKENS_MAX")
-        if (legacy and B > 1 and B * max_seq_len > int(legacy)) or (not legacy and need > cap):
-            raise ValueError(f"{B} users x max_model_len {max_seq_len}: caches {need:.2f} GiB per die exceed the "
-                             f"{cap:.2f} GiB budget (HY4_CACHE_GIB): use --max-model-len <= {max_ctx_for(B)}")
+        pool = None
+        if POOL and B > 1:  # one shared context pool: any user up to max_model_len, all users together up to the pool
+            pool, vtok, _ = pool_plan(B, max_seq_len)
+            if max_seq_len > vtok:
+                raise ValueError(f"{B} users: max_model_len {max_seq_len} > the shared pool's {vtok} tokens "
+                                 f"({pool} pool tokens, {cache_budget_gib(B):.2f} GiB budget, HY4_CACHE_GIB): use "
+                                 f"--max-model-len <= {pool_plan(B)[2]}")
+        else:
+            # every slot holds max_model_len tokens: the slots' caches (cache_gib) must leave the DRAM a long prefill's
+            # scratch needs after warm-up (tools/dram_budget.py; HY4_SLOT_TOKENS_MAX: the old users x ctx token cap)
+            need, cap = cache_gib(B, max_seq_len), cache_budget_gib(B)
+            legacy = os.environ.get("HY4_SLOT_TOKENS_MAX")
+            if (legacy and B > 1 and B * max_seq_len > int(legacy)) or (not legacy and need > cap):
+                raise ValueError(f"{B} users x max_model_len {max_seq_len}: caches {need:.2f} GiB per die exceed the "
+                                 f"{cap:.2f} GiB budget (HY4_CACHE_GIB): use --max-model-len <= {max_ctx_for(B)}")
         from models.autoports.tencent_hy4_flash.tt.config import Hy4Config, checkpoint_dir
         from models.autoports.tencent_hy4_flash.tt.engine import Hy4Engine
         from models.autoports.tencent_hy4_flash.tt.engine_batch import Hy4BatchEngine
@@ -186,10 +229,11 @@ class HYV4FlashForConditionalGeneration:
         engram = EngramRows(edir, checkpoint_dir())
         cache_dir = os.environ.get("HY4_TENSOR_CACHE", os.path.expanduser("~/.cache/hybrid-moe/hy4_tt"))
         model = Hy4Model(mesh_device, cfg, max_ctx=max_seq_len + 64, chunk=int(os.environ.get("HY4_PREFILL_CHUNK", "2048")),
-                         engram=engram, cache_dir=cache_dir, slots=B)
+                         engram=engram, cache_dir=cache_dir, slots=B, pool_tokens=pool)
         # B > 1 with HY4_SPEC_K > 0: speculative decoding while one request decodes alone (tt/engine_batch.py solo)
         engine = Hy4BatchEngine(model, k=SPEC_K) if B > 1 else Hy4Engine(model, SPEC_K)
-        logger.info(f"{cls.__name__}: max_model_len={max_seq_len} users={B} layers={len(model.layers)} spec k={SPEC_K}")
+        logger.info(f"{cls.__name__}: max_model_len={max_seq_len} users={B} layers={len(model.layers)} spec k={SPEC_K}"
+                    + (f" shared pool {pool} tokens" if pool else ""))
         self = cls(model, engine, mesh_device, max_seq_len)
         if _VISION:  # the vision tower (tt/vision.py: tensor parallel, ~0.22 GB per die in bf16)
             from models.autoports.tencent_hy4_flash.tt.vision import Hy4Vision
@@ -201,8 +245,11 @@ class HYV4FlashForConditionalGeneration:
     @classmethod
     def get_max_tokens_all_users(cls, model_name="", num_devices=1, tt_data_parallel=1, max_model_len=None,
                                  max_num_seqs=None, **kwargs):
+        B = max(1, int(max_num_seqs or 1))
+        if POOL and B > 1:  # the shared pool's token budget (pool_plan): vLLM preempts before the pool runs out
+            return pool_plan(B, int(max_model_len or 131072))[1]
         n = int(max_model_len or 131072) + BLOCK_SIZE
-        return math.ceil(n / BLOCK_SIZE) * BLOCK_SIZE * max(1, int(max_num_seqs or 1))
+        return math.ceil(n / BLOCK_SIZE) * BLOCK_SIZE * B
 
     def allocate_kv_cache(self, kv_cache_shape, dtype, num_layers):
         logger.info(f"KV: vLLM asked for {num_layers} layers of {tuple(kv_cache_shape)}; the engine keeps its own caches")
@@ -318,6 +365,8 @@ class HYV4FlashForConditionalGeneration:
         eng = self._engine
         live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
         # (a row off this step keeps its slot: freed only when the row is prefilled again; rows <= slots, so no leak)
+        # slots of rows not in this step (finished / preempted in vLLM): evictable when the shared pool runs short
+        eng.idle = {s for r, s in self._row_slot.items() if r not in live}
         missing = [i for i in live if i not in self._row_slot]
         if missing:
             raise RuntimeError(f"Hy4 decode rows {missing} have no prefilled slot (rows {self._row_slot})")

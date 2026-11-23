@@ -27,7 +27,7 @@ _CATS = [  # (category, regex over the tensor's path), first match wins
     ("MoE latent/router/shared", r"\.mlp\."),
     ("KV cache (sparse)", r"attn\.cache$#sparse"),
     ("KV cache (SWA ring)", r"attn\.cache$#swa"),
-    ("indexer group keys", r"indexer\.(gkeys|_slots)"),
+    ("indexer group keys", r"indexer\.(gkeys|gpool|_slots)"),
     ("indexer lane bufs", r"indexer\._lane|indexer\.lt\b|\._lt\b"),
     ("indexer other", r"indexer\."),
     ("attn decode copies", r"attn\.(dec|dec_ukv)\b"),

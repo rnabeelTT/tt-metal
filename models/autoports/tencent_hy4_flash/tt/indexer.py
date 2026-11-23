@@ -34,10 +34,14 @@ SCORE_ROWS = int(os.environ.get("HY4_IDX_SCORE_ROWS", "256"))
 
 class Hy4Indexer:
     _IOTA_ALL = {}  # (mesh, gcap) -> the group-index row every layer's score masks read
-    _SLOT_ATTRS = ("gkeys", "_mirror", "_mirror_stale", "_gk_pending", "n_tok", "n_groups", "_open_keys",
+    _SLOT_ATTRS = ("_mirror", "_mirror_stale", "_gk_pending", "n_tok", "n_groups", "_open_keys",
                    "_open_pending", "_tk_hist", "_tk_pending", "tk_hist_base", "tk_stage", "g_stage")
 
-    def __init__(self, mesh, cfg, sd, max_ctx: int, slots: int = 1):
+    def __init__(self, mesh, cfg, sd, max_ctx: int, slots: int = 1, pool=None):
+        """pool (P, ext): the shared context pool (tt/pool.py): every slot's group keys live in one group pool
+        [P / 4 + 96, 128] (slot u: groups ext[u][0] / 4 .. + ext[u][1] / 4; then 64 trash groups + 32 spare), and
+        self.gkeys is ONE work buffer [gcap, 128] that the slot prefilling or decoding on the single path owns (wb_take /
+        wb_release copy its extent in / out). None: one slot, the work buffer only."""
         self.mesh, self.cfg = mesh, cfg
         self.nh, self.d, self.r = cfg.idx_heads, cfg.idx_dim, cfg.idx_ratio
         self.rope_d = cfg.qk_rope
@@ -86,6 +90,17 @@ class Hy4Indexer:
         # + 64: the decode group window's two 32-group slabs past the context; + 32: the spare tile scoring reads
         self.gcap = -(-(max_ctx // self.r + 96) // 2048) * 2048  # a multiple of 2048: any power-of-two slab divides it
         self.gkeys = upload(mesh, torch.zeros(1, 1, self.gcap, self.d, dtype=torch.bfloat16), ttnn.bfloat16)
+        # the shared group pool (slots > 1) and the work buffer's owner: (slot, dirty) / None; wb_hi: groups of the
+        # work buffer possibly non-zero
+        self.ext = pool[1] if pool is not None else {0: (0, self.r * self.gcap)}
+        self.gpool = None
+        self.gtrash = 0
+        if pool is not None and int(slots) > 1:
+            self.gtrash = int(pool[0]) // self.r
+            self.gpool = ttnn.zeros((1, 1, self.gtrash + 96, self.d), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
+                                    device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        self.wb = None
+        self.wb_hi = self.gcap
         self._mirror = torch.zeros(self.gcap, self.d, dtype=torch.bfloat16)
         self._mirror_stale = None  # (g0, g1): device groups newer than the host mirror (device-pooled prefill)
         self._tk_pending = self._open_pending = None
@@ -101,18 +116,19 @@ class Hy4Indexer:
         self.offs4 = upload(mesh, torch.arange(self.r, dtype=torch.float32).reshape(1, 1, 1, self.r), ttnn.float32)
         self.tk_stage = None
         self.g_stage = None
-        self.reset()
-        # one sequence state per slot (group cache, host mirror, token history, staging windows); set_slot swaps them
         self.slot = 0
+        self.reset()
+        # one sequence state per slot (host mirror, token history, staging windows); set_slot swaps them (the group
+        # keys: the slot's pool extent, the work buffer while it owns it)
         self._slots = {}
         for u in range(1, max(1, int(slots))):
-            self._slots[u] = {"gkeys": upload(mesh, torch.zeros(1, 1, self.gcap, self.d, dtype=torch.bfloat16),
-                                              ttnn.bfloat16),
-                              "_mirror": torch.zeros(self.gcap, self.d, dtype=torch.bfloat16), "fresh": True}
+            self._slots[u] = {"_mirror": torch.zeros(self.gcap, self.d, dtype=torch.bfloat16), "fresh": True}
 
     def set_slot(self, u: int):
         if u == self.slot:
             return
+        if self.__dict__.get("_mirror_stale") is not None and self.wb is not None and self.wb[0] == self.slot:
+            _ = self.mirror  # (its device-newer groups are in the work buffer: read before another slot may take it)
         self._slots[self.slot] = {a: self.__dict__.get(a) for a in self._SLOT_ATTRS}
         st = self._slots.pop(u)
         fresh = st.pop("fresh", False)
@@ -121,7 +137,68 @@ class Hy4Indexer:
         self.slot = u
         if fresh:
             self.tk_stage = self.g_stage = None
-            self.reset()
+            self.reset(device=False)
+
+    # ------------------------------------------------------------------ the work buffer (shared context pool)
+    def _gext(self, u):
+        """(group base, groups) of slot u's pool extent (None: no extent)."""
+        e = self.ext.get(u)
+        if e is None:
+            return None
+        return int(e[0]) // self.r, min(int(e[1]) // self.r, self.gcap)
+
+    def _wb_use(self):
+        """(prefill) the active slot owns the work buffer (another slot's prefill took it: a packed prefill's
+        segments): its keys loaded from its extent."""
+        if self.gpool is not None and (self.wb is None or self.wb[0] != self.slot):
+            self.wb_take(self.slot, load=True)
+
+    def wb_release(self):
+        """The work buffer's owner (if any) -> its pool extent (when written since it took it); no owner after."""
+        wb, self.wb = self.wb, None
+        if wb is None or not wb[1] or self.gpool is None:
+            return
+        e = self._gext(wb[0])
+        self.wb_hi = max(self.wb_hi, e[1] if e is not None else self.gcap)  # (it may have grown since wb_take)
+        if e is not None and e[1] > 0:
+            from models.autoports.tencent_hy4_flash.tt.pool import PoolCopy
+
+            PoolCopy.get(self.mesh).copy(self.gkeys, 0, self.gpool, e[0], e[1])
+
+    def wb_take(self, u=None, load=None):
+        """Slot u (default: the active one) owns the work buffer: the previous owner's keys written back, the buffer
+        zeroed, then (load: a group count, or True: the slot's whole extent) its first groups copied in from the pool."""
+        u = self.slot if u is None else u
+        if self.wb is not None and self.wb[0] == u:
+            if load is None:
+                self.wb = (u, True)
+                return
+            if load == 0:  # (re-zeroed: nothing to write back)
+                e = self._gext(u)
+                self.wb_hi = max(self.wb_hi, e[1] if e is not None else self.gcap)
+                self.wb = None
+        self.wb_release()
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolCopy
+
+        pc = PoolCopy.get(self.mesh) if self.gpool is not None else None
+        e = self._gext(u) if pc is not None else None
+        n = (e[1] if load is True else min(int(load), e[1])) if load and e is not None else 0
+        if pc is None or self.wb_hi >= self.gcap:
+            z = Hy4Indexer._ZERO.get((id(self.mesh), tuple(self.gkeys.shape)))
+            if z is None:
+                z = Hy4Indexer._ZERO[(id(self.mesh), tuple(self.gkeys.shape))] = upload(
+                    self.mesh, torch.zeros(tuple(self.gkeys.shape), dtype=torch.bfloat16), ttnn.bfloat16)
+            ttnn.copy(z, self.gkeys)
+        elif self.wb_hi > n:  # (groups < n: overwritten by the copy-in below)
+            pc.zero(self.gkeys, n, -(-self.wb_hi // 32) * 32 - n)
+        self.wb_hi = 0
+        if n > 0:
+            pc.copy(self.gpool, e[0], self.gkeys, 0, n)
+        if e is not None:
+            self.wb_hi = e[1]
+        else:
+            self.wb_hi = self.gcap
+        self.wb = (u, True)
 
     # host views of the device-pooled prefill's state, materialized on first use (decode's init_stage, a host-pooled
     # chunk after a device-pooled one): the device path itself never reads back
@@ -178,18 +255,17 @@ class Hy4Indexer:
     def open_keys(self, v):
         self._open_keys, self._open_pending = v, None
 
-    def reset(self):
+    def reset(self, device=True):
         # every request starts from a zeroed group cache: decode scores a bucket of groups past the context, and keys
         # left there by an earlier request leaked into the visible scores (HY4_IDX_ZERO_RESET)
         if os.environ.get("HY4_IDX_ZERO_RESET", "1") == "1":
-            z = Hy4Indexer._ZERO.get((id(self.mesh), tuple(self.gkeys.shape)))
-            if z is None:
-                z = Hy4Indexer._ZERO[(id(self.mesh), tuple(self.gkeys.shape))] = upload(
-                    self.mesh, torch.zeros(tuple(self.gkeys.shape), dtype=torch.bfloat16), ttnn.bfloat16)
-            ttnn.copy(z, self.gkeys)
+            if device:  # (the active slot takes the work buffer, zeroed; its extent gets it at wb_release)
+                self.wb_take(self.slot, load=0)
             # the host mirror too: _write_mirror uploads whole 32-group slabs, whose rows past the complete groups
             # carried the previous request's keys back into the device cache
             self._mirror.zero_()
+        elif device:
+            self.wb_take(self.slot)
         self._mirror_stale = None
         self._gk_pending = []
         self.n_tok, self.n_groups = 0, 0
@@ -220,11 +296,16 @@ class Hy4Indexer:
         zeroed on the device (as reset(); the score op reads past the visible groups) and the host mirror re-read."""
         G = n // self.r
         assert n % (32 * self.r) == 0, n
-        full = to_torch0(self.gkeys).reshape(-1, self.d)[: self.gcap].to(torch.bfloat16).clone()
-        full[G:] = 0
-        t = upload(self.mesh, full.reshape(1, 1, self.gcap, self.d), ttnn.bfloat16)  # (reset()'s copy program)
-        ttnn.copy(t, self.gkeys)
-        ttnn.deallocate(t)
+        if self.gpool is not None:  # its kept keys [0, G) from the pool extent into the zeroed work buffer
+            self.wb_take(self.slot, load=G)
+            full = to_torch0(self.gkeys).reshape(-1, self.d)[: self.gcap].to(torch.bfloat16).clone()
+            full[G:] = 0
+        else:
+            full = to_torch0(self.gkeys).reshape(-1, self.d)[: self.gcap].to(torch.bfloat16).clone()
+            full[G:] = 0
+            t = upload(self.mesh, full.reshape(1, 1, self.gcap, self.d), ttnn.bfloat16)  # (reset()'s copy program)
+            ttnn.copy(t, self.gkeys)
+            ttnn.deallocate(t)
         self._mirror = full
         self._mirror_stale = None
         self._gk_pending = []
@@ -600,6 +681,7 @@ class Hy4Indexer:
         """A selecting chunk (p0 >= 2048) with the selection split by rows over the dies: the group keys take every row
         of x (all rows, replicated), the query / scores / top-k / index lists only this die's rows (x_own, q_resid_own,
         the row-sharded list tails tail_own). -> index lists [1, 1, Tp / N, K] uint32 RM of this die's rows."""
+        self._wb_use()
         Tp = int(x.shape[-2])
         cos_own, sin_own = self.rope.tables(rpos(torch.arange(p0, p0 + Tp)), self.theta, shard_rows=True)
         vis = torch.tensor([(p0 + min(s, T - 1)) // self.r for s in range(Tp)], dtype=torch.float32)
@@ -648,6 +730,7 @@ class Hy4Indexer:
     def forward(self, x, q_resid, p0: int, T: int, mem, tail=None):
         """Updates the group keys with these T tokens; returns selected group ids [T, 512] (numpy, sorted by score) for
         the rows that need them (rows with p < 2048 get none), or None when no row does."""
+        self._wb_use()
         cfg = self.cfg
         Tp = int(x.shape[-2])
         tk = self.tk_norm(ttnn.matmul(x, self.wtk, compute_kernel_config=self.ckc, memory_config=mem), mem)
@@ -823,9 +906,9 @@ class Hy4Indexer:
 
     # ------------------------------------------------------------------ batched decode lanes (tt/decode_batch)
     def lane_tensors(self, L):
-        """(token window [L 64, d], group window [L 64, d], group keys [L gcap + 64, d]) of the L-lane batched decode
-        (lane l: window rows 64 l .., groups l gcap ..; the last 64 groups: idle lanes' slab target), plus the pooling
-        constants; created (eager) on first use."""
+        """(token window [L 64, d], group window [L 64, d], group keys = the group pool) of the L-lane batched decode
+        (lane l: window rows 64 l ..; its slot's groups at its pool extent; groups gtrash ..: idle lanes' slab target),
+        plus the pooling constants; created (eager) on first use."""
         lt = self.__dict__.setdefault("_lanes", {})
         if L not in lt:
             z = lambda n: ttnn.zeros((1, 1, n, self.d), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,  # noqa: E731
@@ -838,7 +921,7 @@ class Hy4Indexer:
                         E[j * 32 * L + 32 * l + g, 64 * l + r * g + j] = 1.0
             bias = torch.zeros(r, 32 * L, 2 * d)
             bias[:, :, d:] = self.ape[:, None, :]
-            lt[L] = {"tk": z(L * 64), "g": z(L * 64), "gk": z(L * self.gcap + 64),
+            lt[L] = {"tk": z(L * 64), "g": z(L * 64), "gk": self.gpool,
                      "Ecat": upload(self.mesh, E.reshape(1, 1, r * 32 * L, 64 * L), ttnn.float32),
                      "bias": upload(self.mesh, bias.reshape(1, r, 32 * L, 2 * d), ttnn.float32)}
         return lt[L]
@@ -873,9 +956,8 @@ class Hy4Indexer:
         return t
 
     def lane_load(self, L, lane, Mk, Mp):
-        """Lane `lane` <- this slot's token / group windows (tk_stage / g_stage) and group keys (gkeys)."""
-        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
-
+        """Lane `lane` <- this slot's token / group windows (tk_stage / g_stage); its group keys to its pool extent
+        (the work buffer released, if this slot owns it: the lanes read and write the pool)."""
         T = self.lane_tensors(L)
         for name, src in (("tk", self.tk_stage), ("g", self.g_stage)):
             a = ttnn.matmul(Mk, T[name], compute_kernel_config=self.ckc)
@@ -884,22 +966,16 @@ class Hy4Indexer:
             ttnn.copy(new, T[name])
             for t_ in (a, b, new):
                 ttnn.deallocate(t_)
-        n = self.gcap // 32
-        slab_write(self.gkeys, T["gk"], self._region_offs(lane * self.gcap, n), n)
+        if self.wb is not None and self.wb[0] == self.slot:
+            self.wb_release()
 
     def lane_unload(self, L, lane, Ms):
-        """This slot's windows / group keys <- lane `lane`."""
-        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
-
+        """This slot's windows <- lane `lane` (its group keys stay in its pool extent)."""
         T = self.lane_tensors(L)
         for name, dst in (("tk", self.tk_stage), ("g", self.g_stage)):
             w = ttnn.matmul(Ms, T[name], compute_kernel_config=self.ckc)
             ttnn.copy(w, dst)
             ttnn.deallocate(w)
-        reg = ttnn.slice(T["gk"], (0, 0, lane * self.gcap, 0), (1, 1, (lane + 1) * self.gcap, self.d))
-        n = self.gcap // 32
-        slab_write(reg, self.gkeys, self._region_offs(0, n), n)
-        ttnn.deallocate(reg)
 
     def step_lanes(self, x, q_resid, si, mem, tk=None, hw=None, iq=None):
         """step() of a batched pass: every lane's token / group windows at once (block-diagonal maps), the group slabs
@@ -956,7 +1032,7 @@ class Hy4Indexer:
             from models.autoports.tencent_hy4_flash.tt.lane_sel import LaneSelOp
 
             op = LaneSelOp.get(self.mesh)
-            if op.score_fits(self.gcap) and q.dtype == ttnn.bfloat16 and w.dtype == ttnn.bfloat16:
+            if op.score_fits(self.gcap) and q.dtype == ttnn.bfloat16 and w.dtype == ttnn.bfloat16:  # (Wc: any slot's groups)
                 comp = op.score(q, T["gk"], w, si.lmeta, self.gcap)
                 ttnn.deallocate(q)
                 ttnn.deallocate(w)

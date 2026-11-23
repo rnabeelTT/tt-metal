@@ -18,10 +18,12 @@ def _cb(cores, index, nbytes):
     return ttnn.CBDescriptor(total_size=nbytes, core_ranges=cores, format_descriptors=[fmt])
 
 
-def slab_write(src, dst, offs, n_slabs: int, slab_rows: int = 32):
+def slab_write(src, dst, offs, n_slabs: int, slab_rows: int = 32, src_offs: bool = False):
     """dst rows [offs[k], offs[k] + slab_rows) = src rows [k slab_rows, (k + 1) slab_rows), k < n_slabs.
     Row-major src / dst (same row width / dtype): any offsets. Tiled src / dst (slab_rows = 32): whole tile rows,
-    offsets multiples of 32. offs [1, 1, 1, >= n_slabs] uint32 RM on the device."""
+    offsets multiples of 32. offs [1, 1, 1, >= n_slabs] uint32 RM on the device.
+    src_offs=True: source slab k starts at row offs[n_slabs + k] instead (offs [1, 1, 1, >= 2 n_slabs]): a gather /
+    scatter between any rows (src and dst may be the same tensor when no slab's source overlaps another's destination)."""
     tiled = src.layout == ttnn.TILE_LAYOUT
     assert dst.layout == src.layout
     if tiled:
@@ -39,7 +41,7 @@ def slab_write(src, dst, offs, n_slabs: int, slab_rows: int = 32):
     cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
     crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
     acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
-    ct = [S, pageb, offb, 0, 1, n_slabs, nc, int(tiled)] + acc(src) + acc(dst) + acc(offs)
+    ct = [S, pageb, offb, 0, 1, n_slabs, nc, int(tiled), int(bool(src_offs))] + acc(src) + acc(dst) + acc(offs)
     rt = ttnn.RuntimeArgs()
     for k, c in enumerate(cores):
         rt[c.x][c.y] = [src.buffer_address(), dst.buffer_address(), offs.buffer_address(), k]
@@ -48,7 +50,8 @@ def slab_write(src, dst, offs, n_slabs: int, slab_rows: int = 32):
                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                           noc=ttnn.NOC.NOC_0))
     cbs = [_cb(crs, 0, S * pageb), _cb(crs, 1, offb)]
-    ttnn.generic_op([src, offs, dst], ttnn.ProgramDescriptor(kernels=[kern], semaphores=[], cbs=cbs))
+    ios = [offs, dst] if src is dst else [src, offs, dst]
+    ttnn.generic_op(ios, ttnn.ProgramDescriptor(kernels=[kern], semaphores=[], cbs=cbs))
     return dst
 
 

@@ -37,12 +37,20 @@ def main():
                     "(the prefill positions' scores stay the serial ones; decode reads the packed caches)")
     ap.add_argument("--rows", type=int, default=1, help="rows per user per pass (verify-like: consecutive tokens)")
     ap.add_argument("--group", type=int, default=0, help="users per pass (default all; groups take turns)")
+    ap.add_argument("--frag", action="store_true", help="shared pool (tt/pool.py) with fragmented extents (reverse "
+                    "order, 4096-token holes); a third into the decode the largest extent moves to the free tail, two "
+                    "thirds in the pool is fully compacted (overlapping slides): outputs must be bit-identical")
     args = ap.parse_args()
     seqs = json.load(open(args.texts))
     names = [n for n in (args.names.split(",") if args.names else sorted(seqs))]
     U = args.users or len(names)
     users = [names[u % len(names)] for u in range(U)]
     os.environ["HY4_SLOTS"] = str(U)
+    if args.frag:
+        from models.autoports.tencent_hy4_flash.tt.pool import rup
+
+        need = [rup(max(len(seqs[n]), args.decode_from + 2048) + 384 + 2048) for n in users]
+        os.environ["HY4_POOL_TOKENS"] = str(rup(sum(need) + 4096 * U + max(need), 2048))
     from models.autoports.tencent_hy4_flash.tools.generate import build, open_mesh
     from models.autoports.tencent_hy4_flash.tt.decode_batch import Hy4BatchDecoder
 
@@ -54,6 +62,18 @@ def main():
             model.engram.store.wait_ram()
         dec = Hy4BatchDecoder(model, lanes=max(8, U), trace=True)
         P = args.decode_from
+        po = None
+        if args.frag:
+            from models.autoports.tencent_hy4_flash.tt.pool import PoolOps
+
+            assert model.pooled, "--frag: the model is not pooled"
+            po = PoolOps(model, dec)
+            po.warm()
+            b = 0
+            for u in reversed(range(U)):  # slot U-1 first: bases in reverse slot order, a hole after each
+                model.ext[u] = (b, need[u])
+                b += need[u] + 4096
+            logger.info(f"frag: pool {model.pool_tokens}, extents {dict(model.ext)}")
         ids, lps, lane = [], [], []
         for u, name in enumerate(users):
             t = torch.tensor(seqs[name], dtype=torch.long)
@@ -78,6 +98,18 @@ def main():
         times = []
         N, G = max(1, args.rows), args.group or U
         for i in range(0, steps, N):
+            if po is not None and i in (steps // 3 // N * N, 2 * steps // 3 // N * N) and i > 0:
+                ttnn.synchronize_device(mesh)
+                if i == steps // 3 // N * N:
+                    u = max(range(U), key=lambda v: model.ext[v][1])
+                    nb = po.pa.fit(model.ext[u][1])
+                    logger.info(f"frag: step {i}: slot {u} {model.ext[u]} -> base {nb}")
+                    po.move(u, nb)
+                else:
+                    logger.info(f"frag: step {i}: compaction {po.pa.compaction()}")
+                    po.compact()
+                ttnn.synchronize_device(mesh)
+                logger.info(f"frag: extents {dict(model.ext)}; {po.stats}")
             for g0 in range(0, U, G):
                 grp = [u for u in range(g0, min(U, g0 + G))]
                 if not any(P + i < ids[u].numel() for u in grp):

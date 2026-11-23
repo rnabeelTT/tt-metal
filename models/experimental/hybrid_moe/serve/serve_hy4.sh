@@ -4,16 +4,18 @@
 # pass, default 4, 0 = plain decode; NSEQS > 1: drafts while one request decodes alone, 2+ live requests decode plain in
 # the batch), NSEQS (concurrent users, default 1; 2..8 -> the batched engine), PORT (8000), IMG
 # (default the local hy4-flash-qb2 image).
-# PROFILE (default "default"): default = 8 users, spec decode on (SPEC=4), the largest per-user CTX the budget allows
-# (20480); long = 1 user, spec on, CTX 223232 (SPEC=0 gives 262144). NSEQS / SPEC / CTX still override.
+# PROFILE (default "default"): default = 8 users sharing one context pool (tt/pool.py; HY4_POOL=1), spec decode on
+# (SPEC=4), CTX = the pool's max_model_len (161792: one user can take it all); long = 1 user (Hy4Engine, no pool),
+# spec on, CTX 223232 (SPEC=0 gives 262144). NSEQS / SPEC / CTX still override.
 case "${PROFILE:-default}" in
   default) NSEQS=${NSEQS:-8} ;;
   long) NSEQS=${NSEQS:-1} ;;
   *) echo "unknown PROFILE '$PROFILE' (default|long)"; exit 1 ;;
 esac
-# CTX default: the largest max_model_len the per-die DRAM budget allows (tt/generator_vllm.py max_ctx_for, ViT on,
-# 400 MiB trace region; 2026-11-22): spec on 1/2/4/8 users 223232/102400/47104/20480, SPEC=0 262144/120832/55296/24576
-if [ "${SPEC:-4}" = 0 ]; then D=(0 262144 120832 0 55296 0 0 0 24576); else D=(0 223232 102400 0 47104 0 0 0 20480); fi
+# CTX default: the largest max_model_len the per-die DRAM budget allows (ViT on, 400 MiB trace region): 1 user
+# (tt/generator_vllm.py max_ctx_for) spec on 223232, SPEC=0 262144; 2/4/8 users the shared pool's (pool_plan) spec on
+# 202752/188416/161792, SPEC=0 239616/225280/200704
+if [ "${SPEC:-4}" = 0 ]; then D=(0 262144 239616 0 225280 0 0 0 200704); else D=(0 223232 202752 0 188416 0 0 0 161792); fi
 CTX=${CTX:-${D[$NSEQS]:-20480}}
 K=ttnn/cpp/ttnn/operations/experimental/moe_sorted_dispatch/device/kernels/moe_sorted_dispatch.cpp
 IMG=${IMG:-tt-model/hy4-flash-qb2:1e7f2ff5eaab}

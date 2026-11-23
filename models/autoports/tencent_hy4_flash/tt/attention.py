@@ -114,10 +114,12 @@ def ukv_pf_cfg(name: str, H: int, Tp: int, kd: int, nd: int, ck, grid) -> dict:
 
 
 class Hy4Attention:
-    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None, slots: int = 1):
+    def __init__(self, mesh, cfg, sd, layer_idx: int, max_ctx: int, chunk: int, share=None, slots: int = 1, pool=None):
         """sd: the layer's `self_attn.` tensors (prefix stripped). max_ctx: cache capacity per sequence (sparse layers);
         chunk: the largest rows per forward (prefill chunk), which sizes the SWA ring. slots: sequences the cache holds
-        (one region of `rows` rows each; set_slot picks the active one; the sink / scratch rows follow the regions)."""
+        (one region of `rows` rows each; set_slot picks the active one; the sink / scratch rows follow the regions).
+        pool (P, ext): sparse layers hold one shared pool of P rows instead (slot u: rows ext[u][0] .. + ext[u][1],
+        tt/pool.py); the sink / scratch / trash rows follow it."""
         self.mesh, self.cfg, self.li = mesh, cfg, layer_idx
         self.slots, self.slot, self.base = max(1, int(slots)), 0, 0
         self.kind = cfg.layer_kind[layer_idx]
@@ -227,14 +229,18 @@ class Hy4Attention:
             self.cache, self.rows = share.cache, share.rows
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
             self.slots, self.share = share.slots, share
+            self.ext = getattr(share, "ext", None)
             return
         # caches (row-major bf16, replicated): sparse layers hold every position + a sink block at the end; SWA layers
         # a ring of `ring` rows + the sink block
+        self.ext = pool[1] if pool is not None else None
         if self.kind == "sparse":
             self.rows = -(-max_ctx // 32) * 32 + 64  # + the decode staging window's lookahead (two 32-row slabs)
         else:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
         self.sink_row = self.slots * self.rows
+        if self.kind == "sparse" and pool is not None:  # (rows: no wrap below the pool's end)
+            self.rows = self.sink_row = int(pool[0])
         self.scratch_row = self.sink_row + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
         self.trash_row = self.sink_row + 64  # 32 rows the batched decode's idle lanes write (never read)
         cache = torch.zeros(1, 1, self.sink_row + 96, self.width, dtype=torch.bfloat16)
@@ -246,7 +252,7 @@ class Hy4Attention:
         if self.kind == "sparse":
             from models.autoports.tencent_hy4_flash.tt.indexer import Hy4Indexer
 
-            self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx, slots=self.slots)
+            self.indexer = Hy4Indexer(mesh, cfg, sd, max_ctx, slots=self.slots, pool=pool)
 
     _SDPA_CKC = {}
 
@@ -748,10 +754,17 @@ class Hy4Attention:
         o4 = ttnn.reshape(o3, (1, Hd, B * Tb, self.kvl))
         return self._out_part(x, o4, mem)
 
+    def slot_base(self, u: int) -> int:
+        """Slot u's first cache row: its pool extent's base (sparse, pooled), else u * rows."""
+        if self.kind == "sparse" and self.ext is not None:
+            e = self.ext.get(u)
+            return int(e[0]) if e is not None else self.trash_row
+        return u * self.rows
+
     def set_slot(self, u: int):
-        """The sequence slot the following prefill / staging calls address (its cache region starts at u * rows)."""
+        """The sequence slot the following prefill / staging calls address (its cache region: slot_base)."""
         assert 0 <= u < self.slots, (u, self.slots)
-        self.slot, self.base = u, u * self.rows
+        self.slot, self.base = u, self.slot_base(u)
         if self.indexer is not None:
             self.indexer.set_slot(u)
             self.indexer.cache_base = self.base

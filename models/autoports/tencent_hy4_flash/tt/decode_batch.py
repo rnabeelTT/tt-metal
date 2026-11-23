@@ -3,8 +3,8 @@
 """Batched decode: up to L sequences (model slots) in one trace-safe pass (rows <= 32, user-contiguous).
 
 Each sequence holds a lane: lane l's 64-row KV / token / group windows are rows 64 l .. of the layers' L-lane staging
-tensors and its group keys rows l gcap .. of the indexers' lane key tensors; the KV cache stays the slot's region
-(index lists and slab offsets carry its base). add() loads a slot's single-path windows (after its prefill and
+tensors; its KV rows and group keys stay in its slot's pool extent (tt/pool.py: index lists, slab offsets and the
+lane selection's group base carry its base). add() loads a slot's single-path windows (after its prefill and
 Hy4Decoder-style init_stage) into a lane, remove() writes them back. One pass updates every lane's windows with
 block-diagonal one-hot maps and writes every lane's slabs with one slab_write per cache (idle lanes: trash rows).
 Sparse-layer index lists: one score over the lanes' keys, masked per row to its lane's visible groups; rows below the
@@ -173,6 +173,7 @@ class Hy4BatchDecoder(Hy4Decoder):
                   {li: int(pos) for li in eng.pos})
         self.lanes[lane] = {"slot": slot, "pos": pos, "ob": nb, "ogb": gb, "tokens": [int(t) for t in tokens],
                             "eng": es, "base": {"sparse": self.a0.base, "swa": self.s0.base if self.s0 else 0}}
+        self.lanes[lane]["gbase"] = self.a0.base // self.cfg.idx_ratio  # (its group keys in the group pool)
         return lane
 
     def remove(self, lane: int):
@@ -206,6 +207,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         cfg, L, R0 = self.cfg, self.L, ROWS
         r = cfg.idx_ratio
         gcap, ring = self.gcap, self.ring
+        gtrash = self.a0.indexer.gtrash  # the group pool's trash groups (idle lanes' slabs)
         order = [(l, list(rows[l])) for l in sorted(rows)]
         R = sum(len(ids) for _, ids in order)
         assert R <= R0
@@ -216,6 +218,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         row_l = np.zeros(R0, dtype=np.int64)
         row_bs = np.zeros(R0, dtype=np.int64)
         row_bw = np.zeros(R0, dtype=np.int64)
+        row_gb = np.zeros(R0, dtype=np.int64)
         nL = 64 * L
         A = np.zeros((nL, nL), dtype=np.float32)
         P = np.zeros((nL, R0), dtype=np.float32)
@@ -237,7 +240,7 @@ class Hy4BatchDecoder(Hy4Decoder):
             for l in idle:
                 offs["sparse"][2 * l : 2 * l + 2] = t_s
                 offs["swa"][2 * l : 2 * l + 2] = t_w
-                offs["grp"][2 * l : 2 * l + 2] = L * gcap
+                offs["grp"][2 * l : 2 * l + 2] = gtrash
         s = 0
         for l, ids in order:
             ln = self.lanes[l]
@@ -254,6 +257,7 @@ class Hy4BatchDecoder(Hy4Decoder):
                 row_l[s : s + n] = l
                 row_bs[s : s + n] = bs
                 row_bw[s : s + n] = bw
+                row_gb[s : s + n] = ln["gbase"]
             q = nb + i64
             mP = (q >= p0) & (q < p0 + n)
             mA = ~mP & (q < p0) & (q >= ob) & (q < ob + 64)
@@ -280,7 +284,7 @@ class Hy4BatchDecoder(Hy4Decoder):
             Ag[64 * l + i64[mAg], 64 * l + g[mAg] - ogb] = 1
             offs["sparse"][2 * l : 2 * l + 2] = [bs + nb, bs + nb + 32]
             offs["swa"][2 * l : 2 * l + 2] = [bw + nb % ring, bw + (nb + 32) % ring] if ring else [0, 0]
-            offs["grp"][2 * l : 2 * l + 2] = [l * gcap + gb, l * gcap + gb + 32]
+            offs["grp"][2 * l : 2 * l + 2] = [ln["gbase"] + gb, ln["gbase"] + gb + 32]
             ln["nb"], ln["gb"] = nb, gb
             s += n
         pos[R:] = pos[R - 1] if R else 0
@@ -336,7 +340,7 @@ class Hy4BatchDecoder(Hy4Decoder):
             sub = swa[:R, 1 : 1 + W]
             sub[ok] = v[ok]
             vis = p // r
-            lg = rl * gcap
+            lg = row_gb[:R]
             lo[:R, 0] = lg
             hi[:R, 0] = lg + vis
             need = max(0, int((lg + vis).max()))
@@ -380,14 +384,25 @@ class Hy4BatchDecoder(Hy4Decoder):
             h["lmeta"] = _rm(torch.from_numpy(meta.view(np.int32)).reshape(1, 1, R0, 16), ttnn.uint32)
             vm = int((meta[:, 1] * meta[:, 3]).max()) if R else 0
             h["vmax"] = _rm(torch.tensor([max(vm, 1)], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)
-        top = L * gcap + 32
-        need = max(need, min(self.min_width, L * gcap))
+        top = gtrash + 32
+        if self._lscore():  # (the lane-aware score reads each row's own keys: the width only keys the trace)
+            need = 0
+        need = max(need, min(self.min_width, gtrash))
         width = next((b for b in (2048 * 2**i for i in range(12)) if b >= need and b + 32 <= top), None)
-        width = width or (L * gcap)
+        width = width or gtrash
         if with_tok:
             self._host_tok(order, h)
         self._sel = bool(nmask.any())
         return h, R, width, order
+
+    def _lscore(self) -> bool:
+        """The batched selection runs tt/lane_sel.score (each row against its own keys; indexer.step_lanes)."""
+        if getattr(self, "_ls_on", None) is None:
+            from models.autoports.tencent_hy4_flash.tt.lane_sel import LaneSelOp
+
+            self._ls_on = bool(LANEX and os.environ.get("HY4_IDX_LANEX_RUN", "1") == "1"
+                               and LaneSelOp.get(self.mesh).score_fits(self.gcap))
+        return self._ls_on and os.environ.get("HY4_IDX_LSCORE", "1") == "1"
 
     def _host_tok(self, order, h):
         """The token-dependent inputs of a pass: token ids and every lane's Engram rows (its own n-gram history)."""

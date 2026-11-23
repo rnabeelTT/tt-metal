@@ -42,14 +42,15 @@ from models.autoports.tencent_hy4_flash.tt.weights import Hy4Weights
 
 
 class Hy4Layer:
-    def __init__(self, mesh, cfg, w: Hy4Weights, li: int, max_ctx: int, chunk: int, cache_dir=None, slots: int = 1):
+    def __init__(self, mesh, cfg, w: Hy4Weights, li: int, max_ctx: int, chunk: int, cache_dir=None, slots: int = 1,
+                 pool=None):
         self.li, self.cfg = li, cfg
         sd = w.layer(li)
         self.attn_hc = sublayer_hc(mesh, sd, "hc_attn_layer", cfg)
         self.ffn_hc = sublayer_hc(mesh, sd, "hc_mlp_layer", cfg)
         self.in_norm = RMSNorm(mesh, sd["input_layernorm.weight"], cfg.rms_eps)
         self.post_norm = RMSNorm(mesh, sd["post_attention_layernorm.weight"], cfg.rms_eps)
-        self.attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), li, max_ctx, chunk, slots=slots)
+        self.attn = Hy4Attention(mesh, cfg, sd.sub("self_attn."), li, max_ctx, chunk, slots=slots, pool=pool)
         self.mlp = Hy4MoE(mesh, cfg, sd.sub("mlp."), li, cache_dir) if cfg.is_moe(li) else Hy4DenseMLP(mesh, cfg, sd.sub("mlp."))
         self.engram = Hy4EngramDevice(mesh, cfg, sd.sub("engram_layer."), li) if li in cfg.engram_layers else None
 
@@ -276,15 +277,29 @@ class Hy4Layer:
 
 class Hy4Model:
     def __init__(self, mesh, cfg: Hy4Config | None = None, w: Hy4Weights | None = None, max_ctx: int = 32768,
-                 chunk: int = 2048, layers: list[int] | None = None, engram=None, cache_dir=None, slots: int | None = None):
+                 chunk: int = 2048, layers: list[int] | None = None, engram=None, cache_dir=None, slots: int | None = None,
+                 pool_tokens: int | None = None):
         """layers: a subset of decoder layers (probes / tests); engram: a host Engram store (None: zero rows, tests);
-        slots: sequences the caches hold, max_ctx tokens each (default HY4_SLOTS, else 1)."""
+        slots: sequences the caches hold, max_ctx tokens each (default HY4_SLOTS, else 1).
+        pool_tokens (default HY4_POOL_TOKENS): the sparse layers' latent rows and the indexers' group keys of every
+        slot in one shared pool of that many tokens (tt/pool.py; the engine sizes each slot's extent, ext); None: fixed
+        extents of ext_rows tokens per slot (slot u at u ext_rows)."""
         self.mesh = mesh
         self.slots = int(slots if slots is not None else os.environ.get("HY4_SLOTS", "1"))
         self.cfg = cfg = cfg or Hy4Config.load()
         self.w = w = w or Hy4Weights()
         self.N = num_devices(mesh)
         self.max_ctx, self.chunk = max_ctx, chunk
+        from models.autoports.tencent_hy4_flash.tt.pool import pool_env, rup
+
+        # a full-context extent: max_ctx rows + the staging lookahead, and groups to max_ctx / 4 + 96 (the decode group
+        # window's two slabs past the context + the spare tile scoring reads)
+        self.ext_rows = rup(max_ctx + 384)
+        pt = pool_tokens if pool_tokens is not None else pool_env()
+        self.pooled = bool(pt) and self.slots > 1
+        self.pool_tokens = int(pt) if self.pooled else self.slots * self.ext_rows
+        assert self.pool_tokens % 128 == 0, self.pool_tokens
+        self.ext = {} if self.pooled else {u: (u * self.ext_rows, self.ext_rows) for u in range(self.slots)}
         self.layer_ids = list(range(cfg.n_layers)) if layers is None else list(layers)
         self.engram = engram
         if cache_dir:  # the attention / dense modules' decode copies cache next to the other tensors
@@ -305,7 +320,8 @@ class Hy4Model:
         logger.info(f"embedding loaded ({time.time() - t0:.0f} s)")
         self.layers = []
         for li in self.layer_ids:
-            self.layers.append(Hy4Layer(mesh, cfg, w, li, max_ctx, chunk, cache_dir, slots=self.slots))
+            self.layers.append(Hy4Layer(mesh, cfg, w, li, max_ctx, chunk, cache_dir, slots=self.slots,
+                                        pool=(self.pool_tokens, self.ext)))
             logger.info(f"layer {li} loaded ({time.time() - t0:.0f} s)")
         self.head_hc = head_hc(mesh, w, cfg)
         self.norm = RMSNorm(mesh, w.get("model.norm.weight"), cfg.rms_eps)
@@ -424,6 +440,7 @@ class Hy4Model:
         """Make sequence slot u active: prefill / reset / staging address its cache regions and state (max_ctx tokens
         each; HY4_SLOTS / the slots argument sets how many the caches hold)."""
         if u == self.slot:
+            self.refresh_bases()  # (its pool extent may have moved)
             return
         assert 0 <= u < self.slots, (u, self.slots)
         eng = self.engram
@@ -435,12 +452,33 @@ class Hy4Model:
                 eng.reset()
             else:
                 eng.hist, eng.pos = dict(es[0]), dict(es[1])
+        self.slot = u
+        self.refresh_bases()
+        set_active(u)
+
+    def refresh_bases(self):
+        """Every layer addresses the active slot's cache regions (again: after its pool extent moved)."""
+        u = self.slot
         for layer in self.layers:
             layer.attn.set_slot(u)
         for a in getattr(self, "_shared_attn", []):  # the DFly2 drafter's KV-sharing layers
-            a.slot, a.base = u, u * a.rows
-        self.slot = u
-        set_active(u)
+            a.slot, a.base = u, a.share.slot_base(u)
+
+    def pf_end(self, n: int, r: int = 0) -> int:
+        """The first cache row past every row a prefill of an n-token prompt continuing from position r writes (its
+        chunks' padded rows; prefill's chunking and buckets): the pool extent it needs (with the decode lookahead)."""
+        big = min(int(os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)
+        dense_end = self.cfg.idx_candidate_topk
+        bucketed = os.environ.get("HY4_PF_BUCKETS", "1") == "1" and self.N > 1
+        p, end = r, r
+        while p < n:
+            k = dense_end - p if p < dense_end else big
+            k = max(128, (k // 128) * 128) if p + k < n else k
+            m = min(k, n - p)
+            rows = next((b for b in self.PF_BUCKETS if b >= m and p + b <= self.max_ctx), 0) if bucketed else 0
+            end = max(end, p + max(rows, -(-m // 128) * 128))
+            p += k
+        return end
 
     def reset(self):
         self.pos = 0

@@ -5,6 +5,8 @@
 // row offs[k] (offs: one uint32 page read at run time: trace-safe).
 //   rows mode (TILEM = 0): row-major tensors, pages are rows: src rows [k S, k S + S) -> dst rows [off, off + S).
 //   tile mode (TILEM = 1): tiled tensors, one 32-row tile row of WT tiles: src tile row k -> dst tile row off / 32.
+//   SRCOFF = 1: the source slab k starts at row offs[NS + k] (rows mode) / tile row offs[NS + k] / 32 (tile mode)
+//   instead of k S (gather / scatter: pool extent copies and moves).
 //
 // runtime args: [src, dst, offs, c]
 
@@ -26,7 +28,8 @@ void kernel_main() {
     constexpr uint32_t NS = get_compile_time_arg_val(5);
     constexpr uint32_t NCORES = get_compile_time_arg_val(6);
     constexpr uint32_t TILEM = get_compile_time_arg_val(7);
-    constexpr auto src_args = TensorAccessorArgs<8>();
+    constexpr uint32_t SRCOFF = get_compile_time_arg_val(8);
+    constexpr auto src_args = TensorAccessorArgs<9>();
     constexpr auto dst_args = TensorAccessorArgs<src_args.next_compile_time_args_offset()>();
     constexpr auto offs_args = TensorAccessorArgs<dst_args.next_compile_time_args_offset()>();
 
@@ -41,8 +44,13 @@ void kernel_main() {
     for (uint32_t k = c; k < NS; k += NCORES) {
         const uint32_t off = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ol1)[k];
         const uint32_t d0 = TILEM ? (off / 32) * S : off;
+        uint32_t s0 = k * S;
+        if constexpr (SRCOFF) {
+            const uint32_t soff = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(ol1)[NS + k];
+            s0 = TILEM ? (soff / 32) * S : soff;
+        }
         for (uint32_t i = 0; i < S; ++i) {
-            noc_async_read(s_src.get_noc_addr(k * S + i), rl1 + i * PAGEB, PAGEB);
+            noc_async_read(s_src.get_noc_addr(s0 + i), rl1 + i * PAGEB, PAGEB);
         }
         noc_async_read_barrier();
         for (uint32_t i = 0; i < S; ++i) {

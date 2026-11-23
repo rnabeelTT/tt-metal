@@ -9,6 +9,10 @@ its fp32 logits (tt/engine.py HostSampler). Solo (HY4_BATCH_SOLO=1, default): wh
 its lane (Hy4BatchDecoder.remove: windows / group keys back to its slot) and decodes on the single path (no lane
 overhead); the next multi-sequence step or prefill puts it back (add). No speculative decoding here.
 
+Shared context pool (tt/pool.py, model.pooled): each slot's latent rows / group keys sit in an extent of one pool
+(_ensure: admission reserves the prefill's padded rows, decode grows it ahead in HY4_POOL_GROW steps; under pressure the
+live slots' headroom is trimmed, kept sequences evicted (LRU), the pool compacted; a move relocates every row exactly).
+
 Contract (tt/generator_vllm.py): alloc() -> a free slot; prefill(slot, ids, sampling) -> first token;
 step({slot: (tok, pos, authoritative)}) -> {slot: [next]}; step_logits({slot: (tok, pos)}) -> {slot: logits};
 finish(slot) frees it.
@@ -54,6 +58,28 @@ def _accept(smp, lgs, drafts):
         p[dd] = 0.0
         return acc, drafts[:acc] + [smp.draw(p / p.sum())]
     return acc, drafts + [smp.draw(smp.probs(lgs[len(drafts)]))]
+
+
+def _prog_trace(mesh):
+    """HY4_PROG_TRACE=1 (diagnostic): after warm-up, log every ttnn op that adds a program-cache entry (a serve-time
+    compile: the decoders then release and re-capture their traces) with its input shapes and the port's call site."""
+    import traceback
+
+    import ttnn
+    from ttnn import decorators as dec
+
+    st = {"n": int(mesh.num_program_cache_entries())}
+
+    def hook(operation, args, kwargs, output):
+        n = int(mesh.num_program_cache_entries())
+        if n != st["n"]:
+            shp = [tuple(a.shape) for a in list(args) + list(kwargs.values()) if isinstance(a, ttnn.Tensor)][:4]
+            site = [f"{f.name}:{f.lineno}" for f in traceback.extract_stack()[:-2] if "tencent_hy4_flash" in f.filename][-4:]
+            logger.warning(f"HY4 PROG +{n - st['n']}: {getattr(operation, 'python_fully_qualified_name', operation)} "
+                           f"{shp} at {site}")
+            st["n"] = n
+
+    dec.POST_OPERATION_HOOKS.append(hook)
 
 
 class Hy4BatchEngine:
@@ -103,6 +129,7 @@ class Hy4BatchEngine:
         # the single path's indexer state in fixed buffers (_solo_in): its traces are keyed (rows, regime, bucket), not
         # by slot, and capture the addresses of the active slot's group keys / staging windows (per-slot tensors): a
         # sequence decoding solo in another slot than the capture's read and wrote the capture slot's group keys
+        # (the group keys: the indexers' one work buffer, which the solo slot owns: tt/indexer.py wb_take)
         import ttnn
 
         self._sb = []
@@ -111,7 +138,23 @@ class Hy4BatchEngine:
             if ix is not None:
                 z = lambda n: ttnn.zeros((1, 1, n, ix.d), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,  # noqa: E731
                                          device=model.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                self._sb.append((ix, (z(ix.gcap), z(64), z(64))))
+                self._sb.append((ix, (z(64), z(64))))
+        # the shared context pool (tt/pool.py): extents of model.ext
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolOps
+
+        self.pooled = bool(getattr(model, "pooled", False))
+        self.po = PoolOps(model, self.dec)
+        self.pa = self.po.pa
+        self.po.warm()
+        self.GROW = int(os.environ.get("HY4_POOL_GROW", "2048"))
+        self.SLACK = 384  # extent rows past the position: the staging lookahead (2 x 32 rows) and group window (64 x 4)
+        self._pinned = set()  # slots being prefilled together (never evicted meanwhile)
+        # slots whose requests the host left out of its last decode step (vLLM finished / preempted them; the adapter
+        # frees a slot only when its row is prefilled again): their extents are evictable (tt/generator_vllm.py)
+        self.idle = set()
+        self.on_evict = None
+        self.pool_stats = self.po.stats
+        self.pool_stats.update({"evicted": 0, "trims": 0})
         self.kept = {}  # slot -> {"toks": the finished sequence's fed tokens (positions 0 ..), "t": finish time, "img",
         #                          "full": its positions < full were computed by whole prefill chunks (_full)}
 
@@ -145,7 +188,122 @@ class Hy4BatchEngine:
         if q is not None and self.pc_on:
             self.kept[int(slot)] = {"toks": q["toks"], "t": time.time(), "img": bool(q.get("img")),
                                     "full": int(q.get("full", 0))}
+        elif q is not None and self.pooled:
+            self._free(int(slot))
         self.last_logits.pop(int(slot), None)
+
+    # ------------------------------------------------------------------ the shared context pool
+    def _ixs(self):
+        return [l.attn.indexer for l in self.model.layers if l.attn.indexer is not None]
+
+    def _free(self, slot):
+        """Slot's extent back to the pool (its kept sequence, if any, forgotten; the work buffer dropped unwritten)."""
+        self.model.ext.pop(slot, None)
+        self.kept.pop(slot, None)
+        for ix in self._ixs():
+            if ix.wb is not None and ix.wb[0] == slot:
+                ix.wb, ix.wb_hi = None, ix.gcap
+
+    def _ensure(self, slot, need, soft=True):
+        """Slot's extent holds >= need tokens (rounded to 128; soft: + HY4_POOL_GROW headroom when it fits). Grows in
+        place, else moves to a fitting gap; under pressure trims the live slots' headroom, evicts kept sequences (LRU),
+        compacts the pool. Fixed extents (not pooled): checks only."""
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolFull, rup
+
+        m = self.model
+        need = min(rup(need), m.ext_rows)
+        cur = m.ext.get(slot)
+        if cur is not None and cur[1] >= need:
+            return
+        if not self.pooled:
+            raise PoolFull(f"Hy4 slot {slot}: {need} tokens > its fixed extent {m.ext_rows}")
+        want = min(rup(need + self.GROW), m.ext_rows) if soft else need
+        self._settle()
+        stage = 0
+        while True:
+            for size in dict.fromkeys((want, need)):
+                if self._grow(slot, size):
+                    m.refresh_bases()
+                    return
+            if stage == 0:
+                stage = 1
+                if self._trim(exclude=slot):
+                    continue
+            victims = sorted((self.kept.get(u, {}).get("t", -1.0), u) for u in m.ext
+                             if u != slot and u not in self.seqs and u not in self._pinned)
+            if victims:
+                self._free(victims[0][1])
+                self.pool_stats["evicted"] += 1
+                continue
+            zombies = [u for u in self.seqs if u in self.idle and u != slot and u not in self._pinned]
+            if zombies:  # (finished in vLLM, its pool tokens already counted free there)
+                for u in zombies:
+                    self.finish(u)
+                    self._free(u)
+                    if self.on_evict is not None:  # (the adapter forgets the row -> slot map entry)
+                        self.on_evict(u)
+                self.pool_stats["evicted"] += len(zombies)
+                continue
+            if stage == 1:
+                stage = 2
+                if self._compact(around=slot if slot in m.ext else None):
+                    continue
+            raise PoolFull(f"Hy4 pool full: slot {slot} needs {need} tokens; extents {dict(m.ext)} of {self.pa.P}")
+
+    def _grow(self, slot, size) -> bool:
+        m = self.model
+        cur = m.ext.get(slot)
+        if cur is None:
+            b = self.pa.fit(size)
+            if b is None:
+                return False
+            m.ext[slot] = (b, size)
+            return True
+        b, n = cur
+        if self.pa.room_after(slot) >= size - n:
+            m.ext[slot] = (b, size)
+            self._zero_tail(slot, n)
+            return True
+        nb = self.pa.fit(size)
+        if nb is None:
+            return False
+        self._move(slot, nb)
+        m.ext[slot] = (nb, size)
+        self._zero_tail(slot, n)
+        return True
+
+    def _zero_tail(self, slot, n0):
+        self.po.zero_tail(slot, n0)
+
+    def _move(self, slot, nb):
+        self._settle()
+        self.po.move(slot, nb)
+
+    def _compact(self, around=None) -> bool:
+        self._settle()
+        return self.po.compact(around)
+
+    def _trim(self, exclude=None) -> bool:
+        """Live slots' extents cut to what they need now (position + lookahead): their growth headroom freed."""
+        from models.autoports.tencent_hy4_flash.tt.pool import rup
+
+        m, cut = self.model, False
+        for u, q in self.seqs.items():
+            e = m.ext.get(u)
+            if u == exclude or e is None:
+                continue
+            keep = min(rup(q["pos"] + self.k + 3 + self.SLACK), m.ext_rows)
+            if keep < e[1]:
+                m.ext[u] = (e[0], keep)
+                cut = True
+        if cut:
+            self.pool_stats["trims"] += 1
+        return cut
+
+    def _ensure_step(self, slots):
+        """Before a decode step of `slots`: each extent holds its next rows (k + 1 verify rows, a run-ahead row)."""
+        for s in slots:
+            self._ensure(s, self.seqs[s]["pos"] + self.k + 3 + self.SLACK)
 
     # ------------------------------------------------------------------ prefix reuse
     def _park(self, lane):
@@ -183,7 +341,7 @@ class Hy4BatchEngine:
         still holding positions [r - window, r), r >= HY4_PC_MIN. 0: no reuse."""
         k = self.kept.get(int(slot))
         m = self.model
-        if (not self.pc_on or k is None or k["img"] or int(slot) in self.seqs
+        if (not self.pc_on or k is None or k["img"] or int(slot) in self.seqs or int(slot) not in m.ext
                 or (m.engram is not None and not hasattr(m.engram, "hist"))):
             return 0
         toks = k["toks"]
@@ -226,6 +384,7 @@ class Hy4BatchEngine:
         slot = int(slot)
         self._settle()
         self._hn = {}
+        self.idle.discard(slot)
         self.finish(slot)
         if self.solo is not None:  # the attention staging windows are shared: the solo sequence back to a lane first
             self._exit_solo()
@@ -236,7 +395,12 @@ class Hy4BatchEngine:
         m = self.model
         idl = ids.tolist()
         r = self._reuse(slot, idl) if mm is None else 0
+        if self.pooled:  # its extent: the kept one (reuse), else a fresh one; the prefill's padded rows reserved
+            if not r:
+                self._free(slot)
+            self._ensure(slot, max(m.pf_end(n, r), n + self.SLACK), soft=False)
         m.set_slot(slot)
+        m.refresh_bases()
         if r:
             m.rewind(r, idl)  # the slot's kept sequence serves positions < r
         else:
@@ -246,6 +410,7 @@ class Hy4BatchEngine:
             m.set_images(**mm)
         lg = m.prefill(ids[r:])
         m.prefill_caches_release()  # (before any decode replay: tt/model.py)
+        self._fit(slot, n)
         lane = self.dec.add(slot, n, idl)
         smp = HostSampler(sampling)
         tok = smp(lg)
@@ -259,6 +424,18 @@ class Hy4BatchEngine:
         self.stats["reused_tokens"] += r
         logger.info(f"Hy4 prefill {n} tokens ({r} reused) into slot {slot} (lane {lane}) in {dt:.2f} s; live {self.live}")
         return tok
+
+    def _fit(self, slot, n):
+        """After a prefill of n tokens: the extent cut to n + lookahead + growth headroom (the padded rows past n are
+        never read)."""
+        from models.autoports.tencent_hy4_flash.tt.pool import rup
+
+        m = self.model
+        e = m.ext.get(slot)
+        if self.pooled and e is not None:
+            keep = min(rup(n + self.k + 3 + self.SLACK + self.GROW), m.ext_rows)
+            if keep < e[1]:
+                m.ext[slot] = (e[0], keep)
 
     def prefill_many(self, reqs) -> list:
         """reqs [(slot, ids, sampling)] -> first tokens. Simultaneous short prompts (dense regime, ordinary text) run as
@@ -290,10 +467,21 @@ class Hy4BatchEngine:
             self._exit_solo()
         for slot, _, _ in reqs:
             self.kept.pop(slot, None)
+            if self.pooled:
+                self._free(slot)
+        self.idle -= {slot for slot, _, _ in reqs}
+        if self.pooled:
+            self._pinned = {slot for slot, _, _ in reqs}
+            try:
+                for (slot, _, _), ids in zip(reqs, idl):
+                    self._ensure(slot, max(plan[1], int(ids.numel()) + self.SLACK), soft=False)
+            finally:
+                self._pinned = set()
         lgs = m.forward_packed([(slot, ids) for (slot, _, _), ids in zip(reqs, idl)], plan)
         m.prefill_caches_release()
         out = []
         for (slot, _, sp), ids, lg in zip(reqs, idl, lgs):
+            self._fit(slot, int(ids.numel()))
             lane = self.dec.add(slot, int(ids.numel()), ids.tolist())
             smp = HostSampler(sp)
             tok = smp(lg)
@@ -321,15 +509,16 @@ class Hy4BatchEngine:
         self._hn = {}
         self._solo_in(slot)
 
-    _SOLO_ATTRS = ("gkeys", "tk_stage", "g_stage")
+    _SOLO_ATTRS = ("tk_stage", "g_stage")
 
     def _solo_in(self, slot):
-        """The slot's indexer state (group keys, token / group windows) -> the fixed solo buffers, which the indexers then
-        use as the slot's (the single-path traces read and write them)."""
+        """The slot's indexer state (token / group windows) -> the fixed solo buffers, which the indexers then use as the
+        slot's (the single-path traces read and write them); its group keys -> the work buffer (wb_take)."""
         import ttnn
 
         self.model.set_slot(slot)
         for ix, bufs in self._sb:
+            ix.wb_take(slot, load=True)
             orig = tuple(getattr(ix, a) for a in self._SOLO_ATTRS)
             for src, dst in zip(orig, bufs):
                 ttnn.copy(src, dst)
@@ -343,6 +532,8 @@ class Hy4BatchEngine:
 
         self.model.set_slot(slot)
         for ix, bufs in self._sb:
+            if ix.wb is not None and ix.wb[0] == slot:
+                ix.wb_release()
             orig = ix.__dict__.pop("_solo_orig")
             for src, dst in zip(bufs, orig):
                 ttnn.copy(src, dst)
@@ -464,6 +655,8 @@ class Hy4BatchEngine:
     def step(self, reqs: dict) -> dict:
         """reqs {slot: (tok, pos, host_authoritative)} -> {slot: [next token(s)]} (one batched pass; a sequence alone
         on the solo path with k > 0: one verify pass, 1 .. k + 1 tokens)."""
+        if self.pooled:
+            self._ensure_step(reqs)
         rows = {}
         for slot, (tok, pos, auth) in reqs.items():
             q = self.seqs[slot]
@@ -631,6 +824,8 @@ class Hy4BatchEngine:
     def step_logits(self, reqs: dict) -> dict:
         """Host-sampled step: reqs {slot: (tok, pos)} (each continues its sequence) -> {slot: next-token logits}."""
         self._take_ra({})  # (no run-ahead here: its rows undone)
+        if self.pooled:
+            self._ensure_step(reqs)
         rows = {}
         for slot, (tok, pos) in reqs.items():
             q = self.seqs[slot]
@@ -678,6 +873,10 @@ class Hy4BatchEngine:
             wl = os.environ.get("HY4_WARM_LONG", "auto")
             if wl == "auto":
                 self.finish(0)
+                if self.pooled:  # (the whole slot context: every other extent freed)
+                    for u in list(m.ext):
+                        self._free(u)
+                    self._ensure(0, m.ext_rows, soft=False)
                 m.warm_long(rnd, slot=0)
             for k in range(1, (0 if wl == "auto" else int(wl)) + 1):
                 for b in m.PF_BUCKETS:
@@ -718,8 +917,10 @@ class Hy4BatchEngine:
         for s in range(self.S):
             self.prefill(s, rnd(long_n if s == 0 else int(prompt_len or 64)))
         dec = self.dec
-        top = dec.L * dec.gcap
+        top = dec.a0.indexer.gtrash
         widths = sorted({w for w in (2048 * 2**i for i in range(12)) if w + 32 <= top + 32} | {top})
+        if dec._lscore():  # (lane-aware score: one width serves; the others compile the same programs)
+            widths = [2048]
         dec.trace = False
         # R = 1 runs solo (the single path) when HY4_BATCH_SOLO=1: slot 0 selects, the others are dense; every slot once,
         # so every lane is unloaded once (indexer.lane_unload slices at lane * gcap: one program per lane; a lane first
@@ -768,8 +969,13 @@ class Hy4BatchEngine:
             m.reset()
         m.set_slot(0)
         self.kept.clear()
+        if self.pooled:  # (the warm-up's extents back to the pool)
+            for u in list(m.ext):
+                self._free(u)
         logger.info(f"warm: traces captured; {m.dram_report()}")
         self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}
+        if os.environ.get("HY4_PROG_TRACE", "0") == "1":
+            _prog_trace(self.model.mesh)
         logger.info(f"Hy4 batch engine warm-up {time.time() - t0:.1f} s ({self.S} slots, widths {widths}, "
                     f"{len(dec.btraces)} batched traces, {len(dec.traces)} single)")
 
