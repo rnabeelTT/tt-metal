@@ -13,6 +13,8 @@ void kernel_main() {
     const uint32_t lg_addr = get_arg_val<uint32_t>(1);
     const uint32_t t0 = get_arg_val<uint32_t>(2);
     const uint32_t nt = get_arg_val<uint32_t>(3);
+    const uint32_t r0 = get_arg_val<uint32_t>(4);  // this core's row tiles r0 .. r0 + nr - 1
+    const uint32_t nr = get_arg_val<uint32_t>(5);
 
     constexpr uint32_t cb_lg = get_compile_time_arg_val(0);
     constexpr uint32_t cb_s = get_compile_time_arg_val(1);
@@ -26,7 +28,7 @@ void kernel_main() {
     const auto as = TensorAccessor(s_args, s_addr, F32);
     const auto alg = TensorAccessor(lg_args, lg_addr, F32);
 
-    for (uint32_t r = 0; r < RT; ++r) {
+    for (uint32_t r = r0; r < r0 + nr; ++r) {
         // logits of row tile r: [1, n, T, nq * 32] tiles (i * RT + r) * nq + q
         cb_reserve_back(cb_lg, n * nq);
         const uint32_t l = get_write_ptr(cb_lg);
@@ -35,16 +37,17 @@ void kernel_main() {
                 noc_async_read(alg.get_noc_addr((i * RT + r) * nq + q), l + (i * nq + q) * F32, F32);
             }
         }
-        // this core's H tiles of row tile r: [1, n, T, H] tiles (i * RT + r) * Ht + t, ordered [t][i]
-        cb_reserve_back(cb_s, n * nt);
-        const uint32_t sp = get_write_ptr(cb_s);
-        for (uint32_t t = 0; t < nt; ++t) {
-            for (uint32_t i = 0; i < n; ++i) {
-                noc_async_read(as.get_noc_addr((i * RT + r) * Ht + t0 + t), sp + (t * n + i) * F32, F32);
-            }
-        }
         noc_async_read_barrier();
         cb_push_back(cb_lg, n * nq);
-        cb_push_back(cb_s, n * nt);
+        // this core's H tiles of row tile r: [1, n, T, H] tiles (i * RT + r) * Ht + t, the n sources of column t
+        for (uint32_t t = 0; t < nt; ++t) {
+            cb_reserve_back(cb_s, n);
+            const uint32_t sp = get_write_ptr(cb_s);
+            for (uint32_t i = 0; i < n; ++i) {
+                noc_async_read(as.get_noc_addr((i * RT + r) * Ht + t0 + t), sp + i * F32, F32);
+            }
+            noc_async_read_barrier();
+            cb_push_back(cb_s, n);
+        }
     }
 }

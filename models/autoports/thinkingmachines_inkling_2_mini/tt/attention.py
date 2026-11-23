@@ -363,12 +363,13 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     if w.dram_sharded:  # drop the bank padding of k / v (the convs take exactly NKV * HD columns)
         pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, R, w.kd))
         pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, R, w.kd))
-    o0 = 0
-    q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.qd)); o0 += w.qd
-    r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.rd)); o0 += w.rd
-    s = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + NH)); o0 += w.sd
+    pq_full = pq if (PREFILL_PREP and not rows_mode and R > 32 and c.kv_dtype == ttnn.bfloat16) else None
+    if pq_full is None:  # (the prefill prep reads q / r / sink from pq itself)
+        q = ttnn.slice(pq, (0, 0, 0, 0), (1, 1, R, w.qd))
+        r = ttnn.slice(pq, (0, 0, 0, w.qd), (1, 1, R, w.qd + w.rd))
+        s = ttnn.slice(pq, (0, 0, 0, w.qd + w.rd), (1, 1, R, w.qd + w.rd + NH))
+    o0 = w.qd + w.rd + w.sd
     g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, R, o0 + w.gd))
-    pq_full = pq if (PREFILL_PREP and not rows_mode and R > 32) else None
     if pq_full is None:
         ttnn.deallocate(pq)
     # convs
@@ -386,7 +387,7 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     ttnn.deallocate(pv)
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
     bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
-    if PREFILL_PREP and not rows_mode and R > 32 and c.kv_dtype == ttnn.bfloat16 and pq_full is not None:
+    if pq_full is not None:
         b0, nb = p0 // c.block, R // c.block
         fill_pt = c._up_i32(c.read_host[slot, b0 : b0 + nb].reshape(1, -1))
         tau_rows = tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha)
@@ -510,12 +511,14 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     if w.dram_sharded:
         pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, T, w.kd))
         pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, T, w.kd))
-    o0 = 0
-    q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.qd)); o0 += w.qd
-    r = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.rd)); o0 += w.rd
-    s = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + NH)); o0 += w.sd
-    g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))
     prep = PREFILL_PREP and T > 32 and c.kv_dtype == ttnn.bfloat16
+    o0 = 0
+    if not prep:  # (the prep reads q / r / sink from pq itself)
+        q = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.qd))
+        r = ttnn.slice(pq, (0, 0, 0, o0 + w.qd), (1, 1, T, o0 + w.qd + w.rd))
+        s = ttnn.slice(pq, (0, 0, 0, o0 + w.qd + w.rd), (1, 1, T, o0 + w.qd + w.rd + NH))
+    o0 = w.qd + w.rd + w.sd
+    g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))
     if not prep:
         ttnn.deallocate(pq)
     sk_ = [(row0, R, valid, lanes[lane][0]) for row0, R, p0, valid, slot, lane in ctx.segs]

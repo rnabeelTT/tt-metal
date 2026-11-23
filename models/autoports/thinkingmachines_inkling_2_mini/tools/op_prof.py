@@ -80,13 +80,16 @@ def main():
     T = int(os.environ.get("PREFILL", "0"))
     if T:  # one prefill chunk of T rows (slot 0) instead of a decode step
         ids = torch.arange(1000, 1000 + T)
+        PK = os.environ.get("PACKED") == "1"  # (the served path: forward_packed, one segment)
+        run = (lambda: m.forward_packed(ids, [(0, T, P0, T, 0, 0)])) if PK else \
+            (lambda: m.forward(ids, P0, valid=T, slot=0, last_only=True))  # noqa: E731
         for _ in range(2):
             m.reset()
-            m.forward(ids, P0, valid=T, slot=0, last_only=True)
+            run()
         m.reset()
         _read()
         REC["on"] = True
-        m.forward(ids, P0, valid=T, slot=0, last_only=True)
+        run()
     else:
         dec = BatchedDecoder(m, B)
         dec.set_inputs(torch.arange(100, 100 + B), torch.arange(300, 300 + B))
