@@ -61,6 +61,14 @@ def _dt(name, default):
     return {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}[os.environ.get(name, default)]
 
 
+def _gate(ov, g, mem):
+    """ov * sigmoid(g). HY4_PF_GATE_FUSE (default 1): the sigmoid as the multiply's input activation (one program, as
+    the decode path's HY4_GATE_FUSE; bit-identical at the prefill shapes, ag_bench 2026-11-23: 2048 x 4096 236 -> 122 us)."""
+    if os.environ.get("HY4_PF_GATE_FUSE", "1") == "1":
+        return ttnn.multiply(ov, g, input_tensor_b_activations=[ttnn.UnaryOpType.SIGMOID], memory_config=mem)
+    return ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+
+
 def solo_rows(si) -> bool:
     """HY4_SOLO_ROWS=1 (with HY4_LANE_ROWS): a single-path pass writes its KV rows straight to their cache rows."""
     return (bool(getattr(si, "row_offs", None)) and getattr(si, "R", None) is not None
@@ -572,8 +580,10 @@ class Hy4Attention:
         if dec and os.environ.get("HY4_GATE_FUSE", "1") == "1":
             # the sigmoid as the multiply's input activation (one program instead of two)
             gated = ttnn.multiply(ov, g, input_tensor_b_activations=[ttnn.UnaryOpType.SIGMOID], memory_config=mem)
-        else:
+        elif dec:
             gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        else:
+            gated = _gate(ov, g, mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
         if dec:
@@ -828,7 +838,7 @@ class Hy4Attention:
         ov2 = ttnn.experimental.nlp_concat_heads(ov, memory_config=mem)  # [1, 1, Tq, H * 256]
         ttnn.deallocate(ov)
         g = mm(x_own, rp["wg"], wfid(self.ckc, rp["wg"]), mem)
-        gated = ttnn.multiply(ov2, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        gated = _gate(ov2, g, mem)
         ttnn.deallocate(ov2)
         ttnn.deallocate(g)
         out = mm(gated, rp["wo"], wfid(self.ckc, rp["wo"]), mem)
@@ -848,7 +858,7 @@ class Hy4Attention:
         ttnn.deallocate(ov)
         ov = ov2
         g = mm(x, self.wg, wfid(self.ckc, self.wg), mem)
-        gated = ttnn.multiply(ov, ttnn.sigmoid(g, memory_config=mem), memory_config=mem)
+        gated = _gate(ov, g, mem)
         ttnn.deallocate(ov)
         ttnn.deallocate(g)
         part = mm(gated, self.wo, wfid(self.ckc, self.wo), mem)
