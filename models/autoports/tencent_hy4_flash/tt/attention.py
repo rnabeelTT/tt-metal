@@ -1088,6 +1088,18 @@ class Hy4Attention:
         fused_rows = (not getattr(si, "L", 0) and solo_rows(si) and isinstance(parts[1], tuple)
                       and os.environ.get("HY4_KVROW_FUSED", "1") == "1"
                       and mem.buffer_type == ttnn.BufferType.L1)
+        if (getattr(si, "L", 0) and getattr(si, "lane_rows", False) and isinstance(parts[1], tuple)
+                and os.environ.get("HY4_KVROW_FUSED", "1") == "1" and os.environ.get("HY4_KVROW_LANES", "1") == "1"
+                and mem.buffer_type == ttnn.BufferType.L1):
+            # batched lanes, each row straight to its cache row: the fused kv_rows program for all 32 rows (padding
+            # rows to their trash rows, as the slab_write it replaces) instead of concat + to_layout + slab_write
+            from models.autoports.tencent_hy4_flash.tt.slab_write import kv_rows_write
+
+            c, kr = self._kv_row(x, cos, sin, mem, kv=parts[1], parts_only=True)
+            kv_rows_write(c, kr, self.cache, si.row_offs[self.kind], int(c.shape[-2]), SINK_COLS * 2)
+            ttnn.deallocate(c)
+            ttnn.deallocate(kr)
+            return self._step_lanes(x, si, None, q_lat, q_rope, q_resid, parts, dec, mem)
         if fused_rows:
             # [norm(c) | rope(k_rope) | 0] rows straight from the tiles to their cache rows (one program instead of
             # concat + to_layout + slab_write; the same bytes)
@@ -1183,7 +1195,9 @@ class Hy4Attention:
         written to its slot's cache region by one slab_write (idle lanes: the trash rows); index lists per row."""
         from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
 
-        if getattr(si, "lane_rows", False):  # each row straight to its cache row (padding rows: the trash rows)
+        if row is None:  # (written by step(): HY4_KVROW_LANES)
+            pass
+        elif getattr(si, "lane_rows", False):  # each row straight to its cache row (padding rows: the trash rows)
             row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
             ttnn.deallocate(row)
             slab_write(row_rm, self.cache, si.row_offs[self.kind], int(row_rm.shape[-2]), slab_rows=1)

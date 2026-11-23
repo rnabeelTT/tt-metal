@@ -10,6 +10,10 @@
 
 #include "api/dataflow/dataflow_api.h"
 
+#ifndef BATCH
+#define BATCH 0  // (HY4_GLUE_BATCH) all rows staged at once: one read and one write barrier per call
+#endif
+
 void kernel_main() {
     const uint32_t ql_addr = get_arg_val<uint32_t>(0);
     const uint32_t qr_addr = get_arg_val<uint32_t>(1);
@@ -38,6 +42,34 @@ void kernel_main() {
         noc_async_read(src, l1 + (LT + RT) * 64, 32);
         noc_async_read(src + 512, l1 + (LT + RT) * 64 + 32, 32);
     }
+#if BATCH
+    // every row's reads in flight at once (row s staged at l1 + s * ROW), one read barrier, the R row writes, one write
+    // barrier (was a read + write round trip per row)
+    for (uint32_t s = 0; s < R; ++s) {
+        const uint32_t rl = l1 + s * ROW;
+        if (s > 0) {  // the sink columns (row 0's were read above)
+            const uint64_t src = s_qs.get_noc_addr(h);
+            noc_async_read(src, rl + (LT + RT) * 64, 32);
+            noc_async_read(src + 512, rl + (LT + RT) * 64 + 32, 32);
+        }
+        const uint32_t off = (s / 16) * 1024 + (s % 16) * 32;
+        for (uint32_t t = 0; t < LT; ++t) {
+            const uint64_t src = s_ql.get_noc_addr(h * LT + t) + off;
+            noc_async_read(src, rl + t * 64, 32);
+            noc_async_read(src + 512, rl + t * 64 + 32, 32);
+        }
+        for (uint32_t t = 0; t < RT; ++t) {
+            const uint64_t src = s_qr.get_noc_addr(h * RT + t) + off;
+            noc_async_read(src, rl + (LT + t) * 64, 32);
+            noc_async_read(src + 512, rl + (LT + t) * 64 + 32, 32);
+        }
+    }
+    noc_async_read_barrier();
+    for (uint32_t s = 0; s < R; ++s) {
+        noc_async_write(l1 + s * ROW, s_o.get_noc_addr(h * S + s), ROW);
+    }
+    noc_async_write_barrier();
+#else
     for (uint32_t s = 0; s < R; ++s) {
         const uint32_t off = (s / 16) * 1024 + (s % 16) * 32;
         for (uint32_t t = 0; t < LT; ++t) {
@@ -54,4 +86,5 @@ void kernel_main() {
         noc_async_write(l1, s_o.get_noc_addr(h * S + s), ROW);
         noc_async_write_barrier();
     }
+#endif
 }

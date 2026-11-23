@@ -10,6 +10,10 @@
 
 #include "api/dataflow/dataflow_api.h"
 
+#ifndef BATCH
+#define BATCH 0  // (HY4_GLUE_BATCH) all rows read at once: two barriers per call instead of two per row
+#endif
+
 void kernel_main() {
     const uint32_t o_addr = get_arg_val<uint32_t>(0);
     const uint32_t out_addr = get_arg_val<uint32_t>(1);
@@ -39,6 +43,22 @@ void kernel_main() {
         }
         noc_async_read_barrier();
     }
+#if BATCH
+    // every row segment read at once (row s at rl + s * NT * 64), one barrier, then every face-row placement, one barrier
+    for (uint32_t s = 0; s < R; ++s) {
+        noc_async_read(s_i.get_noc_addr(h * S + s) + t0 * 64, rl + s * NT * 64, NT * 64);
+    }
+    noc_async_read_barrier();
+    for (uint32_t s = 0; s < R; ++s) {
+        const uint32_t off = (s / 16) * 1024 + (s % 16) * 32;
+        for (uint32_t i = 0; i < NT; ++i) {
+            const uint64_t src = get_noc_addr(rl + s * NT * 64 + i * 64);
+            noc_async_read(src, tl + i * BF + off, 32);
+            noc_async_read(src + 32, tl + i * BF + off + 512, 32);
+        }
+    }
+    noc_async_read_barrier();
+#else
     for (uint32_t s = 0; s < R; ++s) {
         noc_async_read(s_i.get_noc_addr(h * S + s) + t0 * 64, rl, NT * 64);
         noc_async_read_barrier();
@@ -50,6 +70,7 @@ void kernel_main() {
         }
         noc_async_read_barrier();
     }
+#endif
     for (uint32_t i = 0; i < NT; ++i) {
         noc_async_write(tl + i * BF, s_o.get_noc_addr(h * VT + t0 + i), BF);
     }

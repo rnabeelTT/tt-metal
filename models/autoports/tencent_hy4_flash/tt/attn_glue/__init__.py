@@ -10,6 +10,7 @@ otile: the sparse_sdpa output [1, Hp, 32, V] RM -> [1, Hd, 32, V] TILE, real row
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import torch
@@ -17,6 +18,12 @@ import ttnn
 
 KDIR = Path(__file__).parent / "kernels"
 TILE = 32
+
+
+def _batch() -> bool:
+    """HY4_GLUE_BATCH (default 1): passes of 2..16 real rows stage every row at once, one barrier per phase instead of
+    one per row (the same bytes; one row keeps the per-row form)."""
+    return os.environ.get("HY4_GLUE_BATCH", "1") == "1"
 
 
 class AttnGlue:
@@ -57,8 +64,10 @@ class AttnGlue:
         out = self.qbuffer(Hp, W)
         cores = self.grid[:Hd]
         crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
+        batch = _batch() and R > 1
         fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.bfloat16, page_size=W * 2)
-        cbs = [ttnn.CBDescriptor(total_size=W * 2, core_ranges=crs, format_descriptors=[fmt])]
+        cbs = [ttnn.CBDescriptor(total_size=W * 2 * (max(1, R) if batch else 1), core_ranges=crs,
+                                 format_descriptors=[fmt])]
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         ct = [LT, RT, W * 2, TILE, 0] + acc(q_lat) + acc(q_rope) + acc(q_sink) + acc(out)
         rt = [[q_lat.buffer_address(), q_rope.buffer_address(), q_sink.buffer_address(), out.buffer_address(), h, R]
@@ -66,7 +75,8 @@ class AttnGlue:
         k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "qprep.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=self._rt(cores, rt),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
-                                                                           noc=ttnn.NOC.NOC_0))
+                                                                           noc=ttnn.NOC.NOC_0),
+                                  defines=[("BATCH", str(int(batch)))])
         ttnn.generic_op([q_lat, q_rope, q_sink, out], ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=cbs))
         return out
 
@@ -77,12 +87,14 @@ class AttnGlue:
         NT = VT // per_head
         n = Hd * per_head
         cores = self.grid[:n]
+        batch = _batch() and R > 1
         crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, Hd, TILE, V]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
                                              mem)
         cbs = [ttnn.CBDescriptor(total_size=NT * 2048, core_ranges=crs, format_descriptors=[
                    ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.bfloat16, page_size=2048)]),
-               ttnn.CBDescriptor(total_size=NT * 64, core_ranges=crs, format_descriptors=[
+               ttnn.CBDescriptor(total_size=NT * 64 * (max(1, R) if batch else 1), core_ranges=crs,
+                                 format_descriptors=[
                    ttnn.CBFormatDescriptor(buffer_index=1, data_format=ttnn.bfloat16, page_size=NT * 64)])]
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         ct = [NT, VT, int(o.shape[-2]), 0, 1] + acc(o) + acc(out)
@@ -90,6 +102,7 @@ class AttnGlue:
         kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / "otile.cpp"), core_ranges=crs, compile_time_args=ct,
                                    runtime_args=self._rt(cores, rt),
                                    config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
-                                                                            noc=ttnn.NOC.NOC_0))
+                                                                            noc=ttnn.NOC.NOC_0),
+                                   defines=[("BATCH", str(int(batch)))])
         ttnn.generic_op([o, out], ttnn.ProgramDescriptor(kernels=[kd], semaphores=[], cbs=cbs))
         return out
