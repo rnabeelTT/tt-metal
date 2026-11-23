@@ -362,6 +362,11 @@ class Inkling2ForCausalLM:
         """A new request in vLLM row `row`: the lowest slot no other live row holds."""
         self.row2slot.pop(row, None)
         self.hs.forget(row)
+        # the plugin hands a prefill a state slot no live request holds (it tracks finished requests; this map only
+        # learns of them at the next decode step): an entry on that slot is a finished request's
+        for r, s in list(self.row2slot.items()):
+            if s == row:
+                self.row2slot.pop(r)
         used = set(self.row2slot.values())
         slot = next(s for s in range(self.B) if s not in used)
         self.row2slot[row] = slot

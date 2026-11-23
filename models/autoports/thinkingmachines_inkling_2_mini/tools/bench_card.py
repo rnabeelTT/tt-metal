@@ -28,7 +28,7 @@ MODEL = "inkling-2-mini"
 def one(n_in, n_out, seed):
     r = random.Random(seed)
     body = {"model": MODEL, "prompt": [r.randint(1000, 150000) for _ in range(n_in)], "max_tokens": n_out,
-            "temperature": 0, "ignore_eos": True, "stream": True}
+            "temperature": 0, "ignore_eos": True, "stream": True, "stream_options": {"include_usage": True}}
     req = urllib.request.Request(f"http://localhost:{PORT}/v1/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     t0 = time.time()
@@ -44,6 +44,8 @@ def one(n_in, n_out, seed):
                 if first is None:
                     first = time.time()
                 n += 1
+            if d.get("usage"):  # (a chunk may carry several tokens: speculative decoding)
+                n = int(d["usage"]["completion_tokens"])
     t1 = time.time()
     return (first or t1) - t0, t1 - t0, n
 
