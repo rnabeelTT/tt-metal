@@ -26,6 +26,19 @@
 #include "api/dataflow/dataflow_buffer.h"
 #include "api/tensor/noc_traits.h"
 
+#ifdef UNTILIZE_OUT
+// the compute kernel's pack-untilize chunk width (bmm_grouped_resident_in1.cpp: the same function)
+constexpr uint32_t untilize_chunk_cap(uint32_t host_w, uint32_t sub_w, uint32_t block_w) {
+    uint32_t cap = host_w < 8u ? host_w : 8u;
+    for (uint32_t c = cap - cap % sub_w; c >= sub_w; c -= sub_w) {
+        if (block_w % c == 0) {
+            return c;
+        }
+    }
+    return sub_w;
+}
+#endif
+
 void kernel_main() {
     uint32_t rt_args_idx = 0;
     const uint32_t in1_tensor_addr = get_arg_val<uint32_t>(rt_args_idx++);
@@ -180,7 +193,7 @@ void kernel_main() {
         {
             // the compute kernel pushes the [32, N] block in chunks of UNTILIZE_CHUNK_W tiles (row width limit of the
             // pack-untilize path); every chunk is 32 partial sticks of chunk_w * 32 elements at column offset c * chunk
-            constexpr uint32_t chunk_w = UNTILIZE_CHUNK_W;
+            constexpr uint32_t chunk_w = untilize_chunk_cap(UNTILIZE_CHUNK_W, out_subblock_w, out_subblock_w * out_num_subblocks_w);
             constexpr uint32_t chunk_bytes = chunk_w * 32 * 2;
             constexpr uint32_t n_chunks = (out_subblock_w * out_num_subblocks_w) / chunk_w;
             const uint32_t stick0 = gb * 32;

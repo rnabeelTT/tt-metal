@@ -33,6 +33,29 @@ def _dispatch_mc_ok(T, E, k, Rd, gs) -> bool:
     return fits(T, E, k, Rd, gs)
 
 
+_RM_KERNELS = ("ttnn/cpp/ttnn/operations/matmul/device/kernels/compute/bmm_grouped_resident_in1.cpp",
+               "ttnn/cpp/ttnn/operations/matmul/device/kernels/dataflow/reader_writer_bmm_tile_layout_in1_indexed.cpp")
+
+
+def _rm_kernels_ok() -> bool:
+    """The grouped factory's untilize_out kernels have the 8-tile pack-untilize chunk (`untilize_chunk_cap`): with the
+    model's 16-bit DEST the old 16-tile chunk wrote tiles 10..15 of every chunk wrong. Checks the files the JIT build
+    resolves (tt_metal resolve_path: the working directory, TT_METAL_KERNEL_PATH, then the root), so an image without
+    the fix keeps the tile path."""
+    import ttnn as _t
+
+    roots = [os.getcwd(), os.environ.get("TT_METAL_KERNEL_PATH"), os.environ.get("TT_METAL_RUNTIME_ROOT"),
+             os.environ.get("TT_METAL_HOME"), os.path.dirname(os.path.dirname(os.path.dirname(_t.__file__)))]
+    for rel in _RM_KERNELS:
+        path = next((os.path.join(r, rel) for r in roots if r and os.path.exists(os.path.join(r, rel))), None)
+        try:
+            if path is None or "untilize_chunk_cap" not in open(path).read():
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def _grouped_cfg(device, k_dim, n_tiles, w_tile_bytes, in0_cap=8, sub_w=4, fp32_acc=False):
     """The M2.7 grouped-factory config: whole 32-row groups per core, K in in0_block_w tiles, fitting its L1 budget."""
     grid = device.compute_with_storage_grid_size()
@@ -78,6 +101,16 @@ class SortedExperts:
         L, Il = moe.L, moe.Il
         self.cfg_gu = _grouped_cfg(mesh, L, (2 * Il) // 32, self.TILE_BYTES.get(moe.up_gate.dtype, 2048))
         self.cfg_dn = _grouped_cfg(mesh, Il, L // 32, self.TILE_BYTES.get(moe.down.dtype, 2048))
+        # HY4_PF_DOWN_RM (default 1): the down projection writes ROW_MAJOR rows (grouped factory untilize_out: the
+        # resident compute kernel's pack-untilize) straight into the gather-add un-dispatch: no untilize op (~0.7 ms per
+        # MoE layer at 2K rows). Same values (layout only; needs the 8-tile pack-untilize chunk of
+        # bmm_grouped_resident_in1.cpp with a 16-bit DEST).
+        self.cfg_dn_rm = None
+        if hasattr(self.cfg_dn, "untilize_out") and _rm_kernels_ok():
+            k_t, n_t, wb = Il // 32, L // 32, self.TILE_BYTES.get(moe.down.dtype, 2048)
+            if 2 * 2048 + k_t * n_t * wb + n_t * 4096 <= 1_300_000:  # resident in1 (the untilize_out kernel)
+                self.cfg_dn_rm = _grouped_cfg(mesh, Il, L // 32, wb)
+                self.cfg_dn_rm.untilize_out = True
 
     _MASKS = {}
 
@@ -158,16 +191,24 @@ class SortedExperts:
             ttnn.deallocate(din)
         ttnn.deallocate(m["weights"])
         din2 = ttnn.reshape(din2, (1, G, GS, Il))
+        rm = (self.cfg_dn_rm is not None and m.get("undispatch_rm") is not None
+              and os.environ.get("HY4_PF_DOWN_RM", "1") == "1")
+        kw = {}
+        if rm:
+            kw["optional_output_tensor"] = ttnn.allocate_tensor_on_device(
+                ttnn.Shape([1, G, GS, L]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, moe.mesh, DRAM)
         down = ttnn.sparse_matmul(din2, moe.down, sparsity=m["group_mask"], indices=m["group_ids"],
                                   is_input_a_sparse=False, is_input_b_sparse=True, memory_config=DRAM,
-                                  program_config=self.cfg_dn, compute_kernel_config=moe.ckc_e,
-                                  dtype=ttnn.bfloat16)  # [1,G,32,L]
+                                  program_config=self.cfg_dn_rm if rm else self.cfg_dn,
+                                  compute_kernel_config=moe.ckc_e, dtype=ttnn.bfloat16,
+                                  **kw)  # [1,G,32,L] (ROW_MAJOR with HY4_PF_DOWN_RM)
         ttnn.deallocate(din2)
         if not m.get("mask_cached"):
             ttnn.deallocate(m["group_mask"])
         ttnn.deallocate(m["group_ids"])
         y = undispatch_rows(down, None, m.get("undispatch"), T, moe.k, L, undispatch_rm=m.get("undispatch_rm"))
-        ttnn.deallocate(down)
+        if down.is_allocated():  # (the ROW_MAJOR path frees it through its reshape view)
+            ttnn.deallocate(down)
         for key in ("undispatch", "undispatch_rm"):
             if m.get(key) is not None:
                 ttnn.deallocate(m[key])
