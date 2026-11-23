@@ -17,6 +17,16 @@
 #ifdef IN0_TILIZE
 #include "api/compute/tilize.h"
 #endif
+#ifdef FUSE_SWIGLU
+#include "api/compute/bcast.h"
+#include "api/compute/common.h"
+#include "api/compute/compute_kernel_api.h"
+#include "api/compute/pack.h"
+#include "api/compute/eltwise_binary_sfpu.h"
+#include "api/compute/eltwise_unary/clamp.h"
+#include "api/compute/eltwise_unary/eltwise_unary.h"
+#include "api/compute/eltwise_unary/sfpu_split_includes.h"
+#endif
 #include "api/compute/tile_move_copy.h"
 #include "api/compute/transpose.h"
 #include "api/dataflow/dataflow_buffer.h"
@@ -323,10 +333,12 @@ void kernel_main() {
             PACK((pack_reconfig_data_format(mm_partials_dfb_id)));
         }
 #endif
+#ifndef IN1_STREAM
         if (run_first) {
             // the whole expert block (all K-blocks) becomes resident in cb_in1 for this run
             in1_dfb.wait_front(num_blocks_inner_dim * in1_block_num_tiles);
         }
+#endif
 
         for (uint32_t bh = 0; bh < num_blocks_h_dim; ++bh) {
             for (uint32_t bw = 0; bw < num_blocks_w_dim; ++bw) {
@@ -368,7 +380,22 @@ void kernel_main() {
                     }
 
                     in0_dfb.wait_front(in0_block_num_tiles);
+#ifdef IN1_STREAM
+                    // the in1 writer pushes the expert K-block by K-block (gfm_writer.cpp IN1_STREAM): a run's first
+                    // group waits for each block as it reaches it (resident at block * size); its last group takes
+                    // them from the front and pops each one after use (the space the next expert is read into)
+                    uint32_t in1_resident_block_offset = 0;
+                    if (run_last) {
+                        in1_dfb.wait_front(in1_block_num_tiles);
+                    } else {
+                        if (run_first) {
+                            in1_dfb.wait_front((block + 1) * in1_block_num_tiles);
+                        }
+                        in1_resident_block_offset = block * in1_block_num_tiles;
+                    }
+#else
                     const uint32_t in1_resident_block_offset = block * in1_block_num_tiles;
+#endif
 
                     int in0_index_subblock_offset = 0;
                     for (uint32_t in0_subblock = 0; in0_subblock < in0_num_subblocks; in0_subblock++) {
@@ -524,10 +551,17 @@ void kernel_main() {
 #endif
 
                     in0_dfb.pop_front(in0_block_num_tiles);
+#ifdef IN1_STREAM
+                    if (run_last) {
+                        in1_dfb.pop_front(in1_block_num_tiles);
+                    }
+#endif
                 }
+#ifndef IN1_STREAM
                 if (run_last) {
                     in1_dfb.pop_front(num_blocks_inner_dim * in1_block_num_tiles);
                 }
+#endif
 
 #ifdef FUSE_BIAS
 #ifdef PACK_RELU
@@ -706,6 +740,69 @@ void kernel_main() {
                 }
             }
         }
+#ifdef FUSE_SWIGLU
+        {
+            // HY4_PF_GMM_SWIGLU: tt/swiglu_pf's SwiGLU of this group's [up | gate] block (the matmul packed it into
+            // cb_out = a bf16 staging CB) -> o = clamp(up, -L, L) * silu(clamp(gate, max=L)) * bcast_col(w) into
+            // cb_sw_out, the same SFPU calls in the same order on the same 16-bit DEST as swiglu_pf/kernels/sw_compute.cpp
+            constexpr uint32_t NT = get_named_compile_time_arg_val("sw_nt");
+            constexpr uint32_t LIM = get_named_compile_time_arg_val("sw_lim");
+            constexpr uint32_t NLIM = get_named_compile_time_arg_val("sw_nlim");
+            constexpr uint32_t NINF = get_named_compile_time_arg_val("sw_ninf");
+            constexpr uint32_t cb_sin = out_dfb_id;
+            constexpr uint32_t cb_sw = get_named_compile_time_arg_val("cb_sw_w");
+            constexpr uint32_t cb_sout = get_named_compile_time_arg_val("cb_sw_out");
+            constexpr uint32_t B = 3;
+            static_assert(NT % B == 0 && 2 * NT == out_block_num_tiles);
+            reconfig_data_format_srca(in1_dfb_id, cb_sin);
+            PACK((pack_reconfig_data_format(cb_sout)));
+            cb_wait_front(cb_sin, 2 * NT);
+            cb_wait_front(cb_sw, 1);
+            for (uint32_t j0 = 0; j0 < NT; j0 += B) {
+                cb_reserve_back(cb_sout, B);
+                tile_regs_acquire();
+                copy_init(cb_sin);
+                for (uint32_t i = 0; i < B; ++i) {
+                    copy_tile(cb_sin, j0 + i, i);           // up
+                    copy_tile(cb_sin, NT + j0 + i, B + i);  // gate
+                }
+                clamp_tile_init();
+                for (uint32_t i = 0; i < B; ++i) {
+                    clamp_tile(B + i, NINF, LIM);
+                }
+                for (uint32_t i = 0; i < B; ++i) {
+                    clamp_tile(i, NLIM, LIM);
+                }
+                silu_tile_init();
+                for (uint32_t i = 0; i < B; ++i) {
+                    silu_tile(B + i);
+                }
+                mul_binary_tile_init();
+                for (uint32_t i = 0; i < B; ++i) {
+                    mul_binary_tile(i, B + i, i);
+                }
+                unary_bcast_init<BroadcastType::COL>(cb_sw);
+                unary_bcast<BroadcastType::COL>(cb_sw, 0, 2 * B);
+                unary_bcast_uninit<BroadcastType::COL>(cb_sw);
+                mul_binary_tile_init();
+                for (uint32_t i = 0; i < B; ++i) {
+                    mul_binary_tile(i, 2 * B, i);
+                }
+                tile_regs_commit();
+                tile_regs_wait();
+                for (uint32_t i = 0; i < B; ++i) {
+                    pack_tile(i, cb_sout);
+                }
+                tile_regs_release();
+                cb_push_back(cb_sout, B);
+            }
+            cb_pop_front(cb_sin, 2 * NT);
+            cb_pop_front(cb_sw, 1);
+            reconfig_data_format_srca(cb_sin, in1_dfb_id);
+            matmul_block_init(in0_dfb_id, in1_dfb_id, in1_transpose_tile, out_subblock_w, out_subblock_h, in0_block_w);
+            PACK((pack_reconfig_data_format(mm_partials_dfb_id)));
+        }
+#endif
     }
 #ifdef FUSE_BIAS
     // For num_blocks_w_dim == 1 the reader pushes bias once and the kernel holds it resident,

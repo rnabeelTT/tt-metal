@@ -18,6 +18,7 @@ import os
 import ttnn
 
 from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import SortedDispatch, gather_rows, undispatch_rows
+from models.autoports.tencent_hy4_flash.tt.common import l1_cb_room
 from models.autoports.tencent_hy4_flash.tt.gather_mm import GatherMM
 from models.autoports.tencent_hy4_flash.tt.swiglu_pf import SwigluPF
 
@@ -188,14 +189,24 @@ class SortedExperts:
         E, L, Il = moe.E, moe.L, moe.Il
         m = self._build(ids, scores, T)
         Rd, G = m["Rd"], m["G"]
-        if self.gather_mm and os.environ.get("HY4_PF_GATHER_MM", "1") == "1":
+        din2 = None
+        # HY4_PF_GMM_SWIGLU (default 1): the SwiGLU x routing weight inside the gather-matmul (tt/gather_mm): no
+        # [G, 32, 2 Il] round trip through DRAM, no padding groups. Bit-identical to swiglu_pf.
+        fsw = (os.environ.get("HY4_PF_GMM_SWIGLU", "1") == "1" and SwigluPF.supports(Il)
+               and GatherMM.swiglu_ok(moe.ckc_e, 2 * Il))
+        # (its CBs must fit below the L1 buffers allocated now: the served engine holds L1 residents)
+        if (self.gather_mm and os.environ.get("HY4_PF_GATHER_MM", "1") == "1"
+                and GatherMM.cb_bytes(self.cfg_gu, moe.up_gate, L, G, fsw) <= l1_cb_room(moe.mesh)):
             # HY4_PF_GATHER_MM (default 1): the gate|up grouped matmul reads its rows by index from the row-major latent
             # (tt/gather_mm: PR 61548 row 35), no [G, 32, L] gathered copy (moe_gather_rows). Bit-identical.
             x_rm = ttnn.to_layout(ttnn.reshape(xl, (T, L)), ttnn.ROW_MAJOR_LAYOUT)
             fused = GatherMM.get(moe.mesh)(x_rm, m["src_tok"], m["group_ids"], moe.up_gate, self.cfg_gu, moe.ckc_e, E,
-                                           DRAM)  # [1,G,32,2Il] = [up | gate] per die
+                                           DRAM, swiglu=(m["weights"], float(moe.limit)) if fsw else None)
+            # [1,G,32,2Il] = [up | gate] per die; with the SwiGLU [1,G,32,Il] = din2
             ttnn.deallocate(x_rm)
             ttnn.deallocate(m["src_tok"])
+            if fsw:
+                din2, fused = fused, None
         else:
             x_disp = gather_rows(xl, m["src_tok"], Rd, GS, group_ids=m["group_ids"], num_experts=E)  # [1,G,32,L]
             ttnn.deallocate(m["src_tok"])
@@ -203,7 +214,9 @@ class SortedExperts:
                                        memory_config=DRAM, program_config=self.cfg_gu, compute_kernel_config=moe.ckc_e,
                                        dtype=ttnn.bfloat16)  # [1,G,32,2Il] = [up | gate] per die
             ttnn.deallocate(x_disp)
-        if os.environ.get("HY4_PF_SWIGLU", "1") == "1" and SwigluPF.supports(Il):
+        if din2 is not None:
+            pass
+        elif os.environ.get("HY4_PF_SWIGLU", "1") == "1" and SwigluPF.supports(Il):
             # one program for slice x 2, clamp x 2, multiply(silu), routing-weight multiply (tt/swiglu_pf: the same
             # SFPU calls in the same order on a 16-bit DEST: bit-identical)
             din2 = SwigluPF.get(moe.mesh)(fused, m["weights"], float(moe.limit), DRAM)

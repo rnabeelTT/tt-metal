@@ -32,6 +32,12 @@ void kernel_main() {
     const auto s_x = TensorAccessor(x_args, x_addr, row_bytes);
     const auto s_src = TensorAccessor(src_args, src_addr, src_page);
     const auto s_gid = TensorAccessor(gid_args, gid_addr, gid_bytes);
+#ifdef FUSE_SWIGLU
+    // the routing-weight tile of each real group (column 0 of [Rd, 1] bf16, tile g) for the fused SwiGLU
+    constexpr auto w_args = TensorAccessorArgs<gid_args.next_compile_time_args_offset()>();
+    constexpr uint32_t cb_w = get_compile_time_arg_val(w_args.next_compile_time_args_offset());
+    const auto s_w = TensorAccessor(w_args, get_arg_val<uint32_t>(5), 2048);
+#endif
     const uint32_t gid_l1 = get_write_ptr(cb_gid);
     const uint32_t src_l1 = get_write_ptr(cb_src);
     noc_async_read(s_gid.get_noc_addr(0), gid_l1, gid_bytes);
@@ -51,7 +57,14 @@ void kernel_main() {
         for (uint32_t r = 0; r < 32; ++r) {
             noc_async_read(s_x.get_noc_addr(src[r]), base + r * row_bytes, row_bytes);
         }
+#ifdef FUSE_SWIGLU
+        cb_reserve_back(cb_w, 1);
+        noc_async_read(s_w.get_noc_addr(g), get_write_ptr(cb_w), 2048);
+#endif
         noc_async_read_barrier();
         cb_push_back(cb_rm, kt);
+#ifdef FUSE_SWIGLU
+        cb_push_back(cb_w, 1);
+#endif
     }
 }
