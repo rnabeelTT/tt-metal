@@ -560,14 +560,15 @@ class Inkling2Model:
             if s is not None:
                 s.reset(lane)
 
-    def forward_packed(self, ids: torch.Tensor, segs):
+    def forward_packed(self, ids: torch.Tensor, segs, taps=None):
         """A packed prefill chunk: ids [T] holding segments segs = [(row0, R, p0, valid, slot, lane)] (each its own
-        sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row."""
+        sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row. taps: see forward."""
         slid = next(self.apps[a].cache for a, (li, _) in enumerate(self.sched) if self.layers[li].sliding)
         glob = next((self.apps[a].cache for a, (li, _) in enumerate(self.sched) if not self.layers[li].sliding), None)
         ctx = PackedCtx(self.mesh, segs, slid, glob)
         try:
-            return self.forward(ids, 0, ctx=ctx, last_rows=[row0 + valid - 1 for row0, _, _, valid, _, _ in segs])
+            return self.forward(ids, 0, ctx=ctx, last_rows=[row0 + valid - 1 for row0, _, _, valid, _, _ in segs],
+                                taps=taps)
         finally:
             ctx.release()
 

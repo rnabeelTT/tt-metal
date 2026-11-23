@@ -156,6 +156,11 @@ class BatchedConv:
         ttnn.copy(xf, self.s[K - 2])
         return _bf(y)
 
+    def move_row(self, src: int, dst: int):
+        """Row dst of the states := row src (a verify pass's committed row back to its slot's row)."""
+        for t in self.s:
+            _set_row(t, dst, ttnn.slice(t, [0, 0, src, 0], [1, 1, src + 1, self.C]), self.B, self.C)
+
     def load_slot(self, b: int, lane_state):
         """Row b of the states := the lane's [1, 1, K-1, C] row-major fp32 state (after a slot's prefill)."""
         lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
@@ -216,6 +221,8 @@ class BatchedDynConv:
         ttnn.copy(self.s[2], self.s[1])
         ttnn.copy(xf, self.s[2])
         return _bf(y)
+
+    move_row = BatchedConv.move_row
 
     def load_slot(self, b: int, lane_state):
         lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
@@ -477,6 +484,15 @@ class BatchedDecoder:
                                     nr[(li, k)] = rw(getattr(L, f"{k}_norm"))
                         model._norm_rows = nr
                     self.pre, self.aq_rows, self.norm_rows = model._pre, model._aq_rows, model._norm_rows
+
+    def move_row(self, src: int, dst: int = 0):
+        """Every conv state's row src -> row dst (leaving speculative decode: the committed row back to the slot's)."""
+        seen = set()
+        for ba in self.apps:
+            for cv in (ba.k, ba.v, ba.attn, ba.mlp):
+                if id(cv) not in seen:
+                    seen.add(id(cv))
+                    cv.move_row(src, dst)
 
     def set_accept(self, acc):
         """verify: slot g's state is at row R g + acc[g] of the previous pass (its last accepted row)."""

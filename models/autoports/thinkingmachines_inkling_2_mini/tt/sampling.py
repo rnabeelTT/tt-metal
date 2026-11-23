@@ -121,42 +121,82 @@ class HostSampler:
             self.gens[row] = g = (int(seed), gen)
         return g[1]
 
+    def dist(self, ids, vals, r, sp, outs=None, prompt=None):
+        """One row's candidates (ids, logits [K]) under vLLM's semantics -> (ids, probs) after penalties, temperature,
+        top-k, top-p; probs None at temperature 0 (ids then holds the greedy token alone). outs / prompt: the
+        request's output / prompt tokens (penalties)."""
+        ids, lg = ids.clone(), vals.double().clone()
+        ok = ids < self.V  # the LM head's zero-padded vocab columns are never sampled
+        ids, lg = ids[ok], lg[ok]
+        rep = float(_param(sp, "repetition_penalty", r, 1.0))
+        fre = float(_param(sp, "frequency_penalty", r, 0.0))
+        pre = float(_param(sp, "presence_penalty", r, 0.0))
+        if (rep != 1.0 or fre != 0.0 or pre != 0.0) and outs is not None:
+            outs = outs[outs >= 0].to(torch.int64)
+            cnt = (ids[:, None] == outs[None, :]).sum(-1).double()
+            if rep != 1.0:
+                seen = cnt > 0
+                if prompt is not None:
+                    pr = prompt[prompt >= 0].to(torch.int64)
+                    seen = seen | (ids[:, None] == pr[None, :]).any(-1)
+                lg = torch.where(seen, torch.where(lg > 0, lg / rep, lg * rep), lg)
+            lg = lg - fre * cnt - pre * (cnt > 0).double()
+        temp = float(_param(sp, "temperature", r, 0.0))
+        if temp <= 0.0:
+            i = int(torch.argmax(lg))  # ties: the lower index (candidates sorted descending)
+            return ids[i : i + 1], None
+        lg = lg / temp
+        order = torch.argsort(lg, descending=True)
+        ids, lg = ids[order], lg[order]
+        tk = int(_param(sp, "top_k", r, -1))
+        if 0 < tk < lg.numel():
+            ids, lg = ids[:tk], lg[:tk]
+        p = torch.softmax(lg, -1)
+        tp = float(_param(sp, "top_p", r, 1.0))
+        if 0.0 < tp < 1.0:
+            keep = torch.cumsum(p, -1) - p < tp
+            keep[0] = True
+            ids, p = ids[keep], p[keep] / p[keep].sum()
+        return ids, p
+
     def sample(self, idx, vals, rows, sp, output_tokens=None, prompt_tokens=None):
         """idx / vals [W, K] by slot; rows: list of (vLLM row r, slot s). Returns {r: token}."""
         out = {}
         for r, s in rows:
-            ids, lg = idx[s].clone(), vals[s].double().clone()
-            ok = ids < self.V  # the LM head's zero-padded vocab columns are never sampled
-            ids, lg = ids[ok], lg[ok]
-            rep = float(_param(sp, "repetition_penalty", r, 1.0))
-            fre = float(_param(sp, "frequency_penalty", r, 0.0))
-            pre = float(_param(sp, "presence_penalty", r, 0.0))
-            if (rep != 1.0 or fre != 0.0 or pre != 0.0) and output_tokens is not None:
-                outs = output_tokens[r][output_tokens[r] >= 0].to(torch.int64)
-                cnt = (ids[:, None] == outs[None, :]).sum(-1).double()
-                if rep != 1.0:
-                    seen = cnt > 0
-                    if prompt_tokens is not None:
-                        pr = prompt_tokens[r][prompt_tokens[r] >= 0].to(torch.int64)
-                        seen = seen | (ids[:, None] == pr[None, :]).any(-1)
-                    lg = torch.where(seen, torch.where(lg > 0, lg / rep, lg * rep), lg)
-                lg = lg - fre * cnt - pre * (cnt > 0).double()
-            temp = float(_param(sp, "temperature", r, 0.0))
-            if temp <= 0.0:
-                out[r] = int(ids[int(torch.argmax(lg))])  # ties: the lower index (candidates sorted descending)
+            ids, p = self.dist(idx[s], vals[s], r, sp, None if output_tokens is None else output_tokens[r],
+                               None if prompt_tokens is None else prompt_tokens[r])
+            if p is None:
+                out[r] = int(ids[0])
                 continue
-            lg = lg / temp
-            order = torch.argsort(lg, descending=True)
-            ids, lg = ids[order], lg[order]
-            tk = int(_param(sp, "top_k", r, -1))
-            if 0 < tk < lg.numel():
-                ids, lg = ids[:tk], lg[:tk]
-            p = torch.softmax(lg, -1)
-            tp = float(_param(sp, "top_p", r, 1.0))
-            if 0.0 < tp < 1.0:
-                keep = torch.cumsum(p, -1) - p < tp
-                keep[0] = True
-                ids, p = ids[keep], p[keep] / p[keep].sum()
             gen = self._gen(r, _param(sp, "seed", r, None))
             out[r] = int(ids[int(torch.multinomial(p, 1, generator=gen))])
         return out
+
+    def spec(self, idx, vals, r, drafts, sp, outs=None, prompt=None):
+        """Speculative acceptance of a greedy drafter's drafts (a point-mass proposal). idx / vals [d + 1, K]: verify
+        row j scores the token after drafts[:j]. Draft j is kept with probability p_j(draft) (greedy: iff it is the
+        argmax); the first rejection draws from p_j without the draft, renormalised; all kept: a draw from row d. The
+        emitted tokens follow the target's distribution exactly. -> (tokens emitted, drafts kept)."""
+        gen = self._gen(r, _param(sp, "seed", r, None))
+        hist = outs[outs >= 0].to(torch.int64) if outs is not None else torch.zeros(0, dtype=torch.int64)
+        emitted = []
+        for j in range(len(drafts) + 1):
+            ids, p = self.dist(idx[j], vals[j], r, sp, torch.cat([hist, torch.tensor(emitted, dtype=torch.int64)]),
+                               prompt)
+            last = j == len(drafts)
+            if p is None:  # greedy
+                if not last and int(ids[0]) == drafts[j]:
+                    emitted.append(drafts[j])
+                    continue
+                return emitted + [int(ids[0])], j
+            if not last:
+                hit = ids == drafts[j]
+                pd = float(p[hit].sum())
+                if pd > 0.0 and float(torch.rand(1, generator=gen, dtype=torch.float64)) < pd:
+                    emitted.append(drafts[j])
+                    continue
+                if pd > 0.0:
+                    p = torch.where(hit, torch.zeros_like(p), p)
+                    p = p / p.sum()
+            return emitted + [int(ids[int(torch.multinomial(p, 1, generator=gen))])], j
+        raise AssertionError("unreachable")

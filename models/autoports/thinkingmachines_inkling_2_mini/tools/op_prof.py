@@ -91,9 +91,14 @@ def main():
         REC["on"] = True
         run()
     else:
-        dec = BatchedDecoder(m, B)
         dp = int(os.environ.get("DPOS", "300"))  # (decode: the first slot's position)
-        dec.set_inputs(torch.arange(100, 100 + B), torch.arange(dp, dp + B))
+        toks = torch.arange(100, 100 + B)
+        if os.environ.get("VERIFY") == "1":  # (B speculative verify rows of one sequence, real text tokens)
+            dec = BatchedDecoder(m, B, shared=BatchedDecoder(m, B), verify=B)
+            toks = next(iter(torch.load("/cache/fixtures/dspark_taps.pt")["texts"].values()))["ids"][dp : dp + B]
+        else:
+            dec = BatchedDecoder(m, B)
+        dec.set_inputs(toks, torch.arange(dp, dp + B))
         dec.step()
         dec.step()
         _read()
