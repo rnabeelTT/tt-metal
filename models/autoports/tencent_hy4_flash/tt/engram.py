@@ -91,6 +91,13 @@ class Hy4EngramDevice:
                              [bf(sd[f"norm_key.{i}.weight"]).float() for i in range(hc)] +
                              [bf(sd[f"norm_query.{i}.weight"]).float() for i in range(hc)])
             self.dec_nw = upload(mesh, nw.reshape(1, 2 * hc + 1, 1, H), ttnn.float32)
+            # HY4_ENG_FUSED (default 1): the decode tail's elementwise ops as 4 programs with the chain's numerics
+            # (tt/engram_exact; bit-identical); "0" = the ttnn chain
+            self.fused = None
+            if os.environ.get("HY4_ENG_FUSED", "1") == "1" and hc == 4 and (H // 32) % 32 == 0:
+                from models.autoports.tencent_hy4_flash.tt.engram_exact import EngramExactOp
+
+                self.fused = EngramExactOp.get(mesh, H)
 
     def _rms(self, x, w, mem):
         """torch.nn.RMSNorm(eps=None) on a bf16 input: fp32 math, the weight applied in fp32, one rounding at the end
@@ -137,6 +144,32 @@ class Hy4EngramDevice:
         out_mem = mem
         mem = ttnn.L1_MEMORY_CONFIG if os.environ.get("HY4_ENGRAM_DEC_L1", "1") == "1" else mem
         y = self.dec(emb, mem)  # [1, 1, 32, (1 + hc) H] fp32
+        op = getattr(self, "fused", None)
+        if op is not None and os.environ.get("HY4_ENG_FUSED", "1") == "1":
+            allv = op.pre(y, self.dec_b, X, mem)  # [1, 9, 32, H] fp32: v, k_0..3 (bf16-rounded), x_0..3
+            ttnn.deallocate(y)
+            n = ttnn.rms_norm(allv, epsilon=NORM_EPS, compute_kernel_config=self.ckc, memory_config=mem)
+            ttnn.deallocate(allv)
+            main, kq = op.mid(n, self.dec_nw, mem)
+            ttnn.deallocate(n)
+            from models.autoports.tencent_hy4_flash.tt.common import DECODE_ROWS
+
+            if int(DECODE_ROWS[0]) > 8 and os.environ.get("HY4_ENG_FOLD", "1") == "1":
+                # > 8 rows: _row_sum's 8-row blocks would each re-sum all H/32 tiles (4 x ~80 us); fold the tiles once
+                # (tt/engram_exact fold, the same IEEE adds in the same order) and block-sum the one folded tile
+                S = op.fold(kq, mem)
+                ttnn.deallocate(kq)
+                s = _row_sum(S, mem)  # [1, hc, 32, 1]
+                ttnn.deallocate(S)
+            else:
+                s = _row_sum(kq, mem)  # [1, hc, 32, 1]
+                ttnn.deallocate(kq)
+            g = op.gate(s, self.inv_sqrt_h, mem)
+            ttnn.deallocate(s)
+            out = op.tail(g, self.sc, main, X, out_mem)
+            ttnn.deallocate(g)
+            ttnn.deallocate(main)
+            return out
         yb = ttnn.add(y, self.dec_b, dtype=ttnn.bfloat16, memory_config=mem)  # + bias, rounded once (as torch bf16)
         ttnn.deallocate(y)
         yf = ttnn.typecast(yb, ttnn.float32, memory_config=mem)
