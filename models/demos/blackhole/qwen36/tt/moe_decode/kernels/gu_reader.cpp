@@ -126,7 +126,13 @@ void kernel_main() {
     };
     auto stream_slot = [&](uint32_t base, uint32_t e) {
         for (uint32_t h = 0; h < nb; ++h) {
+#if defined(GU_FAR_W)
+            if (h == 0) {
+                stream_block(base, e, pair);  // bank q only: the writer streams bank q + banks / 2 (NOC1)
+            }
+#else
             stream_block(base, e, pair + h * (banks / 2));
+#endif
         }
     };
 

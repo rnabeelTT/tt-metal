@@ -63,6 +63,22 @@ void kernel_main() {
     constexpr auto act_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto table_args = TensorAccessorArgs<act_args.next_compile_time_args_offset()>();
 
+#ifdef GU_FAR_W
+    // the far bank block (bank q + banks / 2) of every slot this core owns, streamed on this RISC's NoC (NOC1: its
+    // responses run west from the centre DRAM column, off the NOC0 links bank q's block uses) into cb_w1
+    constexpr uint32_t far_ct = table_args.next_compile_time_args_offset();
+    constexpr uint32_t cb_w1 = get_compile_time_arg_val(far_ct);
+    constexpr uint32_t f_page_bytes = get_compile_time_arg_val(far_ct + 1);
+    constexpr uint32_t f_buffers = get_compile_time_arg_val(far_ct + 2);
+    constexpr uint32_t f_tile_bytes = get_compile_time_arg_val(far_ct + 3);
+    constexpr uint32_t f_blk_tiles = kx * m;
+    constexpr uint32_t f_blk_bytes = f_blk_tiles * f_tile_bytes;
+    constexpr uint32_t f_pages = f_blk_bytes / f_page_bytes;
+    static_assert(f_pages * f_page_bytes == f_blk_bytes, "page size must divide the block");
+    static_assert(f_buffers >= 2 && f_buffers <= 15, "far ring: 2..15 blocks (transaction ids 1..15)");
+    const uint32_t w_addr = get_arg_val<uint32_t>(5);
+    const uint32_t far_bank = get_arg_val<uint32_t>(6);
+#endif
     constexpr uint32_t tb = trows * 64;  // one [trows, 32] BF16 tile
     constexpr uint32_t half = trows * 32;
     static_assert(groups * trows >= rows && (groups == 1 || trows == 8), "row groups of 8");
@@ -236,19 +252,68 @@ void kernel_main() {
             cb_wait_front(cb_act, np);
             for (uint32_t p = 0; p < np; ++p) {
                 const uint32_t pj = gu_layout::pair_index<m, banks>(pair, p);
+#ifdef ACT_BLK
+                // one page per (slot, row group): the pairs' tiles in K order
+                noc_async_write(get_read_ptr(cb_act) + p * tb, s_act.get_noc_addr(s * groups + g, pj * tb), tb);
+#else
                 noc_async_write(get_read_ptr(cb_act) + p * tb, s_act.get_noc_addr((s * pairs + pj) * groups + g), tb);
+#endif
             }
             noc_async_writes_flushed();
             cb_pop_front(cb_act, np);
         }
     };
 #endif
+#ifdef GU_FAR_W
+    // far stream: block j (the j-th slot of this core) uses transaction id 1 + j % f_buffers and ring position
+    // j % f_buffers; blocks are issued up to f_buffers - 1 slots ahead and pushed in order before the slot's drain
+    reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
+    const uint64_t far_noc = get_noc_addr_from_bank_id<true>(far_bank, w_addr);
+    const uint32_t f_base = get_write_ptr(cb_w1);
+    uint32_t issued = 0, pushed = 0;
+    auto issue_far = [&]() {  // block `issued` (slot slot0 + issued * step)
+        const uint32_t e = uni[slot0 + issued * step - 1];
+        cb_reserve_back(cb_w1, f_blk_tiles * (issued - pushed + 1));
+        uint32_t src = e * f_blk_bytes;
+        uint32_t dst = f_base + (issued % f_buffers) * f_blk_bytes;
+        const uint32_t trid = 1 + issued % f_buffers;
+        noc_async_read_one_packet_set_state<true>(far_noc, f_page_bytes, (pair + 2) & 0x3);
+        noc_async_read_set_trid(trid);
+        for (uint32_t p = 0; p < f_pages; ++p) {
+            noc_async_read_one_packet_with_state_with_trid((uint32_t)far_noc, src, dst, trid);
+            src += f_page_bytes;
+            dst += f_page_bytes;
+        }
+        ++issued;
+    };
+    auto push_far = [&]() {
+        noc_async_read_barrier_with_trid(1 + pushed % f_buffers);
+        cb_push_back(cb_w1, f_blk_tiles);
+        ++pushed;
+    };
+    while (issued < mine && issued < f_buffers - 1) {
+        issue_far();
+    }
+#endif
     uint32_t i = 0;
     for (uint32_t s = slot0; s < U + 1; s += step, ++i) {
         cb_reserve_back(cb_sc, 2 * groups);
         const uint32_t sc = get_write_ptr(cb_sc);
+#ifdef GU_FAR_W
+        push_far();  // slot i's far block (the compute needs it with cb_sc)
+        {
+            volatile tt_l1_ptr uint32_t* z = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sc);
+            for (uint32_t q = 0; q < 2 * groups * tb / 4; ++q) {
+                z[q] = 0;  // (no NoC zero reads: their barrier would wait on the far stream)
+            }
+        }
+        if (issued < mine) {
+            issue_far();
+        }
+#else
         zero_l1(sc, 2 * groups * tb);
         noc_async_read_barrier();
+#endif
         for (uint32_t g = 0; g < groups; ++g) {
             // row rr of a [trows, 32] tile: 16 values in face 0 (word 8 rr ..), 16 in face 1 (word 8 (trows + rr) ..)
             volatile tt_l1_ptr uint32_t* t32 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sc + 2 * g * tb);
@@ -273,6 +338,10 @@ void kernel_main() {
     }
     noc_async_write_barrier();
     noc_async_atomic_barrier();
+#ifdef GU_FAR_W
+    noc_async_read_one_packet_set_state<true>(get_noc_addr(MEM_ZEROS_BASE), 0, 1);
+    noc_async_read_set_trid(0);
+#endif
     cb_pop_front(cb_wt, 1);
     cb_pop_front(cb_tab, 1);
 }

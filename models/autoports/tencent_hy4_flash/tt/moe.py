@@ -42,6 +42,21 @@ def _lshard_topology():
     return ttnn.Topology.Ring if os.environ.get("HY4_LSHARD_TOPO", "linear") == "ring" else ttnn.Topology.Linear
 
 
+def _stream_defaults():
+    """Hy4's routed-expert streaming knobs of the qwen36 fused multi-row MoE (moe_decode/union.py), from 17 rows (the
+    batched-spec verify passes of 6-8 users; below, the qwen36 defaults), unless set; exact (data movement and core
+    counts only, bit-identical logits): the activation buffer in one page per (slot, row group) (QWEN35_MOE_ACT_BLK),
+    down-weight chunks of 2 union slots (QWEN35_MOE_DN_CHUNK), the far bank block on the writer's NOC1
+    (QWEN35_MOE_GU_FARW) with 8 cores per column group (QWEN35_MOE_GUR_READERS; 4 row groups made the gate|up op
+    compute bound on 16 cores). In-model verify pass (8 lanes x r rows, device): 24 rows 88.9 -> 67.5 ms, 32 rows
+    110.3 -> 76.7 ms. HY4_MOE_STREAM=0: the qwen36 defaults."""
+    if os.environ.get("HY4_MOE_STREAM", "1") != "1":
+        return
+    for k, v in (("QWEN35_MOE_ACT_BLK", "17"), ("QWEN35_MOE_DN_CHUNK", "17:2"), ("QWEN35_MOE_GU_FARW", "17"),
+                 ("QWEN35_MOE_GUR_READERS", "17:8")):
+        os.environ.setdefault(k, v)
+
+
 def _dt(name, default):
     return {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}[os.environ.get(name, default)]
 
@@ -250,6 +265,7 @@ class Hy4MoE:
         # route record ROUTE_WIDE; the "keys" router: sigmoid + bias on the Tensix, top-k on the data-movement cores)
         if os.environ.get("HY4_MOE_FUSED", "1") == "1" and tp > 1 and self.dec is not None:
             os.environ["MOE_SWIGLU_LIMIT"] = str(self.limit)
+            _stream_defaults()
             from models.demos.blackhole.qwen36.tt.moe_decode import fused as moe_fused
 
             if moe_fused.supported(E, L, Il, gu_dt, banks=len(moe_fused.bank_workers(mesh))):

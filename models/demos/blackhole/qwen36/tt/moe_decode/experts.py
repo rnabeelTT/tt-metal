@@ -211,6 +211,13 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
     return placed, noc1
 
 
+def gu_variant_key():
+    """The env knobs the gate|up ops read when built (cache keys of fused.FusedMoEDecode)."""
+    return tuple(os.environ.get(k, "") for k in ("QWEN35_MOE_GU_FARW", "QWEN35_MOE_GU_FARW_NEAR",
+                                                 "QWEN35_MOE_GU_FARW_FAR", "QWEN35_MOE_GUR_READERS", "QWEN35_MOE_DN_CHUNK",
+                                                 "QWEN35_MOE_DN_READERS"))
+
+
 def _range_set(cores):
     rs = ttnn.CoreRangeSet([ttnn.CoreRange(cores[0], cores[0])])
     for c in cores[1:]:
@@ -334,6 +341,12 @@ class ExpertGateUp:
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers)  # bank blocks in the cb_w ring (buffers - 2 read ahead)
+        # QWEN35_MOE_GU_FARW=1 (nb = 2): the writer streams bank q + banks / 2's block on NOC1 (union.py ExpertGateUpRows)
+        self.farw = os.environ.get("QWEN35_MOE_GU_FARW", "0") == "1" and self.nb == 2 and not shared and not ep_experts
+        # (an n >= 2 value: the multi-row op at n rows and more only, union.farw_rows)
+        if self.farw:
+            self.buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_NEAR", "3"))
+            self.far_buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_FAR", "3"))
         self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
         self.dst_full = self.m * self.nb > 4  # FP32 DST: 4 tiles half-sync, 8 full-sync
         assert self.m * self.nb <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
@@ -359,6 +372,10 @@ class ExpertGateUp:
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * len(self.group_pairs[0]), tiny=True),
         ]
+        cb_w1 = 7
+        if self.farw:
+            assert notify is None, "GU_FAR_W: not with the one-program MoE"
+            cbs.append(_cb(self.cores, cb_w1, self.weight_dtype, self.tile_bytes, self.far_buffers * self.kt * self.m))
         tail = [] if notify is None else [len(notify[1])] + [v for xy in notify[1] for v in xy]
         bias_arg = [] if bias is None else [bias.buffer_address()]
         rd_rt, wr_rt, cp_rt = {}, {}, {}
@@ -369,6 +386,8 @@ class ExpertGateUp:
             rd_rt[(c.x, c.y)] = [logits.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(), j, vc, len(sl)] + sl + bias_arg + ep_arg
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), route.buffer_address(), logits.buffer_address(), j, int(i == 0 and notify is None), len(sl)] + sl + bias_arg + tail
             cp_rt[(c.x, c.y)] = [len(sl)]
+            if self.farw:
+                wr_rt[(c.x, c.y)] += [up_gate.buffer_address(), j + self.banks // 2]
         rd_ct = [cb_w, cb_route, cb_scr, self.kt, self.n_tiles, self.E, self.k, cb_part, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, self.buffers] + ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         wr_ct = [cb_x, cb_act, cb_route, self.kt, self.k, self.E, 2 * self.inter, cb_part, cb_lg, self.m, self.banks]
@@ -376,6 +395,10 @@ class ExpertGateUp:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, self.kt, self.m, self.banks]
         defines = [] if notify is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(notify[0]))]
+        if self.farw:
+            wr_ct += [cb_w1, self.page_bytes, self.far_buffers, self.tile_bytes]
+            cp_ct += [cb_w1]
+            defines += [("GU_FAR_W", "1")]
         defines += router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
         defines += _ep_defines(self.ep_experts, self.gate_first)
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs

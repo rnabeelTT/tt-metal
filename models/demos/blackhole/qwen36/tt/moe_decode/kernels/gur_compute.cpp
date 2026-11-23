@@ -136,15 +136,30 @@ void kernel_main() {
 
     cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
+#ifdef GU_FAR_W
+    // bank q's block in cb_w (reader, NOC0), bank q + banks / 2's in cb_w1 (writer, NOC1): same tiles, same DST order
+    static_assert(nb == 2, "GU_FAR_W: two bank blocks per slot");
+    constexpr uint32_t cb_w1 = get_compile_time_arg_val(9);
+#endif
     for (uint32_t i = 0; i < n; ++i) {
+#ifdef GU_FAR_W
+        cb_wait_front(cb_w, kt * m);
+        cb_wait_front(cb_w1, kt * m);
+#else
         cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
+#endif
         cb_wait_front(cb_sc, 2 * groups);
         for (uint32_t g = 0; g < groups; ++g) {
             tile_regs_acquire();
+#ifdef GU_FAR_W
+            custom_mm_block<mm_layout, true>(cb_x, cb_w, g * kt, 0, 0, kt, m);
+            custom_mm_block<mm_layout, true>(cb_x, cb_w1, g * kt, 0, m, kt, m);
+#else
             gu_layout::static_for<nb>([&](auto h) {
                 constexpr uint32_t hb = decltype(h)::value;
                 custom_mm_block<mm_layout, true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
             });
+#endif
             custom_mm_block_init_short<transpose, mm_layout>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<mm_layout, true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
@@ -201,7 +216,12 @@ void kernel_main() {
             custom_mm_block_init_short<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
         }
         cb_pop_front(cb_sc, 2 * groups);
+#ifdef GU_FAR_W
+        cb_pop_front(cb_w, kt * m);
+        cb_pop_front(cb_w1, kt * m);
+#else
         cb_pop_front(cb_w, nb * kt * m);
+#endif
     }
     cb_pop_front(cb_id, 2);
     cb_pop_front(cb_x, groups * kt);

@@ -48,8 +48,10 @@ void kernel_main() {
     constexpr auto id_args = TensorAccessorArgs<table_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t m = n_tiles / banks;
-#ifdef SPLIT_PAIR
-    constexpr uint32_t nb = 1;  // split-pair: this core streams only its own bank's block (`pair` is the bank)
+#if defined(SPLIT_PAIR) || defined(GU_FAR_W)
+    // split-pair: this core streams only its own bank's block (`pair` is the bank); GU_FAR_W: only bank q's block (the
+    // writer streams bank q + banks / 2's on the other NoC)
+    constexpr uint32_t nb = 1;
 #else
     constexpr uint32_t nb = gu_layout::blocks<m>();
 #endif

@@ -21,7 +21,7 @@ import torch
 
 import ttnn
 
-from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets
+from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets, gu_variant_key
 from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer, upload_selection_bias
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
@@ -139,7 +139,7 @@ class FusedMoEDecode:
 
         gr = int(os.environ.get("QWEN35_MOE_GU_READERS", "4"))
         dr = int(os.environ.get("QWEN35_MOE_DN1_READERS", "0")) or None
-        key = self._key + ("one", gr, dr)
+        key = self._key + ("one", gr, dr, gu_variant_key())
         if key not in self._cache:
             H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
             ep = dict(ep_experts=ep_experts)
@@ -154,16 +154,22 @@ class FusedMoEDecode:
         """(RouteRows, ExpertGateUpRows, ExpertDownRows, RowsBuffers) for `rows` decode rows, one set per model; build
         every width the server traces before capturing (host uploads)."""
         key = self._key + ("rows", rows)
+        H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
+        ep = dict(ep_experts=ep_experts)
         if key not in self._cache:
-            H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
-            ep = dict(ep_experts=ep_experts)
-            self._cache[key] = (
-                RouteRows(self._mesh, E, k, rows, router=router),
+            self._cache[key] = (RouteRows(self._mesh, E, k, rows, router=router),
+                                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype))
+        # the gate|up and down ops per reader / chunk variant (experts.gu_variant_key, env read per call; no host
+        # uploads: the buffers stay the ones built before capture)
+        gkey = key + ("ops", gu_variant_key())
+        if gkey not in self._cache:
+            self._cache[gkey] = (
                 ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared, gate_first=gate_first, **ep),
                 ExpertDownRows(self._mesh, H, Il, E, k, down_dtype, rows, shared=shared, **ep),
-                RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
-        return self._cache[key]
+        route, b = self._cache[key]
+        gu, dn = self._cache[gkey]
+        return route, gu, dn, b
 
     def _logits(self, x):
         if self.router_logits is not None:

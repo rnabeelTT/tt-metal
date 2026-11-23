@@ -100,10 +100,15 @@ void kernel_main() {
         const uint32_t in0 = get_write_ptr(cb_in0);
         for (uint32_t g = 0; g < groups; ++g) {
             for (uint32_t s = s0; s < s0 + cs; ++s) {
+#ifdef ACT_BLK
+                // the slot's K block of this row group: one page (gur_writer.cpp ACT_BLK)
+                noc_async_read(s_act.get_noc_addr((S0 + s) * groups + g), in0 + (g * cs + s - s0) * kt * tb, kt * tb);
+#else
                 for (uint32_t k = 0; k < kt; ++k) {
                     noc_async_read(
                         s_act.get_noc_addr(((S0 + s) * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);
                 }
+#endif
             }
         }
         noc_async_read_barrier();

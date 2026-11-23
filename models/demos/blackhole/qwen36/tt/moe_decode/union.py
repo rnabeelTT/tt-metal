@@ -58,6 +58,24 @@ def row_groups(m):
 ACT_PAGE = 64 * 8  # one [8, 32] BF16 tile: every width's [Mp, 32] tile fits a page
 
 
+def _min_rows(name):
+    """An env knob "0" / unset (off), "1" (every row count) or n >= 2 (n rows and more) -> the smallest row count it
+    applies to (huge: off)."""
+    v = int(os.environ.get(name, "0") or 0)
+    return v if v > 0 else 1 << 30
+
+
+def act_blk(rows):
+    """QWEN35_MOE_ACT_BLK (_min_rows): the activation buffer as one page per (union slot, row group) holding its
+    inter / 32 tiles (K order) instead of one page per tile: the down cores read a slot's K block in one NoC read (at
+    24-32 rows the 512-byte page reads of every down core bounded the down op). Same values (exact). Read per call."""
+    return rows >= _min_rows("QWEN35_MOE_ACT_BLK")
+
+
+def act_page_bytes(inter, rows):
+    return (inter // TILE) * 64 * tile_rows(rows) if act_blk(rows) else ACT_PAGE
+
+
 def act_buffer(mesh_device, inter, num_experts, k, rows):
     """The activations of a `rows`-row step (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
     interleaved: every down core reads all of it, which from DRAM cost more than the weights at 32 rows (2.7 MB x 64
@@ -65,6 +83,14 @@ def act_buffer(mesh_device, inter, num_experts, k, rows):
     after the down op: a persistent buffer of the 32-row size (2.7 MB per device on 2 chips) left too little L1 for the
     model's other programs' circular buffers. Every page the down op reads is written by the gate|up op first."""
     slots = min(num_experts, rows * k) + 1
+    if act_blk(rows):
+        return ttnn.empty(
+            [slots * row_groups(rows), act_page_bytes(inter, rows) // 2],
+            ttnn.bfloat16,
+            ttnn.ROW_MAJOR_LAYOUT,
+            mesh_device,
+            ttnn.L1_MEMORY_CONFIG,
+        )
     return ttnn.empty(
         [slots * inter // TILE * row_groups(rows), ACT_PAGE // 2],
         ttnn.bfloat16,
@@ -258,6 +284,29 @@ def upload_selection_bias(mesh_device, bias):
     )
 
 
+def farw_rows():
+    """QWEN35_MOE_GU_FARW (_min_rows; "1" also the one-row op): the far-bank writer stream (ExpertGateUpRows.farw)."""
+    return _min_rows("QWEN35_MOE_GU_FARW")
+
+
+def rows_map(name, rows, default):
+    """An env knob "r:n,..." -> the n of the largest r <= rows (default when none; a plain "n": every row count)."""
+    spec = os.environ.get(name, "")
+    if spec and ":" not in spec:
+        return int(spec)
+    n = default
+    for r, c in sorted((int(a), int(b)) for a, b in (x.split(":") for x in spec.split(",") if x)):
+        if rows >= r:
+            n = c
+    return n
+
+
+def gur_readers(rows):
+    """Gate|up cores per column group at `rows` rows: QWEN35_MOE_GUR_READERS (rows_map, default 4). At 24-32 rows the
+    gate|up op is compute bound (4 row groups per weight tile): more cores per group (with the far-bank stream)."""
+    return rows_map("QWEN35_MOE_GUR_READERS", rows, 4)
+
+
 class ExpertGateUpRows:
     """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column group (experts.gu_layout);
     union slot s goes to core s % readers."""
@@ -300,12 +349,20 @@ class ExpertGateUpRows:
         )
         self.ring = int(os.environ.get("QWEN35_MOE_SPLIT_RING", "8"))
         if readers is None:
-            readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else 4
+            readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else gur_readers(rows)
         self.readers = readers
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         # nb = 2 (odd m: a slot is two consecutive ring blocks the compute indexes together): an even ring
         self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers, even=True)
+        # QWEN35_MOE_GU_FARW=1 (nb = 2): the second bank block (bank q + banks / 2, the centre DRAM column) is streamed by
+        # the writer on NOC1 into its own ring (cb 7) instead of by the reader on NOC0, where both banks' responses
+        # shared the bank row's links (exact: same tiles, same DST order); the two rings split the one ring's L1
+        self.farw = (farw_rows() <= rows and self.nb == 2 and not self.split and not shared and not ep_experts)
+        if self.farw:
+            half = max(2, self.buffers // 2)
+            self.buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_NEAR", str(half)))
+            self.far_buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_FAR", str(half)))
         self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
         self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
         assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
@@ -353,7 +410,7 @@ class ExpertGateUpRows:
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None):
-        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
+        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act, cb_w1 = 0, 1, 2, 3, 4, 5, 6, 16, 7
         tb = 64 * self.trows
         g = self.groups
         buffers = self.buffers
@@ -378,6 +435,8 @@ class ExpertGateUpRows:
             _cb(self.cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * np_, tiny=True, rows=self.trows),
         ]
+        if self.farw:
+            cbs.append(_cb(self.cores, cb_w1, self.weight_dtype, self.tile_bytes, self.far_buffers * self.kt * self.m))
         assert (ep_offset is not None) == bool(self.ep_experts)
         ep_arg = [ep_offset.buffer_address()] if ep_offset is not None else []
         rd_rt, wr_rt = {}, {}
@@ -393,6 +452,8 @@ class ExpertGateUpRows:
                 (j + r) & 0x3,
             ] + ep_arg
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0] + ep_arg
+            if self.farw:
+                wr_rt[(c.x, c.y)] += [up_gate.buffer_address(), j + self.banks // 2]
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += (
@@ -412,14 +473,21 @@ class ExpertGateUpRows:
             self.trows,
             g,
             cb_wt,
-            ACT_PAGE,
+            act_page_bytes(self.inter, self.rows),
         ]
         wr_ct += [self.m, self.banks]
         for t in (x, act, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
+        if self.farw:
+            wr_ct += [cb_w1, self.page_bytes, self.far_buffers, self.tile_bytes]
+            cp_ct += [cb_w1]
+            defines += [("GU_FAR_W", "1")]
         defines += [("ROUTE_WIDE", "1")] if self.k == 16 else []
+        if act_blk(self.rows):
+            assert not self.split, "QWEN35_MOE_ACT_BLK: not with the split-pair layout"
+            defines += [("ACT_BLK", "1")]
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -497,8 +565,8 @@ class ExpertDownRows:
         # 4 readers per bank with 4-slot chunks 137 vs 157 us per MoE call, hybrid_moe/bench_moe_rows.py)
         if readers is None and os.environ.get("QWEN35_MOE_DN_READERS"):
             readers = int(os.environ["QWEN35_MOE_DN_READERS"])
-        if os.environ.get("QWEN35_MOE_DN_CHUNK"):
-            chunk = int(os.environ["QWEN35_MOE_DN_CHUNK"])
+        if os.environ.get("QWEN35_MOE_DN_CHUNK"):  # (rows_map: "n" or "r:n,...")
+            chunk = rows_map("QWEN35_MOE_DN_CHUNK", rows, chunk)
         if readers is None:  # 2 per bank (4 / 8 measured slower at 8 rows: 33 vs 24 us)
             readers = max(2 if self.m % 2 == 0 else 1, self.m // max(1, (8 if self.dst_full else 4) // self.groups))
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
@@ -560,12 +628,14 @@ class ExpertDownRows:
             self.trows,
             self.groups,
             self.chunk,
-            ACT_PAGE,
+            act_page_bytes(self.inter, self.rows),
         ]
         for t in (act, out, table):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
+        if act_blk(self.rows):
+            defines.append(("ACT_BLK", "1"))
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

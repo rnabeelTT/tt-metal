@@ -138,11 +138,23 @@ void kernel_main() {
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
         tile_regs_acquire();
+#ifdef GU_FAR_W
+        // bank q's block from cb_w (reader, NOC0), bank q + banks / 2's from cb_w1 (writer, NOC1): same DST order
+        static_assert(nb == 2, "GU_FAR_W: two bank blocks per slot");
+        constexpr uint32_t cb_w1 = get_compile_time_arg_val(6);
+        cb_wait_front(cb_w, kt * m);
+        custom_mm_block<mm_layout, true>(cb_x, cb_w, 0, 0, 0, kt, m);
+        cb_pop_front(cb_w, kt * m);
+        cb_wait_front(cb_w1, kt * m);
+        custom_mm_block<mm_layout, true>(cb_x, cb_w1, 0, 0, m, kt, m);
+        cb_pop_front(cb_w1, kt * m);
+#else
         gu_layout::static_for<nb>([&](auto h) {
             cb_wait_front(cb_w, kt * m);
             custom_mm_block<mm_layout, true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
             cb_pop_front(cb_w, kt * m);
         });
+#endif
 
         silu_tile_init();
         gu_layout::static_for<np>([&](auto p) {
