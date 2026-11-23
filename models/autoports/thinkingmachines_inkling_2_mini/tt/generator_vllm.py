@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""vLLM adapter for thinkingmachines/Inkling-2-Mini (text) on a (1, N) Blackhole mesh (N = 1, 2, 4: tensor parallel).
+"""vLLM adapter for thinkingmachines/Inkling-2-Mini (text and images) on a (1, N) Blackhole mesh (N = 1, 2, 4: tensor parallel).
 
 The engine owns every cache (tt/attention.AttnCache with one slot per decode row: the global layers' paged KV, the
 sliding layers' rings, the conv states), so the KV allocation vLLM asks for is a token budget only and vLLM's page
@@ -68,6 +68,11 @@ SPEC_DUMP = os.environ.get("I2M_SPEC_DUMP")  # (a path: every pass's verify / dr
 # (one die 41.6 / 24.7, TP2 ~29 / 20.1, TP4 24.5 / 15.5)
 SPEC_MIN_DEFAULT = {1: 1.7, 2: 1.5, 4: 1.6}  # (log every pass: position, anchor, drafts, emitted)
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
+# I2M_VISION (default 1): image inputs (tt/vision.py: the vision tower, its programs warmed for every padded length up to
+# the largest image a request may hold, I2M_VISION_MAX_TOKENS; tt/vllm_mm.py: vLLM's processor). I2M_VISION_STREAM
+# (default 1): the tower's weights (0.6 GB) stay on the host and are written to the device per image (+~85 ms on one die),
+# so the device only needs the forward's transients (~16 KB per padded patch row: 0.43 GiB at 4,095 image tokens)
+VISION = os.environ.get("I2M_VISION", "1") == "1"
 
 
 def _prefix_slots():
@@ -113,10 +118,25 @@ def kv_pool_tokens(num_devices, max_model_len, max_num_seqs):
     cap = int(env) if env else caps.get(num_devices, want)
     return (max(max_model_len, min(want, cap)) + 63) // 64 * 64
 
-class Inkling2ForCausalLM:
-    """vLLM bridge (HF arch Inkling2LoopForConditionalGeneration, text only)."""
+def _register(cls):
+    """vLLM's multimodal processor on the class (tt/vllm_mm.py); standalone tools without vLLM skip it."""
+    if not VISION:
+        return cls
+    try:
+        from models.autoports.thinkingmachines_inkling_2_mini.tt import vllm_mm
+    except ImportError as e:
+        logger.debug(f"vLLM multimodal processor not registered: {e}")
+        return cls
+    return vllm_mm.register(cls)
 
-    supports_multimodal = False
+
+@_register
+class Inkling2ForCausalLM:
+    """vLLM bridge (HF arch Inkling2LoopForConditionalGeneration): text and images."""
+
+    supports_multimodal = VISION
+    # the TT plugin passes each request's images with their placeholder ranges as the mm_items prefill kwarg
+    tt_generic_mm_items = True
     model_capabilities = {
         "supports_prefix_caching": PREFIX,
         **({"prefix_state_cache": {"slots": PREFIX_SLOTS, "segment": 0, "min_tokens": PREFIX_MIN, "prompt_end": True,
@@ -163,9 +183,22 @@ class Inkling2ForCausalLM:
             self.sp_stats = [0, 0]  # passes, drafts kept
             self._dump = []
             logger.info(f"speculative decoding: {SPEC} drafts per pass (sequences up to {SPEC_MAX_LEN} tokens)")
+        self.vt = None
+        if VISION and model is not None:
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.vision import VisionTower, vision_config
+
+            stream = os.environ.get("I2M_VISION_STREAM", "1") == "1"
+            self.vt = VisionTower(mesh, model.ck, vision_config(model.cfg.snap), stream=stream)
+            logger.info(f"vision tower up (weights {'streamed from the host' if stream else 'on device'})")
         self._captured = False
         self.already_warmed_up_prefill = False
         self._decode_steps = 0
+
+    @classmethod
+    def get_placeholder_str(cls, modality: str, i: int) -> str | None:
+        if modality.startswith("image"):
+            return "<|content_image|><|unused_200054|>"
+        raise ValueError("Inkling-2-Mini takes text and image inputs")
 
     # vLLM's text-generation protocol (registry inspection only; the TT plugin drives prefill_forward / decode_forward)
     def embed_input_ids(self, input_ids):
@@ -258,6 +291,17 @@ class Inkling2ForCausalLM:
                 self.store.restore(0, 0, 64, 0)
                 self.m.reset()
             logger.info(f"prefill warm-up ({PREFILL_CHUNK // PREFILL_PAD} chunk sizes) in {time.time() - t0:.0f}s")
+            if self.vt is not None:  # every padded length up to the largest image, and the row merge of every chunk size
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.vllm_mm import max_image_tokens
+
+                t0 = time.time()
+                done = self.vt.warm(max_image_tokens(self.max_seq_len))
+                for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
+                    x = self.m.merge_rows(self.m.embed_tokens(torch.zeros(n, dtype=torch.long)), torch.tensor([0]),
+                                          torch.zeros(1, self.m.H))
+                    ttnn.deallocate(x)
+                logger.info(f"vision warm-up (padded lengths {done}, images up to "
+                            f"{max_image_tokens(self.max_seq_len)} tokens) in {time.time() - t0:.0f}s")
         self.already_warmed_up_prefill = True
 
     def warmup_model_decode(self, *args, **kwargs):
@@ -284,6 +328,16 @@ class Inkling2ForCausalLM:
                 tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
             self._captured = True
             logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
+            if self.vt is not None:  # the largest image a request may hold must fit in what the captures left
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.vllm_mm import max_image_tokens
+
+                n = max_image_tokens(self.max_seq_len)
+                try:
+                    self.vt(torch.zeros(n, 40, 40, 3), torch.tensor([[1, 1, n]]))
+                except RuntimeError as e:
+                    raise RuntimeError(f"the vision tower does not fit beside the KV pool for {n}-token images; lower "
+                                       f"I2M_VISION_MAX_TOKENS (or I2M_KV_POOL_TOKENS), or I2M_VISION=0: {e}") from e
+                logger.info(f"vision: images up to {n} tokens fit after the trace captures")
 
     # ------------------------------------------------------------------ helpers
     def _host_logits(self, t, rows):
@@ -332,6 +386,7 @@ class Inkling2ForCausalLM:
         if PREFIX and page_table is not None:
             pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
         directives = kwargs.get("prefix_state") or [None] * N
+        mm_items = kwargs.get("mm_items") or [None] * N
         rows = kwargs.get("empty_slots")
         rows = list(range(N)) if rows is None else [int(r) for r in rows]
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
@@ -343,9 +398,11 @@ class Inkling2ForCausalLM:
             if pt is not None:  # (its prompt's blocks only: see GlobalPages.set_row)
                 self.m.pages.set_row(slot, pt[u], (plens[u] + 63) // 64)
             d = directives[u] or {}
-            reqs.append(dict(u=u, slot=slot, ids=torch.as_tensor(tokens[u, : plens[u]]).to(torch.long), P=plens[u],
-                             b0=starts[u], restore=d.get("restore"),
-                             saves=sorted((int(q), int(k)) for q, k in (d.get("saves") or ()))))
+            ids = torch.as_tensor(tokens[u, : plens[u]]).to(torch.long)
+            images = self._images(mm_items[u] if u < len(mm_items) else None, ids)
+            reqs.append(dict(u=u, slot=slot, ids=ids, P=plens[u], b0=starts[u], restore=d.get("restore"),
+                             saves=sorted((int(q), int(k)) for q, k in (d.get("saves") or ())), images=images,
+                             key=self._content_key(ids, images)))
         L = self.m.lanes
         for g in range(0, N, L):
             self._prefill_group(reqs[g : g + L], out)
@@ -360,7 +417,7 @@ class Inkling2ForCausalLM:
         # those b0 tokens (its caches are positional, one sequence: e.g. the previous turn of the same chat)
         b0 = reqs[0]["b0"] if reqs else 0
         spec = (self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and reqs[0]["P"] + 64 <= SPEC_MAX_LEN
-                and (not b0 or self.dr_seen[:b0] == reqs[0]["ids"][:b0].tolist()))
+                and (not b0 or self.dr_seen[:b0] == reqs[0]["key"][:b0]))
         if spec:
             self.dr.reset()
         for lane, r in enumerate(reqs):
@@ -379,9 +436,10 @@ class Inkling2ForCausalLM:
                     r["b0"] = b0 = 0
             r["p"] = b0
             r["saves"] = [(q, k) for q, k in r["saves"] if q > b0]
+            r["mm"] = self._encode(r["images"], b0)
         live = list(reqs)
         while live:
-            segs, ids, armed, used = [], [], [], 0
+            segs, ids, armed, used, mrows, memb = [], [], [], 0, [], []
             for r in live:
                 rem = r["P"] - r["p"]
                 space = PREFILL_CHUNK - used
@@ -400,6 +458,12 @@ class Inkling2ForCausalLM:
                 if sv:
                     self.store.arm(sv[0][0] - p0, r["lane"])
                     armed.append((r, sv[0]))
+                if r["mm"] is not None:  # (image rows in this segment: their chunk rows and embeddings)
+                    pos, emb = r["mm"]
+                    sel = (pos >= p0) & (pos < p0 + n)
+                    if bool(sel.any()):
+                        mrows.append(pos[sel] - p0 + used)
+                        memb.append(emb[sel])
                 segs.append([used, R, p0, n, r["slot"], r["lane"]])
                 ids.append(c)
                 used += R
@@ -409,7 +473,8 @@ class Inkling2ForCausalLM:
                 ids.append(torch.zeros(extra, dtype=torch.long))
                 used += extra
             taps = [] if spec else None
-            lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs], taps=taps)
+            mm = (torch.cat(mrows), torch.cat(memb)) if mrows else None
+            lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs], taps=taps, mm=mm)
             if spec:  # (one segment: the drafter's context of its rows)
                 _, R0, p0, n0, _, _ = segs[0]
                 self._dr_commit(ttnn.slice(taps[0], [0, 0, 0, 0], [1, 4, R0, self.m.H]), p0, n0)
@@ -428,12 +493,57 @@ class Inkling2ForCausalLM:
                     self.dec.load_slot(r["slot"], r["lane"])
                     if spec:
                         self.ver.set_accept([0])
-                        self.dr_seen = r["ids"].tolist()
+                        self.dr_seen = r["key"]
                         self.spec = dict(row=next(k for k, v in self.row2slot.items() if v == 0), n=None)
                     out[r["u"], 0, : self.V] = lgh[i]
                     live.remove(r)
                     logger.info(f"prefill {r['P']} tokens (from {r['b0']}) -> slot {r['slot']}"
                                 + (f", snapshot at {r['saves'][0][0]}" if r["saves"] else ""))
+
+    # ------------------------------------------------------------------ images
+    def _images(self, items, ids):
+        """A request's mm_items (the plugin's: modality, identifier, offset, length, data) -> [(offset, length,
+        pixel_values, image_grid_thw, identifier)] in prompt order, each checked against its placeholder run."""
+        if not items:
+            return []
+        if self.vt is None:
+            raise NotImplementedError("image inputs are off (I2M_VISION=0)")
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.vllm_mm import IMAGE_TOKEN_ID
+
+        out = []
+        for it in sorted(items, key=lambda it: int(it["offset"])):
+            if not str(it.get("modality", "")).startswith("image"):
+                raise NotImplementedError(f"Inkling-2-Mini takes text and image inputs, not {it.get('modality')!r}")
+            d = it.get("data") or {}
+            pv, grid = torch.as_tensor(d["pixel_values"]), torch.as_tensor(d["image_grid_thw"]).reshape(1, 3)
+            o, n = int(it["offset"]), int(it["length"])
+            if n != int(pv.shape[0]) or n != int(grid.prod()) or not bool((ids[o : o + n] == IMAGE_TOKEN_ID).all()):
+                raise ValueError(f"image at {o}: {n} placeholders for {int(pv.shape[0])} patches")
+            out.append((o, n, pv, grid, str(it.get("identifier"))))
+        return out
+
+    @staticmethod
+    def _content_key(ids, images):
+        """The prompt by position for the drafter's cache check: each image's rows carry its identifier, not the
+        shared placeholder id."""
+        key = ids.tolist()
+        for o, n, _, _, ident in images:
+            key[o : o + n] = [("img", ident, j) for j in range(n)]
+        return key
+
+    def _encode(self, images, b0):
+        """The vision tower on a request's images past position b0 -> (positions [k] int64, embeddings [k, H] bf16) or
+        None."""
+        todo = [im for im in images if im[0] + im[1] > b0]
+        if not todo:
+            return None
+        t0 = time.time()
+        pos, emb = [], []
+        for o, n, pv, grid, _ in todo:
+            pos.append(torch.arange(o, o + n))
+            emb.append(self.vt(pv, grid))
+        logger.info(f"vision: {len(todo)} image(s), {sum(im[1] for im in todo)} tokens in {time.time() - t0:.2f}s")
+        return torch.cat(pos), torch.cat(emb)
 
     # ------------------------------------------------------------------ decode
     def decode_forward(self, *args, **kwargs):

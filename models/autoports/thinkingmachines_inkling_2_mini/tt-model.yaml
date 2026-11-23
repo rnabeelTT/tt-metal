@@ -125,7 +125,8 @@ serve_profiles:
     max_num_seqs: 8
     max_model_len: 8192
     additional_config: {tt: {fabric_config: DISABLED}}
-    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256"}
+    # images up to 2,047 tokens (the vision tower's transients beside the 57K pool: 0.21 GiB largest free block)
+    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_VISION_MAX_TOKENS: "2047"}
 default_profile: p300
 
 verify:

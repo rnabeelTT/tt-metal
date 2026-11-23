@@ -443,6 +443,23 @@ class Inkling2Model:
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
         return _bf(self.ops.rms(e, self.embed_norm))
 
+    def merge_rows(self, x, rows, emb):
+        """x [1, 1, T, H] bf16 with rows `rows` replaced by emb [k, H]: x * keep + M (keep 0 / 1 per row, M zero
+        elsewhere; exact). Its programs depend on T only."""
+        T = int(x.shape[-2])
+        M = torch.zeros(1, 1, T, self.H, dtype=torch.bfloat16)
+        M[0, 0, rows] = emb.to(torch.bfloat16)
+        keep = torch.ones(1, 1, T, 1, dtype=torch.bfloat16)
+        keep[0, 0, rows] = 0
+        up = lambda t: ttnn.from_torch(t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,  # noqa: E731
+                                       mesh_mapper=self.ops.rep, memory_config=DRAM)
+        M_tt, k_tt = up(M), up(keep)
+        xk = ttnn.multiply(x, k_tt, memory_config=DRAM)
+        y = ttnn.add(xk, M_tt, memory_config=x.memory_config())
+        for t in (x, xk, M_tt, k_tt):
+            ttnn.deallocate(t)
+        return y
+
     def _pmix(self, key, blocks_n, ids, D, cur, Q, nq):
         """Prefill mix(blocks_n + [cur], Q, nq) with the blocks' logits from D (each block's against every later query,
         computed once: MixPlan) and only the current source's here."""
@@ -560,25 +577,30 @@ class Inkling2Model:
             if s is not None:
                 s.reset(lane)
 
-    def forward_packed(self, ids: torch.Tensor, segs, taps=None):
+    def forward_packed(self, ids: torch.Tensor, segs, taps=None, mm=None):
         """A packed prefill chunk: ids [T] holding segments segs = [(row0, R, p0, valid, slot, lane)] (each its own
-        sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row. taps: see forward."""
+        sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row. taps, mm: see
+        forward."""
         slid = next(self.apps[a].cache for a, (li, _) in enumerate(self.sched) if self.layers[li].sliding)
         glob = next((self.apps[a].cache for a, (li, _) in enumerate(self.sched) if not self.layers[li].sliding), None)
         ctx = PackedCtx(self.mesh, segs, slid, glob)
         try:
             return self.forward(ids, 0, ctx=ctx, last_rows=[row0 + valid - 1 for row0, _, _, valid, _, _ in segs],
-                                taps=taps)
+                                taps=taps, mm=mm)
         finally:
             ctx.release()
 
     def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None,
-                ctx=None, last_rows=None, taps=None):
+                ctx=None, last_rows=None, taps=None, mm=None):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
         capture(a, out) is called with each application's output (debug). taps: a list that gets the speculative
-        drafter's taps of every row, [1, 4, T, H] bf16 (the inputs of applications 5, 23, 41 + the final normed state)."""
+        drafter's taps of every row, [1, 4, T, H] bf16 (the inputs of applications 5, 23, 41 + the final normed state).
+        mm: (rows [k] int64, embeddings [k, H] bf16): these rows take the given embeddings instead of their tokens' (the
+        image placeholders' rows get the vision tower's outputs, as transformers' masked_scatter)."""
         cfg, ops = self.cfg, self.ops
         x = self.embed_tokens(ids)
+        if mm is not None:
+            x = self.merge_rows(x, *mm)
         if valid is not None and valid < int(ids.numel()):
             pass  # padded rows ride along; their K/V lands past the prompt and conv states stop at `valid`
         T = int(ids.numel())

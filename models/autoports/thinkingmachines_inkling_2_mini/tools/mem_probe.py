@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """DRAM per die after building the model with SLOTS x CTX (bfp8 experts, bf16 KV) and one decoder + trace per width:
 prints the allocator statistics (die 0). env: MESH (1), SLOTS (8), CTX (8192), POOL (the shared global-KV pool in
-tokens; default SLOTS x CTX): with a small POOL the free DRAM at the end is what a bigger pool may take"""
+tokens; default SLOTS x CTX): with a small POOL the free DRAM at the end is what a bigger pool may take; VISION_TOKENS
+(image sizes run through the vision tower after the trace captures)"""
 
 import os
 
@@ -42,6 +43,18 @@ def main():
         stats(mesh, "after the prefill warm-up")
         ad.warmup_model_decode()
         stats(mesh, "after the decode trace captures")
+        if ad.vt is not None:  # VISION_TOKENS: images of these token counts after the captures (fits or not)
+            import torch
+
+            for n in [int(v) for v in os.environ.get("VISION_TOKENS", "169,1024,2048,4032").split(",")]:
+                try:
+                    ad.vt(torch.zeros(n, 40, 40, 3), torch.tensor([[1, 1, n]]))
+                    ttnn.synchronize_device(mesh)
+                    print(f"vision {n} tokens: ok", flush=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"vision {n} tokens: FAILED ({str(e).splitlines()[0][:160]})", flush=True)
+                    break
+            stats(mesh, "after the vision forwards")
     ttnn.close_mesh_device(mesh)
     print("== probe done")
 
