@@ -161,16 +161,27 @@ void kernel_main() {
         for (uint32_t mi = 0; mi < MI; ++mi) {
         cb_mask.reserve_back(Sk_chunk_t_dynamic);
         volatile tt_l1_ptr uint32_t* m = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cb_mask.get_write_ptr());
+        // a fully masked tile is written once per block (RISC stores) and copied (L1 -> L1 NOC reads) to the others;
+        // a partly masked tile: zeros (NOC), then the live rows (R x G per item: the rows past them are never read)
+        uint32_t neg_tile = 0;
         for (uint32_t t = 0; t < Sk_chunk_t_dynamic; ++t) {
             const uint32_t base = (k_chunk * Sk_chunk_t_dynamic + t) * 32;  // first position of this tile
             if (base + 31 <= min_lim && base >= max_lo) {  // every row attends the whole tile
                 fill_tile_zeros<mask_tile_bytes, false>(noc, cb_mask_in, t);
             } else if (base > max_pos || base + 31 < min_lo) {  // no row attends any of it
-                for (uint32_t w = 0; w < mask_tile_bytes / 4; ++w) {
-                    m[w] = NEG2;
+                const uint32_t dst = reinterpret_cast<uint32_t>(m);
+                if (neg_tile == 0) {
+                    for (uint32_t w = 0; w < mask_tile_bytes / 4; ++w) {
+                        m[w] = NEG2;
+                    }
+                    neg_tile = dst;
+                } else {
+                    noc_async_read(get_noc_addr(neg_tile), dst, mask_tile_bytes);
                 }
             } else {
-                for (uint32_t rho = 0; rho < 32; ++rho) {
+                fill_tile_zeros<mask_tile_bytes, false>(noc, cb_mask_in, t);
+                noc.write_zeros_l1_barrier();
+                for (uint32_t rho = 0; rho < (R * G < 32 ? R * G : 32); ++rho) {
                     const uint32_t l = rho < R * G ? lim[mi * R + rho / G] : max_pos;
                     const uint32_t lw = rho < R * G ? lo[mi * R + rho / G] : min_lo;
                     // row rho attends columns [c_lo, n) of this tile (positions [lo, lim]); the rest get the mask value
@@ -190,6 +201,7 @@ void kernel_main() {
             m += mask_tile_bytes / 4;
         }
         noc.write_zeros_l1_barrier();
+        noc_async_read_barrier();
         cb_mask.push_back(Sk_chunk_t_dynamic);
         }  // items
     }

@@ -229,6 +229,8 @@ void kernel_main() {
         const bool masked = inkling_chunk_masked(k_chunk, k_chunk_size_dynamic, min_lim, W, max_lo);
         const bool band = inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E);
 
+        {
+        DeviceZoneScopedN("S_C_BIAS");
         if (band) {
             /* per item m: BIAS_m = sum_j RQ_{m,j} @ TBL_{m,j} (+ the writer's causal / window mask for its rows):
                [1 x R] @ [R x Sk] tiles (the reader's tables and the writer's masks arrive item by item) */
@@ -246,6 +248,9 @@ void kernel_main() {
             pack_reconfig_data_format(cb_qk_im);
         }
 
+        }
+        {
+        DeviceZoneScopedN("S_C_QK");
         /* QK = Q_CHUNK @ K_CHUNK (+ each Q tile row's bias block, added on DST) */
         inkling_matmul_rows(
             cb_q_in, cb_k_in, cb_qk_im, Sq_chunk_t, Sk_chunk_t_dynamic, DHt, true, band, cb_bias, cb_zero_in, 0,
@@ -253,7 +258,9 @@ void kernel_main() {
         if (band) {
             CircularBuffer(cb_bias).pop_front(qk_chunk_tiles_dynamic);
         }
-
+        }
+        {
+        DeviceZoneScopedN("S_C_SM");
         reconfig_data_format(cb_qk_im, cb_identity_scale_in);
         pack_reconfig_data_format(cb_cur_max);
         reduce_c<PoolType::MAX, ReduceDim::REDUCE_ROW, cb_qk_im, cb_identity_scale_in, Sq_chunk_t, vector_mode>(
@@ -270,6 +277,9 @@ void kernel_main() {
         reduce_c<PoolType::SUM, ReduceDim::REDUCE_ROW, cb_qk_im, cb_identity_scale_in, Sq_chunk_t, vector_mode>(
             cb_cur_sum, cb_cur_sum, Sk_chunk_t_dynamic, false);
 
+        }
+        {
+        DeviceZoneScopedN("S_C_PV");
         /* OUT_IM = QK @ V_CHUNK */
         reconfig_data_format(cb_v_in, cb_qk_im);
         pack_reconfig_data_format(cb_out_im);
@@ -293,9 +303,11 @@ void kernel_main() {
         reconfig_data_format_srca(cb_out_im);
         CircularBuffer(cb_qk_im).pop_front(qk_chunk_tiles_dynamic);
 
+        }
         if (k_chunk == k_chunk_start) {
             cb_out_mm = cb_out_im;
         } else {
+            DeviceZoneScopedN("S_C_COR");
             reconfig_data_format(cb_prev_max, cb_cur_max);
             pack_reconfig_data_format(cb_exp_max_diff);
             /* EXP_MAX_DIFF = exp((PREV_MAX - CUR_MAX) * scale) */

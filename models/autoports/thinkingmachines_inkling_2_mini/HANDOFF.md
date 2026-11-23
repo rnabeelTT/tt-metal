@@ -372,6 +372,14 @@ eval 1 die 0.9672 / 0.9957 / 0.0184 -> 0.9686 / 0.9964 / 0.0157, TP2 0.9679 / 0.
 decode KL 0.0157 -> 0.0160); the MoE experts at HiFi4 (bitwise unchanged: their activations are rounded to 7 bits, the
 srcB width, and HiFi2 already reads the whole bfp8 weight); head readers 3 / 4 / 6 (noise); the SDPA read throttle (the
 stock barrier every 2 tiles at ~100 program cores: RD 4 / 8 / 16 changed nothing).
+Decode SDPA phases (tools/zones_sdpa.py, compute sub-zones S_C_BIAS / QK / SM / PV / COR, reader S_R_TBL / K / V; 256-key
+chunks, 4-die shape at position 300): the compute waited up to 16 us in the bias phase for the writer's mask tiles (a
+fully masked 2 KB tile written with 512 RISC stores, 6 of the 8 tiles of the newest chunk; every row of a partly masked
+tile). Now one fully masked tile per block is written and copied (L1 -> L1 NOC reads), partly masked tiles are zeroed
+(NOC) and only their live rows (R x G) written: bias wait 16 -> 4 us, SDPA 29 -> 26.5 us; model B=1 / 4 22.4 / 38.5 ->
+22.3 / 38.3 ms; outputs bitwise (logits, SDPA test 24 / 24, packed test with HiFi2 identical to before). The reader is
+now the limit (K / V ~6.8 us each per chunk). Note: the device profiler writes one CSV in the shared generated mount:
+profile on one die at a time.
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v

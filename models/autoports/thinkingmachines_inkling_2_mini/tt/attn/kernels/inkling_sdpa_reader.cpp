@@ -323,6 +323,8 @@ void kernel_main() {
         const uint32_t k_chunk_start_row_num = k_chunk * Sk_chunk_t_dynamic;
         // per item: R x Sk table tiles: row j, key tile b = k_chunk * Sk + t -> T[phi_j][m = a_j - b] (zero outside
         // [0, M))
+        {
+        DeviceZoneScopedN("S_R_TBL");
         for (uint32_t mi = 0; mi < MI && inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E); ++mi) {
             const uint32_t n = R * Sk_chunk_t_dynamic;
             cb_tblc.reserve_back(n);
@@ -345,6 +347,9 @@ void kernel_main() {
             noc.async_read_barrier();
             cb_tblc.push_back(n);
         }
+        }
+        {
+        DeviceZoneScopedN("S_R_K");
         read_k<cb_k_in, DHt, num_kv_heads, block_size_t, k_tile_bytes, barrier_threshold, false, false, 0>(
             k_chunk_tiles,
             cur_head,
@@ -354,6 +359,9 @@ void kernel_main() {
             nullptr,
             page_table_ptr,
             barrier_count);
+        }
+        {
+        DeviceZoneScopedN("S_R_V");
         read_v<cb_v_in, vDHt, num_kv_heads, block_size_t, v_tile_bytes, barrier_threshold, false, false, 0>(
             v_chunk_tiles,
             cur_head,
@@ -363,6 +371,7 @@ void kernel_main() {
             nullptr,
             page_table_ptr,
             barrier_count);
+        }
     }
     }  // units
 }
