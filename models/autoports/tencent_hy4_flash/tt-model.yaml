@@ -11,7 +11,7 @@ schema: "5.1"
 
 repo: raahemnabeel/hy4-flash-qb2
 name: hy4-flash-qb2
-weights: {repo: tencent/Hy4-flash, revision: d88c9dfd96ba4f2e6b92adba0b8e8f1c8696f959}
+weights: {repo: tencent/Hy4-flash, revision: b2498eba6a1a3f9bbcab4190bc1313a3c7010c2f}   # 2026-11-19; later eccd312 sets engram_fp8_embedding false (our FP8 store assumes true)
 kind: vllm-plugin
 arch: blackhole
 
@@ -60,15 +60,18 @@ serve:
     HY4_ENGRAM_DIR: /weight-cache/hy4_engram      # FP8 Engram tables (~65 GB), built on the first boot
     HY4_TRACE_REGION: "419430400"
     HY4_SPEC_K: "4"                               # DFly2 drafts per verify pass (serve_hy4.sh SPEC=4)
-    HY4_RAM_CHECK: error                          # tt/hostmem.py: refuse to start without the host RAM the server needs
+  # Everything else is a code default at the packaged commit (HY4_BSPEC batched-spec policy, HY4_PF_* prefill paths,
+  # HY4_MOE_STREAM, HY4_FB_FIDELITY HiFi3, HY4_RAM_CHECK error, HY4_ENGRAM_MADV random ...): only launch env lives here.
+  # The image builds tt-metal from that commit, so its ttnn kernels/ops (grouped-matmul untilize fix, sparse_sdpa)
+  # are in the image: no kernel mounts (serve_hy4.sh mounts them only for older dev images).
   # the name the dev scripts use (hy4-flash) besides the weights id, which stays the primary served name
   args: [[--served-model-name, tencent/Hy4-flash, hy4-flash]]
 
 serve_profiles:
   - name: p300x2-8u-20k
     description: >
-      The default: up to 8 concurrent users, 20,480 tokens of context each, speculative decoding (DFly2, 4 drafts)
-      while one request decodes alone; text, images and video.
+      The default: up to 8 concurrent users, 20,480 tokens of context each, speculative decoding (DFly2) at every
+      user count (4 drafts for one user, 1-3 per user for 2-8 users); text, images and video.
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 8
@@ -104,8 +107,13 @@ card:
       copied into RAM (the copy needs a 48 GiB margin on top; the running server then uses ~63 GB). The server checks
       this at startup against the RAM free right now (other jobs on the machine count): below the minimum it refuses
       to start (env `HY4_RAM_CHECK=warn` starts anyway); between the two it starts and reads the Engram rows from
-      their memory map on disk (same output, slower decode when the rows are not in the page cache). The copy is not
-      locked in RAM under `tt-model serve` (no memlock ulimit), so heavy memory pressure can swap it out.
+      their memory map on disk (same output; threaded random-access reads, slower decode while the rows are not in
+      the page cache).
+    - Memory locking: `tt-model serve` does not raise the container's memlock limit (it has no ulimit setting), so the
+      Engram RAM copy is not locked (`engram: mlock failed (errno 12)` in the log, harmless) and heavy memory pressure
+      can swap it out. To lock it, give docker a default (`"default-ulimits": {"memlock": {"Name": "memlock",
+      "Soft": -1, "Hard": -1}}` in `/etc/docker/daemon.json`, then restart docker), or start the command
+      `tt-model serve --print` prints with `--ulimit memlock=-1:-1` added after `docker run`.
     - About 610 GB of disk: the BF16 checkpoint (440 GB) in the HF cache, and in the weight cache the device tensor
       cache (~100 GB) and the Engram FP8 store (~65 GB) the first start writes.
   quickstart: |
@@ -113,7 +121,7 @@ card:
 
     | profile | users | context per user | speculative decoding | decode, greedy | when to pick it |
     | --- | ---: | ---: | --- | --- | --- |
-    | `p300x2-8u-20k` (default) | 8 | 20,480 | 4 drafts while one request decodes alone | 1 user ~**TBD** tok/s, 8 users ~**TBD** tok/s total | chat / coding for a team |
+    | `p300x2-8u-20k` (default) | 8 | 20,480 | 4 drafts for 1 user, 1-3 per user for 2-8 | 1 user ~**TBD** tok/s, 8 users ~**TBD** tok/s total | chat / coding for a team |
     | `p300x2-1u-218k` | 1 | 223,232 | 4 drafts | ~**TBD** tok/s short, ~**TBD** tok/s at 128K | long documents, long agent sessions |
 
     `tt-model serve raahemnabeel/hy4-flash-qb2 --profile p300x2-1u-218k` picks the long one (`tt-model profiles
@@ -133,9 +141,10 @@ card:
     requests a large `max_tokens`: when the budget runs out inside the reasoning, `content` is empty.
 
     Sampling: a request without sampling parameters uses the checkpoint's recommendation (temperature 0.9,
-    top_p 1.0). Greedy (temperature 0) is the fastest setting. While one request decodes alone the drafter proposes
-    4 tokens per verify pass (exact speculative sampling for sampled requests); two or more live requests decode in
-    one batched pass without drafts. Requests that need vLLM's host sampler (logprobs, structured outputs,
+    top_p 1.0). Greedy (temperature 0) is the fastest setting. Speculative decoding (DFly2) runs at every user count:
+    one request alone gets 4 drafts per verify pass; 2-8 live requests draft 1-3 tokens each and verify together in
+    one batched pass (2 users 3, 3 users 1, 4-5 users 2, 6-8 users 1). Exact speculative sampling for sampled requests;
+    greedy output is the same as without drafts. Requests that need vLLM's host sampler (logprobs, structured outputs,
     logit_bias, penalties) are supported.
 
     Images: up to 4 per request (`image_url` parts), resized to at most 2048 x 2048 pixels. Video: one per request
@@ -197,8 +206,7 @@ card:
     (speculative acceptance). Rows from `hy4_card_bench.py ISL:OSL:USERS:N`.
   limitations: |
     - At most 8 concurrent users with 20,480 tokens each (default profile); longer contexts need the one-user profile.
-    - Speculative decoding runs only while one request decodes alone; with two or more live requests every request
-      decodes one token per pass.
+    - Fewer drafts per user as users are added (4 for one user, 1-3 for 2-8), so per-user decode speed drops with load.
     - Outputs are close to but not identical to the BF16 reference (bfp4 experts; see Accuracy).
     - Decode at long context is slower than at short context (see Performance).
     - Without enough free host RAM for the Engram tables they are read from disk (slower decode; see Prerequisites).
