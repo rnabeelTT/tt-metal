@@ -44,6 +44,10 @@ R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 # prefill SDPA items per work unit (inkling_sdpa_decode mi; I2M_SDPA_MI): each K / V chunk read once for 4 items' Q tiles
 # (128K positions: the SDPA 377 -> 111 ms per 1024-row chunk; 8 items: the CBs clash with L1)
 SDPA_MI = int(os.environ.get("I2M_SDPA_MI", "4"))
+# I2M_RING_CHUNK (0: the prefill chunk): the sliding layers' rings hold the window + this many rows; a longer prefill
+# chunk runs those layers' KV writes + SDPA in sub-chunks of this size (the MoE / projections still see the whole chunk:
+# one pass over the experts per chunk), so one die keeps 256-row rings beside 8 slots with 1024-row chunks
+RING_CHUNK = int(os.environ.get("I2M_RING_CHUNK", "0"))
 
 
 def tau_of(positions: torch.Tensor, n_floor: int, alpha: float) -> torch.Tensor:
@@ -255,13 +259,14 @@ class AttnCache:
         mesh, N = w.mesh, w.N
         self.pages = None if w.sliding else pages
         self.w, self.block, self.kv_dtype, self.prefill_chunk, self.B = w, block, kv_dtype, prefill_chunk, slots
+        self.ring_chunk = min(prefill_chunk, RING_CHUNK) if RING_CHUNK else prefill_chunk
         self.max_blocks = mb = math.ceil(max_seq_len / block)
         kv_shard = ttnn.ShardTensorToMesh(mesh, dim=-1) if N > 1 else None
         C = w.NKV * w.HD
         if w.sliding:
             self.k_conv = ShortConv(mesh, w.k_taps, kv_shard, C)
             self.v_conv = ShortConv(mesh, w.v_taps, kv_shard, C)
-            self.n_ring = (w.W + prefill_chunk) // block + 1
+            self.n_ring = (w.W + self.ring_chunk) // block + 1
             per = self.n_ring
         else:
             self.k_conv = DynShortConv(mesh, w.k_static, w.k_wproj, kv_shard, C, w.NKV, w.ckc)
@@ -358,7 +363,7 @@ def attention(w: AttnWeights, c: AttnCache, xq, xk, xv, p0: int, valid: int | No
     G = NH // NKV
     rows_mode = R * G <= 32
     if not rows_mode:
-        assert p0 % c.block == 0 and R % 64 == 0 and R <= c.prefill_chunk, (p0, R)
+        assert p0 % c.block == 0 and R % 64 == 0 and R <= (c.ring_chunk if w.sliding else c.prefill_chunk), (p0, R)
     nvalid = R if valid is None else valid
     ckc = w.ckc
     pq = proj(w, "q", xq, ttnn.float32 if FUSED_OPS else None)  # [1, 1, R, fq(+pad)]
@@ -488,19 +493,33 @@ class PackedCtx:
             pos.append(torch.arange(p0, p0 + R))
             slot_of += [slot] * (R // R_ITEM)
         self.T = sum(s[1] for s in segs)
-        self.positions = up(torch.cat(pos).reshape(-1, R_ITEM))
-        self.pt, self.fill = {}, {}
+        self._up = up
+        self.pos_h = torch.cat(pos).reshape(-1, R_ITEM)
+        self.positions = up(self.pos_h)
+        self.pt, self.fill, self.pt_h, self.fill_h, self._subs = {}, {}, {}, {}, {}
         for c in (sliding_cache, global_cache):
             if c is not None:
-                self.pt[c.w.sliding] = up(c.read_host[slot_of])
+                self.pt_h[c.w.sliding] = c.read_host[slot_of]
+                self.pt[c.w.sliding] = up(self.pt_h[c.w.sliding])
                 # one KV fill per chunk: the physical block of each 64-row block of the packed rows
                 blk = [c.read_host[slot, p0 // 64 + j] for _, R, p0, _, slot, _ in segs for j in range(R // 64)]
-                self.fill[c.w.sliding] = up(torch.stack(blk).reshape(1, -1))
+                self.fill_h[c.w.sliding] = torch.stack(blk).reshape(1, -1)
+                self.fill[c.w.sliding] = up(self.fill_h[c.w.sliding])
         self.p_hi = max(p0 + R for _, R, p0, _, _, _ in segs)
         self.bc = BlockCopy(mesh, sliding_cache.k_cache)
 
+    def sub(self, sliding, r0, r1):
+        """(positions, page-table rows, fill) of packed rows [r0, r1) (64-row aligned): a sub-chunk's SDPA / KV fill."""
+        key = (sliding, r0, r1)
+        if key not in self._subs:
+            self._subs[key] = (self._up(self.pos_h[r0 // R_ITEM : r1 // R_ITEM]),
+                               self._up(self.pt_h[sliding][r0 // R_ITEM : r1 // R_ITEM]),
+                               self._up(self.fill_h[sliding][:, r0 // 64 : r1 // 64]))
+        return self._subs[key]
+
     def release(self):
-        for t in [self.positions] + list(self.pt.values()) + list(self.fill.values()):
+        for t in [self.positions] + list(self.pt.values()) + list(self.fill.values()) \
+                + [t for s in self._subs.values() for t in s]:
             ttnn.deallocate(t)
 
 
@@ -538,6 +557,20 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     ttnn.deallocate(pv)
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
     bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
+    if prep and w.sliding and T > c.ring_chunk:  # (the ring holds the window + ring_chunk rows: sub-chunks)
+        S, os_ = c.ring_chunk, []
+        rows = lambda t, r0, r1: ttnn.slice(t, (0, 0, r0, 0), (1, 1, r1, int(t.shape[-1])))  # noqa: E731
+        for r0 in range(0, T, S):
+            r1 = min(T, r0 + S)
+            pos_s, pt_s, fill_s = ctx.sub(True, r0, r1)
+            ps, ks, vs = rows(pq, r0, r1), rows(k, r0, r1), rows(v, r0, r1)
+            q, rq, sk = _prefill_prep(w, c, ps, ks, vs, None, fill_s)
+            for t in (ps, ks, vs):
+                ttnn.deallocate(t)
+            os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0))
+        for t in (pq, k, v):
+            ttnn.deallocate(t)
+        return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl)
     if prep:  # the q / r / sink prep and the K / V writes in one program
         tau = torch.cat([tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha) for _, R, p0, _, _, _ in ctx.segs])
         q, rq, sk = _prefill_prep(w, c, pq, k, v, tau, ctx.fill[w.sliding])
@@ -569,17 +602,27 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
 
 
-def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
-    """attention_packed()'s SDPA, output gate, o_proj and all-reduce."""
-    NH, HD, N = w.NH, w.HD, w.N
-    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
-    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
-    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, ctx.positions, ctx.pt[w.sliding], rq, w.table, w.scale, w.W, w.E,
+def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
+    """The packed SDPA over T rows -> [1, 1, T, NH * HD]."""
+    o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, pt, rq, w.table, w.scale, w.W, w.E,
                             sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI)
     for t in (q, rq, sk):
         ttnn.deallocate(t)
-    if int(o.shape[-1]) != NH * HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
-        o = ttnn.reshape(o, (1, 1, T, NH * HD))
+    if int(o.shape[-1]) != w.NH * w.HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
+        o = ttnn.reshape(o, (1, 1, T, w.NH * w.HD))
+    return o
+
+
+def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
+    """attention_packed()'s SDPA, output gate, o_proj and all-reduce."""
+    return _packed_out(w, _packed_sdpa(w, c, q, rq, sk, ctx.positions, ctx.pt[w.sliding], T), g, T, tt_ccl)
+
+
+def _packed_out(w, o, g, T, tt_ccl):
+    """The output gate, o_proj and all-reduce of the SDPA output o [1, 1, T, NH * HD]."""
+    N = w.N
+    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
     o = bf(ttnn.multiply(f32(o), ttnn.sigmoid(f32(g))))
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:

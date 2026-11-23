@@ -108,7 +108,9 @@ serve_profiles:
     max_num_seqs: 8
     max_model_len: 8192
     additional_config: {tt: {fabric_config: DISABLED}}
-    env: {I2M_PREFILL_CHUNK: "256", I2M_PREFILL_PAD: "256"}   # the 1024-row rings do not fit beside 8 KV slots
+    # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
+    # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots
+    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256"}
 default_profile: p300
 
 verify:

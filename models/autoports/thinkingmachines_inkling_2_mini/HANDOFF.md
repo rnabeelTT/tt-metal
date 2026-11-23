@@ -319,6 +319,16 @@ TP2 at the end: B=1 18.6 ms (19.3 before the round), B=4 29.6 ms. Quality after 
 / 0.0165, TP2 prefill 0.9691 / 0.9962 / 0.0158 (all in band). One die at 8 x 8K (KV pool 57,344): 0.29 GiB free after
 the trace captures. Fixed here: the merged-MoE commit's prefill sub-shard map had one entry, so TP2's second sub-shard
 was skipped in prefill (TP2 decode test pcc 0.92; TP1 / TP4 unaffected).
+Served p150 (8 x 8K, bench_card): 1 user 28.2 -> 39.0 tok/s/u (TPOT 25.6 ms: device 24.5 incl. the sampler's top-k,
+host 1.2 = inputs 0.1 + readback 0.4 + plugin / sampling 0.7); 8 users 128/128 90.5 -> 97.3 total tok/s.
+
+One-die prefill: a 256-row chunk is 264 ms of kernels, 62 % MoE (the grouped matmul at ~bandwidth: 256 rows x 8 experts
+reach nearly every expert, so each chunk streams all 26 GB of experts). Chunk 256 / 512 / 1024: 825 / 1,397 / 1,841 tok/s
+(bench_prefill, one slot). The sliding rings held the window + one chunk per slot (1024-row rings do not fit beside 8
+slots); I2M_RING_CHUNK sizes them for 256 rows and runs those layers' KV writes + SDPA in 256-row sub-chunks inside a
+longer chunk (projections / convs / MoE on the whole chunk; packed test numbers identical, exact resume bitwise). Served
+p150 at 512-row chunks: TTFT 1K 1,465 -> 830 ms, 4K 5,515 -> 3,216 ms, 8 x 1K 10.1 -> 6.0 s; 8 x 4K and 2 x 7K ran
+clean. 1024-row chunks ran out of DRAM in a real request (the MoE dispatch buffers with real routing, ~56 MB each).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
 different inputs), ~0.2-0.4 ms per token, and the merged weight did not fit beside 8 x 8K on one die.
