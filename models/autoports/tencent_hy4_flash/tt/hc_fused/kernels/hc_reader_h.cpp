@@ -29,6 +29,12 @@
 #ifndef HR
 #define HR 16  // rows of the partial tiles (16: faces 0 / 1 whole; 8: their rows 0..7)
 #endif
+#ifndef FNFACE
+#define FNFACE 0  // fn tiles: only faces 0 / 2 from DRAM (columns 0..15; fn's M <= 16 used columns), faces 1 / 3 zeroed
+#endif
+#ifndef MMGEN
+#define MMGEN 0  // the matmul constants (cb_mm) and the ones half tile (cb_one) built on the core (gen_mm)
+#endif
 
 // rows 0..HR-1 of a full tile at NOC address src (element bytes EB) -> a partial HR x 32 tile at dst
 template <uint32_t EB>
@@ -39,6 +45,42 @@ inline void read_rows(uint64_t src, uint32_t dst) {
         noc_async_read(src, dst, HR * 16 * EB);
         noc_async_read(src + 256 * EB, dst + HR * 16 * EB, HR * 16 * EB);
     }
+}
+
+// MMGEN: HCFusedOp.mm (10 FP32 tiles: 0 ones, 1 + m row m ones, 9 identity) and the ones half tile, bit for bit as the
+// DRAM copy: 64 bytes of ones stored, doubled to the ones tile by local NOC copies; tiles 1..9 zeroed, then their ones
+// stored (the core's own L1, no DRAM traffic: every core read the same 40 KB from the same banks)
+template <uint32_t F32H>
+inline void gen_mm(uint32_t cb_mm, uint32_t cb_one) {
+    constexpr uint32_t F32 = 4096, ONE = 0x3F800000u;
+    cb_reserve_back(cb_mm, 10);
+    cb_reserve_back(cb_one, 1);
+    const uint32_t mm = get_write_ptr(cb_mm);
+    volatile tt_l1_ptr uint32_t* p = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(mm);
+    for (uint32_t i = 0; i < 16; ++i) {
+        p[i] = ONE;
+    }
+    for (uint32_t z = F32; z < 10 * F32; z += MEM_ZEROS_SIZE) {
+        noc_async_write(MEM_ZEROS_BASE, get_noc_addr(mm + z), MEM_ZEROS_SIZE);
+    }
+    for (uint32_t n = 64; n < F32; n *= 2) {
+        noc_async_write(mm, get_noc_addr(mm + n), n);
+        noc_async_write_barrier();
+    }
+    noc_async_write(mm, get_noc_addr(get_write_ptr(cb_one)), F32H);
+    for (uint32_t m = 0; m < 8; ++m) {  // selector m: row m (< 16: faces 0 / 1)
+        volatile tt_l1_ptr uint32_t* q = p + (1 + m) * 1024 + m * 16;
+        for (uint32_t i = 0; i < 16; ++i) {
+            q[i] = ONE;
+            q[256 + i] = ONE;
+        }
+    }
+    volatile tt_l1_ptr uint32_t* e = p + 9 * 1024;
+    for (uint32_t i = 0; i < 16; ++i) {
+        e[i * 16 + i] = ONE;        // face 0
+        e[768 + i * 16 + i] = ONE;  // face 3
+    }
+    noc_async_write_barrier();
 }
 
 void kernel_main() {
@@ -88,23 +130,40 @@ void kernel_main() {
         uint32_t l1 = get_write_ptr(cb_fn);
         for (uint32_t s = 0; s < 4; ++s) {
             for (uint32_t jj = 0; jj < J; ++jj) {
+#if FNFACE
+                // faces 0 / 2 (columns 0..15) from DRAM, faces 1 / 3 (columns 16..31: zero in fn) zeroed locally
+                const uint64_t src = s_fn.get_noc_addr(s * HT + c * J + jj);
+                noc_async_read(src, l1, 1024);
+                noc_async_read(src + 2048, l1 + 2048, 1024);
+                for (uint32_t z = 0; z < 1024; z += MEM_ZEROS_SIZE) {
+                    noc_async_write(MEM_ZEROS_BASE, get_noc_addr(l1 + 1024 + z), MEM_ZEROS_SIZE);
+                    noc_async_write(MEM_ZEROS_BASE, get_noc_addr(l1 + 3072 + z), MEM_ZEROS_SIZE);
+                }
+#else
                 noc_async_read(s_fn.get_noc_addr(s * HT + c * J + jj), l1, F32);
+#endif
                 l1 += F32;
             }
         }
         noc_async_read_barrier();
+#if FNFACE
+        noc_async_write_barrier();
+#endif
         cb_push_back(cb_fn, 4 * J);
     }
 #endif
+    uint32_t l1;
+#if !MMGEN
     const auto s_mm = TensorAccessor(mm_args, mm_addr, F32);
     cb_reserve_back(cb_mm, NMM);
-    uint32_t l1 = get_write_ptr(cb_mm);
+    l1 = get_write_ptr(cb_mm);
     for (uint32_t t = 0; t < NMM; ++t) {
         noc_async_read(s_mm.get_noc_addr(t), l1, F32);
         l1 += F32;
     }
     cb_reserve_back(cb_one, 1);
     read_rows<4>(s_mm.get_noc_addr(0), get_write_ptr(cb_one));
+#endif
     if constexpr (PRE) {
 #if !EARLY
         const auto s_fn = TensorAccessor(fn_args, fn_addr, F32);
@@ -136,6 +195,9 @@ void kernel_main() {
             l1 += F32H;
         }
     }
+#if MMGEN
+    gen_mm<F32H>(cb_mm, cb_one);  // (while the value constants' reads are in flight)
+#endif
     noc_async_read_barrier();
     cb_push_back(cb_mm, NMM);
     cb_push_back(cb_one, 1);

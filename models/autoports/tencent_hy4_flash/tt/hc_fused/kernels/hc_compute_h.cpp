@@ -56,6 +56,32 @@ constexpr uint32_t cb_x = 0, cb_o = 1, cb_wp = 2, cb_fn = 3, cb_mm = 4, cb_cv = 
 #define QF_OUT 0  // PRE: cores 0..7 compute the next POST's selection (h = c / 4, s = c % 4) into cb_qo
 #endif
 constexpr uint32_t MM_ONES = 0, MM_SEL = 1, MM_EYE = 9;
+#ifndef SFPU_F0
+#define SFPU_F0 0
+#endif
+// SFPU_F0 (HR = 8): the FP32 SFPU arithmetic of the weights (and the hi / lo splits) on face 0 only (rows 0..15,
+// columns 0..15: the real rows 0..7, the mix in columns 0..7, COMB's S block at 8..15). Per element the same operations;
+// the other faces keep finite copies (zeros in the weight columns >= 16), which only meet zero selector / ones-matmul
+// entries or are never written out: the outputs are bit-identical. (HR = 16 with VectorMode::R was not: kept RC.)
+#if SFPU_F0
+constexpr VectorMode HVM = HR <= 8 ? VectorMode::None : VectorMode::RC;
+#else
+constexpr VectorMode HVM = VectorMode::RC;
+#endif
+ALWI void h_mul(uint32_t a, uint32_t b, uint32_t o) {  // mul_binary_tile on HVM's faces
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary_mul,
+                           (APPROX, ckernel::BinaryOp::MUL, 8, DST_ACCUM_MODE), a, b, o, HVM)));
+}
+ALWI void h_add(uint32_t a, uint32_t b, uint32_t o) {  // add_binary_tile on HVM's faces
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary,
+                           (APPROX, ckernel::BinaryOp::ADD, 8, DST_ACCUM_MODE, ckernel::DstRoundingMode::Default), a,
+                           b, o, HVM)));
+}
+ALWI void h_sub(uint32_t a, uint32_t b, uint32_t o) {  // sub_binary_tile on HVM's faces
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sfpu_binary,
+                           (APPROX, ckernel::BinaryOp::SUB, 8, DST_ACCUM_MODE, ckernel::DstRoundingMode::Default), a,
+                           b, o, HVM)));
+}
 // cb_s1 (S * I, a matmul operand: default unpack) and cb_m (M, FP32 unpack-to-dest copies) must be separate CBs
 // cb_mm: 0 ones, 1 + m: selector of column m (row m all ones), 9 identity; cb_cv: 0 scale, 1 base, 2 affine rows, 3 identity
 // (copy mode). FP32 operands of a matmul enter the FPU at tf32: split_hi_lo makes an FP32 tile W (in cb_mm-able cb_src
@@ -84,7 +110,7 @@ void split_hi_lo(uint32_t cb_src, uint32_t cb_copy) {
     copy_init(cb_hi);
     copy_tile(cb_hi, 0, 1);  // tf32 values: exact through srcA
     sub_binary_tile_init();
-    sub_binary_tile(0, 1, 0);
+    h_sub(0, 1, 0);
     tile_regs_commit();
     tile_regs_wait();
     pack_reconfig_data_format(cb_lo);
@@ -344,7 +370,7 @@ void kernel_main() {
         copy_tile(cb_cv, 3, 2);  // identity
 #endif
         mul_binary_tile_init();
-        mul_binary_tile(1, 2, 1);  // the diagonal of S
+        h_mul(1, 2, 1);  // the diagonal of S
         tile_regs_commit();
         tile_regs_wait();
         pack_reconfig_data_format(cb_s1);
@@ -372,27 +398,27 @@ void kernel_main() {
         copy_init(cb_m);
         copy_tile(cb_m, 0, 0);  // M
         binop_with_scalar_tile_init();
-        mul_unary_tile(1, inv_n_bits);
-        add_unary_tile(1, eps_bits);
+        mul_unary_tile(1, inv_n_bits, HVM);
+        add_unary_tile(1, eps_bits, HVM);
         rsqrt_tile_init();
-        rsqrt_tile(1);
+        rsqrt_tile(1, HVM);
         mul_binary_tile_init();
-        mul_binary_tile(0, 1, 0);  // M r
+        h_mul(0, 1, 0);  // M r
         reconfig_data_format_srca(cb_cv);
         copy_init(cb_cv);
         copy_tile(cb_cv, 0, 1);  // scale
         copy_tile(cb_cv, 1, 2);  // base
         copy_tile(cb_cv, 2, 3);  // affine
         mul_binary_tile_init();
-        mul_binary_tile(0, 1, 0);
+        h_mul(0, 1, 0);
         add_binary_tile_init();
-        add_binary_tile(0, 2, 0);
+        h_add(0, 2, 0);
         sigmoid_tile_init();
-        sigmoid_tile(0);
+        sigmoid_tile<HVM>(0);
         mul_binary_tile_init();
-        mul_binary_tile(0, 3, 0);
+        h_mul(0, 3, 0);
         binop_with_scalar_tile_init();
-        add_unary_tile(0, heps_bits);
+        add_unary_tile(0, heps_bits, HVM);
         if constexpr (DBG == 1) {
             reconfig_data_format_srca(cb_m);
             copy_init(cb_m);

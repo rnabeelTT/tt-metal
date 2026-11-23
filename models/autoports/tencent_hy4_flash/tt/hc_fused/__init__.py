@@ -173,7 +173,15 @@ class HCFusedOp:
         cbs = [_cb(crs, i, dt, tb, n, half=0 if i in HALF_FULL else half) for i, (dt, tb), n in cbl]
         hdef = [("HR", str(half)), ("QF_IN", str(qf_in)), ("QF_OUT", str(qf_out)),
                 ("POST_FLAT", _os.environ.get("HY4_HCF_FLAT", "1")),
-                ("EARLY", str(early)), ("COMB", str(comb))] if half else []
+                ("EARLY", str(early)), ("COMB", str(comb)),
+                # HY4_HCF_FNFACE: fn's zero columns 16..31 (faces 1 / 3) not read from DRAM (M <= 16; exact)
+                ("FNFACE", str(int(pre and hc.M <= 16 and _os.environ.get("HY4_HCF_FNFACE", "1") == "1"))),
+                # HY4_HCF_MMGEN: the selector / ones / identity constants built on the cores, not read (exact)
+                ("MMGEN", _os.environ.get("HY4_HCF_MMGEN", "1")),
+                # HY4_HCF_XZERO: the new residual's padding rows zeroed at kernel start (off the exchange's path; exact)
+                ("XZERO", _os.environ.get("HY4_HCF_XZERO", "1")),
+                # HY4_HCF_F0: the weights' SFPU arithmetic on the faces with real values only (exact)
+                ("SFPU_F0", _os.environ.get("HY4_HCF_F0", "1"))] if half else []
         sfx = "_h" if half else ""
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         fnlo = int(pre and _os.environ.get("HY4_HCF_FNLO", "0") == "1")

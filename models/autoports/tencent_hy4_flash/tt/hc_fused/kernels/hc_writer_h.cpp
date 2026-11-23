@@ -23,6 +23,9 @@
 #ifndef COMB
 #define COMB 0  // (EARLY) one partial tile per core; X' at rows HR..2 HR - 1 of the full tiles the compute reads
 #endif
+#ifndef XZERO
+#define XZERO 0  // (EARLY + COMB, POST) the residual's padding rows zeroed at kernel start, not after the POST
+#endif
 #ifndef EARLY
 #define EARLY 0  // decode (TR = 1): ready handshake + zero fills at kernel start, only rows 0..HR-1 moved late
 #endif
@@ -126,6 +129,18 @@ void kernel_main() {
         xf_base = get_write_ptr(cb_xf);
         zero_to(get_noc_addr(xf_base), 4 * J * BF);
     }
+#if COMB && XZERO
+    if constexpr (POST) {  // the new residual's padding rows (HR..31) zeroed now: after the POST only rows 0..HR-1 move
+        for (uint32_t t = 0; t < 4 * J; ++t) {
+            const uint64_t d = s_xn.get_noc_addr((t / J) * HT + c * J + t % J);
+            if constexpr (HR < 16) {
+                zero_to(d + HR * 32, (16 - HR) * 32);
+                zero_to(d + 512 + HR * 32, (16 - HR) * 32);
+            }
+            zero_to(d + 1024, 1024);
+        }
+    }
+#endif
     noc_async_write_barrier();
 #endif
     for (uint32_t r = g; r < TR; r += G) {
@@ -146,7 +161,11 @@ void kernel_main() {
 #if COMB
             for (uint32_t s = 0; s < 4; ++s) {
                 for (uint32_t jj = 0; jj < J; ++jj) {
+#if XZERO
+                    write_rows(src + (s * J + jj) * BFH, s_xn.get_noc_addr(s * HT + c * J + jj), 2);
+#else
                     write_full(src + (s * J + jj) * BFH, s_xn.get_noc_addr(s * HT + c * J + jj), 2);
+#endif
                 }
             }
 #else
