@@ -10,7 +10,8 @@
 // (pfseg_compute.cpp) shifts the rows itself: per row tile k this pushes x_k and p_k, the 32 rows before it (x_{k-1},
 // or at a segment start a tile holding the state's 3 rows at rows 29 .. 31, zeros above).
 //
-// common args: x_addr, taps_addr, nseg, then per segment (MAXSEG slots): ks, ke, st, stn, n, sb, snap; shift_addr
+// common args: x_addr, taps_addr, nseg, then per segment (MAXSEG slots): ks, ke, st, stn, n, sb, snap; shift_addr;
+// resid_addr (PF_RESID: tile (k, c) of the residual, pushed beside x_k for the compute's add)
 
 #include <stdint.h>
 
@@ -40,6 +41,12 @@ void kernel_main() {
     constexpr auto st_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     constexpr auto taps_args = TensorAccessorArgs<st_args.next_compile_time_args_offset()>();
     constexpr auto m_args = TensorAccessorArgs<taps_args.next_compile_time_args_offset()>();
+#ifdef PF_RESID
+    constexpr uint32_t cb_r = get_compile_time_arg_val(m_args.next_compile_time_args_offset());
+    constexpr auto r_args = TensorAccessorArgs<m_args.next_compile_time_args_offset() + 1>();
+    constexpr uint32_t RB = get_tile_size(cb_r);
+    const auto s_r = TensorAccessor(r_args, get_common_arg_val<uint32_t>(4 + 7 * MAXSEG), RB);
+#endif
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
     if (item >= cols * G) {
@@ -160,6 +167,12 @@ void kernel_main() {
                 }
             }
         }
+#ifdef PF_RESID
+        cb_reserve_back(cb_r, 1);
+        noc_async_read(s_r.get_noc_addr(k * cols + c), get_write_ptr(cb_r), RB);
+        noc_async_read_barrier();
+        cb_push_back(cb_r, 1);
+#endif
         cb_push_back(cb_x, 1);
         cb_push_back(cb_p, 1);
     }

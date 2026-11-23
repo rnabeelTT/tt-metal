@@ -285,6 +285,11 @@ class MessageGate:
         return ttnn.add(ttnn.subtract(hf, ttnn.multiply(f, hf)), ttnn.multiply(a, mf))
 
 
+def _res_add(resid, y, out_dtype):
+    out = ttnn.add(_f32(resid), _f32(y))
+    return ttnn.typecast(out, out_dtype) if out_dtype != ttnn.float32 else out
+
+
 class Layer:
     """Weights of one decoder layer (shared by its passes)."""
 
@@ -337,11 +342,13 @@ class AppState:
                 for cv in ln:
                     cv.reset()
 
-    def conv(self, which, x, rows_mode, nvalid):
+    def conv(self, which, x, rows_mode, nvalid, resid=None, out_dtype=ttnn.bfloat16):
+        """resid: -> out_dtype(f32(resid) + f32(conv(x))) (the residual add after the conv; in the prefill kernel)."""
         c = self.attn_conv if which == "attn" else self.mlp_conv
         if rows_mode:
-            return c.rows(x, commit_all=True)
-        return c.prefill_commit(x, nvalid)
+            y = c.rows(x, commit_all=True)
+            return y if resid is None else _res_add(resid, y, out_dtype)
+        return c.prefill_commit(x, nvalid, resid=resid, out_dtype=out_dtype)
 
 
 class Inkling2Model:
@@ -461,12 +468,14 @@ class Inkling2Model:
             if messages is not None:
                 qi, ki, vi = (L.gates[n](h, m) for n, h, m in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
             qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
+        r_in = None if L.boundary else x  # (the residual add rides the attention-output conv)
+        f32 = ttnn.float32
         if ctx is not None:
             att = attention_packed(L.attn, st.cache, [ln[:2] for ln in st.lanes], qn, kn, vn, ctx, tt_ccl=self.tt_ccl)
-            att = self._seg_conv(st, 2, att, ctx)
+            att = self._seg_conv(st, 2, att, ctx, resid=r_in, out_dtype=f32)
         else:
             att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl, slot=slot)
-            att = st.conv("attn", att, rows_mode, nvalid)
+            att = st.conv("attn", att, rows_mode, nvalid, resid=r_in, out_dtype=f32)
         if L.boundary:
             resid = _f32(att)
             self._blk = blk = xn if xn is not None else ops.rms(x)
@@ -476,21 +485,24 @@ class Inkling2Model:
                                    memory_config=DRAM)
                 ids = list(ids) + [a]
         else:
-            resid = ttnn.add(_f32(x), _f32(att))
+            resid = att  # (x + conv(attention output), fp32)
         m = (self._pmix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1) if D is not None
              else ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1))[0]
         if messages is not None:
             m = L.gates["mlp"](m, messages[3])
         mo = L.moe.forward(_bf(ops.rms(m, L.mlp_norm)))
-        mo = self._seg_conv(st, 3, mo, ctx) if ctx is not None else st.conv("mlp", mo, rows_mode, nvalid)
-        return _bf(ttnn.add(resid, _f32(mo)))
+        if ctx is not None:
+            return self._seg_conv(st, 3, mo, ctx, resid=resid, out_dtype=ttnn.bfloat16)
+        return st.conv("mlp", mo, rows_mode, nvalid, resid=resid, out_dtype=ttnn.bfloat16)
 
     @staticmethod
-    def _seg_conv(st, i, x, ctx):
-        """Conv i (2: attention output, 3: MoE output) of a packed chunk: each segment on its lane's state."""
+    def _seg_conv(st, i, x, ctx, resid=None, out_dtype=ttnn.bfloat16):
+        """Conv i (2: attention output, 3: MoE output) of a packed chunk: each segment on its lane's state (resid: the
+        following residual add, ShortConv.prefill_packed)."""
         x = _bf(x)
         return st.lanes[0][i].prefill_packed(x, [(row0, R, valid, st.lanes[lane][i])
-                                                 for row0, R, _, valid, _, lane in ctx.segs])
+                                                 for row0, R, _, valid, _, lane in ctx.segs], resid=resid,
+                                             out_dtype=out_dtype)
 
     def messages(self, loop_idx, prev_src_n):
         """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages."""

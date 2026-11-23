@@ -14,7 +14,7 @@ void kernel_main() {
     constexpr uint32_t Rt = get_compile_time_arg_val(2);
     constexpr uint32_t G = get_compile_time_arg_val(3);
     constexpr uint32_t GY = get_compile_time_arg_val(4);
-    constexpr uint32_t TB = 2048;
+    constexpr uint32_t TB = get_tile_size(cb_o);  // (bf16, or fp32 with the packed kernel's residual add)
     constexpr auto out_args = TensorAccessorArgs<5>();
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();

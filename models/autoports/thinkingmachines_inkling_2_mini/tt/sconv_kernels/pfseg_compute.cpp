@@ -5,8 +5,10 @@
 //   T_j = P_j x_k + Q_j p_k   (j < 3: the rows shifted down by 3 - j; p_k = the 32 rows before x_k: x_{k-1} or the
 //                              segment's state rows at 29 .. 31; P_j / Q_j 0/1 shift matrices, exact on the FPU)
 //   y = x + t0 T0 + t1 T1 + t2 T2 + t3 x   (fp32 DST on the SFPU, pf_compute.cpp's arithmetic and order)
-// rounded to bf16 on the SFPU (round to nearest even) before the pack.
-// DST (full sync, 8 fp32 tiles): 0 = y, 1 .. 3 = T_j, 4 = tap, 5 = x.
+// rounded to bf16 on the SFPU (round to nearest even) before the pack. PF_RESID: out = r + y (r the residual tile,
+// fp32 in DST; = ttnn.add(f32(r), f32(y)) after the conv), rounded to bf16 again when PF_OUT_BF16 (the output CB's
+// format: fp32 or bf16).
+// DST (full sync, 8 fp32 tiles): 0 = y, 1 .. 3 = T_j, 4 = tap, 5 = x, 6 = r.
 
 #include <cstdint>
 
@@ -28,6 +30,7 @@ void kernel_main() {
     constexpr uint32_t G = get_compile_time_arg_val(6);
     constexpr uint32_t GY = get_compile_time_arg_val(7);
     constexpr uint32_t cb_m = get_compile_time_arg_val(8);  // 6 tiles: P_0 .. P_2, Q_0 .. Q_2
+    constexpr uint32_t cb_r = get_compile_time_arg_val(9);  // PF_RESID: the residual tiles
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
     if (item >= cols * G) {
@@ -66,8 +69,22 @@ void kernel_main() {
         }
         typecast_tile_init<static_cast<uint32_t>(DataFormat::Float32), static_cast<uint32_t>(DataFormat::Float16_b)>();
         typecast_tile<static_cast<uint32_t>(DataFormat::Float32), static_cast<uint32_t>(DataFormat::Float16_b)>(0);
+#ifdef PF_RESID
+        cb_wait_front(cb_r, 1);
+        reconfig_data_format_srca(cb_r);
+        copy_init(cb_r);
+        copy_tile(cb_r, 0, 6);
+        add_binary_tile_init();
+        add_binary_tile(6, 0, 0);
+#if PF_OUT_BF16
+        typecast_tile_init<static_cast<uint32_t>(DataFormat::Float32), static_cast<uint32_t>(DataFormat::Float16_b)>();
+        typecast_tile<static_cast<uint32_t>(DataFormat::Float32), static_cast<uint32_t>(DataFormat::Float16_b)>(0);
+#endif
+        cb_pop_front(cb_r, 1);
+#endif
         tile_regs_commit();
         tile_regs_wait();
+        pack_reconfig_data_format(cb_o);
         pack_tile(0, cb_o);
         tile_regs_release();
         cb_push_back(cb_o, 1);

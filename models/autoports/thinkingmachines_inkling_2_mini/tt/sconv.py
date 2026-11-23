@@ -298,21 +298,32 @@ class ShortConv:
         P[R] = dict(cr=cr, cbs=cbs, ct=(cols, Rt, G, gy), hash=_stable_hash("inkling_sconv_pf", self.C, R, G, gy))
         return P[R]
 
-    def prefill_commit(self, x, n=None):
+    def prefill_commit(self, x, n=None, resid=None, out_dtype=ttnn.bfloat16):
         """A prefill chunk: x [1, 1, R, C] bf16 tile (R % 32 == 0) -> y [1, 1, R, C] bf16; the state advances past the
-        first n rows (default R: a padded last chunk passes its real row count). One program + a state copy."""
+        first n rows (default R: a padded last chunk passes its real row count). One program + a state copy.
+        resid: -> out_dtype(f32(resid) + f32(y)) (prefill_packed)."""
         R = int(x.shape[2])
         n = R if n is None else int(n)
         if self.snap_row is not None:  # prefix cache: the state at row snap_row of this chunk, before it advances
             self.snap_out = self._state_at(x, int(self.snap_row))
+        if self.snap_row is not None or not self._pf_ok(x) or n < 1:
+            y = self._prefill_commit_ops(x, n, R)
+            if resid is None:
+                return y
+            f32 = lambda t: ttnn.typecast(t, ttnn.float32) if t.dtype != ttnn.float32 else t  # noqa: E731
+            out = ttnn.add(f32(resid), f32(y))
+            return ttnn.typecast(out, out_dtype) if out_dtype != ttnn.float32 else out
+        y = self.prefill_packed(x, [(0, R, n, self)], resid=resid, out_dtype=out_dtype)  # (the row shifts on the FPU)
+        self._last_seq = None
+        return y
+
+    def _prefill_commit_ops(self, x, n, R):
+        """prefill_commit without the packed kernel: the rows path (small chunks) or the single-sequence program (a
+        prefix snapshot in this chunk)."""
         if not self._pf_ok(x) or n < 1:
             y = self.rows(x, commit_all=(n == R))
             if n != R:
                 self.commit_final(n)
-            return y
-        if self.snap_row is None:  # one segment of the packed kernel (the row shifts on the FPU)
-            y = self.prefill_packed(x, [(0, R, n, self)])
-            self._last_seq = None
             return y
         pr = self._pf_program(R)
         cols, Rt, G, gy = pr["ct"]
@@ -368,18 +379,21 @@ class ShortConv:
         self._last_seq = None
         return y
 
-    def prefill_packed(self, x, segs):
+    def prefill_packed(self, x, segs, resid=None, out_dtype=ttnn.bfloat16):
         """A packed prefill chunk (several sequences): x [1, 1, T, C] bf16 tile -> y [1, 1, T, C] bf16 in one program
         (sconv_kernels/pfseg_reader.cpp; the program depends on T only). segs: [(row0, R, n, lane_conv)] (64-row
         aligned, covering all T rows): segment rows run against lane_conv's state, which then advances past the
-        segment's first n rows; a lane conv with snap_row set also gets the state at that row in its snap_buf."""
+        segment's first n rows; a lane conv with snap_row set also gets the state at that row in its snap_buf.
+        resid ([1, 1, T, C] bf16 / fp32): -> out_dtype(f32(resid) + f32(y)) instead (the following residual add)."""
         T = int(x.shape[2])
         assert self._pf_ok(x) and len(segs) <= PF_MAXSEG, (T, len(segs))
         pr = self._pf_program(T)
         cols, Rt, G, gy = pr["ct"]
         cr = pr["cr"]
+        if resid is None:
+            out_dtype = ttnn.bfloat16
         y = ttnn.allocate_tensor_on_device(
-            ttnn.Shape([1, 1, T, self.C]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh, ttnn.DRAM_MEMORY_CONFIG
+            ttnn.Shape([1, 1, T, self.C]), out_dtype, ttnn.TILE_LAYOUT, self.mesh, ttnn.DRAM_MEMORY_CONFIG
         )
         NONE = 0xFFFFFFFF
         args = [x.buffer_address(), self.taps_tiles.buffer_address(), len(segs)]
@@ -390,31 +404,45 @@ class ShortConv:
                      lc.snap_buf.buffer_address() if snap is not None else 0, int(snap) if snap is not None else NONE]
         shift = self._shift_tiles()
         args += [0] * (3 + 7 * PF_MAXSEG - len(args)) + [shift.buffer_address()]
-        cb_x, cb_p, cb_t, cb_scr, cb_m, cb_o = 0, 1, 2, 3, 4, 16
+        cb_x, cb_p, cb_t, cb_scr, cb_m, cb_r, cb_o = 0, 1, 2, 3, 4, 5, 16
         rd_ct = [cb_x, cb_p, cb_t, cb_scr, cols, Rt, G, gy, cb_m]
         for t in (x, self.st, self.taps_tiles, shift):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        defs = []
+        if resid is not None:
+            args.append(resid.buffer_address())
+            rd_ct += [cb_r] + ttnn.TensorAccessorArgs(resid).get_compile_time_args()
+            defs = [("PF_RESID", "1"), ("PF_OUT_BF16", str(int(out_dtype == ttnn.bfloat16)))]
         wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
 
         def kd(source, ct, common, cfg):
             k = ttnn.KernelDescriptor(kernel_source=str(KERNELS / source), core_ranges=cr, compile_time_args=ct,
-                                      config=cfg)
+                                      config=cfg, defines=defs)
             k.common_runtime_args = common
             return k
 
+        ccfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                            dst_full_sync_en=True, math_approx_mode=False)
+        if resid is not None and resid.dtype == ttnn.float32:
+            u2d = [ttnn.UnpackToDestMode.Default] * 64
+            u2d[cb_r] = ttnn.UnpackToDestMode.UnpackToDestFp32  # (the fp32 residual whole into DST)
+            ccfg.unpack_to_dest_mode = u2d
         kernels = [
             kd("pfseg_reader.cpp", rd_ct, args,
                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
             kd("pf_writer.cpp", wr_ct, [y.buffer_address()],
                ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
-            kd("pfseg_compute.cpp", [cb_x, cb_p, cb_t, cb_o, cols, Rt, G, gy, cb_m], [],
-               ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
-                                            dst_full_sync_en=True, math_approx_mode=False)),
+            kd("pfseg_compute.cpp", [cb_x, cb_p, cb_t, cb_o, cols, Rt, G, gy, cb_m, cb_r], [], ccfg),
         ]
-        cbs = pr["cbs"] + [_cb(cr, cb_m, ttnn.bfloat16, 2048, 6)]
+        cbs = pr["cbs"][:-1] + [_cb(cr, cb_m, ttnn.bfloat16, 2048, 6)]  # (pr's last CB: the bf16 output)
+        f32 = ttnn.float32
+        cbs.append(_cb(cr, cb_o, out_dtype, 4096 if out_dtype == f32 else 2048, 2))
+        if resid is not None:
+            cbs.append(_cb(cr, cb_r, resid.dtype, 4096 if resid.dtype == f32 else 2048, 2))
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg2", self.C, T, G, gy)
-        ttnn.generic_op([x, self.st, self.taps_tiles, shift, y], prog)
+        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg3", self.C, T, G, gy, str(out_dtype),
+                                                str(resid.dtype) if resid is not None else "-")
+        ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else []) + [y], prog)
         for row0, R, n, lc in segs:
             ttnn.copy(lc._pf_stn, lc.st)
             if lc.snap_row is not None:

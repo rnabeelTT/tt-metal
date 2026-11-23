@@ -259,6 +259,7 @@ are stored padded to 384); the MoE rows kernels at one row (still route the sigb
 | grouped matmul: slices take contiguous expert ranges (each expert's weights read once per column block) | 344 | 2,976 |
 | SDPA writes whole [1, 1, T, NH * HD] tiles (4 items x 8 rows = one tile row; no reshape of the padded output) | 336 | 3,044 |
 | block mix logits once per block (MixPlan: one matmul per block against every later query; no duplicate block norm) | 324 | 3,165 |
+| the residual adds in the short-conv kernel (x + conv(attention out) fp32; bf16(resid + conv(MoE out))) | 312 | 3,278 |
 
 Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), tools/needle_serve.py, depths 0.1 / 0.5 /
 0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
