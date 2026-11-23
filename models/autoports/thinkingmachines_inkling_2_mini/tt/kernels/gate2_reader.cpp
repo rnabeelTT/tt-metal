@@ -15,11 +15,9 @@
 
 template <uint32_t T, uint32_t E>
 inline void read_rows(uint64_t src, uint32_t dst) {
-    constexpr uint32_t HALF = 16 * E, FACE = 256 * E;
-    for (uint32_t r = 0; r < T; ++r) {
-        noc_async_read(src + r * HALF, dst + r * HALF, HALF);
-        noc_async_read(src + FACE + r * HALF, dst + FACE + r * HALF, HALF);
-    }
+    constexpr uint32_t FACE = 256 * E;  // (rows 0 .. T-1 of a face are contiguous: one read per face)
+    noc_async_read(src, dst, T * 16 * E);
+    noc_async_read(src + FACE, dst + FACE, T * 16 * E);
 }
 
 void kernel_main() {
