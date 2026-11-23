@@ -35,6 +35,10 @@ LANE_ROWS = os.environ.get("HY4_LANE_ROWS", "1") == "1"
 # groups (constant Ecat [r 32 L, 64 L], n = 32 L). Same values for every visible group (recomputed from the same rows).
 LANE_POOL = os.environ.get("HY4_LANE_POOL", "1") == "1"
 PRECOPY = os.environ.get("HY4_PRECOPY", "1") == "1"
+# Batched index lists through tt/lane_sel (HY4_IDX_LANEX, default 1): uint32 host lists (dense rows: the list itself,
+# no device program), selecting rows: each row's own lane window of the scores compacted (one data-movement program),
+# top-512 over that, [selection | tail] / dense rows mixed by one more program (replaces ~20 ops, 7 of them full width)
+LANEX = os.environ.get("HY4_IDX_LANEX", "1") == "1"
 
 
 def pool_rows(L):
@@ -117,6 +121,10 @@ class Hy4BatchDecoder(Hy4Decoder):
             setattr(si, name, self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT))
         si.tail_f = self._dev(z(1, 1, R, self.K_dense - self.n_sel), ttnn.float32, ttnn.TILE_LAYOUT)
         si.dense_f = self._dev(z(1, 1, R, self.K_dense), ttnn.float32, ttnn.TILE_LAYOUT)
+        if LANEX:
+            u32 = lambda *sh: self._dev(z(*sh, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)  # noqa: E731
+            si.dense_u, si.tail_u = u32(1, 1, R, self.K_dense), u32(1, 1, R, self.K_dense - self.n_sel)
+            si.lmeta, si.vmax = u32(1, 1, R, 16), u32(1, 1, 1, 1)
         return si
 
     def _onehots(self, lane):
@@ -357,6 +365,17 @@ class Hy4BatchDecoder(Hy4Decoder):
             h[name] = _tile(torch.from_numpy(t).reshape(1, 1, R0, 1), ttnn.float32)
         h["tail_f"] = _tile(torch.from_numpy(tail).reshape(1, 1, R0, -1), ttnn.float32)
         h["dense_f"] = _tile(torch.from_numpy(dense).reshape(1, 1, R0, -1), ttnn.float32)
+        if LANEX:  # uint32 forms (SENT_F -> 0xFFFFFFFF) + per row [lane group base, visible groups, cache base, selects]
+            u = lambda a: _rm(torch.from_numpy(np.where(a >= SENT_F, 0xFFFFFFFF, a).astype(np.uint32).view(np.int32))
+                              .reshape(1, 1, R0, -1), ttnn.uint32)  # noqa: E731
+            h["dense_u"], h["tail_u"] = u(dense), u(tail)
+            meta = np.zeros((R0, 16), dtype=np.uint32)
+            meta[:, 0], meta[:, 1] = lo[:, 0], hi[:, 0] - lo[:, 0]
+            meta[:R, 2] = row_bs[:R]
+            meta[:, 3] = nmask[:, 0] > 0
+            h["lmeta"] = _rm(torch.from_numpy(meta.view(np.int32)).reshape(1, 1, R0, 16), ttnn.uint32)
+            vm = int((meta[:, 1] * meta[:, 3]).max()) if R else 0
+            h["vmax"] = _rm(torch.tensor([max(vm, 1)], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)
         top = L * gcap + 32
         need = max(need, min(self.min_width, L * gcap))
         width = next((b for b in (2048 * 2**i for i in range(12)) if b >= need and b + 32 <= top), None)
@@ -429,6 +448,9 @@ class Hy4BatchDecoder(Hy4Decoder):
             c(h[f"roffs_{k}"], si.row_offs[k])
         if si.Esel is not None:
             c(h["Esel"], si.Esel)
+        for name in ("dense_u", "tail_u", "lmeta", "vmax"):
+            if name in h and getattr(si, name, None) is not None:
+                c(h[name], getattr(si, name))
 
     # ------------------------------------------------------------------ a pass
     def run_batch(self, rows: dict) -> dict:

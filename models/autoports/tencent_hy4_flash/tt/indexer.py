@@ -922,6 +922,9 @@ class Hy4Indexer:
         ttnn.copy(new, T["g"])
         ttnn.deallocate(new)
         slab_write(T["g"], T["gk"], si.lane_offs["grp"], 2 * L)
+        lanex = getattr(si, "dense_u", None) is not None and os.environ.get("HY4_IDX_LANEX_RUN", "1") == "1"
+        if not getattr(si, "sel", True) and lanex:  # the uint32 host lists as they are (no program; not deallocated)
+            return si.dense_u
         if not getattr(si, "sel", True):  # every row in the dense regime: the host-built dense lists, no scoring
             u = ttnn.typecast(si.dense_f, ttnn.uint32, memory_config=mem)
             idx = ttnn.to_layout(u, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
@@ -930,9 +933,41 @@ class Hy4Indexer:
         cos, sin = si.cos_sin["sparse"]
         q, w = self._query(x, q_resid, cos, sin, mem, hw=hw, iq=iq)
         W = si.width
+        if lanex and os.environ.get("HY4_IDX_LSCORE", "1") == "1":  # (read at call time: A/B in one process)
+            # lane-aware score (tt/lane_sel.score): each row against its own lane's visible keys only, straight into
+            # the compacted rows (bit-identical scores; replaces the full-width score over every lane + compact)
+            from models.autoports.tencent_hy4_flash.tt.lane_sel import LaneSelOp
+
+            op = LaneSelOp.get(self.mesh)
+            if op.score_fits(self.gcap) and q.dtype == ttnn.bfloat16 and w.dtype == ttnn.bfloat16:
+                comp = op.score(q, T["gk"], w, si.lmeta, self.gcap)
+                ttnn.deallocate(q)
+                ttnn.deallocate(w)
+                ids = ttnn.experimental.topk_large_indices(comp, k=TOPK, valid_length_tensor=si.vmax)
+                ttnn.deallocate(comp)
+                idx = op.expand(ids, si.lmeta, si.tail_u, si.dense_u, r=self.r, n_sel=self.cfg.idx_group_topk - 1)
+                ttnn.deallocate(ids)
+                return idx
+            if not getattr(Hy4Indexer, "_ls_warned", False):
+                Hy4Indexer._ls_warned = True
+                from loguru import logger
+
+                logger.warning(f"Hy4 lane score off (gcap {self.gcap}, q {q.dtype}, w {w.dtype}): full-width score")
         sc = ttnn.experimental.indexer_score_dsa(q, T["gk"], w, chunk_start_idx=W, kv_len=W + 32)
         ttnn.deallocate(q)
         ttnn.deallocate(w)
+        if lanex and sc.layout == ttnn.ROW_MAJOR_LAYOUT and sc.dtype == ttnn.bfloat16:
+            # each row's own lane window compacted, top-512 over the largest visible count, lists built (tt/lane_sel)
+            from models.autoports.tencent_hy4_flash.tt.lane_sel import LaneSelOp
+
+            op = LaneSelOp.get(self.mesh)
+            comp = op.compact(sc, si.lmeta, self.gcap)
+            ttnn.deallocate(sc)
+            ids = ttnn.experimental.topk_large_indices(comp, k=TOPK, valid_length_tensor=si.vmax)
+            ttnn.deallocate(comp)
+            idx = op.expand(ids, si.lmeta, si.tail_u, si.dense_u, r=self.r, n_sel=self.cfg.idx_group_topk - 1)
+            ttnn.deallocate(ids)
+            return idx
         if int(sc.shape[-1]) != W + 32:
             sc2 = ttnn.slice(sc, (0, 0, 0, 0), (1, 1, 32, W + 32), memory_config=mem)
             ttnn.deallocate(sc)

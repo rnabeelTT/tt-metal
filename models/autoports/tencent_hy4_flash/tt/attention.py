@@ -1138,7 +1138,7 @@ class Hy4Attention:
         out = self._attend(x, q_lat, q_rope, idx, mem, dec=dec, R=getattr(si, "R", None))
         ttnn.deallocate(q_lat)
         ttnn.deallocate(q_rope)
-        if idx is not si.idx_swa:
+        if idx is not si.idx_swa and idx is not getattr(si, "dense_u", None):
             ttnn.deallocate(idx)
         return out
 
