@@ -42,6 +42,10 @@ DRAM_SHARDED = __import__("os").environ.get("I2M_DRAM_SHARDED", "0") == "1"
 # I2M_MSTREAM (default 1): the decode q | r | s | g, k and v projections in one program, each interleaved weight
 # streamed per DRAM bank in place (tt/mstream.py; the q block zero-padded to a multiple of 8 tile columns)
 MSTREAM = __import__("os").environ.get("I2M_MSTREAM", "1") == "1"
+# I2M_ATTN_HIFI4 (default 1): the attention projections at HiFi4 on bfp8 weights too (HiFi2 drops activation mantissa
+# bits: q vs the exact product mean |err| 2.7e-3 -> 2.1e-4; prefill eval KL 0.0139 -> 0.0123, decode 0.0184 -> 0.0157;
+# one die +0.7 ms per step)
+ATTN_HIFI4 = __import__("os").environ.get("I2M_ATTN_HIFI4", "1") == "1"
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 # prefill SDPA items per work unit (inkling_sdpa_decode mi; I2M_SDPA_MI): each K / V chunk read once for 4 items' Q tiles
@@ -135,7 +139,8 @@ class AttnWeights:
 
             K, fqp = wq.shape[1], self.fq + (-self.fq) % 256
             self.ms = MultiStream(mesh, K, [(fqp, ttnn.float32, 2), (self.kd, ttnn.bfloat16, 1),
-                                            (self.kd, ttnn.bfloat16, 1)], wdtype, interleaved=True)
+                                            (self.kd, ttnn.bfloat16, 1)], wdtype, interleaved=True,
+                                  fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2)
             self.ms_w = [self.w_q, self.w_k, self.w_v]
         # per-head scales (fp32): q [NH, HD], r [NH, DR] (head-sharded), as [1, 1, NH, HD] rows
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
@@ -158,7 +163,7 @@ class AttnWeights:
             self.v_static, self.v_wproj = L("v_sconv.static_w").float(), L("v_sconv.weight_proj").float()
         # HiFi2 reads a bfp8 weight's whole mantissa; HiFi4 only for bf16 weights
         self.ckc = ckc or ttnn.init_device_compute_kernel_config(
-            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4 if wdtype == ttnn.bfloat16 else ttnn.MathFidelity.HiFi2,
+            mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4 if wdtype == ttnn.bfloat16 or ATTN_HIFI4 else ttnn.MathFidelity.HiFi2,
             math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True)
 
 

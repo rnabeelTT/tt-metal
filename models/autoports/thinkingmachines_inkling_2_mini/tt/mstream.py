@@ -20,7 +20,7 @@ OB = {ttnn.float32: 4096, ttnn.bfloat16: 2048}
 
 
 class MultiStream:
-    def __init__(self, mesh, k, specs, weight_dtype, interleaved=False):
+    def __init__(self, mesh, k, specs, weight_dtype, interleaved=False, fidelity=ttnn.MathFidelity.HiFi2):
         """specs: [(n output columns, output dtype, readers per bank)] in order. interleaved: stream the model's own
         interleaved [K, n] weights in place (n a multiple of 8 tiles: each tile column sits in one bank,
         kernels/ilstream_reader.cpp) instead of per-bank copies (weights())."""
@@ -28,7 +28,7 @@ class MultiStream:
         self.parts, used = [], set()
         for n, dt, r in specs:
             assert not interleaved or n % 256 == 0, n
-            dl = DecodeLinear(mesh, k, n, weight_dtype, readers=r, exclude=tuple(used))
+            dl = DecodeLinear(mesh, k, n, weight_dtype, readers=r, fidelity=fidelity, exclude=tuple(used))
             used |= {(c.x, c.y) for c, _, _, _ in dl.assign}
             self.parts.append((dl, dt))
 

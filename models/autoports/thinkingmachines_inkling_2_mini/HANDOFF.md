@@ -363,6 +363,15 @@ tests/test_mstream_device.py), their difference ~1e-7: argmax noise of a last-bi
 Measured, not kept: gate|up + down in one program (the down weights streamed during gate|up, qwen36 union.py fused
 rows): 1 / 4 / 8 rows 210 / 623 / 1073 -> 212 / 639 / 1037 us, one die 22.5 -> 22.8 ms: the MoE reads compete for the
 same bandwidth; down readers 1 / 9, chunk 4 / 8: no gain; the one-row MoE kernels (I2M_MOE_ROW1): equal.
+Attention projections at HiFi4 (I2M_ATTN_HIFI4, default 1; HiFi2 drops low activation mantissa bits): q vs the exact
+fp64 product mean |err| 2.7e-3 -> 2.1e-4 (max 2.8e-2 -> 3.5e-3), identical on the streamed and the interleaved paths.
+Prefill eval (1 die) 0.9703 / 0.9966 / 0.0139 / nll 2.0355 -> 0.9696 / 0.9970 / 0.0123 / nll 2.0218 (ref 2.0219); decode
+eval 1 die 0.9672 / 0.9957 / 0.0184 -> 0.9686 / 0.9964 / 0.0157, TP2 0.9679 / 0.9954 / 0.0169 -> 0.9684 / 0.9947 / 0.0186
+(noise band); worst-slot logits pcc TP4 0.99302 / 0.99334 -> 0.99459 / 0.99540. Cost: 1 die 21.7 -> 22.4 ms, TP2 17.7 ->
+18.1, TP4 14.2 / 21.0 -> 14.4 / 21.3 ms; prefill 368.8 -> 370.0 ms per 512 rows. Not taken: the LM head at HiFi4 (+0.7 ms,
+decode KL 0.0157 -> 0.0160); the MoE experts at HiFi4 (bitwise unchanged: their activations are rounded to 7 bits, the
+srcB width, and HiFi2 already reads the whole bfp8 weight); head readers 3 / 4 / 6 (noise); the SDPA read throttle (the
+stock barrier every 2 tiles at ~100 program cores: RD 4 / 8 / 16 changed nothing).
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v

@@ -23,8 +23,8 @@ def _bits(f):
 
 
 class StreamHead(DecodeLinear):
-    def __init__(self, mesh_device, k, n, weight_dtype, softcap, readers=2):
-        super().__init__(mesh_device, k, n, weight_dtype, readers=readers)
+    def __init__(self, mesh_device, k, n, weight_dtype, softcap, readers=2, fidelity=ttnn.MathFidelity.HiFi2):
+        super().__init__(mesh_device, k, n, weight_dtype, readers=readers, fidelity=fidelity)
         self.softcap = softcap
 
     def __call__(self, x, w, rows, out_memory_config=ttnn.DRAM_MEMORY_CONFIG):
