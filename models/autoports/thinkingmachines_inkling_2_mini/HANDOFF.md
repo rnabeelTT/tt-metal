@@ -413,31 +413,38 @@ teacher-forced greedy 1.20 (base logits without the Markov head 0.70), sampled a
 default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, human chat 0.4 - 0.6. Exact greedy
 (the target's own continuation) on math: 2.05 vs 1.30 teacher-forced.
 
-### Speculative decoding on device (in progress)
+### Speculative decoding on device
 
-Verify rows (committed): BatchedDecoder(verify=R) runs R consecutive tokens of one sequence in one decode pass, bitwise
-the sequential decode at the same width (R = 2, 4; one die and TP2; eager and traced; tests/test_verify_device.py).
-The short convs are the only row-coupled ops: their readers (bconv / post / pre) rebuild each row's conv state in L1
-from the slot's committed row (a device tensor = the previous pass's accepted row) and the earlier rows' inputs
-(tt/kernels/seqshift.hpp); after the pass row j holds the state after row j, so a pass can be rewound to any of its
-rows (vLLM resync, leaving speculative decode: move_row j -> 0). R = 3 is not bitwise (some program is row-position
-dependent at width 3; never served). Taps for the drafter come out of the verify pass and the prefill (forward
-taps=): vs HF 0.98 - 0.9999 pcc.
+Served (vLLM, real text, 256 tokens, one user; tok/s = 1000 / TPOT). T=1 = the checkpoint's default sampling (the
+published profile):
 
-Measured, one die, greedy, eager drafter, d = 3 (tools/spec_bench.py): 2.54 tokens per pass (math 2.49, code 2.31,
-chat 2.89); verify pass 37.5 ms device (B=4 plain 36.1, B=1 22.5: MoE 7.9 -> 18.7 ms, 4 consecutive tokens share
-almost no experts), the drafter ~15 ms eager -> 23.3 ms/token vs 22.6 plain. With a ~3 ms drafter: ~16 ms/token.
-The streams of spec (width 4) and plain decode (width 1) split at the first near-tie (8 - 35 tokens): every emitted
-token is the target's argmax at the verify width.
+| Target | T=1 off | T=1 on | greedy off | greedy on |
+| --- | ---: | ---: | ---: | ---: |
+| p150 (I2M_KV_POOL_TOKENS=32768: the drafter needs the room) | 38.9 | 52.9 | 41.3 | 54.3 |
+| p300 | 49.0 | 64.1 | 49.8 | 70.4 |
+| p300x2 (pool 1.7M) | 64.5 | 83 | 64 | 85 |
 
-Sampling: tt/sampling.HostSampler.spec: a greedy drafter is a point-mass proposal; draft j kept with probability
-p_j(draft) under vLLM's semantics (penalties, temperature, top-k, top-p), else a draw from p_j without it (Monte Carlo:
-the emitted distribution matches p to 0.002). vLLM pages the global KV only up to the current token's block: a pass
-keeps no draft past it (the token there is a full draw from its row).
+Per text on p300x2 (T=1): math 99, code 97 tok/s; chat accepts too little and falls back to plain decode.
 
-Serving (tt/generator_vllm.py, I2M_SPEC=d, off by default): a request decoding alone in slot 0 (prefilled from 0,
-on-device sampling) runs passes; accepted tokens go to vLLM one per decode call; another request / a vLLM token
-mismatch rewinds to what vLLM holds. tests/test_spec_generator.py drives it like the plugin (no server).
+Pieces:
+* Verify rows (BatchedDecoder(verify=R)): R tokens of one sequence in one decode pass, bitwise the sequential decode at
+  the same width (R = 2, 4; one die, TP2, TP4; eager and traced; tests/test_verify_device.py). The short convs' readers
+  rebuild each row's conv state from the slot's committed row (a device tensor) and the earlier rows' inputs
+  (tt/kernels/seqshift.hpp); after a pass row j holds the state after row j (rewind = move_row j -> 0). R = 3 is not
+  bitwise (a width-3 row-position effect; never served).
+* Drafter (tt/drafter.py, the checkpoint's mtp.safetensors): traced ctrl + commit + draft, 3.1 ms at d = 3 on one die,
+  vocab-sharded on multi-die (2.6 ms TP2). Sampled drafts at the request's temperature: top-32 + host Gumbel noise.
+* Acceptance (tt/sampling.HostSampler.spec): min(1, p / q), residual max(p - q, 0) (exact; Monte Carlo checked).
+* Serving (tt/generator_vllm.py, I2M_SPEC=3): a request decoding alone in slot 0 with on-device sampling; a pass's
+  accepted tokens go to vLLM in one step (the M2.7 port's variable-width output shim; the scheduler reserves the
+  verify window's KV slots). Falls back to plain decode under the measured break-even (one die 1.7, TP2 1.5, TP4 1.6
+  tokens per pass, over >= 16 passes). Prefix-cache hits keep spec when the drafter's caches still hold the prefix
+  (multi-turn chat). A second request rewinds to what vLLM holds. tests/test_spec_generator.py, tools/spec_bench.py.
+
+Measured and not taken: the drafter's temperature at c x T (750 served T=1 passes, exact expected acceptance: c = 1 is
+best, 2.22 tokens per pass); d = 1 at T=1 (51 vs 56 tok/s one die); tree verification (two 4-row branches = an 8-row
+pass: the MoE expert union makes it 49 vs 37 ms one die for ~+12 % tokens). Verify pass cost (one die, 4 rows): MoE
+18.7 ms (the expert union of 4 consecutive tokens; at its bandwidth floor), the rest ~18 ms.
 
 ## Next
 
