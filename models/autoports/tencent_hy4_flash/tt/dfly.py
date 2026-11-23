@@ -196,6 +196,186 @@ class Hy4DFly:
         with real_rows(W):  # the block's rows (the per-token correction steps: 1 row, below)
             return self._step(ds, n, mem)
 
+    # ------------------------------------------------------------------ batched (several sequences, one pass)
+    def step_lanes(self, ds, u: int, k: int, orows: tuple, sparse: bool, mem=None):
+        """One draft pass for u sequences of a batched verify / decode pass (trace-safe; tt/decode_batch.py
+        Hy4BatchSpecDecoder.draft_lanes builds ds). Block rows interleaved: row j u + i = sequence i's block row j
+        (j = 0: its bonus; 1..k: MASK), k + 1 rows each (the block is causal: its first k + 1 rows are those of the
+        W-row block). h_target of sequence i = last_hn row ds.hrow[i] (an exact row gather). Index share (sparse):
+        sequence i's rows attend to the selection of the target pass's row orows[i] (its first row there, static) +
+        ds.tail_f (its positions since that row's group, the block's rows of its own); rows of sequences in the dense
+        regime take ds.dense_f (mixed per row in fp32 as tt/indexer.py step_lanes). Correction step kk: rows kk u ..
+        kk u + u (one per sequence). Returns [1, k u] uint32 RM (draft kk of sequence i at (kk - 1) u + i)."""
+        with real_rows(u * (k + 1)):
+            return self._step_lanes(ds, u, k, orows, sparse, mem)
+
+    def _lane_idx(self, tgt, ds, u, k, orows, mem):
+        """The rows' [selection | tail] / dense lists (sparse key): the target pass's lists (tgt.lane_idx_buf, kept by
+        tt/attention.py _step_lanes) of rows orows, repeated per block row, mixed with the host lists."""
+        buf = tgt.lane_idx_buf
+        n_sel = int(ds.dense_f.shape[-1]) - int(ds.tail_f.shape[-1])
+        Rb = u * (k + 1)
+        parts = [ttnn.slice(buf, (0, 0, o, 0), (1, 1, o + 1, n_sel), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+                 for o in orows]
+        pad = self._pad_rows(32 - Rb, n_sel) if Rb < 32 else None
+        blk = ttnn.concat(parts * (k + 1) + ([pad] if pad is not None else []), dim=-2,
+                          memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        for t_ in parts:
+            ttnn.deallocate(t_)
+        bt = ttnn.to_layout(blk, ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(blk)
+        sf = ttnn.typecast(bt, ttnn.float32, memory_config=mem)
+        ttnn.deallocate(bt)
+        full = ttnn.concat([sf, ds.tail_f], dim=-1, memory_config=mem)
+        ttnn.deallocate(sf)
+        sel = ttnn.multiply(full, ds.nmask, memory_config=mem)
+        ttnn.deallocate(full)
+        mix = ttnn.add(sel, ds.dense_f, memory_config=mem)
+        ttnn.deallocate(sel)
+        u32 = ttnn.typecast(mix, ttnn.uint32, memory_config=mem)
+        ttnn.deallocate(mix)
+        idx = ttnn.to_layout(u32, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(u32)
+        return idx
+
+    def _pad_rows(self, n, w):
+        """A persistent [1, 1, n, w] uint32 RM block of sentinels (the padding rows' selection: masked by nmask)."""
+        cache = self.__dict__.setdefault("_pads", {})
+        if (n, w) not in cache:
+            cache[(n, w)] = upload(self.mesh, torch.full((1, 1, n, w), -1, dtype=torch.int32), ttnn.uint32,
+                                   ttnn.ROW_MAJOR_LAYOUT)
+        return cache[(n, w)]
+
+    def _step_lanes(self, ds, u, k, orows, sparse, mem=None):
+        mem = mem or ttnn.DRAM_MEMORY_CONFIG
+        H = self.cfg.hidden
+        x = self._embed(ds.tok, 32)
+        # mtp_fusion on rows 0 .. u - 1 (each sequence's bonus row): its target hidden by an exact row gather
+        hrm = ttnn.to_layout(ttnn.reshape(self.model.last_hn, (32, H)), ttnn.ROW_MAJOR_LAYOUT,
+                             memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        ht = ttnn.embedding(ds.hrow, hrm, layout=ttnn.TILE_LAYOUT, memory_config=mem)
+        ttnn.deallocate(hrm)
+        ht = ttnn.reshape(ht, (1, 1, 32, H))
+        cat = ttnn.concat([self.enorm(x, mem), self.hnorm(ht, mem)], dim=-1, memory_config=mem)
+        ttnn.deallocate(ht)
+        f = self.dec["eh"](cat, mem) if self.dec is not None else ttnn.matmul(cat, self.eh, compute_kernel_config=self.ckc,
+                                                                                memory_config=mem)
+        ttnn.deallocate(cat)
+        f = ttnn.multiply(ttnn.multiply(f, self.fgate, memory_config=mem), ds.m0, memory_config=mem)
+        x2 = ttnn.add(x, f, memory_config=mem)
+        ttnn.deallocate(x)
+        ttnn.deallocate(f)
+        x = x2
+        cos, sin = ds.cos, ds.sin
+        for L in self.layers:
+            a = L["attn"]
+            xn = L["in_norm"](x, mem)
+            dec = a.dec is not None
+            parts = a._xa(xn, mem) if dec else [None, None]
+            q_lat, q_rope, q_resid = a._q(xn, cos, sin, mem, qa=parts[0])
+            ttnn.deallocate(q_resid)
+            row = a._kv_row(xn, cos, sin, mem, kv=parts[1])
+            row_rm = ttnn.to_layout(row, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(row)
+            ttnn.experimental.deepseek_prefill.update_padded_kv_cache(a.cache, row_rm, self.slot0, self.scratch_off,
+                                                                      0, 1, 0)
+            ttnn.deallocate(row_rm)
+            idx = self._lane_idx(L["tgt"], ds, u, k, orows, mem) if sparse else ds.idx_dense
+            o = a._attend(xn, q_lat, q_rope, idx, mem, dec=dec)
+            for t_ in (xn, q_lat, q_rope):
+                ttnn.deallocate(t_)
+            if idx is not ds.idx_dense:
+                ttnn.deallocate(idx)
+            x2 = ttnn.add(x, o, memory_config=mem)
+            ttnn.deallocate(x)
+            ttnn.deallocate(o)
+            x = x2
+            xn = L["post_norm"](x, mem)
+            m = L["mlp"](xn, mem)
+            ttnn.deallocate(xn)
+            x2 = ttnn.add(x, m, memory_config=mem)
+            ttnn.deallocate(x)
+            ttnn.deallocate(m)
+            x = x2
+        h = self.final_norm(x, mem)
+        ttnn.deallocate(x)
+        prev = ttnn.slice(ds.bonus, (0, 0), (1, u))  # [1, u] uint32 RM
+        drafts = [prev]
+        with real_rows(u):
+            for kk in range(1, k + 1):
+                hk = ttnn.slice(h, (0, 0, kk * u, 0), (1, 1, kk * u + u, H), memory_config=mem)  # [1, 1, u, H]
+                e = self._embed(prev, u)
+                z = ttnn.concat([self.hc_hnorm(hk, mem), self.hc_enorm(e, mem)], dim=-1, memory_config=mem)
+                ttnn.deallocate(e)
+                if self.dec is not None:
+                    gu = self.dec["hc_gu"](z, mem)
+                    ttnn.deallocate(z)
+                    g = ttnn.slice(gu, (0, 0, 0, 0), (1, 1, u, self.Ic), memory_config=mem)
+                    up = ttnn.slice(gu, (0, 0, 0, self.Ic), (1, 1, u, 2 * self.Ic), memory_config=mem)
+                    ttnn.deallocate(gu)
+                    a_ = ttnn.multiply(up, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+                    ttnn.deallocate(g)
+                    ttnn.deallocate(up)
+                    dp = self.dec["hc_d"](a_, mem)
+                    ttnn.deallocate(a_)
+                    d1 = ttnn.slice(dp, (0, 0, 0, 0), (1, 1, u, H), memory_config=mem)
+                    ttnn.deallocate(dp)
+                    d = self.ar(d1, mem)
+                    ttnn.deallocate(d1)
+                else:
+                    g = ttnn.matmul(z, self.hc_g, compute_kernel_config=self.ckc, memory_config=mem)
+                    up = ttnn.matmul(z, self.hc_u, compute_kernel_config=self.ckc, memory_config=mem)
+                    ttnn.deallocate(z)
+                    a_ = ttnn.multiply(up, g, input_tensor_b_activations=[ttnn.UnaryOpType.SILU], memory_config=mem)
+                    ttnn.deallocate(g)
+                    ttnn.deallocate(up)
+                    d = ttnn.matmul(a_, self.hc_d, compute_kernel_config=self.ckc, memory_config=mem)
+                    ttnn.deallocate(a_)
+                c = ttnn.add(hk, d, memory_config=mem)
+                ttnn.deallocate(hk)
+                ttnn.deallocate(d)
+                prev = self._argmax_rows(c, u)
+                ttnn.deallocate(c)
+                drafts.append(prev)
+        ttnn.deallocate(h)
+        # [1, k u] (k = 1: the one draft row itself; a one-tensor concat returns its input)
+        out = drafts[1] if k == 1 else ttnn.concat(drafts[1:], dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        for t_ in drafts:
+            if t_ is not out:
+                ttnn.deallocate(t_)
+        bufs = self.__dict__.setdefault("lane_out", {})
+        if (u, k) not in bufs:  # persistent output (allocated at the eager pass, before any capture)
+            bufs[(u, k)] = ttnn.from_torch(torch.zeros(1, k * u, dtype=torch.int32), dtype=ttnn.uint32,
+                                           layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
+                                           mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh))
+        ttnn.copy(out, bufs[(u, k)])
+        ttnn.deallocate(out)
+        return bufs[(u, k)]
+
+    def _argmax_rows(self, c, u):
+        """c [1, 1, u, H] corrected hiddens -> their greedy tokens [1, u] uint32 RM (_argmax_rm over u rows)."""
+        if getattr(self.model, "lm_dec", None) is not None:
+            l32 = self.model.lm_dec(c, ttnn.DRAM_MEMORY_CONFIG)
+            l1 = ttnn.slice(l32, (0, 0, 0, 0), (1, 1, u, int(l32.shape[-1])), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(l32)
+            lg = ttnn.typecast(l1, ttnn.bfloat16, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(l1)
+        else:
+            lg = ttnn.matmul(c, self.model.lm, dtype=ttnn.bfloat16, compute_kernel_config=self.model.ckc,
+                             memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        full = self.ag(lg, dim=3, mem=ttnn.DRAM_MEMORY_CONFIG) if self.N > 1 else lg
+        if full is not lg:
+            ttnn.deallocate(lg)
+        V = self.cfg.vocab
+        part = full
+        if tuple(full.shape)[-2:] != (u, V):
+            part = ttnn.slice(full, (0, 0, 0, 0), (1, 1, u, V), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        frm = ttnn.to_layout(part, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        idx = ttnn.argmax(frm, dim=-1, keepdim=True, memory_config=ttnn.DRAM_MEMORY_CONFIG)  # [1, 1, u, 1] uint32
+        for t_ in {id(x): x for x in (full, part, frm)}.values():
+            ttnn.deallocate(t_)
+        return ttnn.reshape(idx, (1, u))
+
     def _step(self, ds, n: int, mem=None):
         """One draft pass (trace-safe). ds: the draft inputs (tt/decode.DraftInputs); n: the target pass's last
         accepted row (h_target = model.last_hn row n; the index share = each target layer's sel row n). Returns the

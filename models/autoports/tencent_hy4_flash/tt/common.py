@@ -421,6 +421,26 @@ def dl_split() -> bool:
     return os.environ.get("HY4_DL_SPLIT", "1") == "1"
 
 
+# batched speculative decoding (tt/engine_batch.py): HY4_BSPEC "u:K,..." = K drafts per verify pass at u live sequences
+# (other u: plain batched steps). Default 2 users x 4 rows (R = 8: b8 / long3k gates at the floor, exact). Verify
+# passes of more than 8 rows (e.g. "2:3,3:3,4:3,8:3") gate b8 0.8639 / 0.2266 (floor 0.8650 / 0.2229): opt-in.
+BSPEC_DEFAULT = "2:3"
+
+
+def bspec_policy(k_max: int = 5) -> dict:
+    """{u: K} of HY4_BSPEC (u >= 2, K <= k_max, u (K + 1) <= 32); empty when off ("0") or HY4_SPEC_K=0."""
+    if os.environ.get("HY4_SPEC_K", "4") == "0":
+        return {}
+    out = {}
+    for x in os.environ.get("HY4_BSPEC", BSPEC_DEFAULT).split(","):
+        if ":" in x:
+            u, K = (int(v) for v in x.split(":"))
+            K = min(K, int(k_max))
+            if u >= 2 and K > 0 and u * (K + 1) <= 32:
+                out[u] = K
+    return out
+
+
 DECODE_ROWS = [32]  # the real rows (0 .. R-1) of the decode pass in flight (set by Hy4Model.step / the drafter)
 
 

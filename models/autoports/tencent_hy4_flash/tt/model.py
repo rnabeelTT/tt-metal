@@ -388,15 +388,19 @@ class Hy4Model:
         if bufs is not None:
             # persistent outputs, allocated before any trace capture: a trace's outputs allocated during its capture
             # can sit in another trace's freed intermediates and be overwritten by that trace's replays
-            if R <= self.LG_ROWS and "lg_rows" in bufs:
+            # (verify passes of more rows: the next row-major buffer of 16 / 24 rows, tt/decode.py LG_EXTRA)
+            nb = next((n for n in (self.LG_ROWS,) + tuple(sorted(int(k[7:]) for k in bufs if k.startswith("lg_rows")
+                                                                   and k != "lg_rows")) if R <= n), None)
+            name = "lg_rows" if nb == self.LG_ROWS else f"lg_rows{nb}"
+            if nb is not None and name in bufs:
                 # only the real rows leave the device: row-major [LG_ROWS, Vp / N] per die (~120 KB) instead of the
                 # padded fp32 tile block [32, Vp / N] (~3.9 MB per die, 4.2 ms to read); same values
                 lr = ttnn.to_layout(lg, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                ls = ttnn.slice(lr, (0, 0, 0, 0), (1, 1, self.LG_ROWS, int(lg.shape[-1])))
+                ls = ttnn.slice(lr, (0, 0, 0, 0), (1, 1, nb, int(lg.shape[-1])))
                 ttnn.deallocate(lr)
-                ttnn.copy(ls, bufs["lg_rows"])
+                ttnn.copy(ls, bufs[name])
                 ttnn.deallocate(ls)
-                out = bufs["lg_rows"]
+                out = bufs[name]
             else:
                 ttnn.copy(lg, bufs["lg"])
                 out = bufs["lg"]

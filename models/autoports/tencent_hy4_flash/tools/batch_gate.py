@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--users", type=int, default=0, help="users (texts cycled; default: one per text)")
     ap.add_argument("--pack", action="store_true", help="re-prefill every user in one packed pass before decoding "
                     "(the prefill positions' scores stay the serial ones; decode reads the packed caches)")
+    ap.add_argument("--rows", type=int, default=1, help="rows per user per pass (verify-like: consecutive tokens)")
+    ap.add_argument("--group", type=int, default=0, help="users per pass (default all; groups take turns)")
     args = ap.parse_args()
     seqs = json.load(open(args.texts))
     names = [n for n in (args.names.split(",") if args.names else sorted(seqs))]
@@ -74,14 +76,27 @@ def main():
             lane = [dec.add(u, P, ids[u][:P].tolist()) for u in range(U)]
         steps = max(int(t.numel()) for t in ids) - P
         times = []
-        for i in range(steps):
-            rows = {lane[u]: [int(ids[u][P + i])] for u in range(U) if P + i < ids[u].numel()}
-            t0 = time.perf_counter()
-            out = dec.run_batch(rows)
-            times.append((len(rows), time.perf_counter() - t0))
-            for u in range(U):
-                if lane[u] in out:
-                    lps[u].append(torch.log_softmax(out[lane[u]].float(), dim=-1))
+        N, G = max(1, args.rows), args.group or U
+        for i in range(0, steps, N):
+            for g0 in range(0, U, G):
+                grp = [u for u in range(g0, min(U, g0 + G))]
+                if not any(P + i < ids[u].numel() for u in grp):
+                    continue
+                # (N > 1: every lane of the group N rows a pass, as a verify pass: a text's tail padded with token 0,
+                # a finished text fed padding rows until its group finishes; only the text's rows are scored)
+                rows = {}
+                for u in grp:
+                    real = [int(x) for x in ids[u][P + i : P + i + N]]
+                    if N == 1 and not real:
+                        continue
+                    rows[lane[u]] = real + [0] * (N - len(real))
+                t0 = time.perf_counter()
+                out = dec.run_batch(rows)
+                times.append((len(rows), time.perf_counter() - t0))
+                for u in grp:
+                    n = max(0, min(N, ids[u].numel() - P - i))
+                    if lane[u] in out and n:
+                        lps[u].append(torch.log_softmax(out[lane[u]][:n].float(), dim=-1))
         for u, name in enumerate(users):
             if u >= len(names):
                 continue
@@ -94,11 +109,14 @@ def main():
             np.savez(os.path.join(args.out_dir, f"dev_{args.tag}_{name}.npz"), top1=lp.argmax(-1).numpy(),
                      lp_at_ref=torch.gather(lp, 1, torch.from_numpy(top_ids[:T])).numpy(), nll=nll)
             logger.info(f"{name}: nll {nll.mean():.4f}")
-        full = [t for n, t in times[8:] if n == U]
+        full = [t for n, t in times[8:] if n == min(U, G)]
         if full:
             med = sorted(full)[len(full) // 2]
-            print(f"BATCH {U} users: median pass {med * 1e3:.2f} ms -> {U / med:.1f} tok/s total, "
-                  f"{1 / med:.1f} tok/s per user", flush=True)
+            if N == 1 and G >= U:
+                print(f"BATCH {U} users: median pass {med * 1e3:.2f} ms -> {U / med:.1f} tok/s total, "
+                      f"{1 / med:.1f} tok/s per user", flush=True)
+            else:
+                print(f"BATCH {U} users ({min(U, G)} x {N} rows a pass): median pass {med * 1e3:.2f} ms", flush=True)
     finally:
         ttnn.close_mesh_device(mesh)
 

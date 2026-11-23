@@ -261,13 +261,17 @@ class Hy4BatchDecoder(Hy4Decoder):
             A[64 * l + i64[mA], 64 * l + q[mA] - ob] = 1
             g = gb + i64
             if LANE_POOL:  # the groups gw0 .. of the lane's last row (pooled row M l + i: group gw0 + i)
-                ng = (p0 + max(n, 1) - 1) // r - gw0 + 1
+                g0 = gw0
+                ng = (p0 + max(n, 1) - 1) // r - g0 + 1
+                if ng > M:  # (verify rows past the window's 8th group: only the groups from its first row's on can
+                    g0 = p0 // r  # change; the earlier ones are complete, kept by Ag)
+                    ng = (p0 + max(n, 1) - 1) // r - g0 + 1
                 assert ng <= M, f"lane {l}: {ng} groups to pool > {M}"
-                mPg = (g >= gw0) & (g < gw0 + ng)
-                Pg[64 * l + i64[mPg], M * l + g[mPg] - gw0] = 1
-                for j in range(r):  # slot j of pooled row (l, i) = token row r (gw0 + i) + j of the lane's window
-                    Esel[j * npool + M * l + np.arange(ng), 64 * l + r * (gw0 + np.arange(ng)) + j - nb] = 1
-                gpos[M * l : M * l + ng] = r * (gw0 + np.arange(ng))
+                mPg = (g >= g0) & (g < g0 + ng)
+                Pg[64 * l + i64[mPg], M * l + g[mPg] - g0] = 1
+                for j in range(r):  # slot j of pooled row (l, i) = token row r (g0 + i) + j of the lane's window
+                    Esel[j * npool + M * l + np.arange(ng), 64 * l + r * (g0 + np.arange(ng)) + j - nb] = 1
+                gpos[M * l : M * l + ng] = r * (g0 + np.arange(ng))
             else:
                 mPg = (g >= gw0) & (g < gw0 + 16)
                 Pg[64 * l + i64[mPg], 32 * l + g[mPg] - gw0] = 1
@@ -564,6 +568,20 @@ class Hy4BatchDecoder(Hy4Decoder):
         self._pre = (snap, (h, R, width, o, self._sel, nbgb), False)
         self._sel = sel_now
 
+    def prebuild(self, nrows: dict):
+        """The position inputs of a pass of nrows {lane: rows} (any tokens) built now and copied behind the device queue
+        (batched spec: the verify pass's, while its draft pass runs; the pass then adds its token inputs only)."""
+        nxt = {l: [0] * n for l, n in nrows.items()}
+        snap = self._snap(nxt)
+        sel_now = getattr(self, "_sel", True)
+        h, R, width, o = self._host_b(nxt, with_tok=False)
+        nbgb = {l: (self.lanes[l]["nb"], self.lanes[l]["gb"]) for l in nxt}
+        self._pre = (snap, (h, R, width, o, self._sel, nbgb), False)
+        self._sel = sel_now
+        if PRECOPY:
+            self._copy_pos(h)
+            self._pre = self._pre[:2] + (True,)
+
     def _has_traces(self):
         return super()._has_traces() or bool(getattr(self, "btraces", None))
 
@@ -584,6 +602,138 @@ class Hy4BatchSpecDecoder(Hy4BatchDecoder, Hy4SpecDecoder):
         super().__init__(model, lanes=lanes, trace=trace)
         if int(k) != self.k:
             self.set_k(int(k))
+        # batched drafts (tt/engine_batch.py batched spec): one draft pass for every lane of the last batched pass
+        z = torch.zeros
+        R, cfg = ROWS, self.cfg
+        ds = DraftLanes()
+        u32 = lambda *s: self._dev(z(*s, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)  # noqa: E731
+        ds.tok, ds.bonus, ds.hrow = u32(1, R), u32(1, R), u32(1, R)
+        ds.cos = self._dev(z(1, 1, R, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.sin = self._dev(z(1, 1, R, cfg.qk_rope), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.m0 = self._dev(z(1, 1, R, 1), ttnn.bfloat16, ttnn.TILE_LAYOUT)
+        ds.idx_dense = u32(1, 1, R, self.K_dense)
+        ds.dense_f = self._dev(z(1, 1, R, self.K_dense), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.tail_f = self._dev(z(1, 1, R, self.K_dense - self.n_sel), ttnn.float32, ttnn.TILE_LAYOUT)
+        ds.nmask = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
+        self.dsl = ds
+        for L in self.dfly.layers:  # the target layers' index lists of each batched pass (tt/attention.py _step_lanes)
+            if getattr(L["tgt"], "lane_idx_buf", None) is None:
+                L["tgt"].lane_idx_buf = u32(1, 1, R, self.K_dense)
+        self.dltraces, self.dlout = {}, {}
+
+    def draft_lanes(self, users: list, k: int, then=None) -> list:
+        """One batched draft pass (tt/dfly.py step_lanes) after a batched pass: users (in that pass's row order) dicts
+        {bonus, anchor (the bonus's position), hrow (last_hn row of its last accepted row), orow (its first row in the
+        pass), opos (that row's position), slot, base (its sparse cache base)}. -> k greedy drafts per user. then():
+        host work run after the draft pass is launched, before its drafts are read."""
+        cfg, R, r = self.cfg, ROWS, self.cfg.idx_ratio
+        u = len(users)
+        assert u * (k + 1) <= R
+        topk = int(cfg.idx_candidate_topk)
+        sparse = any(us["opos"] >= topk for us in users)
+        Kd, nt = self.K_dense, self.K_dense - self.n_sel
+        tok = np.zeros((1, R), dtype=np.int32)
+        bonus = np.zeros((1, R), dtype=np.int32)
+        hrow = np.zeros((1, R), dtype=np.int32)
+        m0 = np.zeros((R, 1), dtype=np.float32)
+        pos = np.zeros(R, dtype=np.int64)
+        rslot = np.full(R, -1, dtype=np.int64)
+        dense = np.full((R, Kd), SENTINEL, dtype=np.uint32)
+        dense[:, 0] = self.sink_sparse
+        dense_f = np.zeros((R, Kd), dtype=np.float32)
+        dense_f[u * (k + 1):, :] = SENT_F
+        dense_f[u * (k + 1):, 0] = float(self.sink_sparse)
+        tail_f = np.full((R, nt), SENT_F, dtype=np.float32)
+        tail_f[:, 0] = float(self.sink_sparse)
+        nmask = np.zeros((R, 1), dtype=np.float32)
+        for i, us in enumerate(users):
+            a, bs = int(us["anchor"]), int(us["base"])
+            bonus[0, i], hrow[0, i], m0[i, 0] = us["bonus"], us["hrow"], 1.0
+            sp = us["opos"] >= topk
+            g0 = (int(us["opos"]) // r) * r
+            for j in range(k + 1):
+                row = j * u + i
+                tok[0, row] = us["bonus"] if j == 0 else self.dfly.mask_id
+                pos[row], rslot[row] = a + j, us["slot"]
+                blk = self.scratch + np.arange(j + 1) * u + i  # its block rows 0 .. j (scratch row = block row)
+                if sp:  # [selection of its row orow | its positions since that row's group + block]
+                    t = np.concatenate([bs + np.arange(g0, a), blk])
+                    tail_f[row, 1 : 1 + t.size] = t
+                    nmask[row, 0] = 1.0
+                else:
+                    keys = np.concatenate([bs + np.arange(a), blk])
+                    dense[row, 1 : 1 + keys.size] = keys
+                    dense_f[row, 0] = float(self.sink_sparse)
+                    dense_f[row, 1 : 1 + keys.size] = keys
+                    dense_f[row, 1 + keys.size :] = SENT_F
+        pos[u * (k + 1):] = pos[u * (k + 1) - 1]
+        pos_t = torch.from_numpy(pos)
+        if POSMAPS:
+            pos_t = rpos_rows(pos_t, [int(s) for s in rslot])
+        c, s = cos_sin(pos_t, cfg.rope_theta["sparse"], cfg.qk_rope)
+        h = {"tok": _rm(torch.from_numpy(tok), ttnn.uint32), "bonus": _rm(torch.from_numpy(bonus), ttnn.uint32),
+             "hrow": _rm(torch.from_numpy(hrow), ttnn.uint32),
+             "cos": _tile(c.float().reshape(1, 1, R, -1), ttnn.float32),
+             "sin": _tile(s.float().reshape(1, 1, R, -1), ttnn.float32),
+             "m0": _tile(torch.from_numpy(m0).to(torch.bfloat16).reshape(1, 1, R, 1), ttnn.bfloat16)}
+        if sparse:
+            h["dense_f"] = _tile(torch.from_numpy(dense_f).reshape(1, 1, R, Kd), ttnn.float32)
+            h["tail_f"] = _tile(torch.from_numpy(tail_f).reshape(1, 1, R, nt), ttnn.float32)
+            h["nmask"] = _tile(torch.from_numpy(nmask).reshape(1, 1, R, 1), ttnn.float32)
+        else:
+            h["idx_dense"] = _rm(torch.from_numpy(dense.view(np.int32)).reshape(1, 1, R, Kd), ttnn.uint32)
+        c_ = ttnn.copy_host_to_device_tensor
+        for name, t in h.items():
+            c_(t, getattr(self.dsl, name))
+        orows = tuple(int(us["orow"]) for us in users)
+        key = ("dl", u, int(k), orows, sparse)
+        D = self.dfly
+        if not self.trace:
+            out = D.step_lanes(self.dsl, u, k, orows, sparse, mem=self.mem)
+        else:
+            self._guard_programs("before a batched draft")
+            if key not in self.dltraces:
+                out = D.step_lanes(self.dsl, u, k, orows, sparse, mem=self.mem)
+                self._guard_programs("the eager pass of a new batched draft trace")
+                tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+                self.dlout[key] = D.step_lanes(self.dsl, u, k, orows, sparse, mem=self.mem)
+                ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+                self.dltraces[key] = tid
+                self._prog_n = self._programs()
+                logger.info(f"captured batched draft trace {key}")
+            else:
+                ttnn.execute_trace(self.mesh, self.dltraces[key], cq_id=0, blocking=False)
+                out = self.dlout[key]
+        if then is not None:
+            then()
+        v = ttnn.to_torch(ttnn.get_device_tensors(out)[0]).reshape(-1)[: k * u].tolist()
+        v = [int(x) & 0xFFFFFFFF for x in v]
+        return [[v[(kk - 1) * u + i] for kk in range(1, k + 1)] for i in range(u)]
+
+    def _has_traces(self):
+        return super()._has_traces() or bool(getattr(self, "dltraces", None))
+
+    def release(self):
+        super().release()
+        if getattr(self, "dltraces", None):
+            ttnn.synchronize_device(self.mesh)
+            for tid in self.dltraces.values():
+                ttnn.release_trace(self.mesh, tid)
+        self.dltraces, self.dlout = {}, {}
+
+
+@dataclass
+class DraftLanes:
+    tok: object = None
+    bonus: object = None
+    hrow: object = None
+    cos: object = None
+    sin: object = None
+    m0: object = None
+    idx_dense: object = None
+    dense_f: object = None
+    tail_f: object = None
+    nmask: object = None
 
 
 def _eng_batched(eng, eli, order, lanes, h):

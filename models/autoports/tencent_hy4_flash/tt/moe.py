@@ -20,7 +20,7 @@ import os
 import torch
 import ttnn
 
-from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, Boundary, boundary_rows_out, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, pair_enabled, stream_pair, num_devices, wfid,
+from models.autoports.tencent_hy4_flash.tt.common import (AllReduce, bspec_policy, Boundary, boundary_rows_out, RMSNorm, StreamLinear, TILE, ckc, dl_split, mm, pair_enabled, stream_pair, num_devices, wfid,
                                                            stream_enabled, upload)
 
 class _Args:
@@ -262,8 +262,10 @@ class Hy4MoE:
                 )
                 # verify rows (DFly2): the multi-row fused kernels (the union of the rows' experts), up to
                 # HY4_MOE_FUSED_ROWS_MAX rows; their buffers are uploaded here, before any trace capture
+                # (+ the batched spec verify passes' row counts u (K + 1), tt/common.py bspec_policy)
                 self.rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
-                for m in range(2, self.rows_max + 1):
+                self.rows_set = set(range(2, self.rows_max + 1)) | {u * (K + 1) for u, K in bspec_policy().items()}
+                for m in sorted(self.rows_set):
                     self.fused.rows_ops(m)
 
     def _up(self, t, dtype, dim, cache_name, have_cache, shape):
@@ -513,14 +515,14 @@ class Hy4MoE:
     def forward_decode(self, x, T: int, mem=None):
         """Decode / verify rows (T <= 32 real rows of x [1, 1, 32, 3072]): the fused kernels when available."""
         mem = mem or ttnn.DRAM_MEMORY_CONFIG
-        rows_max = int(os.environ.get("HY4_MOE_FUSED_ROWS_MAX", "8"))
+        fused_ok = self.fused is not None and (T == 1 or T in getattr(self, "rows_set", ()))
         if (self.dec is not None and int(x.shape[-2]) == 32
-                and ("in" in self.dec or (self.fused is not None and T <= getattr(self, "rows_max", 1)
+                and ("in" in self.dec or (fused_ok
                                           and _lshard_env() == "1"))):
             # streamed linears: [latent down | shared gate | shared up] and [latent up ; shared down]; the experts by
             # the fused kernels (one row) or the per-row gather (verify rows)
             L, Sl = self.L, self.Sl
-            fusedT = self.fused is not None and T <= getattr(self, "rows_max", 1)
+            fusedT = fused_ok
             ab = None
             if fusedT and "in_s" in self.dec and _lshard_env() == "1":
                 Lq = L // self.N
@@ -573,8 +575,11 @@ class Hy4MoE:
                     ttnn.deallocate(rT)
                     ttnn.deallocate(h)
                     return self._dec_tail(part, T, mem)
-                routed = ttnn.pad(rT, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
-                ttnn.deallocate(rT)
+                if T == 32:  # (a zero pad returns its input: deallocating it freed `routed`, a segfault in the concat)
+                    routed = rT
+                else:
+                    routed = ttnn.pad(rT, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
+                    ttnn.deallocate(rT)
             else:
                 if self.route_kernel:
                     scores, ids = self.route_decode(x, T, mem)
@@ -591,7 +596,7 @@ class Hy4MoE:
             part = self.dec["out"](cat, mem, rows_out=boundary_rows_out(self.mesh, T))
             ttnn.deallocate(cat)
             return self._dec_tail(part, T, mem)
-        if self.fused is None or T > rows_max:
+        if not fused_ok:
             # trace-safe rows path: per-row gather (the chunk-masked prefill path writes from the host: ttnn.zeros)
             scores, ids = self.route(x, mem)
             xl = mm(x, self.wd, wfid(self.ckc_s, self.wd), mem)

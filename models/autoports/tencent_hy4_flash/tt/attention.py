@@ -1134,6 +1134,8 @@ class Hy4Attention:
         else:
             idx = self.indexer.step_lanes(x, q_resid, si, mem, tk=parts[2] if dec else None,
                                           hw=parts[3] if dec else None, iq=self.dec["iq"] if dec else None)
+            if getattr(self, "lane_idx_buf", None) is not None:  # (the batched DFly2 drafter's index share: tt/dfly.py)
+                ttnn.copy(idx, self.lane_idx_buf)
         ttnn.deallocate(q_resid)
         out = self._attend(x, q_lat, q_rope, idx, mem, dec=dec, R=getattr(si, "R", None))
         ttnn.deallocate(q_lat)

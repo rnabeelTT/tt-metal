@@ -23,6 +23,7 @@ import numpy as np
 import torch
 from loguru import logger
 
+from models.autoports.tencent_hy4_flash.tt.common import bspec_policy
 from models.autoports.tencent_hy4_flash.tt.engine import HostSampler, sample_rows
 
 # HY4_RUNAHEAD=1 (default): after a batched step samples its tokens, the next batched pass (those tokens, the same
@@ -30,6 +31,27 @@ from models.autoports.tencent_hy4_flash.tt.engine import HostSampler, sample_row
 # the next step() takes that pass's logits for every slot it continues with the same token (any other slot: undone on
 # the host, recomputed). Same passes, same inputs: identical outputs.
 RUNAHEAD = os.environ.get("HY4_RUNAHEAD", "1") == "1"
+
+
+def _accept(smp, lgs, drafts):
+    """(accepted drafts, emitted tokens) of a verify pass's logits lgs [k + 1, V] over `drafts` (greedy drafts): greedy:
+    the matching prefix + the target's next token; sampled: exact speculative sampling (one-hot draft q)."""
+    if smp.greedy:
+        picks = lgs.argmax(-1).tolist()
+        acc = 0
+        while acc < len(drafts) and picks[acc] == drafts[acc]:
+            acc += 1
+        return acc, drafts[:acc] + [int(picks[acc])]
+    acc = 0
+    while acc < len(drafts):
+        p = smp.probs(lgs[acc])
+        dd = drafts[acc]
+        if smp.uniform() < float(p[dd]):
+            acc += 1
+            continue
+        p[dd] = 0.0
+        return acc, drafts[:acc] + [smp.draw(p / p.sum())]
+    return acc, drafts + [smp.draw(smp.probs(lgs[len(drafts)]))]
 
 
 class Hy4BatchEngine:
@@ -49,6 +71,12 @@ class Hy4BatchEngine:
         else:
             self.dec = Hy4BatchDecoder(model, lanes=lanes, trace=trace)
         self.trace = bool(trace)
+        # HY4_BSPEC (k > 0): batched speculative decoding while 2+ sequences decode: "u:K,..." drafts per verify pass
+        # for u live sequences (one batched DFly2 draft pass + one verify pass of u (K + 1) rows); u not listed or K 0:
+        # plain batched steps. "0": off.
+        self.bspec = {u: K for u, K in bspec_policy(self.k).items() if u <= self.S} if self.k > 0 else {}
+        self._hn = {}  # slot -> (hrow, orow, opos) of the last batched pass (the batched drafter's target rows)
+        self._no_bspec = False
         self.V = int(self.cfg.vocab)
         self.eos = {int(self.cfg.eos)}
         self.chunk = int(model.chunk)
@@ -195,6 +223,7 @@ class Hy4BatchEngine:
         t0 = time.time()
         slot = int(slot)
         self._settle()
+        self._hn = {}
         self.finish(slot)
         if self.solo is not None:  # the attention staging windows are shared: the solo sequence back to a lane first
             self._exit_solo()
@@ -234,6 +263,7 @@ class Hy4BatchEngine:
         one packed prefill pass (Hy4Model.forward_packed: B prompts on the attention's batch dimension); otherwise one
         prefill each."""
         self._settle()
+        self._hn = {}
         m = self.model
         idl = [torch.as_tensor(ids, dtype=torch.long).reshape(-1) for _, ids, _ in reqs]
         if self.pc_on and len(reqs) > 1:  # prompts continuing a kept sequence: their own (continued) prefill
@@ -286,6 +316,7 @@ class Hy4BatchEngine:
         d.set_history(q["toks"])
         q["lane"] = None
         self.solo = slot
+        self._hn = {}
         self._solo_in(slot)
 
     _SOLO_ATTRS = ("gkeys", "tk_stage", "g_stage")
@@ -372,7 +403,7 @@ class Hy4BatchEngine:
         """The next batched pass of `slots` (each feeds its sampled token), launched now; collected by _settle."""
         d = self.dec
         if not (RUNAHEAD and self.trace and d.trace and not self._warming and not d.min_width and self.solo is None
-                and len(slots) >= 2):
+                and len(slots) >= 2) or self.bspec.get(len(slots), 0) > 0:  # (batched spec: its draft reads this pass)
             return
         rows, info = {}, {}
         for slot in slots:
@@ -412,6 +443,7 @@ class Hy4BatchEngine:
                 self._exit_solo()
             lo = self.dec.run_batch({self.seqs[s]["lane"]: ids for s, ids in rows.items()})
             out = {s: lo[self.seqs[s]["lane"]] for s in rows}
+            self._set_hn(rows)
         solo = self.solo is not None
         for s, ids in rows.items():
             self.seqs[s]["toks"] += [int(t) for t in ids]
@@ -440,6 +472,8 @@ class Hy4BatchEngine:
             self._check_pos(slot, q, None)
             rows[slot] = [q["tok"]]
         acc = self._take_ra(rows)
+        if not acc and self._bspec_ok(rows):
+            return self._bspec_step(rows)
         if not acc and self.k > 0 and len(rows) == 1 and self.solo is not None and self.solo in rows:
             q = self.seqs[self.solo]
             if q.get("n") is not None and q["pos"] + self.k + 1 + 64 <= self.model.max_ctx:
@@ -449,6 +483,7 @@ class Hy4BatchEngine:
             self.stats["steps"] += 1
             self.stats["rows"] += len(acc)
             self.stats["ra_taken"] = self.stats.get("ra_taken", 0) + len(acc)
+            self._set_hn(acc)
         else:
             out = self._pass(rows)
         picks = self._sample_batch(out)
@@ -488,25 +523,7 @@ class Hy4BatchEngine:
         drafts = d.draft(q["tok"], q["pos"], q["n"])[: self.k]
         rows = [q["tok"]] + drafts
         lgs = d.run(rows, logits_rows="all", p0=q["pos"])  # [k + 1, V]
-        if smp.greedy:
-            picks = lgs.argmax(-1).tolist()
-            acc = 0
-            while acc < len(drafts) and picks[acc] == drafts[acc]:
-                acc += 1
-            emit = drafts[:acc] + [int(picks[acc])]
-        else:
-            acc, emit = 0, []
-            while acc < len(drafts):
-                p = smp.probs(lgs[acc])
-                dd = drafts[acc]
-                if smp.uniform() < float(p[dd]):
-                    acc += 1
-                    continue
-                p[dd] = 0.0
-                emit = drafts[:acc] + [smp.draw(p / p.sum())]
-                break
-            if not emit:
-                emit = drafts + [smp.draw(smp.probs(lgs[len(drafts)]))]
+        acc, emit = _accept(smp, lgs, drafts)
         q["toks"] += rows[: len(emit)]  # the accepted rows' tokens (fed at pos .. pos + acc)
         q["n"] = acc
         q["pos"] += len(emit)
@@ -518,6 +535,81 @@ class Hy4BatchEngine:
         self.stats["spec_emitted"] = self.stats.get("spec_emitted", 0) + len(emit)
         self.stats["spec_passes"] = self.stats.get("spec_passes", 0) + 1
         return emit
+
+    # ------------------------------------------------------------------ batched speculative decoding
+    def _set_hn(self, slots):
+        """After a plain batched pass of `slots` (one row each, rows in lane order): the drafter's target rows."""
+        order = sorted(slots, key=lambda s: self.seqs[s]["lane"])
+        self._hn = {s: (i, i, self.seqs[s]["pos"]) for i, s in enumerate(order)}
+
+    def _bspec_ok(self, rows) -> bool:
+        """This step can be one batched draft + verify pass: K drafts for len(rows) sequences (HY4_BSPEC), every
+        sequence in the last batched pass (its target rows in last_hn / the lane index lists) and no other."""
+        K = self.bspec.get(len(rows), 0)
+        if K <= 0 or self._no_bspec or self.solo is not None or set(self._hn) != set(rows):
+            return False
+        return all(self.seqs[s].get("lane") is not None and self.seqs[s]["pos"] + K + 1 + 64 <= self.model.max_ctx
+                   for s in rows)
+
+    def _bspec_step(self, rows) -> dict:
+        """One batched draft pass (tt/decode_batch.py draft_lanes) and one verify pass of every live sequence (rows
+        [tok, d_1 .. d_K] each, lane order); per sequence the accepted prefix + the target's next token (greedy) or
+        exact speculative sampling; each lane rolled back to its accepted rows (position, token history, Engram
+        n-grams; KV / group keys of the rejected rows are rewritten before any row sees them)."""
+        t0 = time.time()
+        d = self.dec
+        u = len(rows)
+        K = self.bspec[u]
+        order = sorted(rows, key=lambda s: self.seqs[s]["lane"])
+        users = []
+        for s in order:
+            q = self.seqs[s]
+            hrow, orow, opos = self._hn[s]
+            users.append({"bonus": q["tok"], "anchor": q["pos"], "hrow": hrow, "orow": orow, "opos": opos, "slot": s,
+                          "base": d.lanes[q["lane"]]["base"]["sparse"]})
+        drafts = d.draft_lanes(users, K, then=lambda: d.prebuild({self.seqs[s]["lane"]: K + 1 for s in order}))
+        feed = {s: [self.seqs[s]["tok"]] + dr for s, dr in zip(order, drafts)}
+        lo = d.run_batch({self.seqs[s]["lane"]: feed[s] for s in order})
+        eng = self.model.engram
+        keep = int(getattr(eng, "keep", 2))
+        res, hn, emitted = {}, {}, 0
+        job = lambda s, dr: _accept(self.seqs[s]["smp"], lo[self.seqs[s]["lane"]], dr)  # noqa: E731
+        sam = [i for i, s in enumerate(order) if not self.seqs[s]["smp"].greedy]
+        accs = {}
+        if len(sam) > 1:  # sampled rows' probabilities in threads (each sequence its own generator; 8 users 9.5 -> 4.5 ms)
+            if getattr(self, "_pool", None) is None:
+                from concurrent.futures import ThreadPoolExecutor
+
+                self._pool = ThreadPoolExecutor(self.S)
+            accs = dict(zip(sam, self._pool.map(lambda i: job(order[i], drafts[i]), sam)))
+        for i, (s, dr) in enumerate(zip(order, drafts)):
+            q = self.seqs[s]
+            lgs = lo[q["lane"]]  # [K + 1, V]
+            acc, emit = accs[i] if i in accs else job(s, dr)
+            p0, ln = q["pos"], d.lanes[q["lane"]]
+            p1 = p0 + acc + 1  # rows p0 .. p0 + acc accepted
+            ln["pos"] = p1
+            del ln["tokens"][p1:]
+            if ln["eng"] is not None:
+                tl = ln["tokens"]
+                ln["eng"] = ({li: np.asarray(tl[max(0, p1 - keep) : p1], dtype=np.int64) for li in ln["eng"][0]},
+                             {li: p1 for li in ln["eng"][1]})
+            q["toks"] += feed[s][: acc + 1]
+            q["pos"], q["tok"], q["n"] = p1, emit[-1], None
+            self.last_logits[s] = lgs[acc]
+            hn[s] = (i * (K + 1) + acc, i * (K + 1), p0)
+            res[s] = emit
+            emitted += len(emit)
+        d._pre = None  # (prebuilt for one row per lane at the unaccepted positions)
+        self._hn = hn
+        st = self.stats
+        st["t_step"] += time.time() - t0
+        st["steps"] += 1
+        st["rows"] += u
+        st["bspec_passes"] = st.get("bspec_passes", 0) + 1
+        st["bspec_emitted"] = st.get("bspec_emitted", 0) + emitted
+        st["bspec_rows"] = st.get("bspec_rows", 0) + u
+        return res
 
     def step_logits(self, reqs: dict) -> dict:
         """Host-sampled step: reqs {slot: (tok, pos)} (each continues its sequence) -> {slot: next-token logits}."""
@@ -542,10 +634,13 @@ class Hy4BatchEngine:
         batch size 1..S at every score width bucket (eager), then capture the common traces."""
         self._take_ra({})
         self._warming = True
+        self._no_bspec = True  # (plain batched passes; the batched spec ones by _warm_bspec)
         try:
             self._warm(prompt_len)
         finally:
             self._warming = False
+            self._no_bspec = False
+            self._hn = {}
 
     def _warm(self, prompt_len=None):
         t0 = time.time()
@@ -625,11 +720,13 @@ class Hy4BatchEngine:
             self.step(solo[0])
         dec.min_bucket = 0
         self._warm_spec(solo)
+        self._warm_bspec(widths)
         dec.min_width = 0
         # dense-only passes (no row selects: no scoring) at every batch size: slot 0 short again
         self.prefill(0, rnd(int(prompt_len or 64)))
         for R in range(2, self.S + 1):
             self.step({s: (None, None, False) for s in range(R)})
+        self._warm_bspec([0])
         m.prefill_caches_mark()  # (the warm-up prefills above ran before any capture: their cached constants stay)
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
@@ -639,6 +736,7 @@ class Hy4BatchEngine:
         for R in range(1, self.S + 1):
             for _ in range(steps):
                 self.step({s: (None, None, False) for s in range(R)})
+        self._warm_bspec([0], steps=steps + 1)
         for r in solo[:2]:  # capture the single-path traces of both regimes
             for _ in range(steps):
                 self.step(r)
@@ -672,6 +770,23 @@ class Hy4BatchEngine:
                 for _ in range(3):
                     self.step(r)
         dec.min_bucket = 0
+
+    def _warm_bspec(self, widths, steps=3):
+        """Batched spec (HY4_BSPEC): per listed batch size and score width bucket a plain pass, then verify passes (the
+        first drafts from one row per sequence, the next from k + 1: both draft programs) of the sequences in slots
+        0 .. u - 1 (eager: compile; traced: capture)."""
+        dec = self.dec
+        for u in sorted(self.bspec):
+            for w in widths:
+                dec.min_width = w
+                self._hn = {}
+                self._no_bspec = False
+                try:
+                    for _ in range(steps):
+                        self.step({s: (None, None, False) for s in range(u)})
+                finally:
+                    self._no_bspec = True
+        self._hn = {}
 
     def capture(self):
         """Batched traces are captured on first use per (rows, width) by tt/decode_batch.Hy4BatchDecoder."""
