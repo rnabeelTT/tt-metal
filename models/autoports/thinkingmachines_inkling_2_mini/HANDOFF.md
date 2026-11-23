@@ -256,10 +256,23 @@ are stored padded to 384); the MoE rows kernels at one row (still route the sigb
 | grouped matmul: A multicast within each group slice (read from DRAM once, not once per column block) | 355 | 2,887 |
 | grouped matmul: padding groups skipped, the weight block double-buffered when it fits | 352 | 2,913 |
 | prefill SDPA: 4 items per work unit (their Q tiles stacked; each K / V chunk read once for the 4) | 346 | 2,958 |
+| grouped matmul: slices take contiguous expert ranges (each expert's weights read once per column block) | 344 | 2,976 |
 
 Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), tools/needle_serve.py, depths 0.1 / 0.5 /
 0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
 760 s (1,350 tok/s over the whole prompt).
+
+Served decode (p300x2, 1M-context server, tools/bench_card.py 128 in): 1 user TPOT 23.9 -> 18.4 ms (54.4 tok/s) after the
+SDPA reads only the page-table entries it needs (a 1M row is 64 KB; every SDPA core read it whole each step: traced
+B=1 at max_seq_len 1M 21.1 ms vs 15.7 at 512, now 15.7 at both); per step (I2M_TIMING): inputs 0.7-1.1, device 16.1,
+readback 0.3, plugin + sampling 0.7 ms. 8 users TPOT 37.0 ms (27.0 tok/s/user; device 30-35 ms, width 8 throughout);
+32 users 84.8 ms (11.8 tok/s/user, 310 tok/s; device 78-82 vs 70.4 traced: the device top-k runs 8 rows per pass,
+~0.65 ms each). The 2048-row profile (617 ms device): gmm 91, rms_norm 55, SDPA 46, mix 35 + logit matmuls 34, message
+gates ~70 (gate tail 25, matmuls 27, casts 13), all-reduces 47, prep 23, the SDPA output reshape 18 (a [1, T, NH, HD]
+tile tensor: NH padded to 32 rows), row gather 18.
+Tried: the grouped matmul with double-buffered 6-tile weights and single-buffered A (1.1 MB of CBs) 346 -> 353 ms;
+balanced group slices snapped to expert boundaries 354 ms; LoFi barely faster (not FPU-bound). 8 items per SDPA unit
+with 128-position K chunks: 228 ms at 128K (32 units: compute-bound), 4 items with 128-position chunks 135 ms.
 
 Quality after this round (teacher_force.py prefill path, bfp8 experts, bf16 KV): TP4 2048-row chunks 0.9717 / 0.9970 /
 0.0153; TP2 1024-row 0.9697 / 0.9962 / 0.0160; TP1 256-row 0.9703 / 0.9966 / 0.0142; decode eval (TP4 B=8) 0.9711 /
