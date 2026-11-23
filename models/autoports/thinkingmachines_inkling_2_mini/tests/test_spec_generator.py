@@ -43,9 +43,10 @@ def main():
         out, p = [t], int(ids.numel())
         while len(out) < n_new:
             o = gen.decode_forward(tokens=torch.tensor([[out[-1]]]), start_pos=torch.tensor([p]), sampling_params=sp(temp))
-            out.append(int(o[0, 0]))
-            p += 1
-        return out
+            new = [int(x) for x in o[0] if int(x) >= 0]  # (a speculative step: 1 .. d + 1 tokens, -1 padded)
+            out += new
+            p += len(new)
+        return out[:n_new]
 
     # 1. greedy: spec vs plain (spec off: the generator's own plain path)
     for i, ids in enumerate(prompts):
@@ -64,8 +65,9 @@ def main():
     a, p = [t], int(ids0.numel())
     while len(a) < 20:
         o = gen.decode_forward(tokens=torch.tensor([[a[-1]]]), start_pos=torch.tensor([p]), sampling_params=sp(0.0))
-        a.append(int(o[0, 0]))
-        p += 1
+        new = [int(x) for x in o[0] if int(x) >= 0]
+        a += new
+        p += len(new)
     b = [prefill(ids1, 1)]
     q = int(ids1.numel())
     for _ in range(10):
@@ -76,10 +78,11 @@ def main():
         p, q = p + 1, q + 1
     # reference: request 0 alone, plain greedy, over the same handed-out prefix
     saved, gen.dr = gen.dr, None
-    ref = run(ids0, 0.0, 30, spec=False)
+    ref = run(ids0, 0.0, len(a), spec=False)
     gen.dr = saved
-    agree = next((j for j in range(30) if a[j] != ref[j]), 30)
-    print(f"handover: request 0 agrees with plain greedy for {agree} / 30 tokens (handover at 20)", flush=True)
+    agree = next((j for j in range(len(a)) if a[j] != ref[j]), len(a))
+    h = len(a) - 10
+    print(f"handover: request 0 agrees with plain greedy for {agree} / {len(a)} tokens (handover at {h})", flush=True)
 
     # 3. sampled
     st0 = list(gen.sp_stats)

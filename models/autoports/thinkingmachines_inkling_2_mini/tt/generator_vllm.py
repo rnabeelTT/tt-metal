@@ -50,10 +50,17 @@ WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").s
 PREFIX = os.environ.get("I2M_PREFIX", "1") == "1"
 # I2M_SPEC d (default 0: off): speculative decoding of a request decoding alone (slot 0, prompt prefilled from 0, on-device
 # sampling): the DSpark drafter (tt/drafter.py) proposes d tokens, one verify pass of d + 1 rows scores them, the
-# accepted ones are handed to vLLM one per call (tt/sampling.HostSampler.spec: the target's distribution exactly).
-# d + 1 must be 2 or 4. I2M_SPEC_MAX_LEN: the longest sequence it serves (the drafter's caches).
+# accepted ones (tt/sampling.HostSampler.spec: the target's distribution exactly) go to vLLM in one decode step through
+# the plugin's variable-width output shim (the M2.7 port's mtp_plugin_shim: 1..d + 1 tokens per row, -1 padded; the
+# scheduler reserves the verify window's KV slots). d + 1 must be 2 or 4. I2M_SPEC_MAX_LEN: the longest sequence it
+# serves (the drafter's caches).
 SPEC = int(os.environ.get("I2M_SPEC", "0"))
+if SPEC:
+    from models.autoports.minimaxai_minimax_m2_7.tt import mtp_plugin_shim
+
+    mtp_plugin_shim.apply(SPEC + 1)
 SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
+SPEC_DEBUG = os.environ.get("I2M_SPEC_DEBUG", "0") == "1"  # (log every pass: position, anchor, drafts, emitted)
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 
 
@@ -111,6 +118,7 @@ class Inkling2ForCausalLM:
         "supports_async_decode": False,
         "supports_sample_on_device": True,  # decode: device top-32 + host draw (tt/sampling.py)
         "supports_chunked_prefill": False,
+        **({"max_output_tokens_per_step": SPEC + 1} if SPEC else {}),
     }
 
     def __init__(self, model: Inkling2Model = None, mesh=None, B: int = 1, max_seq_len: int = 0, vllm_config=None,
@@ -510,26 +518,23 @@ class Inkling2ForCausalLM:
             self.dr.commit(ttnn.slice(taps, [0, 0, c0, 0], [1, 4, c0 + T, self.m.H]), p0 + c0, valid=c1 - c0)
 
     def _spec_decode(self, r, t, p, nrows, kwargs):
-        """The speculative request's call (token t at position p): the next accepted token, a pass when none is left.
-        A pass: the drafter's trace (commit the last pass's rows vLLM kept, draft d), then the verify trace."""
-        s, out = self.spec, torch.zeros((nrows, 1), dtype=torch.int32)
+        """The speculative request's step (token t at position p): one pass -> its accepted tokens, all in this step
+        ([nrows, d + 1] int32, -1 padded). A pass: the drafter's trace (commit the last pass's accepted rows, draft d),
+        then the verify trace."""
+        s = self.spec
         commit = None  # (rows of the last pass's taps the drafter commits: (first position, count))
         if s["n"] is not None:
-            i = p - 1 - s["n"]  # (vLLM holds tokens up to position p - 1)
-            if 0 <= i < s["k"] and t == s["em"][i]:
-                out[r, 0] = s["em"][i + 1]
-                s["handed"] = i + 1
-                return out
-            if not (i == s["k"] and t == s["em"][s["k"]]):  # vLLM went another way: resume from row i of the pass
+            i = p - 1 - s["n"]  # (vLLM holds tokens up to position p - 1: rows 0 .. i of the last pass)
+            if not (i == s["k"] and t == s["em"][s["k"]]):  # (vLLM went another way, e.g. a stop it trimmed)
                 assert 0 <= i <= s["k"], (p, s["n"], s["k"])
                 logger.warning(f"speculative decode: resync at position {p}")
                 self.ver.set_accept([i])
             commit = (s["n"], i + 1)
         d, R = SPEC, SPEC + 1
         pt = kwargs.get("page_table")
-        if pt is not None and self.m.pages.paged:
+        if pt is not None and self.m.pages.paged:  # (the verify window's blocks: the shim's lookahead reserved them)
             pt = pt if isinstance(pt, torch.Tensor) else torch.as_tensor(pt)
-            self.m.pages.set_row(0, pt[r], p // 64 + 1)
+            self.m.pages.set_row(0, pt[r], (p + R - 1) // 64 + 1)
         self.m.pages.sync(self.ver.table_key)
         if commit is None:  # (right after the prefill, whose commit is done)
             _, drafts = self.dr.draft(t, p, d=d)
@@ -540,26 +545,28 @@ class Inkling2ForCausalLM:
         self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
         self.vtr.step()
         idx, vals = self.topk.host(self.vtr.extra)
-        # (the KV of an accepted row must land in a block vLLM allocated: up to the end of position p's block)
-        cap = min(d, (p // 64 + 1) * 64 - 1 - p) if self.m.pages.paged else d
-        em, k = self.hs.spec(idx, vals, r, drafts[:cap], kwargs["sampling_params"],
+        em, k = self.hs.spec(idx, vals, r, drafts, kwargs["sampling_params"],
                              outs=_row(kwargs.get("output_tokens"), r), prompt=_row(kwargs.get("prompt_tokens"), r))
         self.ver.set_accept([k])
-        s.update(n=p, k=k, em=em, handed=0)
+        if SPEC_DEBUG:
+            logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")
+        s.update(n=p, k=k, em=em)
         st = self.sp_stats
         st[0], st[1] = st[0] + 1, st[1] + k
         if TIMING and st[0] % 100 == 0:
             logger.info(f"speculative decode: {st[1] / st[0]:.2f} drafts kept per pass over {st[0]} passes")
-        out[r, 0] = em[0]
+        out = torch.full((nrows, R), -1, dtype=torch.int32)
+        out[:, 0] = 0  # (rows vLLM is not decoding: one token, as the plain path returns)
+        out[r, : len(em)] = torch.tensor(em, dtype=torch.int32)
         return out
 
     def _spec_exit(self, p=None):
         """Back to plain decode: the speculative request's state to its slot's row (rewound to what vLLM holds: the
-        position p it decodes next, or every token handed out so far)."""
+        position p it decodes next, or every token of the last pass)."""
         s, self.spec = self.spec, None
         if s["n"] is None:
             return
-        i = (p - 1 - s["n"]) if p is not None else s.get("handed", s["k"])
+        i = (p - 1 - s["n"]) if p is not None else s["k"]  # (vLLM holds every token a pass emitted)
         if i > 0:
             self.ver.move_row(i, 0)
         self.ver.set_accept([0])
