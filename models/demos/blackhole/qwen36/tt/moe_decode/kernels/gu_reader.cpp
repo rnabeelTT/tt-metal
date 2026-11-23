@@ -64,6 +64,7 @@ void kernel_main() {
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
     constexpr uint32_t lg_tiles = moe_topk::lg_tiles(num_experts);
 
+#ifndef ROUTE_IN
     // ---- logits row (+ the selection bias) ----
     cb_reserve_back(cb_scr, 1);
     const uint32_t lg = get_write_ptr(cb_scr);
@@ -89,6 +90,7 @@ void kernel_main() {
 #endif
     const uint32_t ep_off = moe_topk::read_ep_offset(get_arg_val<uint32_t>(a_ep + num_slots), lg + ep_l1_off);
 #endif
+#endif  // ROUTE_IN
 
     // ---- column stream: per slot, up column j then gate column j + n_tiles / 2 ----
     constexpr uint32_t extra_in_flight = num_buffers - 2;
@@ -144,6 +146,24 @@ void kernel_main() {
 
     uint32_t keys[topk], ids[topk];
     uint32_t n_live = topk;  // the routed experts this die streams (EP_EXPERTS: its window of the top-k)
+#ifdef ROUTE_IN
+    // ROUTE_IN (Hy4-flash: tt/router_post took the top-k): the route record from the route buffer (logits_addr), as the
+    // tail below would have built it; to the writer through cb_route
+    {
+        cb_reserve_back(cb_route, 1);
+        const uint32_t rl1 = get_write_ptr(cb_route);
+        const auto s_rt = TensorAccessor(logits_args, logits_addr, moe_topk::REC_BYTES);
+        noc_async_read(s_rt.get_noc_addr(0), rl1, moe_topk::REC_BYTES);
+        noc_async_read_barrier();
+        invalidate_l1_cache();
+        volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rl1);
+        for (uint32_t j = 0; j < topk; ++j) {
+            ids[j] = route[j];
+        }
+        (void)keys;
+        cb_push_back(cb_route, 1);
+    }
+#else
     {
         DeviceZoneScopedN("tail");
     // ---- router tail: top-k of [0, E / 2) here, of [E / 2, E) on the writer, merged ----
@@ -168,6 +188,7 @@ void kernel_main() {
     route[16] = w_shared;
     cb_push_back(cb_route, 1);
     }
+#endif
 
     for (uint32_t i = first; i < num_slots; ++i) {
         const uint32_t s = get_arg_val<uint32_t>(6 + i);

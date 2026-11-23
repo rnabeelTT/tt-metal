@@ -21,7 +21,8 @@ import torch
 
 import ttnn
 
-from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets, gu_variant_key
+from .experts import (TILE, ExpertDown, ExpertGateUp, ExpertGateUp1B, MoEDecodeBuffers, bank_workers, ep_offsets,
+                      gu_layout, gu_variant_key)
 from .union import (
     ExpertDownRows,
     ExpertGateUpDownRows,
@@ -67,7 +68,7 @@ class FusedMoEDecode:
     def __init__(self, mesh_device, args, *, hidden, inter_local, num_experts, k, tp, dtype, router_weight,
                  shared_gate_weight, shared_gate_proj, shared_up_proj, shared_down_proj, cache_name, router_ckc,
                  router="softmax", selection_bias=None, down_dtype=None, router_logits=None, ep_experts=None,
-                 gate_first=False):
+                 gate_first=False, route_wexp=0):
         """router_weight [E, H], shared_gate_weight [1, H], shared_{gate,up}_proj [S, H], shared_down_proj [H, S]
         (HF layouts, S = I * tp); cache_name(name) -> tensor cache path or None.
 
@@ -83,6 +84,7 @@ class FusedMoEDecode:
         self.router_ckc = router_ckc
         self.args_ref = args
         self.router, self.router_logits = router, router_logits
+        self.route_wexp = route_wexp  # multi-row routes: weights x 2^route_wexp (RouteRows ROUTE_WEXP; exact)
         self.shared = shared_up_proj is not None
         self.ep_experts = ep_experts
         down_dtype = down_dtype or dtype
@@ -141,6 +143,25 @@ class FusedMoEDecode:
         self._cache, self._key, self._mesh = cache, key, mesh_device
         self.gate_up, self.down_op = self._one_row_ops()
 
+    def _gu1b1_op(self):
+        """QWEN35_MOE_GU1B1=1 (read per call): the one-row gate|up in the one-bank layout (ExpertGateUp1B) when the route
+        record comes in (route_in), m is odd, routed experts only; None otherwise."""
+        import os
+
+        if os.environ.get("QWEN35_MOE_GU1B1", "0") != "1":
+            return None
+        H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
+        if shared or ep_experts or gate_first or gu_layout(2 * Il // TILE, len(bank_workers(self._mesh)))[1] != 2:
+            return None
+        rd = int(os.environ.get("QWEN35_MOE_GU1B1_READERS", "2"))
+        onrow = int(os.environ.get("QWEN35_MOE_GU1B1_ONROW", "2"))
+        key = self._key + ("one1b", rd, onrow, os.environ.get("QWEN35_MOE_PER_DEVICE", ""))
+        if key not in self._cache:
+            mesh = self._mesh
+            self._cache[key] = PerDeviceOp(mesh, lambda: ExpertGateUp1B(mesh, H, Il, E, k, dtype, readers=rd,
+                                                                        on_row=onrow))
+        return self._cache[key]
+
     def _one_row_ops(self):
         """(ExpertGateUp, ExpertDown) of one row, per reader counts: QWEN35_MOE_GU_READERS (cores per gate|up column
         group, default 4) and QWEN35_MOE_DN1_READERS (cores per bank, default ExpertDown's); read per call (a decode
@@ -168,7 +189,7 @@ class FusedMoEDecode:
         H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
         ep = dict(ep_experts=ep_experts)
         if key not in self._cache:
-            self._cache[key] = (RouteRows(self._mesh, E, k, rows, router=router),
+            self._cache[key] = (RouteRows(self._mesh, E, k, rows, router=router, wexp=self.route_wexp),
                                 RowsBuffers(self._mesh, H, Il, E, k, rows, dtype))
         # the gate|up and down ops per reader / chunk variant (experts.gu_variant_key, env read per call; no host
         # uploads: the buffers stay the ones built before capture)
@@ -204,16 +225,17 @@ class FusedMoEDecode:
         """Routed-only: the routed tensors stand in for the shared ones (their addresses are passed, never read)."""
         return (self.shared_up_gate, self.shared_down) if self.shared else (up_gate, down)
 
-    def rows(self, x, up_gate, down, out=None, logits=None):
+    def rows(self, x, up_gate, down, out=None, logits=None, route_in=False):
         """x: the normed hidden [1, 1, M, H] (2 <= M <= 32). Returns the model-wide [1, 1, M, H] partial-sum buffer, or
         `out` (a [1, 1, M, H] BF16 TILE tensor, e.g. allocated per call in L1 for the fabric boundary: rows >= Mp of its
         tiles are left as they were)."""
         m = int(x.shape[-2])
         route, gu, dn, b = self.rows_ops(m)
-        if logits is None:  # (logits: the router output when the port computed it)
-            logits = self._logits(x)
-        route(logits, b.table, bias=self.bias)
-        ttnn.deallocate(logits)
+        if not route_in:  # (route_in: an earlier program wrote the route table, rows_ops(m)[3].table)
+            if logits is None:  # (logits: the router output when the port computed it)
+                logits = self._logits(x)
+            route(logits, b.table, bias=self.bias, wexp=self.route_wexp)
+            ttnn.deallocate(logits)
         H, Il, E, k = self._key[:4]
         sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
@@ -238,16 +260,20 @@ class FusedMoEDecode:
         op, w = self._dl_router
         return op.consumer(w, ttnn.L1_MEMORY_CONFIG)
 
-    def __call__(self, x, up_gate, down, logits=None):
+    def __call__(self, x, up_gate, down, logits=None, route_in=False):
         """x: the normed hidden [1, 1, 1, H] BF16 TILE (interleaved). Returns this device's partial sum (routed +
         shared) in the model-wide [1, 1, 1, H] buffer: consume it (the layer reduce) before the next layer's MoE.
         logits: the router output when the boundary computed it (router_consumer)."""
-        if logits is None:
-            logits = self._logits(x)
         b = self.buf
         sug, sdn = self._shared_tensors(up_gate, down)
         self.gate_up, self.down_op = self._one_row_ops()
-        self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset)
-        ttnn.deallocate(logits)
+        if route_in:  # an earlier program wrote the route record into self.buf.route (Hy4-flash router_post)
+            gu = self._gu1b1_op() or self.gate_up
+            gu(x, b.route, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset, route_in=True)
+        else:
+            if logits is None:
+                logits = self._logits(x)
+            self.gate_up(x, logits, up_gate, sug, b.act, b.route, bias=self.bias, ep_offset=self.ep_offset)
+            ttnn.deallocate(logits)
         self.down_op(b.act, b.route, down, sdn, b.out)
         return b.out

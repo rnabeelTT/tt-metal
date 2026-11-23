@@ -62,6 +62,9 @@ void kernel_main() {
     const auto s_route = TensorAccessor(route_args, route_addr, moe_topk::REC_BYTES);
     const auto s_lg = TensorAccessor(lg_args, logits_addr, moe_topk::LG_PAGE);
 
+#ifdef ROUTE_IN
+    constexpr uint32_t extra = 1;  // (the bias address after the slot list: unused)
+#else
     // logits [E / 2, E) (they gate the expert stream)
     cb_reserve_back(cb_lg, 1);
     const uint32_t lg = get_write_ptr(cb_lg);
@@ -89,6 +92,7 @@ void kernel_main() {
         moe_topk::route_select<topk>(lg, bias, num_experts / 2, num_experts, part, part + topk);
         cb_push_back(cb_part, 1);
     }
+#endif
 
     // x after the router tail: the compute needs it only with the first weight column
     cb_reserve_back(cb_x, kx);
@@ -120,9 +124,11 @@ void kernel_main() {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
         ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, static_cast<uint32_t>(route[16 + s]) << 16);
     }
+#ifndef ROUTE_IN  // (ROUTE_IN: the record is in the route buffer already)
     if (route_owner) {
         noc_async_write(route_l1, s_route.get_noc_addr(0), moe_topk::REC_BYTES);
     }
+#endif
 
 #ifdef GU_FAR_W
     // the far bank block (bank q + banks / 2) of each slot, streamed on this RISC's NoC (NOC1) into cb_w1, up to

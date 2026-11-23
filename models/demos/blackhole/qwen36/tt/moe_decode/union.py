@@ -144,16 +144,19 @@ class RouteRows:
     """(logits [M, E + 32] BF16 (softmax) / [M, E] FP32 (sigb), table) -> table, one core per row (NCRISC and BRISC
     each take half the logits)."""
 
-    def __init__(self, mesh_device, num_experts, k, rows, router="softmax"):
+    def __init__(self, mesh_device, num_experts, k, rows, router="softmax", wexp=0):
+        """wexp: the routed weights x 2^wexp (ROUTE_WEXP; exact): a port's routed scale when it is a power of two."""
         assert router in ROUTERS, router
-        self.router = router
+        self.router, self.wexp = router, wexp
         self.E, self.k, self.rows = num_experts, k, rows
         gx = mesh_device.compute_with_storage_grid_size().x
         self.assign = [ttnn.CoreCoord(r % gx, r // gx) for r in range(rows)]
         self.cores = _range_set(self.assign)
 
-    def __call__(self, logits, table, bias=None):
-        """bias: the sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
+    def __call__(self, logits, table, bias=None, wexp=None):
+        """bias: the sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page). wexp: overrides
+        the build's (per call)."""
+        wexp = self.wexp if wexp is None else wexp
         assert (bias is not None) == is_sig(self.router)
         cb_scr, cb_part, cb_lg = 0, 1, 2
         lg_bytes = logits_row_bytes(self.E, self.router)
@@ -172,6 +175,8 @@ class RouteRows:
         wr_ct = [cb_lg, cb_part, self.E, self.k] + lg_ct
         dm = ttnn.DataMovementConfigDescriptor
         defines = router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
+        if wexp:
+            defines.append(("ROUTE_WEXP", str(int(wexp))))
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),

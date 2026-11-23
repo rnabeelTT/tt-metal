@@ -67,6 +67,9 @@ def _stream_defaults():
         for k, v in (("QWEN35_MOE_GU1B", "2-16"), ("QWEN35_MOE_GU1B_READERS", "2:2,5:3,9:4"),
                      ("QWEN35_MOE_GU1B_ONROW", "2:2,5:3,9:4")):
             os.environ.setdefault(k, v)
+        # one row (with HY4_MOE_ROUTE_IN: the route record from router_post): the one-bank gate|up of one row
+        # (ExpertGateUp1B, 2 cores per bank on its row; exact)
+        os.environ.setdefault("QWEN35_MOE_GU1B1", "1")
 
 
 def _dt(name, default):
@@ -345,7 +348,20 @@ class Hy4MoE:
         ttnn.deallocate(b)
         return lg
 
-    def router_row(self, x, T=None, ab=None):
+    def scale_wexp(self):
+        """HY4_MOE_SCALE_FOLD (default 1): the routed scale as a power-of-two weight exponent when ttnn.multiply's BF16
+        scalar is one (bf16(3.998) = 4.0: x * 3.998 on a BF16 tensor == x * 4, exactly): the fused routing kernels scale
+        the normalized weights by 2^wexp (BF16 exponent; every later step is homogeneous: the partial sums come out x 4
+        bit for bit) and the multiply program goes. 0: not foldable / off."""
+        if os.environ.get("HY4_MOE_SCALE_FOLD", "1") != "1":
+            return 0
+        import math
+
+        sb = float(torch.tensor(self.scale, dtype=torch.float32).to(torch.bfloat16).float())
+        m, e = math.frexp(sb)
+        return e - 1 if m == 0.5 and e > 1 else 0
+
+    def router_row(self, x, T=None, ab=None, route=None, wexp=0):
         """[keys | s] FP32 [1, 1, rows, 2E]: s = sigmoid(x W_r) (fp32 logits, as the reference), keys = s + bias (the
         selection score); the routing kernels (router "keys") take the top-k of the keys and normalize s. T: return
         rows 0..T-1 only (HY4_ROUTER_POST=1, decode rows: one fused program after the router linear)."""
@@ -363,7 +379,7 @@ class Hy4MoE:
                 a = ttnn.slice(y, (0, 0, 0, 0), (1, 1, 32, self.E), memory_config=L1)
                 b = ttnn.slice(y, (0, 0, 0, self.E), (1, 1, 32, 2 * self.E), memory_config=L1)
                 ttnn.deallocate(y)
-            row = RouterPostOp.get(self.mesh)(a, b, self.bias_rows, T, L1)
+            row = RouterPostOp.get(self.mesh)(a, b, self.bias_rows, T, L1, route=route, wexp=wexp)
             ttnn.deallocate(a)
             ttnn.deallocate(b)
             return row
@@ -580,8 +596,32 @@ class Hy4MoE:
             ttnn.deallocate(g)
             ttnn.deallocate(u)
             if fusedT:
-                row = self.router_row(x, T, ab=ab)  # [keys | s] (streamed router): rows 0..T-1 are the tokens'
-                if int(row.shape[-2]) == T:
+                # HY4_MOE_ROUTE_IN (default 1; one row): the router post program also takes the top-k + weights
+                # (tt/router_post RP_ROUTE) into the fused MoE's route buffer; the gate|up program skips its router
+                # tail (~10 us) and streams from its start (same record: exact)
+                # HY4_MOE_ROUTE_IN_ROWS (default 0 = off; exact): the same for 2..n-row passes (into the rows' route
+                # table; the RouteRows program goes). Unit (rp + RouteRows -> rp route): R2 17.8 -> 15.0, R4 18.8 ->
+                # 16.9 us, R8 / R16 slower (serial per-row top-k); in-model no gain measured yet
+                rp_ok = (os.environ.get("HY4_ROUTER_POST", "1") == "1" and getattr(self, "dec_router", None) is not None)
+                if T == 1:
+                    route_in = rp_ok and os.environ.get("HY4_MOE_ROUTE_IN", "1") == "1"
+                else:
+                    route_in = rp_ok and T <= int(os.environ.get("HY4_MOE_ROUTE_IN_ROWS", "0"))
+                wexp = self.scale_wexp()
+                if T == 1 and not route_in:
+                    wexp = 0  # (the one-row gate|up tail does not fold the scale)
+                self.fused.route_wexp = wexp  # multi-row: RouteRows ROUTE_WEXP
+                table = None
+                if route_in:
+                    table = self.fused.buf.route if T == 1 else self.fused.rows_ops(T)[3].table
+                row = self.router_row(x, T, ab=ab, route=table,
+                                      wexp=wexp)  # [keys | s] (streamed router): rows 0..T-1 are the tokens'
+                if route_in:
+                    ttnn.deallocate(row)
+                    row = None
+                if row is None:
+                    rowT = None
+                elif int(row.shape[-2]) == T:
                     rowT = row
                 else:
                     rowT = ttnn.slice(row, (0, 0, 0, 0), (1, 1, T, 2 * self.E), memory_config=ttnn.L1_MEMORY_CONFIG)
@@ -592,22 +632,33 @@ class Hy4MoE:
                     xT = ttnn.slice(xl, (0, 0, 0, 0), (1, 1, T, L), memory_config=mem)
                     ttnn.deallocate(xl)
                 if T == 1:
-                    partT = self.fused(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, 1, L] (model-wide: keep)
+                    partT = self.fused(xT, self.up_gate, self.down, logits=rowT, route_in=route_in)  # [1, 1, 1, L]
                 else:
-                    partT = self.fused.rows(xT, self.up_gate, self.down, logits=rowT)  # [1, 1, T, L] (model-wide)
+                    out = None
+                    if wexp:  # (folded scale: the out linear reads the partial itself, from L1, not the DRAM buffer)
+                        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.L]), ttnn.bfloat16,
+                                                             ttnn.TILE_LAYOUT, self.mesh, ttnn.L1_MEMORY_CONFIG)
+                    partT = self.fused.rows(xT, self.up_gate, self.down, logits=rowT, route_in=route_in, out=out)
                 ttnn.deallocate(xT)
-                rT = ttnn.multiply(partT, self.scale, memory_config=mem)  # the fused router normalizes to 1
+                if wexp and T > 1:  # the scale is in the routing weights already (a per-call L1 output)
+                    rT, own = partT, True
+                elif wexp:  # (one row: the model-wide L1 buffer, never deallocated here)
+                    rT, own = partT, False
+                else:
+                    rT, own = ttnn.multiply(partT, self.scale, memory_config=mem), True  # the router normalizes to 1
                 if os.environ.get("HY4_MOE_XSPLIT", "1") == "1" and T <= 16:
                     # the out linear reads [routed | h] as two K parts (its rows 0..T-1 only): no pad / concat
                     part = self.dec["out"]((rT, h), mem, rows_out=boundary_rows_out(self.mesh, T))
-                    ttnn.deallocate(rT)
+                    if own:
+                        ttnn.deallocate(rT)
                     ttnn.deallocate(h)
                     return self._dec_tail(part, T, mem)
                 if T == 32:  # (a zero pad returns its input: deallocating it freed `routed`, a segfault in the concat)
-                    routed = rT
+                    routed = rT if own else ttnn.clone(rT, memory_config=mem)  # (own: the multiply's / a per-call output)
                 else:
                     routed = ttnn.pad(rT, [(0, 0), (0, 0), (0, 32 - T), (0, 0)], value=0.0)
-                    ttnn.deallocate(rT)
+                    if own:
+                        ttnn.deallocate(rT)
             else:
                 if self.route_kernel:
                     scores, ids = self.route_decode(x, T, mem)

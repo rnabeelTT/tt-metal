@@ -251,7 +251,8 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
 
 def gu_variant_key():
     """The env knobs the gate|up ops read when built (cache keys of fused.FusedMoEDecode)."""
-    return tuple(os.environ.get(k, "") for k in ("QWEN35_MOE_GU_FARW", "QWEN35_MOE_GU_FARW_NEAR",
+    return tuple(os.environ.get(k, "") for k in ("QWEN35_MOE_GU1B1", "QWEN35_MOE_GU1B1_READERS", "QWEN35_MOE_GU_FARW",
+                                                 "QWEN35_MOE_GU_FARW_NEAR",
                                                  "QWEN35_MOE_GU_FARW_FAR", "QWEN35_MOE_GUR_READERS", "QWEN35_MOE_DN_CHUNK",
                                                  "QWEN35_MOE_DN_READERS", "QWEN35_MOE_GUDN", "QWEN35_MOE_GU1B",
                                                  "QWEN35_MOE_GU1B_READERS", "QWEN35_MOE_GU1B_ONROW", "QWEN35_MOE_PER_DEVICE"))
@@ -402,9 +403,15 @@ class ExpertGateUp:
         self.assign = [(c, q, r) for q in range(self.groups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None, ep_offset=None):
+    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None, ep_offset=None,
+              route_in=False):
         """(kernels, cbs). notify = (semaphore id, [(NOC x, y)] of the down cores) for the one-program MoE. bias: the
-        sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
+        sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page). route_in (ROUTE_IN): the route
+        record is in `route` already (an earlier program took the top-k, e.g. Hy4-flash's router_post): no logits
+        read and no router tail here (`logits` unused)."""
+        if route_in:
+            assert notify is None and not self.ep_experts and not self.shared
+            logits = route
         assert (bias is not None) == is_sig(self.router) and (notify is None or self.router == "softmax")
         assert (ep_offset is not None) == bool(self.ep_experts) and (notify is None or not self.ep_experts)
         cb_x, cb_w, cb_route, cb_scr, cb_part, cb_lg, cb_act = 0, 1, 2, 3, 4, 5, 16
@@ -447,16 +454,106 @@ class ExpertGateUp:
             defines += [("GU_FAR_W", "1")]
         defines += router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
         defines += _ep_defines(self.ep_experts, self.gate_first)
+        if route_in:
+            defines += [("ROUTE_IN", "1")]
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs
 
-    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None):
-        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset)
+    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=False):
+        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset,
+                                                    route_in=route_in)
         return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
 
-    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None):
-        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias, ep_offset=ep_offset)
-        io = [up_gate, shared_up_gate, x, logits, route, act] + [t for t in (bias, ep_offset) if t is not None]
+    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=False):
+        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias, ep_offset=ep_offset,
+                                  route_in=route_in)
+        lg = [] if route_in else [logits]
+        io = [up_gate, shared_up_gate, x] + lg + [route, act] + [t for t in (bias, ep_offset) if t is not None]
         return kernels, [], cbs, io
+
+
+class ExpertGateUp1B:
+    """One-row gate|up in the one-bank layout (QWEN35_MOE_GU1B1; m odd, routed experts only, the route record already in
+    `route`: ROUTE_IN, e.g. Hy4-flash's router_post): every core streams ONE DRAM bank's [kt, m] block per slot (the
+    two-bank cores of ExpertGateUp read ~230 GB/s per die, capped by the far bank's path), `readers` cores per bank
+    (`on_row` of them on the bank's row, union.place_onebank); partner cores (banks b, b + banks / 2, same rank and
+    slots) swap their gate matmul results as FP32 tiles and each computes the SwiGLU of its own up columns
+    (gu1b_*.cpp). Same matmuls, same DST values, same SFPU sequence as ExpertGateUp (exact); same activation buffer
+    layout, so ExpertDown is unchanged. Call signature as ExpertGateUp (logits / bias unused)."""
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=2, on_row=2, buffers=5,
+                 xring=4):
+        from .union import place_onebank
+
+        self.mesh_device = mesh_device
+        self.banks = len(bank_workers(mesh_device))
+        self.kt = hidden // TILE
+        self.n_tiles = 2 * inter // TILE
+        self.m, self.nb, _, _ = gu_layout(self.n_tiles, self.banks)
+        assert self.nb == 2, "one-bank layout: odd columns per bank"
+        self.E, self.k, self.inter = num_experts, k, inter
+        self.readers = min(readers, k)
+        self.slots = [list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
+        self.tile_bytes = TILE_BYTES[weight_dtype]
+        self.weight_dtype = weight_dtype
+        self.buffers = gu_ring(self.kt, self.m, 1, self.tile_bytes, buffers)
+        self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
+        self.xring = xring
+        placed = place_onebank(mesh_device, self.banks, self.readers, on_row)
+        self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
+        half = self.banks // 2
+        self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(self.readers)}
+        self.cores = _range_set([c for c, _, _ in self.assign])
+
+    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=True):
+        assert route_in and ep_offset is None, "ExpertGateUp1B: route record in `route` (ROUTE_IN), no EP"
+        cb_x, cb_w, cb_route, cb_up, cb_xo, cb_xi, cb_act = 0, 1, 2, 9, 10, 11, 16
+        m = self.m
+        nmax = (m + 1) // 2
+        xt = 32 * 32 * 4
+        cbs = [
+            _cb(self.cores, cb_x, ttnn.bfloat16, 64, self.kt, tiny=True),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * m),
+            _cb(self.cores, cb_route, ttnn.uint16, 128, 1),
+            _cb(self.cores, cb_up, ttnn.float32, xt, 2 * nmax),
+            _cb(self.cores, cb_xo, ttnn.float32, xt, 2 * nmax),
+            _cb(self.cores, cb_xi, ttnn.float32, xt, self.xring * nmax),
+            _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * nmax, tiny=True),
+        ]
+        rd_rt, wr_rt, cp_rt = {}, {}, {}
+        for c, b, r in self.assign:
+            sl = self.slots[r]
+            pc = self.mesh_device.worker_core_from_logical_core(self.partner[(b, r)])
+            rd_rt[(c.x, c.y)] = [route.buffer_address(), up_gate.buffer_address(), b, (b + r) & 0x3, len(sl)] + sl
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), b, pc.x, pc.y, len(sl)] + sl
+            cp_rt[(c.x, c.y)] = [len(sl)]
+        rd_ct = [cb_w, cb_route, self.kt, m, self.tile_bytes, self.page_bytes, self.buffers, self.k]
+        rd_ct += ttnn.TensorAccessorArgs(route).get_compile_time_args()
+        wr_ct = [cb_x, cb_act, cb_route, self.kt, 2 * self.inter, m, self.banks, cb_xo, cb_xi, xt, self.xring]
+        for t in (x, act):
+            wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        cp_ct = [cb_x, cb_w, cb_act, self.kt, m, cb_up, cb_xo, cb_xi]
+        defines = [("ROUTE_WIDE", "1")] if self.k == 16 else []
+        defines += _ep_defines(None)
+        half = self.banks // 2
+        kernels = []
+        for hi in (False, True):
+            sel = [(c.x, c.y) for c, b, _ in self.assign if (b >= half) == hi]
+            cr = _range_set([ttnn.CoreCoord(x_, y_) for x_, y_ in sel])
+            kernels += _kernels(
+                cr, "gu1b",
+                (rd_ct, {k_: v for k_, v in rd_rt.items() if k_ in sel}),
+                (wr_ct, {k_: v for k_, v in wr_rt.items() if k_ in sel}),
+                (cp_ct, {k_: v for k_, v in cp_rt.items() if k_ in sel}),
+                defines + ([("ROLE_HI", "1")] if hi else []), dst_full=False, unpack_fp32=(cb_up, cb_xi),
+            )
+        semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
+        io = [up_gate, x, route, act]
+        return kernels, semaphores, cbs, io
+
+    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=True):
+        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset,
+                                                    route_in=route_in)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
 
 
 class ExpertDown:

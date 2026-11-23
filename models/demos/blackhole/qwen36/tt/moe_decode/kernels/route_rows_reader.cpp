@@ -76,6 +76,14 @@ void kernel_main() {
     cb_pop_front(cb_part, 1);
     uint16_t w[topk];
     const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
+#ifdef ROUTE_WEXP
+    // the routed weights x 2^ROUTE_WEXP (BF16 exponent; exact): a port's routed scale when it is a power of two in BF16
+    for (uint32_t j = 0; j < topk; ++j) {
+        if (w[j]) {
+            w[j] = static_cast<uint16_t>(w[j] + (ROUTE_WEXP << 7));
+        }
+    }
+#endif
 
     volatile tt_l1_ptr uint16_t* r = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec);
     for (uint32_t j = 0; j < moe_topk::REC_U16; ++j) {
