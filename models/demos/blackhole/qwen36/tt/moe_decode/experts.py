@@ -111,8 +111,46 @@ def logits_row_bytes(num_experts, router):
     return 64 * (num_experts // TILE + 1)
 
 
+_WORKERS_OVERRIDE = [None]  # union.PerDeviceOp: the bank workers of the device group an op instance is built for
+
+
 def bank_workers(mesh_device):
+    """The optimal reader core per DRAM bank (a mesh: its FRONT device's; union.PerDeviceOp builds per device)."""
+    if _WORKERS_OVERRIDE[0] is not None:
+        return list(_WORKERS_OVERRIDE[0])
     return list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))
+
+
+_DEV_WORKERS = {}
+
+
+def device_worker_groups(mesh_device):
+    """[(bank workers, [MeshCoordinate])]: the mesh's devices grouped by their optimal DRAM bank workers (1x1
+    submeshes: the mesh query answers for its front device only; QB2 chips differ in harvested columns, the centre
+    DRAM column's workers at logical x 5 / 6 / 7). One group: every device alike (or not a mesh)."""
+    key = id(mesh_device)
+    if key in _DEV_WORKERS and _DEV_WORKERS[key][0] is mesh_device:
+        return _DEV_WORKERS[key][1]
+    n = getattr(mesh_device, "get_num_devices", lambda: 1)()
+    groups = None
+    if n > 1:
+        try:
+            shape = mesh_device.shape
+            subs = mesh_device.create_submeshes(ttnn.MeshShape(1, 1))
+            coords = [ttnn.MeshCoordinate(r, c) for r in range(shape[0]) for c in range(shape[1])]
+            assert len(subs) == len(coords) and [s.get_device_ids()[0] for s in subs] == list(mesh_device.get_device_ids())
+            by = {}
+            for sub, co in zip(subs, coords):
+                w = tuple((c.x, c.y) for c in ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(sub, ttnn.NOC.NOC_0))
+                by.setdefault(w, []).append(co)
+            groups = [([ttnn.CoreCoord(x, y) for x, y in w], cs) for w, cs in by.items()]
+            _DEV_WORKERS[key] = (mesh_device, groups, subs)  # (the submeshes stay referenced)
+            return groups
+        except Exception as e:  # noqa: BLE001
+            print(f"moe_decode: per-device bank workers unavailable ({type(e).__name__}: {e}); front device's for all")
+    groups = [(bank_workers(mesh_device), None)]
+    _DEV_WORKERS[key] = (mesh_device, groups, None)
+    return groups
 
 
 _NOC_COORDS = {}
@@ -215,7 +253,8 @@ def gu_variant_key():
     """The env knobs the gate|up ops read when built (cache keys of fused.FusedMoEDecode)."""
     return tuple(os.environ.get(k, "") for k in ("QWEN35_MOE_GU_FARW", "QWEN35_MOE_GU_FARW_NEAR",
                                                  "QWEN35_MOE_GU_FARW_FAR", "QWEN35_MOE_GUR_READERS", "QWEN35_MOE_DN_CHUNK",
-                                                 "QWEN35_MOE_DN_READERS"))
+                                                 "QWEN35_MOE_DN_READERS", "QWEN35_MOE_GUDN", "QWEN35_MOE_GU1B",
+                                                 "QWEN35_MOE_GU1B_READERS", "QWEN35_MOE_GU1B_ONROW", "QWEN35_MOE_PER_DEVICE"))
 
 
 def _range_set(cores):
@@ -242,9 +281,11 @@ def _rt(args, cores=None):
     return rt
 
 
-def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, reader_noc=None):
+def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, reader_noc=None, compute_name=None,
+             unpack_fp32=()):
     """reader / writer / compute: (compile args, {(x, y): runtime args}). reader_noc: ttnn.NOC.NOC_1 swaps the reader /
-    writer NOCs (readers off their bank's row: NOC1 routes Y first, keeping the responses off the bank row's links)."""
+    writer NOCs (readers off their bank's row: NOC1 routes Y first, keeping the responses off the bank row's links).
+    compute_name: the compute kernel's file stem (default `name`); unpack_fp32: cb indices unpacked to DST as FP32."""
     dm = ttnn.DataMovementConfigDescriptor
     rd_ct, rd_args = reader
     wr_ct, wr_args = writer
@@ -276,17 +317,22 @@ def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, r
                 defines=list(defines),
             ),
         ]
+    cfg = ttnn.ComputeConfigDescriptor(
+        math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False, dst_full_sync_en=dst_full,
+    )
+    if unpack_fp32:
+        modes = [ttnn.UnpackToDestMode.Default] * 64
+        for i in unpack_fp32:
+            modes[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg.unpack_to_dest_mode = modes
     return dms + [
         ttnn.KernelDescriptor(
-            kernel_source=str(KERNEL_DIR / f"{name}_compute.cpp"),
+            kernel_source=str(KERNEL_DIR / f"{compute_name or name}_compute.cpp"),
             core_ranges=cores,
             compile_time_args=cp_ct,
             runtime_args=cp_rt if cp_rt is not None else [],
             defines=list(defines),
-            config=ttnn.ComputeConfigDescriptor(
-                math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False,
-                dst_full_sync_en=dst_full,
-            ),
+            config=cfg,
         ),
     ]
 
@@ -404,10 +450,13 @@ class ExpertGateUp:
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs
 
     def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None):
+        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None):
         kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias, ep_offset=ep_offset)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         io = [up_gate, shared_up_gate, x, logits, route, act] + [t for t in (bias, ep_offset) if t is not None]
-        return ttnn.generic_op(io, program)
+        return kernels, [], cbs, io
 
 
 class ExpertDown:
@@ -477,9 +526,12 @@ class ExpertDown:
         return _kernels(self.cores, "dn", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines), cbs
 
     def __call__(self, act, route, down, shared_down, out):
+        kernels, semaphores, cbs, io = self.program(act, route, down, shared_down, out)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, act, route, down, shared_down, out):
         kernels, cbs = self.parts(act, route, down, shared_down, out)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([down, shared_down, act, route, out], program)
+        return kernels, [], cbs, [down, shared_down, act, route, out]
 
 
 class ExpertMoE:

@@ -26,7 +26,13 @@
 // the partner's semaphore 1. ROLE_UP writers zero their cb_sc ring, grant credits, publish each slot once its data
 // arrived (semaphore 1), and write the activation buffer (pair q) as above.
 //
-// runtime args: [x_addr, act_addr, table_addr, group q, slot0, (EP_EXPERTS) ep_offset_addr]
+// GU_ONE_BANK (union.py ExpertGateUpRows.onebank, gub_compute.cpp): group q is this core's bank; per slot the core's
+// gate-column FP32 tiles go to its partner core's ring (bank q +- banks / 2, same rank) and the partner's come back.
+// GUDN (union.py ExpertGateUpDownRows): after each slot's activation writes, the core's slot count in its progress word
+// for the down writers of the same program.
+//
+// runtime args: [x_addr, act_addr, table_addr, group q, slot0, (EP_EXPERTS) ep_offset_addr, (GU_FAR_W) w_addr,
+//                far bank, (GU_ONE_BANK) partner noc x, y, (GUDN) down core count, (x | y << 8) per down core]
 
 #include <stdint.h>
 
@@ -81,6 +87,90 @@ void kernel_main() {
 #endif
     constexpr uint32_t tb = trows * 64;  // one [trows, 32] BF16 tile
     constexpr uint32_t half = trows * 32;
+#ifdef GU_ONE_BANK
+    // one-bank layout (union.py ExpertGateUpRows.onebank, gub_compute.cpp): `pair` is this core's bank b; its local up
+    // columns c < nup (global column b + banks c) are its pairs, its gate columns go to the partner core (bank
+    // b +- banks / 2, same slots) as FP32 tiles (cb_xo -> the partner's cb_xi ring, `xring` slots of groups x nmax
+    // tiles; semaphore 0: credits from the partner, 1: slots arrived from the partner)
+    constexpr uint32_t ob_ct = table_args.next_compile_time_args_offset();
+    constexpr uint32_t cb_xo = get_compile_time_arg_val(ob_ct);
+    constexpr uint32_t cb_xi = get_compile_time_arg_val(ob_ct + 1);
+    constexpr uint32_t xt = get_compile_time_arg_val(ob_ct + 2);
+    constexpr uint32_t xring = get_compile_time_arg_val(ob_ct + 3);
+#ifdef ROLE_HI
+    constexpr uint32_t nup = (m - 1) / 2;
+#else
+    constexpr uint32_t nup = (m + 1) / 2;
+#endif
+    constexpr uint32_t nsend = m - nup;
+    constexpr uint32_t nmax = (m + 1) / 2;
+    constexpr uint32_t x_slot_tiles = groups * nmax;
+    static_assert(m % 2 == 1, "one-bank layout: odd m (pairs split over banks b, b + banks / 2)");
+#ifdef EP_EXPERTS
+    constexpr uint32_t ob_rt = 6;
+#else
+    constexpr uint32_t ob_rt = 5;
+#endif
+    const uint32_t ppx = get_arg_val<uint32_t>(ob_rt);
+    const uint32_t ppy = get_arg_val<uint32_t>(ob_rt + 1);
+    const uint32_t x_ring_base = get_write_ptr(cb_xi);  // (the partner's ring: same address)
+    volatile tt_l1_ptr uint32_t* x_credit = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(0));
+    volatile tt_l1_ptr uint32_t* x_got = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(1));
+    cb_reserve_back(cb_xi, xring * x_slot_tiles);
+    noc_semaphore_inc(get_noc_addr(ppx, ppy, get_semaphore(0)), xring);
+    auto exchange = [&](uint32_t i) {  // slot i (this core's i-th): grant the partner's ring slot, send, receive
+        if (i >= xring) {
+            cb_reserve_back(cb_xi, x_slot_tiles);  // slot i - xring consumed
+            noc_semaphore_inc(get_noc_addr(ppx, ppy, get_semaphore(0)), 1);
+        }
+        cb_wait_front(cb_xo, groups * nsend);
+        noc_semaphore_wait_min(x_credit, i + 1);
+        const uint32_t src = get_read_ptr(cb_xo);
+        const uint32_t dst = x_ring_base + (i % xring) * x_slot_tiles * xt;
+        for (uint32_t g = 0; g < groups; ++g) {
+            noc_async_write(src + g * nsend * xt, get_noc_addr(ppx, ppy, dst + g * nmax * xt), nsend * xt);
+        }
+        noc_async_write_barrier();
+        noc_semaphore_inc(get_noc_addr(ppx, ppy, get_semaphore(1)), 1);
+        cb_pop_front(cb_xo, groups * nsend);
+        noc_semaphore_wait_min(x_got, i + 1);
+        cb_push_back(cb_xi, x_slot_tiles);
+    };
+#endif
+#ifdef GUDN
+    // gate|up + down in one program (union.py ExpertGateUpDownRows): this core's slot count in its progress word (cb
+    // index cb_prog, the same address on every core of the program), read by the down writers; start handshake: zero
+    // it, then semaphore 2 + 1 on every down core
+#if defined(GU_FAR_W) || defined(GU_ONE_BANK)
+    constexpr uint32_t gudn_ct = table_args.next_compile_time_args_offset() + 4;
+    constexpr uint32_t gudn_rt_ = 7;
+#else
+    constexpr uint32_t gudn_ct = table_args.next_compile_time_args_offset();
+    constexpr uint32_t gudn_rt_ = 5;
+#endif
+#ifdef EP_EXPERTS
+    constexpr uint32_t gudn_rt = gudn_rt_ + 1;
+#else
+    constexpr uint32_t gudn_rt = gudn_rt_;
+#endif
+    constexpr uint32_t cb_prog = get_compile_time_arg_val(gudn_ct);
+    volatile tt_l1_ptr uint32_t* prog = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_prog));
+    prog[0] = 0;
+    {
+        const uint32_t n_dn = get_arg_val<uint32_t>(gudn_rt);
+        for (uint32_t d = 0; d < n_dn; ++d) {
+            const uint32_t xy = get_arg_val<uint32_t>(gudn_rt + 1 + d);
+            noc_semaphore_inc(get_noc_addr(xy & 0xFF, (xy >> 8) & 0xFF, get_semaphore(2)), 1);
+        }
+    }
+    uint32_t published = 0;
+    auto publish = [&]() {  // the drained slot's activation writes landed: count it
+        noc_async_write_barrier();
+        prog[0] = ++published;
+    };
+#else
+    auto publish = [&]() {};
+#endif
     static_assert(groups * trows >= rows && (groups == 1 || trows == 8), "row groups of 8");
 
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
@@ -247,11 +337,20 @@ void kernel_main() {
         ++sent;
     };
 #else
+#ifdef GU_ONE_BANK
+    constexpr uint32_t np_w = nup;
+#else
+    constexpr uint32_t np_w = np;
+#endif
     auto drain = [&](uint32_t s) {
         for (uint32_t g = 0; g < groups; ++g) {
-            cb_wait_front(cb_act, np);
-            for (uint32_t p = 0; p < np; ++p) {
+            cb_wait_front(cb_act, np_w);
+            for (uint32_t p = 0; p < np_w; ++p) {
+#ifdef GU_ONE_BANK
+                const uint32_t pj = pair + banks * p;  // local up column p
+#else
                 const uint32_t pj = gu_layout::pair_index<m, banks>(pair, p);
+#endif
 #ifdef ACT_BLK
                 // one page per (slot, row group): the pairs' tiles in K order
                 noc_async_write(get_read_ptr(cb_act) + p * tb, s_act.get_noc_addr(s * groups + g, pj * tb), tb);
@@ -260,7 +359,7 @@ void kernel_main() {
 #endif
             }
             noc_async_writes_flushed();
-            cb_pop_front(cb_act, np);
+            cb_pop_front(cb_act, np_w);
         }
     };
 #endif
@@ -329,12 +428,17 @@ void kernel_main() {
             }
         }
         cb_push_back(cb_sc, 2 * groups);
+#ifdef GU_ONE_BANK
+        exchange(i);
+#endif
         if (s != slot0) {
             drain(s - step);
+            publish();
         }
     }
     if (mine) {
         drain(slot0 + (mine - 1) * step);
+        publish();
     }
     noc_async_write_barrier();
     noc_async_atomic_barrier();

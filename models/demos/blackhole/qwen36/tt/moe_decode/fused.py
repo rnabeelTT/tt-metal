@@ -22,7 +22,17 @@ import torch
 import ttnn
 
 from .experts import TILE, ExpertDown, ExpertGateUp, MoEDecodeBuffers, bank_workers, ep_offsets, gu_variant_key
-from .union import ExpertDownRows, ExpertGateUpRows, RouteRows, RowsBuffers, act_buffer, upload_selection_bias
+from .union import (
+    ExpertDownRows,
+    ExpertGateUpDownRows,
+    ExpertGateUpRows,
+    PerDeviceOp,
+    RouteRows,
+    RowsBuffers,
+    act_buffer,
+    gudn_rows,
+    upload_selection_bias,
+)
 
 WEIGHT_SIG_BITS = 5  # significant bits custom_mm's LoFi multiply reads from the weight operand (srcA)
 CACHE_SUFFIX = f".r{WEIGHT_SIG_BITS}"
@@ -143,10 +153,11 @@ class FusedMoEDecode:
         if key not in self._cache:
             H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
             ep = dict(ep_experts=ep_experts)
+            mesh = self._mesh
             self._cache[key] = (
-                ExpertGateUp(self._mesh, H, Il, E, k, dtype, readers=gr, router=router, shared=shared,
-                             gate_first=gate_first, **ep),
-                ExpertDown(self._mesh, H, Il, E, k, down_dtype, readers=dr, shared=shared, **ep),
+                PerDeviceOp(mesh, lambda: ExpertGateUp(mesh, H, Il, E, k, dtype, readers=gr, router=router,
+                                                       shared=shared, gate_first=gate_first, **ep)),
+                PerDeviceOp(mesh, lambda: ExpertDown(mesh, H, Il, E, k, down_dtype, readers=dr, shared=shared, **ep)),
             )
         return self._cache[key]
 
@@ -162,10 +173,20 @@ class FusedMoEDecode:
         # the gate|up and down ops per reader / chunk variant (experts.gu_variant_key, env read per call; no host
         # uploads: the buffers stay the ones built before capture)
         gkey = key + ("ops", gu_variant_key())
+        mesh = self._mesh
+        # (PerDeviceOp: built per group of devices with the same DRAM bank workers, QWEN35_MOE_PER_DEVICE)
+        if gkey not in self._cache and gudn_rows() <= rows:
+            # gate|up + down in one program (QWEN35_MOE_GUDN): (the op, None)
+            self._cache[gkey] = (
+                PerDeviceOp(mesh, lambda: ExpertGateUpDownRows(mesh, H, Il, E, k, dtype, rows, down_dtype=down_dtype,
+                                                               shared=shared, gate_first=gate_first, **ep)),
+                None,
+            )
         if gkey not in self._cache:
             self._cache[gkey] = (
-                ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared, gate_first=gate_first, **ep),
-                ExpertDownRows(self._mesh, H, Il, E, k, down_dtype, rows, shared=shared, **ep),
+                PerDeviceOp(mesh, lambda: ExpertGateUpRows(mesh, H, Il, E, k, dtype, rows, shared=shared,
+                                                           gate_first=gate_first, **ep)),
+                PerDeviceOp(mesh, lambda: ExpertDownRows(mesh, H, Il, E, k, down_dtype, rows, shared=shared, **ep)),
             )
         route, b = self._cache[key]
         gu, dn = self._cache[gkey]
@@ -196,9 +217,12 @@ class FusedMoEDecode:
         H, Il, E, k = self._key[:4]
         sug, sdn = self._shared_tensors(up_gate, down)
         act = act_buffer(self._mesh, Il, E, k, m)
-        gu(x, b.table, b.identity, up_gate, sug, act, ep_offset=self.ep_offset)
         dst = b.out if out is None else out
-        dn(act, b.table, down, sdn, dst, ep_offset=self.ep_offset)
+        if dn is None:  # ExpertGateUpDownRows
+            gu(x, b.table, b.identity, up_gate, sug, act, down, sdn, dst, ep_offset=self.ep_offset)
+        else:
+            gu(x, b.table, b.identity, up_gate, sug, act, ep_offset=self.ep_offset)
+            dn(act, b.table, down, sdn, dst, ep_offset=self.ep_offset)
         ttnn.deallocate(act)
         return dst
 

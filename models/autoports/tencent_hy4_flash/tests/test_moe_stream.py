@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 """tt/moe.py _stream_defaults: the qwen36 fused MoE decode with Hy4's streaming knobs (QWEN35_MOE_ACT_BLK,
-QWEN35_MOE_DN_CHUNK, QWEN35_MOE_GU_FARW, QWEN35_MOE_GUR_READERS) vs the qwen36 defaults, on one chip at Hy4's per-die
+QWEN35_MOE_DN_CHUNK, QWEN35_MOE_GU_FARW, QWEN35_MOE_GUR_READERS, QWEN35_MOE_GU1B*, QWEN35_MOE_GUDN) vs the qwen36 defaults, on one chip at Hy4's per-die
 shapes (latent 1536, expert width 384, 512 experts, top-16, bfp4, routed only, "keys" router): the output must be
 bit-identical at 1, 4, 8, 16, 24 and 32 rows (random weights, random distinct routing per row). Prints the per-call time
 of each (trace replay). usage: python -m models.autoports.tencent_hy4_flash.tests.test_moe_stream"""
@@ -17,9 +17,13 @@ from models.demos.blackhole.qwen36.tt.moe_decode import union as U
 
 H, I, E, K = 1536, 384, 512, 16
 DT = ttnn.bfloat4_b
-OFF = {"QWEN35_MOE_ACT_BLK": "0", "QWEN35_MOE_DN_CHUNK": "8", "QWEN35_MOE_GU_FARW": "0", "QWEN35_MOE_GUR_READERS": ""}
-ON = {"QWEN35_MOE_ACT_BLK": "17", "QWEN35_MOE_DN_CHUNK": "17:2", "QWEN35_MOE_GU_FARW": "17", "QWEN35_MOE_GUR_READERS": "17:8"}
-ALL = {"QWEN35_MOE_ACT_BLK": "1", "QWEN35_MOE_DN_CHUNK": "2", "QWEN35_MOE_GU_FARW": "1", "QWEN35_MOE_GUR_READERS": "1:8"}
+OFF = {"QWEN35_MOE_ACT_BLK": "0", "QWEN35_MOE_DN_CHUNK": "8", "QWEN35_MOE_GU_FARW": "0", "QWEN35_MOE_GUR_READERS": "",
+       "QWEN35_MOE_GU1B": "0", "QWEN35_MOE_GUDN": "0"}
+ON = {"QWEN35_MOE_ACT_BLK": "17", "QWEN35_MOE_DN_CHUNK": "17:2", "QWEN35_MOE_GU_FARW": "17", "QWEN35_MOE_GUR_READERS": "17:8",
+      "QWEN35_MOE_GU1B": "2-16", "QWEN35_MOE_GU1B_READERS": "2:2,5:3,9:4", "QWEN35_MOE_GU1B_ONROW": "2:2,5:3,9:4",
+      "QWEN35_MOE_GUDN": "17"}
+ALL = {"QWEN35_MOE_ACT_BLK": "1", "QWEN35_MOE_DN_CHUNK": "2", "QWEN35_MOE_GU_FARW": "1", "QWEN35_MOE_GUR_READERS": "1:8",
+       "QWEN35_MOE_GU1B": "1", "QWEN35_MOE_GU1B_READERS": "3", "QWEN35_MOE_GU1B_ONROW": "2", "QWEN35_MOE_GUDN": "1"}
 
 
 def logits(R, g):
@@ -45,7 +49,7 @@ def main():
         ug = up(torch.randn(1, E, H, 2 * I, generator=g) * 0.03)
         dn = up(torch.randn(1, E, I, H, generator=g) * 0.03)
         bias = U.upload_selection_bias(dev, torch.zeros(E))
-        for R in (1, 4, 8, 16, 24, 32):
+        for R in (1, 2, 4, 8, 16, 24, 32):
             lg = ttnn.from_torch(logits(R, g), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=dev, memory_config=l1)
             x = ttnn.from_torch(torch.randn(1, 1, R, H, generator=g), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                 device=dev, memory_config=dram)
@@ -61,10 +65,15 @@ def main():
                     act = U.act_buffer(dev, I, E, K, R)
                     b = U.RowsBuffers(dev, H, I, E, K, R, DT, act=act)
                     route = U.RouteRows(dev, E, K, R, router="keys")
-                    gu = U.ExpertGateUpRows(dev, H, I, E, K, DT, R, shared=False)
-                    dop = U.ExpertDownRows(dev, H, I, E, K, DT, R, shared=False)
-                    fn = lambda: (route(lg, b.table, bias=bias), gu(x, b.table, b.identity, ug, ug, act),  # noqa
-                                  dop(act, b.table, dn, dn, b.out))
+                    if U.gudn_rows() <= R:  # gate|up + down in one program
+                        op = U.ExpertGateUpDownRows(dev, H, I, E, K, DT, R, shared=False)
+                        fn = lambda: (route(lg, b.table, bias=bias),  # noqa
+                                      op(x, b.table, b.identity, ug, ug, act, dn, dn, b.out))
+                    else:
+                        gu = U.ExpertGateUpRows(dev, H, I, E, K, DT, R, shared=False)
+                        dop = U.ExpertDownRows(dev, H, I, E, K, DT, R, shared=False)
+                        fn = lambda: (route(lg, b.table, bias=bias), gu(x, b.table, b.identity, ug, ug, act),  # noqa
+                                      dop(act, b.table, dn, dn, b.out))
                 fn()
                 ttnn.synchronize_device(dev)
                 outs[name] = ttnn.to_torch(b.out).reshape(-1, H)[:R].clone()

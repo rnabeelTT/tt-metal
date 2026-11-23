@@ -159,10 +159,10 @@ class Hy4Decoder:
         lr = ttnn.from_torch(z(1, 1, m.LG_ROWS, m.Vp), dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
                              mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))
         m.step_bufs = {"lg": lg, "hn": hn, "lg_rows": lr}
-        # HY4_LG_EXTRA (default 16,24): row-major logits buffers of more rows (batched spec verify passes; 32 rows read
-        # the tile block)
-        for n in [int(x) for x in os.environ.get("HY4_LG_EXTRA", "16,24").split(",") if x.strip()]:
-            if m.LG_ROWS < n < ROWS:
+        # HY4_LG_EXTRA (default 16,24,32): row-major logits buffers of more rows (batched spec verify passes; the 32-row
+        # tile block read 3.6 ms (host untilize) vs ~2.3 row-major, same values)
+        for n in [int(x) for x in os.environ.get("HY4_LG_EXTRA", "16,24,32").split(",") if x.strip()]:
+            if m.LG_ROWS < n <= ROWS:
                 m.step_bufs[f"lg_rows{n}"] = ttnn.from_torch(
                     z(1, 1, n, m.Vp), dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
                     mesh_mapper=ttnn.ShardTensorToMesh(self.mesh, dim=-1))

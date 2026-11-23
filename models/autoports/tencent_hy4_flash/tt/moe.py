@@ -43,18 +43,30 @@ def _lshard_topology():
 
 
 def _stream_defaults():
-    """Hy4's routed-expert streaming knobs of the qwen36 fused multi-row MoE (moe_decode/union.py), from 17 rows (the
-    batched-spec verify passes of 6-8 users; below, the qwen36 defaults), unless set; exact (data movement and core
-    counts only, bit-identical logits): the activation buffer in one page per (slot, row group) (QWEN35_MOE_ACT_BLK),
-    down-weight chunks of 2 union slots (QWEN35_MOE_DN_CHUNK), the far bank block on the writer's NOC1
-    (QWEN35_MOE_GU_FARW) with 8 cores per column group (QWEN35_MOE_GUR_READERS; 4 row groups made the gate|up op
-    compute bound on 16 cores). In-model verify pass (8 lanes x r rows, device): 24 rows 88.9 -> 67.5 ms, 32 rows
-    110.3 -> 76.7 ms. HY4_MOE_STREAM=0: the qwen36 defaults."""
+    """Hy4's routed-expert streaming knobs of the qwen36 fused multi-row MoE (moe_decode/union.py), unless set; all
+    exact (data movement, core placement and counts only, bit-identical logits). HY4_MOE_STREAM=0: the qwen36 defaults.
+    * 17+ rows (batched-spec verify passes of 6-8 users): the activation buffer in one page per (slot, row group)
+      (QWEN35_MOE_ACT_BLK), down-weight chunks of 2 union slots (QWEN35_MOE_DN_CHUNK), the far bank block on the
+      writer's NOC1 (QWEN35_MOE_GU_FARW) with 8 cores per column group (QWEN35_MOE_GUR_READERS), gate|up and down in ONE
+      program (QWEN35_MOE_GUDN: the down chunks start while the gate|up cores stream later slots).
+    * Every row count (QWEN35_MOE_PER_DEVICE): each chip's MoE cores by ITS DRAM banks (the mesh query answers for the
+      front chip; QB2's chips differ in harvested columns: the centre DRAM column's workers at logical x 5 / 6 / 7).
+    * 2..16 rows (HY4_MOE_GU1B=1): one-bank gate|up (QWEN35_MOE_GU1B, ExpertGateUpRows.onebank): every gate|up core
+      streams one DRAM bank from its row (two-bank cores were capped at ~330 GB/s per die by the far bank's path),
+      partner cores swap their gate results as FP32 tiles; READERS / ONROW cores per bank.
+    In-model 8 lanes x r rows pass (traced, device + logits read): 8 rows 33.4 -> 30.7 ms, 16: 44.1 -> 39.0, 24: 67.4 ->
+    55.7, 32: 76.0 -> 61.6 (vs the 17+ row knobs alone); plain batched decode 2 / 4 / 8 users 25.2 / 28.8 / 35.1 ->
+    24.3 / 27.1 / 32.0 ms per step."""
     if os.environ.get("HY4_MOE_STREAM", "1") != "1":
         return
     for k, v in (("QWEN35_MOE_ACT_BLK", "17"), ("QWEN35_MOE_DN_CHUNK", "17:2"), ("QWEN35_MOE_GU_FARW", "17"),
-                 ("QWEN35_MOE_GUR_READERS", "17:8")):
+                 ("QWEN35_MOE_GUR_READERS", "17:8"), ("QWEN35_MOE_GUDN", "17"), ("QWEN35_MOE_PER_DEVICE", "1")):
         os.environ.setdefault(k, v)
+    if os.environ.get("HY4_MOE_GU1B", "1") == "1":
+        # gate|up us per MoE layer and die (bench): 2 rows 66 -> 48, 4: 84 -> 60, 8: 159 -> 118, 16: 308 -> 240
+        for k, v in (("QWEN35_MOE_GU1B", "2-16"), ("QWEN35_MOE_GU1B_READERS", "2:2,5:3,9:4"),
+                     ("QWEN35_MOE_GU1B_ONROW", "2:2,5:3,9:4")):
+            os.environ.setdefault(k, v)
 
 
 def _dt(name, default):

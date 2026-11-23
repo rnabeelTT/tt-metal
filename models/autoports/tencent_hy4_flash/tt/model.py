@@ -397,10 +397,13 @@ class Hy4Model:
                 # only the real rows leave the device: row-major [LG_ROWS, Vp / N] per die (~120 KB) instead of the
                 # padded fp32 tile block [32, Vp / N] (~3.9 MB per die, 4.2 ms to read); same values
                 lr = ttnn.to_layout(lg, ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-                ls = ttnn.slice(lr, (0, 0, 0, 0), (1, 1, nb, int(lg.shape[-1])))
+                if nb == int(lr.shape[-2]):  # (all rows: a full-extent slice may return its input)
+                    ttnn.copy(lr, bufs[name])
+                else:
+                    ls = ttnn.slice(lr, (0, 0, 0, 0), (1, 1, nb, int(lg.shape[-1])))
+                    ttnn.copy(ls, bufs[name])
+                    ttnn.deallocate(ls)
                 ttnn.deallocate(lr)
-                ttnn.copy(ls, bufs[name])
-                ttnn.deallocate(ls)
                 out = bufs[name]
             else:
                 ttnn.copy(lg, bufs["lg"])

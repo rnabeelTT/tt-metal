@@ -23,6 +23,7 @@ import torch
 
 import ttnn
 
+from . import experts as _X
 from .experts import (
     KERNEL_DIR,
     RING_BYTES,
@@ -301,6 +302,45 @@ def rows_map(name, rows, default):
     return n
 
 
+def gu1b_on(rows):
+    """QWEN35_MOE_GU1B: the one-bank gate|up layout (ExpertGateUpRows.onebank) at `rows` rows: "0" / unset off, "n" from
+    n rows, "a-b" for a..b rows."""
+    v = os.environ.get("QWEN35_MOE_GU1B", "0") or "0"
+    if "-" in v:
+        a, b = (int(t) for t in v.split("-"))
+        return a <= rows <= b
+    return int(v) > 0 and rows >= int(v)
+
+
+def place_onebank(mesh_device, banks, readers, on_row):
+    """{bank: [CoreCoord]}: `on_row` cores per bank on its optimal reader's row (nearest x first), every bank's, then
+    the rest on the rows above / below (read bench: 2 cores on the bank's row read 500 GB/s per chip, a 3rd / 4th on the
+    same row slows every core of the row (320 at 4), off-row cores add ~15 GB/s each)."""
+    workers = bank_workers(mesh_device)
+    grid = mesh_device.compute_with_storage_grid_size()
+    used, out = set(), {b: [] for b in range(banks)}
+
+    def take(b, dys):
+        w = workers[b]
+        for dy in dys:
+            for d in range(grid.x):
+                for dx in ((d, -d) if d else (0,)):
+                    x, y = w.x + dx, w.y + dy
+                    if 0 <= x < grid.x and 0 <= y < grid.y and (x, y) not in used:
+                        used.add((x, y))
+                        out[b].append(ttnn.CoreCoord(x, y))
+                        return
+        raise AssertionError(f"no room near bank {b}")
+
+    for _ in range(min(on_row, readers)):
+        for b in range(banks):
+            take(b, (0, -1, 1, -2, 2))
+    for i in range(readers - min(on_row, readers)):
+        for b in range(banks):
+            take(b, (-1, 1, -2, 2) if i % 2 == 0 else (1, -1, 2, -2))
+    return out
+
+
 def gur_readers(rows):
     """Gate|up cores per column group at `rows` rows: QWEN35_MOE_GUR_READERS (rows_map, default 4). At 24-32 rows the
     gate|up op is compute bound (4 row groups per weight tile): more cores per group (with the far-bank stream)."""
@@ -348,6 +388,15 @@ class ExpertGateUpRows:
             and not gate_first
         )
         self.ring = int(os.environ.get("QWEN35_MOE_SPLIT_RING", "8"))
+        # one-bank layout (QWEN35_MOE_GU1B, nb = 2): each core streams ONE bank's [kt, m] block per slot (its local up
+        # columns and the gate columns of its partner's pairs), `readers` cores per bank (QWEN35_MOE_GU1B_READERS,
+        # rows_map, default 2), QWEN35_MOE_GU1B_ONROW of them (rows_map, default 2) on the bank's row, the rest beside
+        # it; partner cores (banks b, b + banks / 2, same rank) swap their
+        # gate matmul results as FP32 tiles (exact) and each computes the SwiGLU of its own up columns (gub_compute.cpp)
+        self.onebank = (gu1b_on(rows) and self.nb == 2 and not self.split and not gate_first)
+        if self.onebank:
+            readers = rows_map("QWEN35_MOE_GU1B_READERS", rows, 2) if readers is None else readers
+            self.xring = int(os.environ.get("QWEN35_MOE_GU1B_RING", "4"))
         if readers is None:
             readers = int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4")) if self.split else gur_readers(rows)
         self.readers = readers
@@ -358,7 +407,8 @@ class ExpertGateUpRows:
         # QWEN35_MOE_GU_FARW=1 (nb = 2): the second bank block (bank q + banks / 2, the centre DRAM column) is streamed by
         # the writer on NOC1 into its own ring (cb 7) instead of by the reader on NOC0, where both banks' responses
         # shared the bank row's links (exact: same tiles, same DST order); the two rings split the one ring's L1
-        self.farw = (farw_rows() <= rows and self.nb == 2 and not self.split and not shared and not ep_experts)
+        self.farw = (farw_rows() <= rows and self.nb == 2 and not self.split and not shared and not ep_experts
+                     and not self.onebank)
         if self.farw:
             half = max(2, self.buffers // 2)
             self.buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_NEAR", str(half)))
@@ -404,12 +454,24 @@ class ExpertGateUpRows:
                 (b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)
             }
             self.mesh = mesh_device
+        elif self.onebank:
+            placed = place_onebank(mesh_device, self.banks, readers, rows_map("QWEN35_MOE_GU1B_ONROW", rows, 2))
+            self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
+            half = self.banks // 2
+            self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(readers)}
+            self.mesh = mesh_device
         else:
             placed = place_along_rows(mesh_device, {q: readers for q in range(self.ngroups)})
             self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None):
+        kernels, semaphores, cbs, io = self.program(x, table, identity, up_gate, shared_up_gate, act, ep_offset)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None, gudn=None):
+        """(kernels, semaphores, cbs, io) of the op. gudn (ExpertGateUpDownRows): {"cb": progress cb index, "dn": [the
+        down cores' NoC (x, y)]}: the writer publishes its slot progress for the down cores of the same program."""
         cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act, cb_w1 = 0, 1, 2, 3, 4, 5, 6, 16, 7
         tb = 64 * self.trows
         g = self.groups
@@ -437,6 +499,17 @@ class ExpertGateUpRows:
         ]
         if self.farw:
             cbs.append(_cb(self.cores, cb_w1, self.weight_dtype, self.tile_bytes, self.far_buffers * self.kt * self.m))
+        cb_up, cb_xo, cb_xi = 9, 10, 11
+        xt = 32 * 32 * 4  # one full FP32 tile (the DST image of a [trows, 32] result: gub_compute.cpp)
+        nmax = (self.m + 1) // 2  # up / gate columns of a one-bank core: (m + 1) / 2 or (m - 1) / 2
+        if self.onebank:
+            cbs[1] = _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, buffers * self.kt * self.m)
+            cbs[7] = _cb(self.cores, cb_act, ttnn.bfloat16, tb, 2 * g * nmax, tiny=True, rows=self.trows)
+            cbs += [
+                _cb(self.cores, cb_up, ttnn.float32, xt, 2 * g * nmax),
+                _cb(self.cores, cb_xo, ttnn.float32, xt, 2 * g * nmax),
+                _cb(self.cores, cb_xi, ttnn.float32, xt, self.xring * g * nmax),
+            ]
         assert (ep_offset is not None) == bool(self.ep_experts)
         ep_arg = [ep_offset.buffer_address()] if ep_offset is not None else []
         rd_rt, wr_rt = {}, {}
@@ -454,6 +527,11 @@ class ExpertGateUpRows:
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), j, s0] + ep_arg
             if self.farw:
                 wr_rt[(c.x, c.y)] += [up_gate.buffer_address(), j + self.banks // 2]
+            if self.onebank:
+                pc = self.mesh.worker_core_from_logical_core(self.partner[(j, r)])
+                wr_rt[(c.x, c.y)] += [pc.x, pc.y]
+            if gudn is not None:
+                wr_rt[(c.x, c.y)] += [len(gudn["dn"])] + [x_ | (y_ << 8) for x_, y_ in gudn["dn"]]
         rd_ct = [cb_w, cb_scr, cb_id, self.kt, self.n_tiles, self.k, self.rows, self.readers, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, buffers]
         rd_ct += (
@@ -485,6 +563,14 @@ class ExpertGateUpRows:
             cp_ct += [cb_w1]
             defines += [("GU_FAR_W", "1")]
         defines += [("ROUTE_WIDE", "1")] if self.k == 16 else []
+        if self.onebank:
+            wr_ct += [cb_xo, cb_xi, xt, self.xring]
+            cp_ct += [cb_up, cb_xo, cb_xi]
+            defines += [("GU_ONE_BANK", "1")]
+        if gudn is not None:
+            assert not self.split, "gate|up + down in one program: not with the split-pair layout"
+            wr_ct += [gudn["cb"]]
+            defines += [("GUDN", "1")]
         if act_blk(self.rows):
             assert not self.split, "QWEN35_MOE_ACT_BLK: not with the split-pair layout"
             defines += [("ACT_BLK", "1")]
@@ -523,13 +609,26 @@ class ExpertGateUpRows:
                     reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
                 )
             semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
+        elif self.onebank:
+            half = self.banks // 2
+            kernels = []
+            for hi in (False, True):
+                sel = [c for c, b, _ in self.assign if (b >= half) == hi]
+                keys = {(c.x, c.y) for c in sel}
+                kernels += _kernels(
+                    _range_set(sel), "gur",
+                    (rd_ct, {k: v for k, v in rd_rt.items() if k in keys}),
+                    (wr_ct, {k: v for k, v in wr_rt.items() if k in keys}),
+                    (cp_ct, None), defines + ([("ROLE_HI", "1")] if hi else []),
+                    dst_full=self.m + 2 > 4, compute_name="gub", unpack_fp32=(cb_up, cb_xi),
+                )
+            semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
         else:
             kernels = _kernels(
                 self.cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
             )
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
-        return ttnn.generic_op(io, program)
+        return kernels, semaphores, cbs, io
 
 
 class ExpertDownRows:
@@ -549,8 +648,10 @@ class ExpertDownRows:
         chunk=8,
         shared=True,
         ep_experts=None,
+        used=None,
     ):
-        """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
+        """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown. used: (x, y) cores
+        taken (ExpertGateUpDownRows: the gate|up cores of the same program)."""
         assert not ep_experts or not shared
         self.shared, self.ep_experts = shared, ep_experts
         self.k = k
@@ -578,11 +679,18 @@ class ExpertDownRows:
         self.E, self.k, self.inter, self.rows, self.chunk = num_experts, k, inter, rows, chunk
         self.max_slots = min(num_experts, rows * k) + 1
         self.weight_dtype = weight_dtype
-        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)})
+        placed = place_along_rows(mesh_device, {b: readers for b in range(self.banks)}, used=used)
         self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, act, table, down, shared_down, out, ep_offset=None):
+        kernels, semaphores, cbs, io = self.program(act, table, down, shared_down, out, ep_offset)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, act, table, down, shared_down, out, ep_offset=None, gudn=None):
+        """(kernels, semaphores, cbs, io). gudn (ExpertGateUpDownRows): {"cb": progress cb index, "step": gate|up cores
+        per column group, "gu": [the gate|up cores' (NoC x, NoC y, first union slot)]}: the writer waits, per chunk,
+        until every gate|up core has written the chunk's slots (semaphore 2: the gate|up cores' start handshake)."""
         assert (ep_offset is not None) == bool(self.ep_experts)
         ep_arg = [ep_offset.buffer_address()] if ep_offset is not None else []
         cb_in0, cb_w, cb_scr, cb_tab, cb_out = 0, 1, 3, 5, 16
@@ -614,6 +722,8 @@ class ExpertDownRows:
                 (b + r) & 0x3,
             ] + ep_arg
             wr_rt[(c.x, c.y)] = [act.buffer_address(), out.buffer_address(), table.buffer_address(), b, c0] + ep_arg
+            if gudn is not None:
+                wr_rt[(c.x, c.y)] += [len(gudn["gu"])] + [x_ | (y_ << 8) | (f_ << 16) for x_, y_, f_ in gudn["gu"]]
         rd_ct = [cb_w, cb_scr, self.kt, self.m, self.cols, self.k, self.tile_bytes, self.rows, self.chunk]
         rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args()
         wr_ct = [
@@ -640,9 +750,98 @@ class ExpertDownRows:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)
         defines += [("ROUTE_WIDE", "1")] if self.k == 16 else []
+        semaphores = []
+        if gudn is not None:
+            wr_ct += [gudn["cb"], gudn["step"]]
+            defines.append(("GUDN", "1"))
+            semaphores = [ttnn.SemaphoreDescriptor(2, ttnn.CoreType.WORKER, self.cores, 0)]
         kernels = _kernels(
             self.cores, "dnr", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines, dst_full=self.dst_full
         )
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         io = [down, shared_down, act, table, out] + ([ep_offset] if ep_offset is not None else [])
-        return ttnn.generic_op(io, program)
+        return kernels, semaphores, cbs, io
+
+
+class PerDeviceOp:
+    """An op built once per group of mesh devices with the same optimal DRAM bank workers (experts.device_worker_groups;
+    QWEN35_MOE_PER_DEVICE=1): one generic_op, with a MeshProgramDescriptor when the groups differ (QB2: the front
+    device's centre-column bank workers are 1-2 columns off their banks on two of the four chips: in-model down op
+    at 32 rows 290 us on chips 0 / 2, 445 on chip 1). The ops are the same (exact); attributes read from the first."""
+
+    def __init__(self, mesh_device, build):
+        if os.environ.get("QWEN35_MOE_PER_DEVICE", "0") == "1":
+            groups = _X.device_worker_groups(mesh_device)
+        else:
+            groups = [(None, None)]
+        self.ops = []
+        for workers, coords in groups:
+            _X._WORKERS_OVERRIDE[0] = workers
+            try:
+                self.ops.append((coords, build()))
+            finally:
+                _X._WORKERS_OVERRIDE[0] = None
+        self.first = self.ops[0][1]
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["first"], name)
+
+    def __call__(self, *args, **kwargs):
+        if len(self.ops) == 1:
+            return self.first(*args, **kwargs)
+        mpd = ttnn.MeshProgramDescriptor()
+        io = None
+        for coords, op in self.ops:
+            kernels, semaphores, cbs, io = op.program(*args, **kwargs)
+            pd = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
+            for co in coords:
+                mpd[ttnn.MeshCoordinateRange(co, co)] = pd
+        return ttnn.generic_op(io, mpd)
+
+
+def gudn_rows():
+    """QWEN35_MOE_GUDN (_min_rows): ExpertGateUpDownRows (gate|up and down in one program) from this many rows."""
+    return _min_rows("QWEN35_MOE_GUDN")
+
+
+class ExpertGateUpDownRows:
+    """ExpertGateUpRows + ExpertDownRows as ONE program on disjoint cores (the down cores placed after the gate|up
+    cores): the down op's chunks start while the gate|up cores still stream later slots (at 17+ rows the gate|up op is
+    read bound, the down op compute bound). Each gate|up writer, after a slot's activation writes are acknowledged,
+    stores its slot count in its progress word (cb CB_PROG); the down writers read the progress words of the gate|up
+    cores a chunk needs before reading its activations (union slot s is written by the cores of rank (s - first) %
+    readers). Start handshake: a gate|up core zeroes its word, then increments semaphore 2 of every down core; the down
+    writers wait for all of them (semaphore 2). Same tiles, same math, same order on every core (exact)."""
+
+    CB_PROG = 8
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, down_dtype=None, shared=True,
+                 ep_experts=None, gate_first=False):
+        self.gu = ExpertGateUpRows(mesh_device, hidden, inter, num_experts, k, weight_dtype, rows, shared=shared,
+                                   ep_experts=ep_experts, gate_first=gate_first)
+        assert not self.gu.split
+        used = {(c.x, c.y) for c, _, _ in self.gu.assign}
+        self.dn = ExpertDownRows(mesh_device, hidden, inter, num_experts, k, down_dtype or weight_dtype, rows,
+                                 shared=shared, ep_experts=ep_experts, used=set(used))
+        assert not used & {(c.x, c.y) for c, _, _ in self.dn.assign}
+        self.mesh = mesh_device
+        vc = lambda c: mesh_device.worker_core_from_logical_core(c)  # noqa: E731
+        self.dn_noc = [(vc(c).x, vc(c).y) for c, _, _ in self.dn.assign]
+        # first union slot of each gate|up core (ExpertGateUpRows.program: s0 = r, + 1 without the shared expert)
+        self.gu_noc = [(vc(c).x, vc(c).y, r if shared else r + 1) for c, _, r in self.gu.assign]
+        assert len(self.gu_noc) <= 64, "dnr_writer.cpp GUDN: max_gu"
+        self.all_cores = _range_set([c for c, _, _ in self.gu.assign] + [c for c, _, _ in self.dn.assign])
+
+    def __call__(self, x, table, identity, up_gate, shared_up_gate, act, down, shared_down, out, ep_offset=None):
+        kernels, semaphores, cbs, io = self.program(x, table, identity, up_gate, shared_up_gate, act, down, shared_down,
+                                                    out, ep_offset)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, x, table, identity, up_gate, shared_up_gate, act, down, shared_down, out, ep_offset=None):
+        gk, gs, gc, gio = self.gu.program(x, table, identity, up_gate, shared_up_gate, act, ep_offset,
+                                          gudn={"cb": self.CB_PROG, "dn": self.dn_noc})
+        dk, ds, dc, dio = self.dn.program(act, table, down, shared_down, out, ep_offset,
+                                          gudn={"cb": self.CB_PROG, "step": self.gu.readers, "gu": self.gu_noc})
+        assert not self.gu.split
+        prog_cb = _cb(self.all_cores, self.CB_PROG, ttnn.uint32, 16, 1)
+        io = gio + [t for t in dio if all(t is not u for u in gio)]
+        return gk + dk, gs + ds, gc + dc + [prog_cb], io
