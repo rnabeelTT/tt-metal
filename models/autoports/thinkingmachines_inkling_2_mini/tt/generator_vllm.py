@@ -452,7 +452,8 @@ class Inkling2ForCausalLM:
             s = self.spec
             if s["row"] not in live:  # (finished)
                 self.spec = None
-            elif live == [s["row"]] and self.row2slot[s["row"]] == 0 and kwargs.get("sampling_params") is not None:
+            elif (live == [s["row"]] and self.row2slot[s["row"]] == 0 and kwargs.get("sampling_params") is not None
+                  and int(pos[s["row"]]) + SPEC + 2 < SPEC_MAX_LEN - 64):  # (the drafter's caches end at SPEC_MAX_LEN)
                 return self._spec_decode(s["row"], int(tok[s["row"]]), int(pos[s["row"]]), R, kwargs)
             else:
                 self._spec_exit(int(pos[s["row"]]))

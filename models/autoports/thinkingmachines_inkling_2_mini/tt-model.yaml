@@ -80,36 +80,51 @@ serve_profiles:
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 1048576
-    env: {I2M_PREFILL_CHUNK: "2048"}   # 2048-row prefill chunks: +14% prefill, the pool 2.06M -> 1.9M tokens
+    # 2048-row prefill chunks: +14% prefill; speculative decoding (DSpark drafter, 3 drafts per pass): the pool 2.06M ->
+    # 1.7M tokens
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
   - name: p150x4
     description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 boards (the identical (1,4) mesh).
     hardware: p150x4
     mesh_device: P150x4
     max_model_len: 1048576
-    env: {I2M_PREFILL_CHUNK: "2048"}
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
   - name: p300
     description: One p300 board (2 dies, tensor parallel 2), 16 sequences, 32768-token context.
     hardware: p300
     mesh_device: P300
     max_num_seqs: 16
     max_model_len: 32768
-    env: {TT_VISIBLE_DEVICES: "0,1"}   # fabric init needs every visible chip in the mesh
+    # fabric init needs every visible chip in the mesh; speculative decoding: the pool 647K -> 520K tokens
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
   - name: p150x2
     description: Two p150 boards (2 dies), same configuration as p300. Not run on p150 boards (the identical (1,2) mesh).
     hardware: p150x2
     mesh_device: P150x2
     max_num_seqs: 16
     max_model_len: 32768
-    env: {TT_VISIBLE_DEVICES: "0,1"}
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
   - name: p150
-    description: One p150 (1 die), 8 sequences, 8192-token context (the bfp8 experts take 27 of the die's 31.5 GiB).
+    description: One p150 (1 die), 8 sequences, 8192-token context, speculative decoding (a 32K-token KV pool shared by
+      the sequences; the bfp8 experts take 27 of the die's 31.5 GiB). p150-long keeps the larger pool without it.
     hardware: p150
     mesh_device: P150
     max_num_seqs: 8
     max_model_len: 8192
     additional_config: {tt: {fabric_config: DISABLED}}
     # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
-    # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots
+    # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
+    # Speculative decoding: the drafter needs ~0.5 GB, the KV pool 57K -> 32K tokens
+    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_SPEC: "3",
+          I2M_KV_POOL_TOKENS: "32768"}
+  - name: p150-long
+    description: One p150 (1 die), 8 sequences, 8192-token context, the larger KV pool (57K tokens shared by the
+      sequences), no speculative decoding.
+    hardware: p150
+    mesh_device: P150
+    max_num_seqs: 8
+    max_model_len: 8192
+    additional_config: {tt: {fabric_config: DISABLED}}
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256"}
 default_profile: p300
 
