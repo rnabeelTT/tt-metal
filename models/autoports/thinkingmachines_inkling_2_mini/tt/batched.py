@@ -272,9 +272,12 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    pq = proj(w, "q", xq, ttnn.float32)
-    pk = proj(w, "k", xk)
-    pv = proj(w, "v", xv)
+    if getattr(w, "ms", None) is not None and B <= 16:  # (q | k | v streamed in one program)
+        pq, pk, pv = w.ms([xq, xk, xv], w.ms_w, B)
+    else:
+        pq = proj(w, "q", xq, ttnn.float32)
+        pk = proj(w, "k", xk)
+        pv = proj(w, "v", xv)
     if w.dram_sharded:
         pk = ttnn.slice(pk, (0, 0, 0, 0), (1, 1, B, w.kd))
         pv = ttnn.slice(pv, (0, 0, 0, 0), (1, 1, B, w.kd))

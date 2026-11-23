@@ -329,6 +329,16 @@ slots); I2M_RING_CHUNK sizes them for 256 rows and runs those layers' KV writes 
 longer chunk (projections / convs / MoE on the whole chunk; packed test numbers identical, exact resume bitwise). Served
 p150 at 512-row chunks: TTFT 1K 1,465 -> 830 ms, 4K 5,515 -> 3,216 ms, 8 x 1K 10.1 -> 6.0 s; 8 x 4K and 2 x 7K ran
 clean. 1024-row chunks ran out of DRAM in a real request (the MoE dispatch buffers with real routing, ~56 MB each).
+Multi-die: the decode q | r | s | g, k and v projections in one program (tt/mstream.py: each weight streamed per DRAM
+bank by its own reader cores, each projection its own input; per-bank weight copies beside the interleaved ones, ~130 MB
+per die at 4 dies, 264 at 2, none on 1 die: no room). TP4 B=1 / 4: 15.1 / 23.1 -> 14.2 / 22.1 ms; TP2 18.7 / 29.7 ->
+17.7 / 28.5 ms. Outputs vs the interleaved matmuls (tests/test_mstream_device.py, real weights): k / v bitwise equal, q
+99.5 % bitwise, max rel 9e-8 (fp32 sum order). Decode eval TP4 0.9703 / 0.9956 / 0.0135 (0.9711 / 0.9955 / 0.0165 off),
+TP2 0.9679 / 0.9954 / 0.0169 (off: 0.9708 / 0.9960 / 0.0142): the eval's noise band between numerically equivalent
+variants. Memory at the served shapes: 4 dies 1.11 GiB free after the traces (pool cap 1,895,296 -> 1,878,912 keeps the
+prefill headroom), 2 dies 4.1 GiB. Side tests can run on dies 2 / 3 while a 2-die server uses 0 / 1 (TT_LOCK_HELD=1,
+TT_VISIBLE_DEVICES=2,3): fine for correctness / device time, but host load skews served timings (p300 prefix TTFT 0.94 ->
+1.32 s while one ran).
 Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
 columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
 different inputs), ~0.2-0.4 ms per token, and the merged weight did not fit beside 8 x 8K on one die.

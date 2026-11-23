@@ -39,6 +39,9 @@ FUSED_OPS = __import__("os").environ.get("I2M_OPS", "fused") == "fused"
 # (measured: at one row these projections are compute-bound on the 32-row tile; DRAM-sharded only wins at LoFi without
 # fp32 accumulation, 45 vs 60 us; at HiFi2 it is slower, 67-69 us: off by default)
 DRAM_SHARDED = __import__("os").environ.get("I2M_DRAM_SHARDED", "0") == "1"
+# I2M_MSTREAM (default 1 on > 1 die): the decode q | r | s | g, k and v projections in one program, each weight streamed
+# per DRAM bank (tt/mstream.py; per-bank weight copies beside the interleaved ones: ~30 MB per die at 4 dies, no room on 1)
+MSTREAM = __import__("os").environ.get("I2M_MSTREAM", "1") == "1"
 SQRT5 = math.sqrt(5.0)
 R_ITEM = 8  # prefill: rows per SDPA work item (R * G <= 32 at G = 3)
 # prefill SDPA items per work unit (inkling_sdpa_decode mi; I2M_SDPA_MI): each K / V chunk read once for 4 items' Q tiles
@@ -124,6 +127,17 @@ class AttnWeights:
             self.w_k = up(wk.T.reshape(1, 1, wk.shape[1], -1), wdtype, shard_c)
             self.w_v = up(wv.T.reshape(1, 1, wv.shape[1], -1), wdtype, shard_c)
             self.w_o = up(wo.T.reshape(1, 1, wo.shape[1], -1), wdtype, shard_r)
+        self.ms = None
+        if MSTREAM and N > 1 and not DRAM_SHARDED:
+            from .mstream import MultiStream
+
+            K, kd, fq = wq.shape[1], self.kd, self.fq
+            self.ms = MultiStream(mesh, K, [(fq, ttnn.float32, 2), (kd, ttnn.bfloat16, 1), (kd, ttnn.bfloat16, 1)],
+                                  wdtype)
+            bf = lambda t: t.T.contiguous().to(torch.bfloat16)  # noqa: E731
+            self.ms_w = self.ms.weights([[bf(torch.cat(cols[4 * d : 4 * d + 4], 0)) for d in range(N)],
+                                         [bf(wk[d * kd : (d + 1) * kd]) for d in range(N)],
+                                         [bf(wv[d * kd : (d + 1) * kd]) for d in range(N)]])
         # per-head scales (fp32): q [NH, HD], r [NH, DR] (head-sharded), as [1, 1, NH, HD] rows
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
                                           layout=ttnn.TILE_LAYOUT, device=mesh,
