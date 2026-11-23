@@ -44,7 +44,7 @@ _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
 GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"
 GATE2 = os.environ.get("I2M_GATE2", "1") == "1"  # the round-reduced gate on the post-attention rectangle (tt/gate.py GateKernel2)
-GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail, one tile row (tt/gatet.py)
+GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 # I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
 RMS_CAST = os.environ.get("I2M_RMS_CAST", "1") == "1"
@@ -268,12 +268,13 @@ class MessageGate:
         hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
         g = dmm(hm, self.wd, o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
         T = int(hf.shape[-2])
-        if GATE_KERNEL and T <= 32:
-            fg = dmm(_f32(g), self.wfg, o.ckc, dtype=ttnn.float32, memory_config=ttnn.L1_MEMORY_CONFIG)  # pre-tanh [.., 2H]
+        if GATE_KERNEL and (T <= 32 or T % 32 == 0) and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
+            mc = ttnn.L1_MEMORY_CONFIG if T <= 32 else DRAM
+            fg = dmm(_f32(g), self.wfg, o.ckc, dtype=ttnn.float32, memory_config=mc)  # pre-tanh [.., 2H]
             if o.gatek is None:
                 from .gatet import GateTail
                 o.gatek = GateTail(o.mesh, H)
-            return o.gatek(fg, hf, mf)
+            return o.gatek(fg, hf, mf, out_mc=mc)
         fg = ttnn.tanh(ttnn.matmul(_f32(g), self.wfg, compute_kernel_config=o.ckc, dtype=ttnn.float32))  # [.., 2H]
         lead = [int(d) for d in hf.shape][:-1]
         f = ttnn.slice(fg, [0] * (len(lead)) + [0], lead + [H])

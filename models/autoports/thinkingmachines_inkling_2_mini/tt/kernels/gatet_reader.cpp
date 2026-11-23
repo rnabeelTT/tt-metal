@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Message gate tail (tt/gatet.py), reader: per H tile t of this core, the pre-tanh forget / gain tiles (fg tiles t and
-// Ht + t: fg = [forget | gain] over 2H columns, one tile row), h tile t, m tile t (all fp32).
+// Message gate tail (tt/gatet.py), reader: per tile i of this core's range (row tile r = i / Ht, column t = i % Ht),
+// the pre-tanh forget / gain tiles (fg = [forget | gain] over 2H columns: tiles r * 2Ht + t and r * 2Ht + Ht + t),
+// h tile i, m tile i (all fp32).
 
 #include <stdint.h>
 
@@ -23,13 +24,14 @@ void kernel_main() {
     const auto afg = TensorAccessor(fg_args, fg_addr, F32);
     const auto ah = TensorAccessor(h_args, h_addr, F32);
     const auto am = TensorAccessor(m_args, m_addr, F32);
-    for (uint32_t t = t0; t < t0 + nt; ++t) {
+    for (uint32_t i = t0; i < t0 + nt; ++i) {
+        const uint32_t f = (i / Ht) * 2 * Ht + i % Ht;
         cb_reserve_back(cb_in, 4);
         const uint32_t p = get_write_ptr(cb_in);
-        noc_async_read(afg.get_noc_addr(t), p, F32);
-        noc_async_read(afg.get_noc_addr(Ht + t), p + F32, F32);
-        noc_async_read(ah.get_noc_addr(t), p + 2 * F32, F32);
-        noc_async_read(am.get_noc_addr(t), p + 3 * F32, F32);
+        noc_async_read(afg.get_noc_addr(f), p, F32);
+        noc_async_read(afg.get_noc_addr(f + Ht), p + F32, F32);
+        noc_async_read(ah.get_noc_addr(i), p + 2 * F32, F32);
+        noc_async_read(am.get_noc_addr(i), p + 3 * F32, F32);
         noc_async_read_barrier();
         cb_push_back(cb_in, 4);
     }

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""tt/gatet.py (fused message-gate tail) vs fp32 torch and the ttnn-op tail: T in (1, 4, 32), H 2304."""
+"""tt/gatet.py (fused message-gate tail) vs fp32 torch and the ttnn-op tail: T in (1, 4, 32, 64, 1024), H 2304."""
 
 import torch
 
@@ -15,7 +15,7 @@ def main():
     up = lambda t: ttnn.from_torch(t, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)  # noqa: E731
     worst_k = worst_o = 0.0
     torch.manual_seed(0)
-    for T in (1, 4, 32):
+    for T in (1, 4, 32, 64, 1024):
         fg, h, m = torch.randn(1, 1, T, 2 * H) * 2, torch.randn(1, 1, T, H), torch.randn(1, 1, T, H)
         ref = h - torch.tanh(fg[..., :H]) * h + torch.tanh(fg[..., H:]) * m
         out = ttnn.to_torch(k(up(fg), up(h), up(m))).float()[:, :, :T]

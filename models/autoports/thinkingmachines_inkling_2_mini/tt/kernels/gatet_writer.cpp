@@ -18,7 +18,8 @@ void kernel_main() {
     for (uint32_t t = t0; t < t0 + nt; ++t) {
         cb_wait_front(cb_out, 1);
         noc_async_write(get_read_ptr(cb_out), ao.get_noc_addr(t), F32);
-        noc_async_write_barrier();
+        noc_async_writes_flushed();
         cb_pop_front(cb_out, 1);
     }
+    noc_async_write_barrier();
 }

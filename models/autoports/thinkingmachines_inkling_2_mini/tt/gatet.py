@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Fused message-gate tail (tt/kernels/gatet_*.cpp) for one tile row (T <= 32, the decode):
+"""Fused message-gate tail (tt/kernels/gatet_*.cpp) (T <= 32 or a multiple of 32; the tiles split over the cores):
 
     out = h - tanh(f) * h + tanh(a) * m          fg = [f | a] (pre-tanh, [1, 1, T, 2H] fp32), h, m fp32
 
@@ -21,43 +21,46 @@ class GateTail:
     def __init__(self, mesh, H: int):
         self.mesh, self.Ht = mesh, H // 32
         grid = mesh.compute_with_storage_grid_size()
-        nc = min(self.Ht, grid.x * grid.y)
-        while self.Ht % nc:
-            nc -= 1
-        self.cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
-        self.per = self.Ht // nc
-        self.crs = _range_set(self.cores)
+        self.G, self.gx = grid.x * grid.y, grid.x
+
+    def _split(self, n):
+        """n tiles over min(n, cores) cores in contiguous ranges -> (cores, [(i0, count)])."""
+        nc = min(n, self.G)
+        work = [(n * i // nc, n * (i + 1) // nc - n * i // nc) for i in range(nc)]
+        return [ttnn.CoreCoord(i % self.gx, i // self.gx) for i in range(nc)], work
 
     def __call__(self, fg, h, m, out_mc=ttnn.L1_MEMORY_CONFIG):
         ins = [ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t for t in (fg, h, m)]
         fg, h, m = ins
-        assert all(t.dtype == ttnn.float32 for t in ins) and int(h.shape[-2]) <= 32
+        T = int(h.shape[-2])
+        assert all(t.dtype == ttnn.float32 for t in ins) and (T <= 32 or T % 32 == 0)
+        cores, work = self._split(max(1, T // 32) * self.Ht)
+        crs = _range_set(cores)
         out = ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh, out_mc)
         cb_in, cb_out = 0, 1
-        cbs = [_cb(self.crs, cb_in, ttnn.float32, F32, 8), _cb(self.crs, cb_out, ttnn.float32, F32, 2)]
-        nc = len(self.cores)
+        cbs = [_cb(crs, cb_in, ttnn.float32, F32, 8), _cb(crs, cb_out, ttnn.float32, F32, 2)]
         rd_ct = [cb_in, self.Ht] + ttnn.TensorAccessorArgs(fg).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(h).get_compile_time_args() + ttnn.TensorAccessorArgs(m).get_compile_time_args()
-        rd_rt = [[fg.buffer_address(), h.buffer_address(), m.buffer_address(), i * self.per, self.per] for i in range(nc)]
+        rd_rt = [[fg.buffer_address(), h.buffer_address(), m.buffer_address(), i0, n] for i0, n in work]
         wr_ct = [cb_out] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
-        wr_rt = [[out.buffer_address(), i * self.per, self.per] for i in range(nc)]
+        wr_rt = [[out.buffer_address(), i0, n] for i0, n in work]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         u2d[cb_in] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
+            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("gatet_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("gatet_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gatet_compute.cpp"), core_ranges=self.crs,
-                                  compile_time_args=[cb_in, cb_out], runtime_args=_rt(self.cores, [[self.per]] * nc),
+            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gatet_compute.cpp"), core_ranges=crs,
+                                  compile_time_args=[cb_in, cb_out], runtime_args=_rt(cores, [[n] for _, n in work]),
                                   config=cfg),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_gatet", self.Ht, nc, int(h.shape[-2]), repr(fg.memory_config()), repr(h.memory_config()),
+        key = ("i2m_gatet2", self.Ht, len(cores), T, repr(fg.memory_config()), repr(h.memory_config()),
                repr(m.memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([fg, h, m, out], prog)
