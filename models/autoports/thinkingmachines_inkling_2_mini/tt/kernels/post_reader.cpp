@@ -10,6 +10,9 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#ifdef SEQ_R
+#include "seqshift.hpp"
+#endif
 
 // rows 0 .. T-1 of a tile (T <= 16: faces 0 / 1; e = element bytes): 2 T half-row reads
 template <uint32_t T, uint32_t E>
@@ -66,6 +69,12 @@ void kernel_main() {
     const auto nw = TensorAccessor(w_args, arg(), F32);
     const auto sel = TensorAccessor(w_args, arg(), BF);
 
+#ifdef SEQ_R  // speculative verify rows (seqshift.hpp)
+    const auto seq_a = TensorAccessor(TensorAccessorArgs<SEQ_CT>(), get_common_arg_val<uint32_t>(SEQ_ARG), 128);
+    cb_reserve_back(SEQ_CB, 1);
+    const uint32_t seq_scr = get_write_ptr(SEQ_CB);
+    const auto seq_acc_rows = seq_acc(seq_a, seq_scr);
+#endif
     // every conv input of this core's tiles at once (one barrier), pushed tile by tile
     cb_reserve_back(cb_att, PER);
     cb_reserve_back(cb_s, 3 * PER);
@@ -100,6 +109,11 @@ void kernel_main() {
         rf(wc.get_noc_addr(t), w + 3 * F32);
     }
     noc_async_read_barrier();
+#ifdef SEQ_R
+    for (uint32_t i = 0; i < PER; ++i) {
+        seq_shift<2>(get_write_ptr(cb_s) + i * 3 * F32, get_write_ptr(cb_att) + i * BF, seq_scr, seq_acc_rows);
+    }
+#endif
     for (uint32_t i = 0; i < PER; ++i) {
         cb_push_back(cb_att, 1);
         if constexpr (ADD) {

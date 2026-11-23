@@ -527,10 +527,12 @@ class Inkling2Model:
         ops = self.ops
         return self.head_tail(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0])
 
-    def head_tail(self, h):
-        """The final mix's output h -> logits (norm, LM head, softcap)."""
+    def head_tail(self, h, normed=None):
+        """The final mix's output h -> logits (norm, LM head, softcap). normed: a list that gets the normed h."""
         ops = self.ops
         h = _bf(ops.rms(h, self.final_norm))
+        if normed is not None:
+            normed.append(h)
         if self.shead is not None:  # (one call per tile row of 32)
             T = int(h.shape[-2])
             if T <= 32:
@@ -570,9 +572,10 @@ class Inkling2Model:
             ctx.release()
 
     def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None,
-                ctx=None, last_rows=None):
+                ctx=None, last_rows=None, taps=None):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
-        capture(a, out) is called with each application's output (debug)."""
+        capture(a, out) is called with each application's output (debug). taps: a list that gets the speculative
+        drafter's taps of every row, [1, 4, T, H] bf16 (the inputs of applications 5, 23, 41 + the final normed state)."""
         cfg, ops = self.cfg, self.ops
         x = self.embed_tokens(ids)
         if valid is not None and valid < int(ids.numel()):
@@ -604,10 +607,15 @@ class Inkling2Model:
                 blocks_n, bids = blocks_n + [self._blk], bids + [a]
             if capture is not None:
                 capture(a, x)
+            if taps is not None and a + 1 in (5, 23, 41):
+                taps.append(ttnn.to_memory_config(x, DRAM))
             if L.loop and li == cfg.loop_end - 1:
                 # sources for the next pass's messages: the block appended at layer 12 of this pass + this output
                 b12 = blocks_n[len(pre_blocks) + 1]
                 prev_src = [b12, ops.rms(x)]
+        if taps is not None:
+            hn = _bf(ops.rms(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0], self.final_norm))
+            taps[:] = [ttnn.concat([_bf(t) for t in taps] + [hn], dim=1)]
         if last_rows is not None:  # the head on the given rows (each packed segment's last prompt token), rows 0..U-1
             def cut(t):  # row gather through row-major pages: every program's shape depends on T only
                 rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT)

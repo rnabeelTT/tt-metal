@@ -126,6 +126,11 @@ class PostKernel:
                                                     (nw if norm else q).buffer_address(), sel.buffer_address()]
         tail = [v for b, (lg, off) in zip(blocks, logits) for v in (b.buffer_address(), lg.buffer_address(), int(off))]
         rd_common = base + tail + ([router[0].buffer_address(), router[1].buffer_address()] if rt else [])
+        from . import bconv
+
+        sdefs, scbs, acc = bconv.seq_parts(rd_ct, len(rd_common), 33, crs)
+        cbs += scbs
+        rd_common += [acc.buffer_address()] if acc else []
         wr_ct = [cb_so, cb_rout, cb_part, cb_gath, cb_part2, cb_gath2, cb_out, PER, C, int(norm), BF if norm else F32,
                  T, NQ, cb_tout, cb_tot, cb_tot2, cb_zero]
         for t in (conv.s[0], resid, out, self.zeros) + ((lg,) if rt else ()):
@@ -141,7 +146,7 @@ class PostKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed)))] + rdefs
+        defs = [("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed)))] + rdefs + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -158,12 +163,12 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, NB, add, norm, self.H, ET, dup, packed, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, NB, add, norm, self.H, ET, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
         for t in [att, xa] + list(conv.s) + taps + [q, self.ones, sel, self.zeros] + ([nw] if norm else []) + list(blocks) \
-                + [g for g, _ in logits] + [resid, out] + (list(router) + [lg] if rt else []):
+                + [g for g, _ in logits] + [resid, out] + (list(router) + [lg] if rt else []) + ([acc] if acc else []):
             if id(t) not in seen:
                 seen.add(id(t))
                 io.append(t)

@@ -226,9 +226,9 @@ class BatchedDynConv:
 class BatchedApp:
     """Batched decode state of one application: the k / v / attention-output / MLP-output convs over B slots."""
 
-    def __init__(self, app, layer, B: int, shared: "BatchedApp" = None):
+    def __init__(self, app, layer, B: int, shared: "BatchedApp" = None, row_slots=None):
         """shared: the full-width BatchedApp whose conv states this narrower decode width uses (rows 0 .. B-1 of the
-        same one-tile-row state tensors)."""
+        same one-tile-row state tensors). row_slots: the slot of each row (speculative verify: R rows per slot)."""
         c, mesh = app.cache, layer.ops.mesh
         N = mesh.get_num_devices()
         w = layer.attn
@@ -236,7 +236,10 @@ class BatchedApp:
         rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
         # this width's page tables: rows 0 .. B-1 of the cache's slot tables (slot = row)
         if c.pages is not None:  # global layers: the shared tables (vLLM's block ids when paged)
-            self.read_table = self.write_table = c.pages.table(B)
+            self.read_table = self.write_table = c.pages.table(tuple(row_slots) if row_slots else B)
+        elif row_slots:
+            self.read_table = c._up_i32(c.read_host[list(row_slots)])
+            self.write_table = c._up_i32(c.write_host[list(row_slots)])
         elif shared is None:
             self.read_table, self.write_table = c.read_table, c.write_table
         else:
@@ -396,13 +399,28 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
 class BatchedDecoder:
     """B-slot decode on an Inkling2Model built with slots=B."""
 
-    def __init__(self, model, B: int, shared: "BatchedDecoder" = None):
+    def __init__(self, model, B: int, shared: "BatchedDecoder" = None, verify: int = 0):
         """shared: a wider decoder on the same model whose conv states this one uses (slots 0 .. B-1 = its rows
-        0 .. B-1; its rows past B are left stale and re-initialised by the next prefill into them)."""
-        self.m, self.B, self.shared = model, B, shared
+        0 .. B-1; its rows past B are left stale and re-initialised by the next prefill into them).
+        verify R: speculative verify rows, B / R slots (0 .. B / R - 1) of R consecutive rows each: their convs run
+        sequentially within a slot from the row of the previous pass set_accept names (tt/kernels/seqshift.hpp); a
+        slot's state then lives at row R slot + accepted (load_slot: row R slot, accepted 0)."""
+        self.m, self.B, self.shared, self.R = model, B, shared, verify
         assert shared is None or shared.B >= B
-        self.apps = [BatchedApp(model.apps[a], model.layers[li], B, shared=shared.apps[a] if shared else None)
-                     for a, (li, _) in enumerate(model.sched)]
+        # (verify rows are bitwise the sequential decode at power-of-two widths, the served ones; R = 3 is not)
+        assert not verify or (shared is not None and B % verify == 0 and B <= 16 and 3 * (B // verify) <= 16
+                              and B & (B - 1) == 0)
+        row_slots = [r // verify for r in range(B)] if verify else None
+        self.apps = [BatchedApp(model.apps[a], model.layers[li], B, shared=shared.apps[a] if shared else None,
+                                row_slots=row_slots) for a, (li, _) in enumerate(model.sched)]
+        self.table_key = tuple(row_slots) if verify else B
+        # verify: the drafter's taps (the inputs of these applications + the final normed state) -> self.taps
+        self.tap_at, self._tap, self.taps = ((5, 23, 41) if verify else ()), {}, None
+        if verify:
+            self.acc = ttnn.from_torch(torch.zeros(1, 32, dtype=torch.int32), dtype=ttnn.uint32,
+                                       layout=ttnn.ROW_MAJOR_LAYOUT, device=model.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                                       mesh_mapper=ttnn.ReplicateTensorToMesh(model.mesh)
+                                       if model.mesh.get_num_devices() > 1 else None)
         for L in model.layers.values():  # the fused MoE rows ops of this width, built before any trace capture
             if getattr(L.moe, "fused", False):
                 L.moe.fe.build_rows([B] if B <= L.moe.fe.rows_max else [L.moe.fe.rows_max, B - L.moe.fe.rows_max])
@@ -460,7 +478,16 @@ class BatchedDecoder:
                         model._norm_rows = nr
                     self.pre, self.aq_rows, self.norm_rows = model._pre, model._aq_rows, model._norm_rows
 
+    def set_accept(self, acc):
+        """verify: slot g's state is at row R g + acc[g] of the previous pass (its last accepted row)."""
+        a = torch.zeros(1, 32, dtype=torch.int32)
+        a[0, : len(acc)] = torch.as_tensor(acc, dtype=torch.int32)
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(a, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                                        mesh_mapper=self.rep), self.acc)
+
     def load_slot(self, b, lane=0):
+        if self.R:  # (verify slot g = the shared decoder's row R g)
+            return self.shared.load_slot(self.R * b, lane)
         if self.shared is not None:
             return self.shared.load_slot(b, lane)
         for a in range(len(self.apps)):
@@ -485,6 +512,17 @@ class BatchedDecoder:
 
     def step(self):
         """One decode step for all B slots from the persistent inputs -> logits [1, 1, B, Vp] fp32 (softcapped)."""
+        if not self.R:
+            return self._step()
+        from . import bconv
+
+        bconv.SEQ = (self.R, self.B // self.R, self.acc)
+        try:
+            return self._step()
+        finally:
+            bconv.SEQ = None
+
+    def _step(self):
         m, B, ops, cfg = self.m, self.B, self.m.ops, self.m.cfg
         e = ttnn.embedding(self.tokens, m.embed, layout=ttnn.TILE_LAYOUT)
         x = _bf(ops.rms(ttnn.reshape(e, (1, 1, B, m.H)), m.embed_norm))
@@ -512,7 +550,14 @@ class BatchedDecoder:
         if self.plan is None:
             return m.head(x, blocks_n)
         h = self._mix(("head", -1), blocks_n, ids, D, ops.rms(x), m.final_Q, 1)[0]
-        return m.head_tail(h)
+        if not self.tap_at:
+            return m.head_tail(h)
+        hn = []
+        out = m.head_tail(h, normed=hn)
+        tp = [ttnn.reshape(t, (1, 1, B, m.H)) for t in [self._tap[a] for a in self.tap_at] + hn]
+        self.taps = ttnn.concat([ttnn.to_memory_config(t, ttnn.DRAM_MEMORY_CONFIG) for t in tp], dim=1)
+        self._tap = {}
+        return out
 
     @staticmethod
     def materialize(x):
@@ -578,6 +623,8 @@ class BatchedDecoder:
                 x, xn, outs = self.pre(x, blocks_n, lgs, self.aq_rows[li], nws, bound=L.boundary)
             fused = outs
         x = self.materialize(x)
+        if a in self.tap_at:
+            self._tap[a] = x
         if fused is not None:
             ins = fused
         elif L.nq:

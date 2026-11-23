@@ -216,10 +216,14 @@ class GlobalPages:
         return ttnn.from_torch(t.to(torch.int32).contiguous(), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
                                device=self.mesh, memory_config=DRAM, mesh_mapper=self.rep)
 
-    def table(self, W: int):
+    def table(self, W):
+        """W: a width (slots 0 .. W-1) or a tuple of slots, one per row (speculative verify rows)."""
         if W not in self.width_dev:
-            self.width_dev[W] = self._up(self.host[:W])
+            self.width_dev[W] = self._up(self._rows(W))
         return self.width_dev[W]
+
+    def _rows(self, W):
+        return self.host[list(W)] if isinstance(W, tuple) else self.host[:W]
 
     def _scratch_row(self):
         return (self.scratch_base + torch.arange(self.mb) % self.scratch).to(torch.int32)
@@ -254,13 +258,13 @@ class GlobalPages:
         ttnn.copy_host_to_device_tensor(ttnn.from_torch(m.reshape(1, -1).contiguous(), dtype=ttnn.int32,
                                                         layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self.rep),
                                         self.slot_dev[b])
-        self.dirty.update(w for w in self.width_dev if b < w)
+        self.dirty.update(w for w in self.width_dev if (b in w if isinstance(w, tuple) else b < w))
         return True
 
     def sync(self, W: int):
         """Before a decode step of width W: its device table catches up with the host rows."""
         if W in self.dirty:
-            ttnn.copy_host_to_device_tensor(ttnn.from_torch(self.host[:W].contiguous(), dtype=ttnn.int32,
+            ttnn.copy_host_to_device_tensor(ttnn.from_torch(self._rows(W).contiguous(), dtype=ttnn.int32,
                                                             layout=ttnn.ROW_MAJOR_LAYOUT, mesh_mapper=self.rep),
                                             self.width_dev[W])
             self.dirty.discard(W)

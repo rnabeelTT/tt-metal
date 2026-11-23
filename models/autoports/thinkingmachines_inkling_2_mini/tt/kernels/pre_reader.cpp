@@ -10,6 +10,9 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#ifdef SEQ_R
+#include "seqshift.hpp"
+#endif
 
 template <uint32_t T, uint32_t E>
 inline void read_rows(uint64_t src, uint32_t dst) {
@@ -53,6 +56,12 @@ void kernel_main() {
     const auto ain = TensorAccessor(i_args, ca(0), BF);
     const auto arp = TensorAccessor(r_args, ca(1), F32);
 
+#ifdef SEQ_R  // speculative verify rows (seqshift.hpp)
+    const auto seq_a = TensorAccessor(TensorAccessorArgs<SEQ_CT>(), ca(SEQ_ARG), 128);
+    cb_reserve_back(SEQ_CB, 1);
+    const uint32_t seq_scr = get_write_ptr(SEQ_CB);
+    const auto seq_acc_rows = seq_acc(seq_a, seq_scr);
+#endif
     cb_reserve_back(cb_in, PER);
     if constexpr (TAIL) {
         cb_reserve_back(cb_rp, PER);
@@ -85,6 +94,11 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
+#ifdef SEQ_R
+    for (uint32_t i = 0; i < PER; ++i) {
+        seq_shift<2>(get_write_ptr(cb_s) + 3 * i * F32, get_write_ptr(cb_in) + i * BF, seq_scr, seq_acc_rows);
+    }
+#endif
     for (uint32_t i = 0; i < PER; ++i) {
         cb_push_back(cb_in, 1);
         if constexpr (TAIL) {

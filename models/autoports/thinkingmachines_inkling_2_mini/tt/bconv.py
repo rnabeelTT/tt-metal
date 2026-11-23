@@ -21,6 +21,21 @@ KDIR = Path(__file__).parent / "kernels"
 # I2M_BCONV_ROWS: <= 16 live rows -> the conv's SFPU work on those rows only (bconv_compute.cpp BCONV_ROWS)
 ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "1") == "1"
 TILE = 32
+# speculative verify rows (tt/kernels/seqshift.hpp): (R, G, acc) while a verify pass runs / is captured, else None.
+# acc: uint32 [1, 32] row-major, group g's accepted row of the previous pass.
+SEQ = None
+
+
+def seq_parts(ct, nargs, cb, crs):
+    """With SEQ set: the verify defines (ct: the reader's compile args, the acc accessor appended in place; nargs: the
+    acc address's index in the reader's args; cb: a free CB index for the scratch tile) -> (defines, cbs, acc)."""
+    if SEQ is None:
+        return [], [], None
+    R, G, acc = SEQ
+    defs = [("SEQ_R", str(R)), ("SEQ_G", str(G)), ("SEQ_CT", str(len(ct))), ("SEQ_ARG", str(nargs)),
+            ("SEQ_CB", str(cb))]
+    ct += ttnn.TensorAccessorArgs(acc).get_compile_time_args()
+    return defs, [_cb(crs, cb, ttnn.float32, 4096, 1)], acc
 
 
 def _range_set(cores):
@@ -93,7 +108,9 @@ class BConvKernel:
             + ttnn.TensorAccessorArgs(s[0]).get_compile_time_args()
         addr = [x.buffer_address()] + [t.buffer_address() for t in s] + [t.buffer_address() for t in w_taps] \
             + [wc.buffer_address()]
-        rd_rt = [addr + [i * self.per, self.per] for i in range(len(cores))]
+        sdefs, scbs, acc = seq_parts(rd_ct, len(addr) + 2, 7, crs)
+        cbs += scbs
+        rd_rt = [addr + [i * self.per, self.per] + ([acc.buffer_address()] if acc else []) for i in range(len(cores))]
         wr_rt = [[y.buffer_address()] + [t.buffer_address() for t in s] + [i * self.per, self.per]
                  for i in range(len(cores))]
         u2d = [ttnn.UnpackToDestMode.Default] * 64  # (this build: one entry per CB index, 64)
@@ -104,7 +121,7 @@ class BConvKernel:
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
-            defines=[("BCONV_TAP_STRIDE", str(stride))] if stride else [],
+            defines=([("BCONV_TAP_STRIDE", str(stride))] if stride else []) + sdefs,
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("bconv_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
@@ -116,8 +133,9 @@ class BConvKernel:
                                   else []),
         ]
         key = ("i2m_bconv", self.C, len(cores), cores[0].x, cores[0].y, str(x.dtype), int(x.shape[-2]), stride,
-               repr(x.memory_config()), repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()))
-        return kernels, cbs, [x] + list(s) + list(w_taps) + [wc, y], key, y
+               repr(x.memory_config()), repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()),
+               SEQ[:2] if SEQ else None)
+        return kernels, cbs, [x] + list(s) + list(w_taps) + [wc, y] + ([acc] if acc else []), key, y
 
 
 def _hash(key):

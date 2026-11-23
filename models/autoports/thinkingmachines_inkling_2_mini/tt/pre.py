@@ -74,6 +74,11 @@ class PreKernel:
             + [t.buffer_address() for t in taps] + [pk.ones.buffer_address(), sel.buffer_address()] \
             + [q.buffer_address() for q in qrows] + [w.buffer_address() for w in nwl] \
             + [v for b, (lg, off) in zip(blocks, logits) for v in (b.buffer_address(), lg.buffer_address(), int(off))]
+        from . import bconv
+
+        sdefs, scbs, acc = bconv.seq_parts(rd_ct, len(rd_common), 28, crs) if conv is not None else ([], [], None)
+        cbs += scbs
+        rd_common += [acc.buffer_address()] if acc else []
         wr_ct = [cb_so, cb_xo, cb_part, cb_gath, cb_tout, cb_tot, cb_xn, cb_part2, cb_gath2, cb_tot2, cb_out, cb_zero,
                  PER, C, NQ, int(tail is not None), int(norm), int(bound), NSEL]
         for t in (states[0], outs[0], pk.zeros):
@@ -89,7 +94,7 @@ class PreKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))]
+        defs = [("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -106,12 +111,12 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(4)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed,
+        key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
         for t in [mo, resid] + states + taps + [pk.ones, sel, pk.zeros] + list(qrows) + nwl + list(blocks) \
-                + [lg for lg, _ in logits] + [xo] + ([xn] if xn is not None else []) + outs:
+                + [lg for lg, _ in logits] + [xo] + ([xn] if xn is not None else []) + outs + ([acc] if acc else []):
             if id(t) not in seen:
                 seen.add(id(t))
                 io.append(t)

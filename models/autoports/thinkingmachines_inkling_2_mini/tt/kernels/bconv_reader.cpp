@@ -8,6 +8,9 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#ifdef SEQ_R
+#include "seqshift.hpp"
+#endif
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -38,6 +41,12 @@ void kernel_main() {
     const auto aw2 = TensorAccessor(w_args, w2_addr, F32);
     const auto awc = TensorAccessor(w_args, wc_addr, F32);
 
+#ifdef SEQ_R  // speculative verify rows (seqshift.hpp)
+    const auto seq_a = TensorAccessor(TensorAccessorArgs<SEQ_CT>(), get_arg_val<uint32_t>(SEQ_ARG), 128);
+    cb_reserve_back(SEQ_CB, 1);
+    const uint32_t seq_scr = get_write_ptr(SEQ_CB);
+    const auto seq_acc_rows = seq_acc(seq_a, seq_scr);
+#endif
     for (uint32_t t = t0; t < t0 + nt; ++t) {
         cb_reserve_back(cb_x, 1);
         cb_reserve_back(cb_s, 3);
@@ -56,6 +65,9 @@ void kernel_main() {
         noc_async_read(aw2.get_noc_addr(t + 2 * BCONV_TAP_STRIDE), w + 2 * F32, F32);
         noc_async_read(awc.get_noc_addr(t + 3 * BCONV_TAP_STRIDE), w + 3 * F32, F32);
         noc_async_read_barrier();
+#ifdef SEQ_R
+        seq_shift<x_bytes == 4096 ? 4 : 2>(s, get_write_ptr(cb_x), seq_scr, seq_acc_rows);
+#endif
         cb_push_back(cb_x, 1);
         cb_push_back(cb_s, 3);
         cb_push_back(cb_w, 4);
