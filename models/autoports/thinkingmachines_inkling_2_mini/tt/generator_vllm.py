@@ -62,9 +62,10 @@ if SPEC:
     mtp_plugin_shim.apply(SPEC + 1)
 SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
 SPEC_DEBUG = os.environ.get("I2M_SPEC_DEBUG", "0") == "1"
-# I2M_SPEC_MIN (2.0): a request whose tokens per pass (running mean, over >= 8 passes) fall below this goes back to plain
-# decode for the rest of its generation (break-even ~ a pass's time / a one-row step's: ~1.9 on one die)
-SPEC_MIN = float(os.environ.get("I2M_SPEC_MIN", "2.0"))  # (log every pass: position, anchor, drafts, emitted)
+# I2M_SPEC_MIN: a request whose tokens per pass (running mean, over >= 8 passes) fall below this goes back to plain
+# decode for the rest of its generation. Default per die count, ~ a pass's time / a one-row step's: one die 45 / 23.5,
+# TP2 29.5 / 18.5
+SPEC_MIN_DEFAULT = {1: 2.0, 2: 1.7, 4: 1.8}  # (log every pass: position, anchor, drafts, emitted)
 PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 
 
@@ -563,7 +564,8 @@ class Inkling2ForCausalLM:
             logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")
         s.update(n=p, k=k, em=em)
         s["np"], s["nt"] = s.get("np", 0) + 1, s.get("nt", 0) + len(em)
-        if s["np"] >= 8 and s["nt"] / s["np"] < SPEC_MIN:  # (not paying off for this request: plain decode from here)
+        smin = float(os.environ.get("I2M_SPEC_MIN", SPEC_MIN_DEFAULT.get(self.N, 2.0)))
+        if s["np"] >= 8 and s["nt"] / s["np"] < smin:  # (not paying off for this request: plain decode from here)
             if TIMING:
                 logger.info(f"speculative decode off for this request: {s['nt'] / s['np']:.2f} tokens per pass")
             self._spec_exit(p + k + 1)
