@@ -24,9 +24,10 @@ class GroupedMM:
         g = mesh.compute_with_storage_grid_size()
         self.gx, self.ncores = g.x, max_cores or g.x * g.y  # (whole rows of the grid)
 
-    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0)):
+    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0):
         """a [1, G, gs, K] bf16, w [1, E, K, N] (bfp8 / bf16 tiles), ids [1, G] uint16 ROW_MAJOR, out [1, G, gs, N].
-        wsub (S, s): w holds S sub-shards per expert as virtual experts e * S + s ([1, E * S, K, N]); this call's s."""
+        wsub (S, s): w holds S sub-shards per expert as virtual experts e * S + s ([1, E * S, K, N]); this call's s.
+        k0: w's experts have more K rows than a ([1, E, Kw, N]): rows [k0, k0 + K) of each."""
         G, gs, K = int(a.shape[1]), int(a.shape[2]), int(a.shape[3])
         N = int(w.shape[-1])
         Kt, Nt, mt = K // 32, N // 32, gs // 32
@@ -70,7 +71,8 @@ class GroupedMM:
             + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
             + ttnn.TensorAccessorArgs(ids).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
-        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1]]
+        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
+                                  int(w.shape[-2]) // 32, k0]
         wr = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, Nt, nb, mt, cb_ids, E] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),

@@ -47,6 +47,8 @@ void kernel_main() {
     const auto aw = TensorAccessor(w_args, get_common_arg_val<uint32_t>(1), w_page);
     const auto ai = TensorAccessor(i_args, get_common_arg_val<uint32_t>(2), ids_bytes);
     const uint32_t ws = get_common_arg_val<uint32_t>(3), wo = get_common_arg_val<uint32_t>(4);
+    // (K rows [k0, k0 + Kt) of each expert's wkt-row block: one K segment of the weights)
+    const uint32_t wkt = get_common_arg_val<uint32_t>(5), k0 = get_common_arg_val<uint32_t>(6);
 
     cb_reserve_back(cb_ids, 1);
     const uint32_t il = get_write_ptr(cb_ids);
@@ -69,7 +71,7 @@ void kernel_main() {
             const uint32_t wl = get_write_ptr(cb_w);
             for (uint32_t kt = 0; kt < Kt; ++kt) {
                 for (uint32_t j = 0; j < nb; ++j) {
-                    noc_async_read(aw.get_noc_addr(((e * ws + wo) * Kt + kt) * Nt + b * nb + j), wl + (kt * nb + j) * w_page,
+                    noc_async_read(aw.get_noc_addr(((e * ws + wo) * wkt + k0 + kt) * Nt + b * nb + j), wl + (kt * nb + j) * w_page,
                                    w_page);
                 }
             }

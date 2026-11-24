@@ -42,9 +42,12 @@ NOCLONE = os.environ.get("I2M_MOE_NOCLONE", "1") == "1"
 # I2M_MOE_REM (multi-die): a die's expert slice whose 32-column pairs are not a multiple of the 8 banks as bank blocks of
 # the first 8 n pairs + the rest K-split over the banks (qwen36 union.py rem), one gate|up and one down program, no
 # column padding (TP2 576 = 512 + 64, was 384 + 256 in two programs each; TP4 288 = 256 + 32, was padded to 384; + one
-# zero pair where the down K would be odd). The die counts it applies to: default 4 (bitwise to the padded layout); TP2
-# (one fp32 down sum instead of two bf16 partials) is opt-in: its decode eval KL was 0.0121 / 0.0136 -> 0.0144 / 0.0157
-REM = {int(v) for v in os.environ.get("I2M_MOE_REM", "4").split(",") if v.strip()}
+# zero pair where the down K would be odd), for the die counts listed (default 2,4). TP4 is bitwise to the padded
+# layout; TP2 too with I2M_MOE_REM_SPLIT (up to 8 rows: one row group)
+REM = {int(v) for v in os.environ.get("I2M_MOE_REM", "2,4").split(",") if v.strip()}
+# I2M_MOE_REM_SPLIT (default 1): with REM where the old layout had two sub-shards (TP2: 384 + 256), the down as two K
+# chains packed to BF16 and added in its program: the two-program numerics
+REM_SPLIT = os.environ.get("I2M_MOE_REM_SPLIT", "1") == "1"
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -118,7 +121,7 @@ class FusedExperts:
                 router_weight=None, shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None,
                 shared_down_proj=None, cache_name=lambda n: None, router_ckc=moe.rckc, router="sigb",
                 selection_bias=ck.L(li, "mlp.gate.bias").float(), router_logits=self._logits, gate_first=True,
-                rem=R, rem_pad=pad,
+                rem=R, rem_pad=pad, down_split=SUBS[N][0][1] // 32 if len(SUBS[N]) > 1 and REM_SPLIT else None,
             )
             self.subs = [(op, ug, dn)]
             self.widths = [(Il, op.inter_total)]
@@ -214,14 +217,29 @@ class FusedExperts:
         for op, _, _ in self.subs:
             for w in widths:
                 w = w if ROW1 else max(w, 2)
-                if w <= self.rows_max:
-                    op.rows_ops(w)
+                for w in ([8, max(w - 8, 2)] if self._halves(w) else [w]):
+                    if w <= self.rows_max:
+                        op.rows_ops(w)
+
+    def _halves(self, M):
+        """The split down (REM_SPLIT) packs one row group's two chains: 9..16 rows as two calls of <= 8 (each row's
+        sum runs over its own experts in the same order, so the halves are bitwise the whole call)."""
+        return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None
 
     def forward(self, x, logits=None, dup=False, raw=False):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
         tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
         assert int(x.shape[-2]) <= self.rows_max
         M = int(x.shape[-2])
+        if self._halves(M):
+            H = self.H
+            lg = (None, None) if logits is None else [ttnn.slice(logits, [0, 0, a, 0], [1, 1, b, int(logits.shape[-1])])
+                                                      for a, b in ((0, 8), (8, M))]
+            if logits is not None:
+                ttnn.deallocate(logits)
+            lo = self.forward(ttnn.slice(x, [0, 0, 0, 0], [1, 1, 8, H]), logits=lg[0])
+            hi = self.forward(ttnn.slice(x, [0, 0, 8, 0], [1, 1, M, H]), logits=lg[1])
+            return ttnn.concat([lo, hi], dim=2)
         # one row: the 2-row path with the row twice (the single-row kernels' sigb routing is wrong here: pcc 0.5);
         # I2M_MOE_ROW1=1: the rows kernels at one row instead (no concat / slice / clone)
         if M == 1 and not ROW1:

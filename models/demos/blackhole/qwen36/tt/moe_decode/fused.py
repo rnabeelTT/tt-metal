@@ -62,7 +62,7 @@ class FusedMoEDecode:
     def __init__(self, mesh_device, args, *, hidden, inter_local, num_experts, k, tp, dtype, router_weight,
                  shared_gate_weight, shared_gate_proj, shared_up_proj, shared_down_proj, cache_name, router_ckc,
                  router="softmax", selection_bias=None, down_dtype=None, router_logits=None, ep_experts=None,
-                 gate_first=False, subs=1, rem=0, rem_pad=0):
+                 gate_first=False, subs=1, rem=0, rem_pad=0, down_split=None):
         """subs > 1 (rows ops only): the experts' inter_local columns are `subs` sub-shards stacked as virtual experts
         (union.ExpertGateUpRows subs), routed and summed in one gate|up and one down program.
         router_weight [E, H], shared_gate_weight [1, H], shared_{gate,up}_proj [S, H], shared_down_proj [H, S]
@@ -146,12 +146,13 @@ class FusedMoEDecode:
         # rem_pad zero pairs after them (the down K); inter_total: the activation / down width
         self.rem, self.rem_pad = rem, rem_pad
         self.inter_total = inter_local + TILE * (rem + rem_pad)
+        self.down_split = down_split  # (ExpertDownRows split: K tiles of the first of two BF16-summed chains)
 
     def rows_ops(self, rows):
         """(RouteRows, ExpertGateUpRows, ExpertDownRows, RowsBuffers) for `rows` decode rows, one set per model; build
         every width the server traces before capturing (host uploads)."""
         key = self._key + ("rows", rows) + ((("subs", self.subs),) if self.subs > 1 else ())
-        key += (("rem", self.rem, self.rem_pad),) if self.rem else ()
+        key += (("rem", self.rem, self.rem_pad, self.down_split),) if self.rem else ()
         if key not in self._cache:
             S = dict(subs=self.subs) if self.subs > 1 else {}
             H, Il, E, k, dtype, down_dtype, router, shared, ep_experts, gate_first = self._key
@@ -161,7 +162,8 @@ class FusedMoEDecode:
                 RouteRows(self._mesh, E, k, rows, router=router),
                 ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared, gate_first=gate_first, **ep, **S,
                                  **R),
-                ExpertDownRows(self._mesh, H, self.inter_total, E, k, down_dtype, rows, shared=shared, **ep, **S),
+                ExpertDownRows(self._mesh, H, self.inter_total, E, k, down_dtype, rows, shared=shared, **ep, **S,
+                               **({"split": self.down_split} if self.down_split else {})),
                 RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
         return self._cache[key]

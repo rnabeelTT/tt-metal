@@ -636,8 +636,10 @@ class ExpertDownRows:
         shared=True,
         ep_experts=None,
         subs=1,
+        split=None,
     ):
-        """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown."""
+        """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown. split: K tiles of the
+        first of two accumulation chains per slot, each packed to BF16 and the two added (two sub-shards' numerics)."""
         assert not ep_experts or not shared
         self.shared, self.ep_experts = shared, ep_experts
         self.banks = len(bank_workers(mesh_device))
@@ -661,6 +663,12 @@ class ExpertDownRows:
         if readers is None:  # 2 per bank (4 / 8 measured slower at 8 rows: 33 vs 24 us)
             readers = max(2 if self.m % 2 == 0 else 1, self.m // max(1, (8 if self.dst_full else 4) // self.groups))
         assert self.m * self.banks * TILE == hidden and self.m % readers == 0
+        # (one row group only: two chains of > 1 group would need fewer columns per core, ~10 % slower at 16 rows)
+        self.split = split if self.groups == 1 else None
+        if self.split:  # two chains of cols DST tiles: <= 8
+            self.dst_full = True
+            while 2 * self.groups * (self.m // readers) > 8:
+                readers = next(r for r in range(readers + 1, self.m + 1) if self.m % r == 0)
         self.cols = self.m // readers
         assert self.groups * self.cols <= (8 if self.dst_full else 4), (self.groups, self.cols)
         self.tile_bytes = TILE_BYTES[weight_dtype]
@@ -703,6 +711,8 @@ class ExpertDownRows:
             _cb(self.cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
             _cb(self.cores, cb_out, ttnn.bfloat16, tb, self.groups * self.cols, tiny=True, rows=self.trows),
         ]
+        if self.split:
+            cbs.append(_cb(self.cores, 6, ttnn.bfloat16, tb, 2 * self.groups * self.cols, tiny=True, rows=self.trows))
         rd_rt, wr_rt = {}, {}
         for c, b, r in self.assign:
             c0 = r * self.cols
@@ -736,6 +746,7 @@ class ExpertDownRows:
         cp_ct = [cb_in0, cb_w, cb_out, self.kt, self.cols, self.chunk, self.groups]
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
         defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
+        defines += [("DN_SPLIT", str(self.split)), ("DN_TMP", "6")] if self.split else []
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

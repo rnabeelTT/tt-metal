@@ -267,31 +267,45 @@ class MoE:
                     ttnn.deallocate(t)
                 if int(din.shape[-1]) < W:
                     din = ttnn.pad(din, [(0, 0), (0, 0), (0, 0), (0, W - int(din.shape[-1]))], 0.0)
-            if GMM:  # (row-major rows: the un-dispatch gathers them without an untilize)
-                down = self._gmm(din, dn, m["group_ids"], ttnn.allocate_tensor_on_device(
-                    ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E, wsub)
+            split = self.fe.subs[0][0].down_split if self.fe.rem is not None and dn is self.rem_dn[0] else None
+            if split:  # (the two-sub-shard numerics: each K segment's down alone, the two outputs added in BF16)
+                S = 32 * split
+                for a, b in ((0, S), (S, W)):
+                    seg = ttnn.slice(din, [0, 0, 0, a], [1, G, gs, b])
+                    out = self._down_undispatch(seg, dn, wsub, m, G, gs, T, cdn, alloc, out, k0=a // 32)
+                ttnn.deallocate(din)
             else:
-                down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
-                                          is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
-                                          compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
-                                          optional_output_tensor=alloc(H))  # compact [1, G, 32, H]
-            ttnn.deallocate(din)
-            y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
-            ttnn.deallocate(down)
-            out = y if out is None else ttnn.add(out, y)
+                out = self._down_undispatch(din, dn, wsub, m, G, gs, T, cdn, alloc, out)
         ttnn.deallocate(x_disp)
         for key in ("src_tok", "weights", "group_mask", "group_ids", "undispatch", "undispatch_rm"):
             if m.get(key) is not None:
                 ttnn.deallocate(m[key])
         return out
 
-    def _gmm(self, a, w, ids, out, E, wsub=(1, 0)):
+    def _down_undispatch(self, din, dn, wsub, m, G, gs, T, cdn, alloc, out, k0=0):
+        from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import undispatch_rows
+
+        E, H, k = self.E, self.H, self.k
+        if GMM:  # (row-major rows: the un-dispatch gathers them without an untilize)
+            down = self._gmm(din, dn, m["group_ids"], ttnn.allocate_tensor_on_device(
+                ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E, wsub, k0=k0)
+        else:
+            down = ttnn.sparse_matmul(din, dn, sparsity=m["group_mask"], nnz=G, is_input_a_sparse=False,
+                                      is_input_b_sparse=True, memory_config=DRAM, program_config=cdn,
+                                      compute_kernel_config=self.ckc, dtype=ttnn.bfloat16,
+                                      optional_output_tensor=alloc(H))  # compact [1, G, 32, H]
+        ttnn.deallocate(din)
+        y = undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
+        ttnn.deallocate(down)
+        return y if out is None else ttnn.add(out, y)
+
+    def _gmm(self, a, w, ids, out, E, wsub=(1, 0), k0=0):
         if getattr(_GMM, "op", None) is None:
             from .gmm import GroupedMM
 
             _GMM.op = GroupedMM(self.mesh, ttnn.MathFidelity.HiFi2 if w.dtype != ttnn.bfloat16 else
                                 ttnn.MathFidelity.HiFi4)
-        return _GMM.op(a, w, ids, out, E, wsub=wsub)
+        return _GMM.op(a, w, ids, out, E, wsub=wsub, k0=k0)
 
     def _gather(self, x, w, ids, T):
         k, Il, H = self.k, self.Il, self.H
