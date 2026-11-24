@@ -349,8 +349,14 @@ class MoE:
             wsub = (S, 0) if merged else self.wsub[i]
             din = self._gmm(x_disp, ug, m["group_ids"], alloc(ns * W), E, wsub, act=m["weights"], nsub=ns)
             if merged and UNDISP and m.get("undispatch_rm") is not None:  # one un-dispatch for all sub-shards
-                ds = [self._gmm(din, dn, m["group_ids"], alloc(H, ttnn.ROW_MAJOR_LAYOUT), E, (S, s), koff=s * W, K=W)
-                      for s in range(ns)]
+                from .gmm import D3
+
+                if D3:  # (one program for the sub-shards' downs)
+                    ds = [alloc(H, ttnn.ROW_MAJOR_LAYOUT) for _ in range(ns)]
+                    self._gmm(din, dn, m["group_ids"], ds, E, (S, 0), K=W)
+                else:
+                    ds = [self._gmm(din, dn, m["group_ids"], alloc(H, ttnn.ROW_MAJOR_LAYOUT), E, (S, s), koff=s * W,
+                                    K=W) for s in range(ns)]
                 ttnn.deallocate(din)
                 if getattr(_GMM, "undisp", None) is None:
                     from .undisp import Undispatch

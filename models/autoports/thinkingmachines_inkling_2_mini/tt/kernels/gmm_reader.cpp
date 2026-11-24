@@ -16,10 +16,24 @@
 // tt/moe_fused.py; this core's weight columns start at c0; A's columns at tile koff of its KA-tile rows)
 // GMM_ACT: the block's nb = 2h columns are the gate columns [c0, c0 + h) and the up columns Wt + [c0, c0 + h), and
 // each row tile's routing weights (column 0 of rw's tile, spread to every column) go to cb_rw.
+// GMM_WW: the writer loads the weight blocks (gmm_writer.cpp); this reads only A (and the routing weights).
+// GMM_NS (> 1, no act): NS sub-shards (experts e * ws + wo + s, s < NS) of NS Kt-tile column ranges of A: a row tile is
+// NS Kt tiles and the weight block NS [Kt x nb] blocks (one multicast per row for all the sub-shards' products).
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "gmm_bal.hpp"
+
+#ifndef GMM_WW
+#define GMM_WW 0
+#endif
+#ifndef GMM_NS
+#define GMM_NS 1
+#endif
+#ifndef GMM_BAL
+#define GMM_BAL 0
+#endif
 
 void kernel_main() {
     constexpr uint32_t cb_a = get_compile_time_arg_val(0);
@@ -35,12 +49,14 @@ void kernel_main() {
     constexpr uint32_t KA = get_compile_time_arg_val(10);
     constexpr uint32_t cb_rw = get_compile_time_arg_val(11);
     constexpr uint32_t Wt = get_compile_time_arg_val(12);
+    constexpr uint32_t KT = Kt * GMM_NS;  // (A tiles per row tile)
     constexpr uint32_t NB = get_compile_time_arg_val(13);  // (cores per group slice: the A multicast's NB - 1 receivers)
     constexpr auto a_args = TensorAccessorArgs<14>();
     constexpr auto w_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();
     constexpr auto i_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();
     constexpr auto r_args = TensorAccessorArgs<i_args.next_compile_time_args_offset()>();
-    const uint32_t b = get_arg_val<uint32_t>(0), e0 = get_arg_val<uint32_t>(1), e1 = get_arg_val<uint32_t>(2);
+    const uint32_t b = get_arg_val<uint32_t>(0);
+    uint32_t e0 = get_arg_val<uint32_t>(1), e1 = get_arg_val<uint32_t>(2);  // (GMM_BAL: s, S)
     const uint32_t G = get_arg_val<uint32_t>(9);
     const uint32_t sub = get_arg_val<uint32_t>(10), c0 = get_arg_val<uint32_t>(11);
     const uint32_t sx = get_arg_val<uint32_t>(3), sy = get_arg_val<uint32_t>(4);
@@ -69,6 +85,9 @@ void kernel_main() {
     noc_async_read_barrier();
     cb_push_back(cb_ids, 1);
     volatile tt_l1_ptr uint16_t* ids = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(il);
+#if GMM_BAL
+    gmm_bal([&](uint32_t g) -> uint32_t { return ids[g]; }, G, E, e0, e1, GMM_BAL, e0, e1);
+#endif
 
     uint32_t prev = 0xFFFFFFFF;
     for (uint32_t g = 0; g < G; ++g) {
@@ -79,22 +98,23 @@ void kernel_main() {
         if (e >= e1) {
             break;  // (sorted; padding groups carry ids >= E >= e1)
         }
-        if (e != prev) {
-            cb_reserve_back(cb_w, Kt * nb);
+        if (!GMM_WW && e != prev) {  // (GMM_WW: the writer loads the weight blocks)
+            cb_reserve_back(cb_w, KT * nb);
             const uint32_t wl = get_write_ptr(cb_w);
-            for (uint32_t kt = 0; kt < Kt; ++kt) {
+            for (uint32_t st = 0; st < KT; ++st) {
+                const uint32_t s = st / Kt, kt = st % Kt;
                 for (uint32_t j = 0; j < nb; ++j) {
 #if GMM_ACT
                     const uint32_t col = j < nb / 2 ? c0 + j : Wt + c0 + j - nb / 2;
 #else
                     const uint32_t col = c0 + j;
 #endif
-                    noc_async_read(aw.get_noc_addr(((e * ws + wo) * wkt + k0 + kt) * Nt + col), wl + (kt * nb + j) * w_page,
-                                   w_page);
+                    noc_async_read(aw.get_noc_addr(((e * ws + wo + s) * wkt + k0 + kt) * Nt + col),
+                                   wl + (st * nb + j) * w_page, w_page);
                 }
             }
             noc_async_read_barrier();
-            cb_push_back(cb_w, Kt * nb);
+            cb_push_back(cb_w, KT * nb);
             prev = e;
         }
         for (uint32_t mi = 0; mi < mt; ++mi) {
@@ -117,17 +137,17 @@ void kernel_main() {
             }
             cb_push_back(cb_rw, 1);
 #endif
-            cb_reserve_back(cb_a, Kt);
+            cb_reserve_back(cb_a, KT);
             const uint32_t al = get_write_ptr(cb_a);
             if (b == 0) {
-                for (uint32_t kt = 0; kt < Kt; ++kt) {
+                for (uint32_t kt = 0; kt < KT; ++kt) {
                     noc_async_read(aa.get_noc_addr((g * mt + mi) * KA + koff + kt), al + kt * 2048, 2048);
                 }
                 noc_async_read_barrier();
                 if constexpr (NB > 1) {
                     noc_semaphore_wait(ready, NB - 1);
                     noc_semaphore_set(ready, 0);
-                    noc_async_write_multicast(al, mc_base | al, Kt * 2048, NB - 1, true);
+                    noc_async_write_multicast(al, mc_base | al, KT * 2048, NB - 1, true);
                     noc_semaphore_set_multicast(s_valid, mc_base | s_valid, NB - 1);
                     noc_async_writes_flushed();  // (the slot is not refilled before the multicast has read it)
                 }
@@ -136,7 +156,7 @@ void kernel_main() {
                 noc_semaphore_inc(get_noc_addr(sx, sy, s_ready), 1);
                 noc_semaphore_wait(valid, 1);
             }
-            cb_push_back(cb_a, Kt);
+            cb_push_back(cb_a, KT);
         }
     }
     noc_async_write_barrier();  // (the A multicasts and semaphore updates)

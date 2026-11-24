@@ -9,6 +9,8 @@
 // GMM_ACT: DST j < h holds the gate, h + j the up products (h = nb / 2); each is rounded to bf16 (the packer's
 // rounding of the unfused gate|up output) and the h outputs are tt/kernels/moeact_compute.cpp's math:
 // bf16(bf16(tanh(g / 4) sigmoid(g) tanh(u)) w).
+// GMM_NS (no act): a row tile holds NS sub-shards' Kt-tile A ranges and the weight block their NS [Kt x nb] blocks:
+// NS products per row tile, each accumulated alone (same order), packed one after the other.
 
 #include <cstdint>
 
@@ -20,6 +22,14 @@
 #include "api/compute/pack_untilize.h"
 #include "api/compute/tile_move_copy.h"
 #include "api/compute/reconfig_data_format.h"
+#include "gmm_bal.hpp"
+
+#ifndef GMM_NS
+#define GMM_NS 1
+#endif
+#ifndef GMM_BAL
+#define GMM_BAL 0
+#endif
 #if GMM_ACT
 #include "api/compute/common.h"
 #include "api/compute/eltwise_binary_sfpu.h"
@@ -76,7 +86,9 @@ void kernel_main() {
     constexpr uint32_t mt = get_compile_time_arg_val(5);
     constexpr uint32_t cb_ids = get_compile_time_arg_val(6);
     constexpr uint32_t E = get_compile_time_arg_val(7);
-    const uint32_t e0 = get_arg_val<uint32_t>(0), e1 = get_arg_val<uint32_t>(1), G = get_arg_val<uint32_t>(2);
+    uint32_t e0 = get_arg_val<uint32_t>(0), e1 = get_arg_val<uint32_t>(1);  // (GMM_BAL: s, S)
+    const uint32_t G = get_arg_val<uint32_t>(2);
+    constexpr uint32_t KT = Kt * GMM_NS;
 #if GMM_ACT
     constexpr uint32_t cb_rw = get_compile_time_arg_val(8);
     constexpr uint32_t quarter = get_compile_time_arg_val(9);  // 0.25f bits
@@ -88,6 +100,10 @@ void kernel_main() {
     pack_untilize_dest_init<nb>(cb_out);  // (row-major output: 32 rows x nb tiles per block)
 #endif
     cb_wait_front(cb_ids, 1);
+#if GMM_BAL
+    gmm_bal([&](uint32_t g) -> uint32_t { return (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF; }, G, E,
+            e0, e1, GMM_BAL, e0, e1);
+#endif
     uint32_t prev = 0xFFFFFFFF;
     for (uint32_t g = 0; g < G; ++g) {
         const uint32_t e = (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF;
@@ -99,75 +115,76 @@ void kernel_main() {
         }
         if (e != prev) {
             if (prev != 0xFFFFFFFF) {
-                cb_pop_front(cb_w, Kt * nb);
+                cb_pop_front(cb_w, KT * nb);
             }
-            cb_wait_front(cb_w, Kt * nb);
+            cb_wait_front(cb_w, KT * nb);
             prev = e;
         }
         for (uint32_t mi = 0; mi < mt; ++mi) {
-            cb_wait_front(cb_a, Kt);
-            tile_regs_acquire();
+            cb_wait_front(cb_a, KT);
+            for (uint32_t s = 0; s < GMM_NS; ++s) {
+                tile_regs_acquire();
 #if GMM_ACT
-            matmul_block_init(cb_a, cb_w, false, nb, 1, Kt);
+                matmul_block_init(cb_a, cb_w, false, nb, 1, Kt);
 #endif
-            for (uint32_t kt = 0; kt < Kt; ++kt) {
-                matmul_block(cb_a, cb_w, kt, kt * nb, 0, false, nb, 1, Kt);
-            }
+                for (uint32_t kt = s * Kt; kt < (s + 1) * Kt; ++kt) {
+                    matmul_block(cb_a, cb_w, kt, kt * nb, 0, false, nb, 1, Kt);
+                }
 #if GMM_ACT
-            cb_wait_front(cb_rw, 1);
-            reconfig_data_format_srca(cb_w, cb_rw);  // (matmul: in1 = the weights in srcA)
-            copy_init(cb_rw);
-            copy_tile(cb_rw, 0, dw);
-            drain();
-            MATH((SFPU_BINARY_INIT(unused)));
-            for (uint32_t j = 0; j < 2 * h; ++j) {
-                gbin<2>(j, j, j);  // (the bf16 gate|up products)
-            }
-            for (uint32_t j = 0; j < h; ++j) {
-                gbin<2>(j, j, dt);  // (g, for the sigmoid)
-                drain();
-                binop_with_scalar_tile_init();
-                mul_unary_tile(j, quarter);
-                tanh_tile_init();
-                tanh_tile(j);
-                tanh_tile(h + j);
-                sigmoid_tile_init<false>();
-                sigmoid_tile<VectorMode::RC, false>(dt);
+                cb_wait_front(cb_rw, 1);
+                reconfig_data_format_srca(cb_w, cb_rw);  // (matmul: in1 = the weights in srcA)
+                copy_init(cb_rw);
+                copy_tile(cb_rw, 0, dw);
                 drain();
                 MATH((SFPU_BINARY_INIT(unused)));
-                gbin<0>(j, dt, j);
-                gbin<1>(j, h + j, j);
-                gbin<0>(j, dw, j);
-            }
-            cb_pop_front(cb_rw, 1);
-            reconfig_data_format_srca(cb_rw, cb_w);
-            tile_regs_commit();
-            cb_reserve_back(cb_out, h);
-            tile_regs_wait();
-            for (uint32_t j = 0; j < h; ++j) {
-                pack_tile(j, cb_out);
-            }
-            tile_regs_release();
-            cb_push_back(cb_out, h);
-            cb_pop_front(cb_a, Kt);
-            continue;
+                for (uint32_t j = 0; j < 2 * h; ++j) {
+                    gbin<2>(j, j, j);  // (the bf16 gate|up products)
+                }
+                for (uint32_t j = 0; j < h; ++j) {
+                    gbin<2>(j, j, dt);  // (g, for the sigmoid)
+                    drain();
+                    binop_with_scalar_tile_init();
+                    mul_unary_tile(j, quarter);
+                    tanh_tile_init();
+                    tanh_tile(j);
+                    tanh_tile(h + j);
+                    sigmoid_tile_init<false>();
+                    sigmoid_tile<VectorMode::RC, false>(dt);
+                    drain();
+                    MATH((SFPU_BINARY_INIT(unused)));
+                    gbin<0>(j, dt, j);
+                    gbin<1>(j, h + j, j);
+                    gbin<0>(j, dw, j);
+                }
+                cb_pop_front(cb_rw, 1);
+                reconfig_data_format_srca(cb_rw, cb_w);
+                tile_regs_commit();
+                cb_reserve_back(cb_out, h);
+                tile_regs_wait();
+                for (uint32_t j = 0; j < h; ++j) {
+                    pack_tile(j, cb_out);
+                }
+                tile_regs_release();
+                cb_push_back(cb_out, h);
+                continue;
 #endif
-            tile_regs_commit();
-            cb_reserve_back(cb_out, nb);
-            tile_regs_wait();
+                tile_regs_commit();
+                cb_reserve_back(cb_out, nb);
+                tile_regs_wait();
 #if GMM_RM
-            pack_untilize_dest<nb>(cb_out);
+                pack_untilize_dest<nb>(cb_out);
 #else
-            for (uint32_t j = 0; j < nb; ++j) {
-                pack_tile(j, cb_out);
-            }
+                for (uint32_t j = 0; j < nb; ++j) {
+                    pack_tile(j, cb_out);
+                }
 #endif
-            tile_regs_release();
-            cb_push_back(cb_out, nb);
-            cb_pop_front(cb_a, Kt);
+                tile_regs_release();
+                cb_push_back(cb_out, nb);
+            }
+            cb_pop_front(cb_a, KT);
         }
     }
     if (prev != 0xFFFFFFFF) {
-        cb_pop_front(cb_w, Kt * nb);
+        cb_pop_front(cb_w, KT * nb);
     }
 }
