@@ -343,6 +343,33 @@ void kernel_main() {
     cb_reserve_back(cb_wt, NQ * n);
     for (uint32_t q = 0; q < NQ; ++q) {
         tile_regs_acquire();
+#if SOFT_BATCH  // (each SFPU op over all sources: one init per op kind)
+        cp(cb_red, 1 + q, 0);
+        for (uint32_t i = 0; i < n; ++i) {
+            if (i < NB) {
+                cp(cb_d, i * NQ + q, 1 + i);
+            } else {
+                cp(cb_red, 1 + q, 1 + i);
+            }
+        }
+        if constexpr (NB > 0) {
+            drain();
+            binary_max_tile_init();
+            for (uint32_t b = 0; b < NB; ++b) {
+                binary_max_tile(0, 1 + b, 0, VectorMode::R);
+            }
+        }
+        drain();
+        sinit();
+        for (uint32_t i = 0; i < n; ++i) {
+            sub(1 + i, 0, 1 + i);
+        }
+        drain();
+        exp_tile_init();
+        for (uint32_t i = 0; i < n; ++i) {
+            exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
+        }
+#else
         cp(cb_red, 1 + q, 0);
         for (uint32_t b = 0; b < NB; ++b) {
             cp(cb_d, b * NQ + q, 1);
@@ -360,6 +387,7 @@ void kernel_main() {
             exp_tile_init();
             exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
         }
+#endif
         if constexpr (n > 1) {
             drain();
             sinit();
@@ -497,13 +525,36 @@ void kernel_main() {
             cb_push_back(cb_tout, NQ);
             cb_pop_front(cb_gath, 2 * K1 * NSEL);
         }
+#if PRE_RN1  // (each query's rsqrt once, through cb_red: free again after the mixes)
+        tile_regs_acquire();
+        cp_prep(cb_tot2);
+        cb_wait_front(cb_tot2, NQ);
+        for (uint32_t q = 0; q < NQ; ++q) {
+            cp(cb_tot2, q, q);
+            rnorm(q, inv_h, eps);
+        }
+        tile_regs_commit();
+        cb_reserve_back(cb_red, NQ);
+        tile_regs_wait();
+        pack_cfg(cb_red);
+        for (uint32_t q = 0; q < NQ; ++q) {
+            pack_tile(q, cb_red);
+        }
+        tile_regs_release();
+        cb_push_back(cb_red, NQ);
+        cb_wait_front(cb_red, NQ);
+#endif
         cb_wait_front(cb_tot2, NQ);
         cb_wait_front(cb_nw, NQ * PER);
         for (uint32_t q = 0; q < NQ; ++q) {
             for (uint32_t i = 0; i < PER; ++i) {
                 tile_regs_acquire();
+#if PRE_RN1
+                cp(cb_red, q, 1);
+#else
                 cp(cb_tot2, q, 1);
                 rnorm(1, inv_h, eps);
+#endif
                 cp(cb_h, q * PER + i, 0);
                 sinit();
                 mul(0, 1, 0);
@@ -519,6 +570,9 @@ void kernel_main() {
             }
         }
         cb_pop_front(cb_tot2, NQ);
+#if PRE_RN1
+        cb_pop_front(cb_red, NQ);
+#endif
         cb_pop_front(cb_nw, NQ * PER);
         cb_pop_front(cb_h, NQ * PER);
     }

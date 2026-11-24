@@ -345,6 +345,33 @@ void kernel_main() {
     // ---- softmax over [block logits..., lg]: DST 0 = max, 1..n = e_i -> w_i, 7 = sum
     cb_wait_front(cb_d, NB);
     tile_regs_acquire();
+#if SOFT_BATCH  // (each SFPU op over all sources: one init per op kind)
+    cp(cb_red, 1, 0);
+    for (uint32_t i = 0; i < n; ++i) {
+        if (i < NB) {
+            cp(cb_d, i, 1 + i);
+        } else {
+            cp(cb_red, 1, 1 + i);
+        }
+    }
+    if constexpr (NB > 0) {
+        drain();
+        binary_max_tile_init();
+        for (uint32_t b = 0; b < NB; ++b) {
+            binary_max_tile(0, 1 + b, 0, VectorMode::R);
+        }
+    }
+    drain();
+    sinit();
+    for (uint32_t i = 0; i < n; ++i) {
+        sub(1 + i, 0, 1 + i);
+    }
+    drain();
+    exp_tile_init();
+    for (uint32_t i = 0; i < n; ++i) {
+        exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
+    }
+#else
     cp(cb_red, 1, 0);
     for (uint32_t b = 0; b < NB; ++b) {
         cp(cb_d, b, 1);
@@ -362,6 +389,7 @@ void kernel_main() {
         exp_tile_init();
         exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
     }
+#endif
     if constexpr (n > 1) {  // (one source: w = exp(0) = 1)
         drain();
         sinit();
@@ -557,7 +585,35 @@ void kernel_main() {
             cb_push_back(cb_p3, 2 * ET);
             cb_pop_front(cb_xb, PER);
             cb_pop_front(cb_rw, 2 * PER * ET);
+#if POST_RSPLIT  // (core t ET + e reduces logit tile e of row t)
+            const uint32_t ci = get_arg_val<uint32_t>(0);
+            if (ci < ROWS * ET) {
+                constexpr uint32_t cb_g3 = POST_CB_G3, cb_t3 = POST_CB_T3;
+                const uint32_t e = ci % ET;
+                cb_wait_front(cb_sel, NQ);
+                tile_regs_acquire();
+                mm_begin(cb_sel, cb_g3);  // (configured before the gather arrives)
+                cb_wait_front(cb_g3, 2 * ET * NQ);
+                for (uint32_t k = 0; k < NQ; ++k) {
+                    matmul_tiles(cb_sel, cb_g3, k, (2 * e) * NQ + k, 0);
+                    matmul_tiles(cb_sel, cb_g3, k, (2 * e + 1) * NQ + k, 0);
+                }
+                tile_regs_commit();
+                cb_reserve_back(cb_t3, 1);
+                tile_regs_wait();
+                pack_cfg(cb_t3);
+                pack_tile(0, cb_t3);
+                tile_regs_release();
+                cb_push_back(cb_t3, 1);
+                cb_pop_front(cb_g3, 2 * ET * NQ);
+                if (!root) {
+                    cb_pop_front(cb_sel, NQ);
+                }
+            }
+            if (false) {
+#else
             if (root) {
+#endif
                 constexpr uint32_t cb_g3 = POST_CB_G3, cb_t3 = POST_CB_T3;
                 tile_regs_acquire();
                 mm_begin(cb_sel, cb_g3);  // (configured before the gather arrives)

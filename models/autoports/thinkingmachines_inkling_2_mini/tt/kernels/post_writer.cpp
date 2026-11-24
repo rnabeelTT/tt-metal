@@ -122,12 +122,22 @@ void kernel_main() {
         }
         noc_async_write_barrier();
     };
-    if (root) {
+#if POST_RT && POST_RSPLIT  // router logit tile e of row t reduced by core t ET + e (the root t did all ET tiles)
+    constexpr uint32_t PROW = 4 + (NORM ? 2 : 0);  // (the row roots' parts; the router roots zero their own two)
+    const bool rr = c < T * POST_RT;
+    const uint32_t re = c % POST_RT, rt_ = c / POST_RT;
+#else
+    constexpr uint32_t PROW = PALL;
+    constexpr bool rr = false;
+#endif
+    if (root || rr) {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
         noc_async_read_barrier();
-        zero_parts(0, POST_ZLAZY ? 4 : PALL);
+    }
+    if (root) {
+        zero_parts(0, POST_ZLAZY ? 4 : PROW);
     }
 
     for (uint32_t i = 0; i < PER; ++i) {
@@ -217,8 +227,13 @@ void kernel_main() {
         round(cb_part, 4, cb_gath, g1, cb_tot, tot, 2, 1);
     }
     if (POST_ZLAZY && root) {
-        zero_parts(4, PALL);
+        zero_parts(4, PROW);
     }
+#if POST_RT && POST_RSPLIT
+    if (rr) {
+        zero_parts(PROW + 2 * re, PROW + 2 * re + 2);
+    }
+#endif
     if constexpr (NORM) {
         round(cb_part2, 2, cb_gath2, g2, cb_tot2, tot2, 1, 2);
     }
@@ -237,6 +252,37 @@ void kernel_main() {
         constexpr uint32_t ET = POST_RT, parts = 2 * ET;
         constexpr auto l_args = TensorAccessorArgs<z_args.next_compile_time_args_offset()>();
         cb_wait_front(POST_CB_P3, parts);
+#if POST_RSPLIT
+        {  // parts 2 e, 2 e + 1 (hi / lo of logit tile e) of row t -> core t ET + e
+            const uint32_t src = get_read_ptr(POST_CB_P3), d = get_write_ptr(POST_CB_G3) + red_off<POST_RK>(c);
+            for (uint32_t t = 0; t < T; ++t) {
+                for (uint32_t p = 0; p < parts; ++p) {
+                    const uint32_t s = src + p * FT + t * 64, r = t * ET + p / 2;
+                    noc_async_write(s, rxy(r, d + p * NQ * F32), 64);
+                    noc_async_write(s + FO, rxy(r, d + p * NQ * F32 + 1024), 64);
+                }
+            }
+            noc_async_writes_flushed();
+            for (uint32_t r = 0; r < T * ET; ++r) {
+                noc_semaphore_inc(rxy(r, s_g), 1);
+            }
+        }
+        cb_pop_front(POST_CB_P3, parts);
+        if (rr) {
+            cb_reserve_back(POST_CB_G3, parts * NQ);
+            noc_semaphore_wait(sem(s_g), C * ((root ? (NORM ? 2 : 1) : 0) + 1));
+            cb_push_back(POST_CB_G3, parts * NQ);
+            const auto al = TensorAccessor(l_args, ca(10), F32);
+            cb_wait_front(POST_CB_T3, 1);
+            const uint64_t dl = al.get_noc_addr(re) + rt_ * 64;
+            write_rows<1, 4, TH>(get_read_ptr(POST_CB_T3), dl);
+#if POST_DUP
+            write_rows<1, 4, TH>(get_read_ptr(POST_CB_T3), dl + 64);
+#endif
+            noc_async_write_barrier();
+            cb_pop_front(POST_CB_T3, 1);
+        }
+#else
         send(get_read_ptr(POST_CB_P3), parts, get_write_ptr(POST_CB_G3));
         cb_pop_front(POST_CB_P3, parts);
         if (root) {
@@ -256,6 +302,7 @@ void kernel_main() {
             noc_async_write_barrier();
             cb_pop_front(POST_CB_T3, ET);
         }
+#endif
     }
 #endif
     // (the round sends are only flushed: every write and increment acknowledged before the kernel ends)

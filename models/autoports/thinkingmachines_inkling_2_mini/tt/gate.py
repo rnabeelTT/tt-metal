@@ -16,7 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import ZLAZY, red_k, red_sel
+from .post import RSPLIT, ZLAZY, red_k, red_sel
 
 F32, BF = 4096, 2048
 ROWS = __import__("os").environ.get("I2M_GATE_ROWS", "1") == "1"  # SFPU passes on the live rows only (<= 16 rows)
@@ -149,6 +149,7 @@ class GateKernel2:
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             pk.mesh, out_mc) if rt else None
         NSEL, sel = rc.red(T)  # (a root per row)
+        rsplit = RSPLIT and rt and T * ET <= 16
         PER, R, C, crs = rc.PER, self.R, rc.C, rc.crs
         GP = 2 * ET if rt else 4
         (cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
@@ -182,7 +183,7 @@ class GateKernel2:
             + ttnn.TensorAccessorArgs(lg if rt else out).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(pk.zeros).get_compile_time_args()
         wr_common = [out.buffer_address(), (lg if rt else out).buffer_address()] + rc.mc + [pk.zeros.buffer_address()] \
-            + rc.roots[:2 * T]
+            + rc.roots[:2 * (T * ET if rsplit else T)]
         cp_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
                  cb_gath, cb_tot2, cb_g, cb_fa, cb_out, PER, R, NSEL, _bits(1.0 / self.H), _bits(self.eps), GP,
                  int(norm), int(rt), ET, cb_o32, cb_tot3, cb_nw, cb_xb, cb_rw]
@@ -193,7 +194,7 @@ class GateKernel2:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
-                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY)))]
+                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit)))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -206,9 +207,9 @@ class GateKernel2:
             dm("gate2_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
-                                  defines=[("ROWS", str(T))]),
+                                  defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit)))]),
         ]
-        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY,
+        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

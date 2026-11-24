@@ -99,11 +99,20 @@ void kernel_main() {
         }
         noc_async_write_barrier();
     };
-    if (root) {
+#if G2_RSPLIT  // router logit tile e of row t reduced by core t ET + e (the root t did all ET tiles)
+    const bool rr = ROUTER && c < T * ET;
+    const uint32_t re = c % ET, rt_ = c / ET;
+#else
+    constexpr bool rr = false;
+    constexpr uint32_t re = 0, rt_ = 0;
+#endif
+    if (root || rr) {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
         noc_async_read_barrier();
+    }
+    if (root) {
         zero_parts(0, G2_ZLAZY ? 4 : GP);
     }
 
@@ -185,6 +194,9 @@ void kernel_main() {
     if (G2_ZLAZY && root && GP > 4) {
         zero_parts(4, GP);
     }
+    if (rr && !root) {  // (its two router parts: the row roots zero every part)
+        zero_parts(2 * re, 2 * re + 2);
+    }
     {
     DeviceZoneScopedN("G2_W_R2");
     round(4, cb_tot2, tot2, 2, true);
@@ -206,8 +218,42 @@ void kernel_main() {
     }
     if constexpr (ROUTER) {
         DeviceZoneScopedN("G2_W_R4");
+#if G2_RSPLIT
+        cb_wait_front(cb_part, 2 * ET);
+        {  // parts 2 e, 2 e + 1 (hi / lo of logit tile e) of row t -> core t ET + e
+            const uint32_t src = get_read_ptr(cb_part), d = g + red_off<G2_RK>(c);
+            for (uint32_t t = 0; t < T; ++t) {
+                for (uint32_t p = 0; p < 2 * ET; ++p) {
+                    const uint32_t s = src + p * FT + t * 64, r = t * ET + p / 2;
+                    noc_async_write(s, rxy(r, d + p * NSEL * F32), 64);
+                    noc_async_write(s + FO, rxy(r, d + p * NSEL * F32 + 1024), 64);
+                }
+            }
+            noc_async_writes_flushed();
+            for (uint32_t r = 0; r < T * ET; ++r) {
+                noc_semaphore_inc(rxy(r, s_g), 1);
+            }
+        }
+        cb_pop_front(cb_part, 2 * ET);
+        if (rr) {
+            cb_reserve_back(cb_gath, GT);
+            noc_semaphore_wait(sem(s_g), C * ((root ? 3 : 0) + 1));
+            cb_push_back(cb_gath, GT);
+            const auto al = TensorAccessor(l_args, ca(1), F32);
+            cb_wait_front(cb_tout, 1);
+            const uint64_t d = al.get_noc_addr(re) + rt_ * 64;
+            write_rows<1, 4, TH>(get_read_ptr(cb_tout), d);
+            if constexpr (DUP) {
+                write_rows<1, 4, TH>(get_read_ptr(cb_tout), d + 64);
+            }
+            noc_async_write_barrier();
+            cb_pop_front(cb_tout, 1);
+        }
+        if (false) {
+#else
         round(2 * ET, 0, 0, 4, false);
         if (root) {  // logits row c ([Tp, E] fp32)
+#endif
             const auto al = TensorAccessor(l_args, ca(1), F32);
             cb_wait_front(cb_tout, ET);
             const uint32_t ts = get_read_ptr(cb_tout);

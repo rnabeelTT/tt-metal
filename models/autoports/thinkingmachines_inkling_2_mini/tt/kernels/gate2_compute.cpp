@@ -532,7 +532,34 @@ void kernel_main() {
             cb_push_back(cb_part, 2 * ET);
             cb_pop_front(cb_xb, PER);
             cb_pop_front(cb_rw, 2 * PER * ET);
+#if G2_RSPLIT  // (core t ET + e reduces logit tile e of row t)
+            const uint32_t ci = get_arg_val<uint32_t>(0);
+            if (ci < ROWS * ET) {
+                const uint32_t e = ci % ET;
+                cb_wait_front(cb_sel, NSEL);
+                tile_regs_acquire();
+                mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+                cb_wait_front(cb_gath, GT);
+                for (uint32_t s = 0; s < NSEL; ++s) {
+                    matmul_tiles(cb_sel, cb_gath, s, (2 * e) * NSEL + s, 0);
+                    matmul_tiles(cb_sel, cb_gath, s, (2 * e + 1) * NSEL + s, 0);
+                }
+                tile_regs_commit();
+                cb_reserve_back(cb_tout, 1);
+                tile_regs_wait();
+                pack_cfg(cb_tout);
+                pack_tile(0, cb_tout);
+                tile_regs_release();
+                cb_push_back(cb_tout, 1);
+                cb_pop_front(cb_gath, GT);
+                if (!root) {
+                    cb_pop_front(cb_sel, NSEL);
+                }
+            }
+            if (false) {
+#else
             if (root) {
+#endif
                 tile_regs_acquire();
                 mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
                 cb_wait_front(cb_gath, GT);

@@ -12,7 +12,10 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, RD_STAGED, _bits, cbt, red_k, tile_rows
+from .post import BF, CX, CY, C, F32, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, tile_rows
+
+
+RN1 = __import__("os").environ.get("I2M_PRE_RN1", "1") == "1"  # each norm's rsqrt once, not per tile
 
 
 class PreKernel:
@@ -109,11 +112,11 @@ class PreKernel:
             dm("pre_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "pre_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
-                                  defines=[("ROWS", str(T))]),
+                                  defines=[("ROWS", str(T)), ("PRE_RN1", str(int(RN1))), ("SOFT_BATCH", str(int(SOFT_BATCH)))]),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
+        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, RN1, SOFT_BATCH, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
