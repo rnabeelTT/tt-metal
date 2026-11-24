@@ -55,8 +55,10 @@ void kernel_main() {
 #endif
     constexpr uint32_t blk_tiles = kt * m;  // one bank's [kt, m] run
     constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
+#ifndef GU_REM
     constexpr uint32_t pages_per_col = col_bytes / page_bytes;
     static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
+#endif
 
     // identity tile x 2 (custom_mm takes an even K)
     const auto s_id = TensorAccessor(id_args, id_addr, tile_bytes);
@@ -96,6 +98,25 @@ void kernel_main() {
     for (uint32_t s = slot0; s < U + 1; s += step) {
         const uint32_t base = s == 0 ? ws_addr : w_addr;
         const uint32_t e = s == 0 ? 0 : uni[s - 1];
+#ifdef GU_REM
+        // remainder pair `pair`: bank b holds its K tiles [b kc, (b + 1) kc) x (gate, up) as one contiguous run per
+        // expert ([1, E, R kt 2 / banks * 32, banks * 32] tensor, tile (t, b)): the banks' runs in order = the [kt, 2] block
+        constexpr uint32_t kc2 = kt / banks * 2;
+        constexpr uint32_t chunk_pages = kc2 * tile_bytes / page_bytes;
+        static_assert(kt % banks == 0 && chunk_pages * page_bytes == kc2 * tile_bytes, "K chunk / page size");
+        noc_async_read_set_trid(trid);
+        for (uint32_t b = 0; b < banks; ++b) {
+            const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(b, base);
+            noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
+            uint32_t src = (e * GU_REM_PAIRS + pair) * kc2 * tile_bytes;
+            for (uint32_t p = 0; p < chunk_pages; ++p) {
+                noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
+                src += page_bytes;
+                l1_write += page_bytes;
+            }
+        }
+        {
+#else
         for (uint32_t h = 0; h < nb; ++h) {
             uint32_t src = e * blk_tiles * tile_bytes;
 #ifdef SPLIT_PAIR
@@ -110,6 +131,7 @@ void kernel_main() {
                 src += page_bytes;
                 l1_write += page_bytes;
             }
+#endif
             if (free_blocks == num_buffers - extra_in_flight) {
                 noc_async_read_barrier_with_trid(trid_to_wait);
                 cb_push_back(cb_w, blk_tiles);

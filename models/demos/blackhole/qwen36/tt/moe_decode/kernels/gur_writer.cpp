@@ -237,9 +237,21 @@ void kernel_main() {
         for (uint32_t g = 0; g < groups; ++g) {
             cb_wait_front(cb_act, np);
             for (uint32_t p = 0; p < np; ++p) {
+#ifdef GU_REM
+                const uint32_t pj = GU_REM + pair;  // the remainder pairs follow the bank blocks' pairs
+#else
                 const uint32_t pj = gu_layout::pair_index<m, banks>(pair, p);
+#endif
                 noc_async_write(get_read_ptr(cb_act) + p * tb, s_act.get_noc_addr((s * pairs + pj) * groups + g), tb);
             }
+#if defined(GU_REM) && GU_REM_PAD > 0
+            if (pair == 0) {  // the zero pairs up to `pairs` (read by the down projection)
+                for (uint32_t z = 0; z < GU_REM_PAD; ++z) {
+                    const uint32_t pz = GU_REM + GU_REM_PAIRS + z;
+                    noc_async_write(MEM_ZEROS_BASE, s_act.get_noc_addr((s * pairs + pz) * groups + g), tb);
+                }
+            }
+#endif
             noc_async_writes_flushed();
             cb_pop_front(cb_act, np);
         }

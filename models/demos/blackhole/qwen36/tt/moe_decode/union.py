@@ -299,8 +299,15 @@ class ExpertGateUpRows:
         ep_experts=None,
         gate_first=False,
         subs=1,
+        rem=0,
+        pairs_total=None,
     ):
-        """subs > 1: each expert stored as `subs` sub-shards of `inter` columns (virtual experts e * subs + s, weights
+        """rem > 0: `rem` more gate|up column pairs past the `inter` columns, each pair's [kt, 2] block split over the
+        banks by K (bank b: K tiles [b kt / banks, (b + 1) kt / banks) of the pair's gate | up columns, one contiguous
+        run per expert in a [1, E, rem * kt * 2 / banks * 32, banks * 32] tensor rem_w, tile (t, b)): streamed from every
+        bank by the pair's own cores (no column padding to a multiple of the banks). pairs_total: the activation pairs per slot
+        (>= inter / 32 + rem: the extra pairs are written as zeros, e.g. an even down K).
+        subs > 1: each expert stored as `subs` sub-shards of `inter` columns (virtual experts e * subs + s, weights
         stacked [E * subs, ...]; kernels' MOE_SUBS), one program for all of them.
         shared False: routed experts only (no union slot 0). ep_experts / gate_first: as ExpertGateUp. readers None: 4 cores per column pair. At 8 rows a core spends ~2.6 us per union slot (unpack 1.7 +
         SFPU 0.7, measured), yet 6-22 cores per pair measured slower: the extra cores sit off the banks' rows and
@@ -332,6 +339,8 @@ class ExpertGateUpRows:
             readers = (
                 int(os.environ.get("QWEN35_MOE_SPLIT_READERS", "4"))
                 if self.split
+                # QWEN35_MOE_REM_GU_READERS: with remainder pairs (Inkling-2-Mini TP2 / TP4: 2 vs 3, 4: -6 / -30 %)
+                else int(os.environ.get("QWEN35_MOE_REM_GU_READERS", "2")) if rem
                 else int(os.environ.get("QWEN35_MOE_GU_READERS", "4"))
             )
         self.readers = readers
@@ -426,9 +435,26 @@ class ExpertGateUpRows:
                 place_along_rows(mesh_device, {q: readers for q in range(self.ngroups) if q not in placed}, used=used, rows=True)
             )
             self.assign = [(c, q, r) for q in range(self.ngroups) for r, c in enumerate(placed[q])]
+        self.rem = rem
+        self.pairs_total = pairs_total or self.pairs + rem
+        assert self.pairs_total >= self.pairs + rem
+        self.rem_assign = []
+        if rem:
+            assert not self.split and not ep_experts and not shared and self.kt % self.banks == 0
+            # QWEN35_MOE_REM_READERS: cores per remainder pair (slots s % readers); off the bank readers' rows first
+            rr = int(os.environ.get("QWEN35_MOE_REM_READERS", "8"))
+            grid = mesh_device.compute_with_storage_grid_size()
+            used = {(c.x, c.y) for c, _, _ in self.assign}
+            busy_rows = {c.y for c, _, _ in self.assign}
+            cand = sorted(((x, y) for y in range(grid.y) for x in range(grid.x) if (x, y) not in used),
+                          key=lambda c: (c[1] in busy_rows, abs(c[0] - grid.x // 2), abs(c[1] - grid.y // 2)))
+            assert len(cand) >= rem * rr, "no room for the remainder pairs' cores"
+            self.rem_readers = rr
+            self.rem_assign = [(ttnn.CoreCoord(*cand[p * rr + j]), p, j) for p in range(rem) for j in range(rr)]
+            self.rem_buffers = gu_ring(self.kt, 2, 1, self.tile_bytes, buffers, even=True)
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None):
+    def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None, rem_w=None):
         cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
         tb = 64 * self.trows
         g = self.groups
@@ -484,7 +510,7 @@ class ExpertGateUpRows:
             self.k,
             self.rows,
             self.readers,
-            self.pairs,
+            self.pairs_total,
             self.trows,
             g,
             cb_wt,
@@ -548,9 +574,48 @@ class ExpertGateUpRows:
                     dst_full=self.dst_full,
                     reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
                 )
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         io = [up_gate, shared_up_gate, identity, x, table, act] + ([ep_offset] if ep_offset is not None else [])
+        if self.rem:
+            assert rem_w is not None
+            kernels, cbs = kernels + self._rem_kernels(x, table, identity, act, rem_w, defines, wr_ct), cbs + self._rem_cbs
+            io.append(rem_w)
+        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
         return ttnn.generic_op(io, program)
+
+    def _rem_kernels(self, x, table, identity, act, rem_w, defines, wr_ct_main):
+        """The remainder pairs' cores: the gur kernels at m = 2 (one pair), the reader gathering the pair's K chunks from
+        every bank (GU_REM), the writer at pair index inter / 32 + p (+ the zero pairs up to pairs_total)."""
+        cb_x, cb_w, cb_scr, cb_id, cb_sc, cb_tab, cb_wt, cb_act = 0, 1, 2, 3, 4, 5, 6, 16
+        tb = 64 * self.trows
+        g = self.groups
+        rr = self.rem_readers
+        cores = _range_set([c for c, _, _ in self.rem_assign])
+        per_core = -(-self.max_slots // rr)
+        self._rem_cbs = [
+            _cb(cores, cb_x, ttnn.bfloat16, tb, g * self.kt, tiny=True, rows=self.trows),
+            _cb(cores, cb_w, self.weight_dtype, self.tile_bytes, self.rem_buffers * self.kt * 2),
+            _cb(cores, cb_scr, ttnn.uint16, 64 * self.rows + 128, 1),
+            _cb(cores, cb_id, self.weight_dtype, self.tile_bytes, 2),
+            _cb(cores, cb_sc, ttnn.bfloat16, tb, 4 * g, tiny=True, rows=self.trows),
+            _cb(cores, cb_tab, ttnn.uint16, 64 * self.rows + 128, 1),
+            _cb(cores, cb_wt, ttnn.uint16, ((2 * per_core * self.rows + 15) // 16) * 16, 1),
+            _cb(cores, cb_act, ttnn.bfloat16, tb, 2 * g, tiny=True, rows=self.trows),
+        ]
+        rd_rt, wr_rt = {}, {}
+        for c, p, j in self.rem_assign:
+            rd_rt[(c.x, c.y)] = [table.buffer_address(), rem_w.buffer_address(), rem_w.buffer_address(),
+                                 identity.buffer_address(), p, j + 1, (p + j) & 0x3]
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), table.buffer_address(), p, j + 1]
+        rd_ct = [cb_w, cb_scr, cb_id, self.kt, 2 * self.banks, self.k, self.rows, rr, self.tile_bytes]
+        rd_ct += [_page_bytes(self.kt // self.banks * 2, self.tile_bytes), self.banks, self.rem_buffers]
+        rd_ct += ttnn.TensorAccessorArgs(table).get_compile_time_args() + ttnn.TensorAccessorArgs(identity).get_compile_time_args()
+        wr_ct = list(wr_ct_main)
+        wr_ct[7] = rr  # step
+        wr_ct[13] = 2  # m
+        cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, 2, self.banks]
+        d = list(defines) + [("GU_REM", str(self.pairs)), ("GU_REM_PAIRS", str(self.rem)),
+                             ("GU_REM_PAD", str(self.pairs_total - self.pairs - self.rem))]
+        return _kernels(cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), d, dst_full=False)
 
 
 class ExpertDownRows:

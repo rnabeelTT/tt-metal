@@ -39,6 +39,12 @@ MERGE = os.environ.get("I2M_MOE_MERGE", "1") == "1"
 # I2M_MOE_NOCLONE (default 1): unmerged sub-shards (TP2: 384 + 256) summed straight from their own output buffers (no
 # clone of the first), and the sum returned whole for a caller that reads its live rows (no slice)
 NOCLONE = os.environ.get("I2M_MOE_NOCLONE", "1") == "1"
+# I2M_MOE_REM (multi-die): a die's expert slice whose 32-column pairs are not a multiple of the 8 banks as bank blocks of
+# the first 8 n pairs + the rest K-split over the banks (qwen36 union.py rem), one gate|up and one down program, no
+# column padding (TP2 576 = 512 + 64, was 384 + 256 in two programs each; TP4 288 = 256 + 32, was padded to 384; + one
+# zero pair where the down K would be odd). The die counts it applies to: default 4 (bitwise to the padded layout); TP2
+# (one fp32 down sum instead of two bf16 partials) is opt-in: its decode eval KL was 0.0121 / 0.0136 -> 0.0144 / 0.0157
+REM = {int(v) for v in os.environ.get("I2M_MOE_REM", "4").split(",") if v.strip()}
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -52,7 +58,8 @@ class FusedExperts:
         self.N, self.H = N, H
         subs = SUBS[N]
         assert sum(r for r, _ in subs) == Il, (subs, Il)
-        mm = (lambda d: ttnn.ShardTensorToMesh(self.mesh, dim=d)) if N > 1 else (lambda d: None)
+        D = 1 if getattr(moe, "bench_tp", 0) else N  # die slices built (tools: one die's slice of an N-die layout)
+        mm = (lambda d: ttnn.ShardTensorToMesh(self.mesh, dim=d)) if D > 1 else (lambda d: None)
         dt = {ttnn.bfloat8_b: "bfp8", ttnn.bfloat4_b: "bfp4"}[dtype]
         cname = (lambda n: os.path.join(cache_dir, f"L{li}.fused.{n}.{dt}.tp{N}")) if cache_dir else (lambda n: None)
         w13 = w2 = None
@@ -61,7 +68,63 @@ class FusedExperts:
         S = len(subs)
         self.sub_widths = subs
         # (the prefill paths read the stacked tensors through the grouped matmul's virtual expert ids: tt/moe.py wsub)
-        self.merged = (MERGE and S > 1 and len(set(subs)) == 1 and subs[0][0] == subs[0][1]
+        P = Il // 32
+        self.rem_w = self.rem = None
+        if N in REM and P % 8 and P // 8 * 2 in (2, 4):
+            Wm, R = P // 8 * 256, P % 8
+            pad = (P // 8 * 8 + R) % 2
+
+            def make_ug(off, W):  # [1, E, H, D * 2W]: each die's [gate | up] columns off .. off + W of its slice
+                w13 = ck.experts(li, "w13")
+                t = torch.zeros(E, H, D * 2 * W)
+                for d in range(D):
+                    a = d * Il + off
+                    t[:, :, d * 2 * W : d * 2 * W + W] = w13[:, a : a + W].transpose(1, 2)
+                    t[:, :, d * 2 * W + W : (d + 1) * 2 * W] = w13[:, I + a : I + a + W].transpose(1, 2) / 25.0
+                return t.unsqueeze(0).to(torch.bfloat16)
+
+            def make_rem():  # tile (t, b) of each die's [R kc 2, 8] block: pair r's K tiles kc b + j, gate | up
+                w13 = ck.experts(li, "w13")
+                kc, dies = H // 32 // 8, []
+                for d in range(D):
+                    prs = []
+                    for r in range(R):
+                        a = d * Il + Wm + 32 * r
+                        g = w13[:, a : a + 32].transpose(1, 2).float()
+                        u = w13[:, I + a : I + a + 32].transpose(1, 2).float() / 25.0
+                        gu = torch.stack([g, u], 1).reshape(E, 2, 8, kc, 32, 32)  # (c, b, j, row, col)
+                        prs.append(gu.permute(0, 3, 1, 4, 2, 5).reshape(E, kc * 2 * 32, 8 * 32))
+                    dies.append(torch.cat(prs, 1))
+                return torch.cat(dies, -1).unsqueeze(0).to(torch.bfloat16)
+
+            def make_dn():
+                w2 = ck.experts(li, "w2")
+                Wt = Wm + 32 * (R + pad)
+                t = torch.zeros(E, D * Wt, H)
+                for d in range(D):
+                    t[:, d * Wt : d * Wt + Il] = w2[:, :, d * Il : (d + 1) * Il].transpose(1, 2) * (
+                        100.0 * moe.route_scale / math.sqrt(5.0))
+                return t.unsqueeze(0).to(torch.bfloat16)
+
+            ug = cached(lambda: make_ug(0, Wm), dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"ugR{Wm}"),
+                        mesh_mapper=mm(-1))
+            self.rem_w = cached(make_rem, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"rmR{Wm}r{R}"), mesh_mapper=mm(-1))
+            # (prefill: the remainder pairs as a plain [gate | up] sub-shard too)
+            self.rem_pf = cached(lambda: make_ug(Wm, 32 * R), dtype, ttnn.TILE_LAYOUT, self.mesh,
+                                 cname(f"ugR{Wm}r{R}"), mesh_mapper=mm(-1))
+            dn = cached(make_dn, dtype, ttnn.TILE_LAYOUT, self.mesh, cname(f"dnR{Wm}p{pad}"), mesh_mapper=mm(-2))
+            op = FusedMoEDecode(
+                self.mesh, _SHARED, hidden=H, inter_local=Wm, num_experts=E, k=moe.k, tp=N, dtype=dtype,
+                router_weight=None, shared_gate_weight=None, shared_gate_proj=None, shared_up_proj=None,
+                shared_down_proj=None, cache_name=lambda n: None, router_ckc=moe.rckc, router="sigb",
+                selection_bias=ck.L(li, "mlp.gate.bias").float(), router_logits=self._logits, gate_first=True,
+                rem=R, rem_pad=pad,
+            )
+            self.subs = [(op, ug, dn)]
+            self.widths = [(Il, op.inter_total)]
+            self.rem = (Wm, 32 * R, op.inter_total)  # (prefill: main / remainder gate|up widths, the down K)
+            subs = []
+        self.merged = (self.rem_w is None and MERGE and S > 1 and len(set(subs)) == 1 and subs[0][0] == subs[0][1]
                        and os.environ.get("I2M_MOE_GMM", "1") == "1" and os.environ.get("I2M_MOE_SORTED", "1") == "1")
         if self.merged:
             W = subs[0][1]
@@ -70,7 +133,7 @@ class FusedExperts:
                 w13 = ck.experts(li, "w13")  # [E, 2I, H] rows [gate | up]
                 t = torch.zeros(E, S, H, N * 2 * W)
                 for s in range(S):
-                    for d in range(N):
+                    for d in range(D):
                         a = d * Il + s * W
                         t[:, s, :, d * 2 * W : d * 2 * W + W] = w13[:, a : a + W].transpose(1, 2)
                         t[:, s, :, d * 2 * W + W : (d + 1) * 2 * W] = w13[:, I + a : I + a + W].transpose(1, 2) / 25.0
@@ -80,7 +143,7 @@ class FusedExperts:
                 w2 = ck.experts(li, "w2")  # [E, H, I]
                 t = torch.zeros(E, S, N * W, H)
                 for s in range(S):
-                    for d in range(N):
+                    for d in range(D):
                         a = d * Il + s * W
                         t[:, s, d * W : (d + 1) * W] = w2[:, :, a : a + W].transpose(1, 2) * (
                             100.0 * moe.route_scale / math.sqrt(5.0))
@@ -104,7 +167,7 @@ class FusedExperts:
                 if w13 is None:
                     w13 = ck.experts(li, "w13")  # [E, 2I, H] rows [gate | up]
                 cols = []
-                for d in range(N):
+                for d in range(D):
                     a = d * Il + off
                     g = torch.zeros(E, H, W)
                     u = torch.zeros(E, H, W)
@@ -118,7 +181,7 @@ class FusedExperts:
                 if w2 is None:
                     w2 = ck.experts(li, "w2")  # [E, H, I]
                 rows = []
-                for d in range(N):
+                for d in range(D):
                     a = d * Il + off
                     t = torch.zeros(E, W, H)
                     t[:, :real] = w2[:, :, a : a + real].transpose(1, 2) * (100.0 * moe.route_scale / math.sqrt(5.0))
@@ -185,7 +248,8 @@ class FusedExperts:
         for (op, ug, dn), (_, W) in zip(self.subs, self.widths):
             _, gu, dnop, b = op.rows_ops(m)
             act = act_buffer(self.mesh, W, self.moe.E, self.moe.k, m, subs=op.subs)
-            gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None)
+            gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None,
+               **({"rem_w": self.rem_w} if self.rem_w is not None else {}))
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)
             if acc is None:  # (one sub-shard: the shared out buffer itself, consumed before the next layer's MoE)

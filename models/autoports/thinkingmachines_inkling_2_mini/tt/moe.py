@@ -79,7 +79,7 @@ class MoE:
     def __init__(self, mesh, cfg, ck, li: int, expert_dtype=ttnn.bfloat4_b, cache_dir: str | None = None,
                  tt_ccl=None):
         self.mesh, self.li, self.tt_ccl = mesh, li, tt_ccl
-        self.N = N = mesh.get_num_devices()
+        self.N = N = getattr(self, "bench_tp", 0) or mesh.get_num_devices()  # (bench_tp: tools, one die of N)
         self.E, self.k, self.H, self.I = cfg.n_routed_experts, cfg.num_experts_per_tok, cfg.hidden_size, \
             cfg.intermediate_size
         assert self.I % (N * TILE) == 0
@@ -127,6 +127,11 @@ class MoE:
                                                                      in0_block_w_cap=kc(W)),
                           sparse_matmul_program_config(PF_CHUNK, H, W, target_cores=32, in0_block_w_cap=kc(W)))
                          for (op, ug, dn), (_, W) in zip(self.fe.subs, self.fe.widths)]
+            if self.fe.rem is not None:  # (moe_fused REM: main + remainder gate|up as two sub-shards, one down)
+                (op, ug, dn), (Wm, Wr, Wt) = self.fe.subs[0], self.fe.rem
+                assert SORTED and GMM, "the REM expert layout runs prefill through the sorted grouped matmuls"
+                self.subs = [(t, None, W, None, None) for t, W in ((ug, Wm), (self.fe.rem_pf, Wr))]
+                self.rem_dn = (dn, Wt)
             # merged decode layout (moe_fused MERGE): one stacked tensor pair, sub-shard s = virtual experts e * S + s
             self.wsub = [(1, 0)] * len(self.subs)
             if self.fe.merged:
@@ -217,7 +222,7 @@ class MoE:
             self._cfg_sorted[("gs", gs)] = {
                 W: (sparse_matmul_program_config(gs, 2 * W, H, target_cores=64, in0_block_w_cap=kc(W)),
                     sparse_matmul_program_config(gs, H, W, target_cores=64, in0_block_w_cap=kc(W)))
-                for _, _, W, _, _ in self.subs}
+                for W in [W for _, _, W, _, _ in self.subs] + ([self.rem_dn[1]] if self.fe.rem else [])}
         w, ids = self.route(x)
         m = self._dispatches[gs].build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
         Rd, G = m["Rd"], m["G"]
@@ -229,6 +234,7 @@ class MoE:
         else:
             x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
         out = None
+        dins = []
         for (ug, dn, W, _, _), wsub in zip(self.subs, self.wsub):
             cgu, cdn = self._cfg_sorted[("gs", gs)][W]
             alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
@@ -251,6 +257,16 @@ class MoE:
                                         ttnn.slice(fused, [0, 0, 0, W], [1, G, gs, 2 * W]))
                 ttnn.deallocate(fused)
                 din = ttnn.reshape(ttnn.multiply(ttnn.reshape(din, (1, 1, Rd, W)), m["weights"]), (1, G, gs, W))
+            if dn is None:  # (REM: the sub-shards' activations side by side, one down over all of them)
+                dins.append(din)
+                if len(dins) < len(self.subs):
+                    continue
+                dn, W = self.rem_dn
+                din = ttnn.concat(dins, dim=-1)
+                for t in dins:
+                    ttnn.deallocate(t)
+                if int(din.shape[-1]) < W:
+                    din = ttnn.pad(din, [(0, 0), (0, 0), (0, 0), (0, W - int(din.shape[-1]))], 0.0)
             if GMM:  # (row-major rows: the un-dispatch gathers them without an untilize)
                 down = self._gmm(din, dn, m["group_ids"], ttnn.allocate_tensor_on_device(
                     ttnn.Shape([1, G, gs, H]), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM), E, wsub)
