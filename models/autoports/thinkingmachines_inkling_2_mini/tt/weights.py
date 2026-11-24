@@ -29,9 +29,14 @@ def snapshot_dir(repo: str = REPO) -> str:
     if env:
         return env
     hub = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME", "/opt/tenstorrent/models"), "hub")
-    snaps = sorted(glob.glob(os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots", "*")))
+    base = os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots")
+    # the pinned revision (tt-model.yaml), else the newest snapshot that holds weights (refs/main can be config-only)
+    pin = os.path.join(base, os.environ.get("I2M_REVISION", "ed40e7da625f594fc9c4990f5f66be24873c22d7"))
+    if glob.glob(os.path.join(pin, "*.safetensors")):
+        return pin
+    snaps = sorted(s for s in glob.glob(os.path.join(base, "*")) if glob.glob(os.path.join(s, "*.safetensors")))
     if not snaps:
-        raise FileNotFoundError(f"no snapshot of {repo} under {hub}")
+        raise FileNotFoundError(f"no snapshot of {repo} with weights under {hub}")
     return snaps[-1]
 
 
