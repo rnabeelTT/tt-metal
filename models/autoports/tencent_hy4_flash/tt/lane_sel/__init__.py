@@ -93,7 +93,9 @@ class LaneSelOp:
                 ttnn.CBFormatDescriptor(buffer_index=i, data_format=fmt, page_size=page)])
 
         # k (2 key tiles in flight), q (2 sub-runs), w bcast, P, T_h (2 units), acc, compute descriptor, scratch x2
-        cbs = [cb(0, 8), cb(1, 8), cb(2, 16), cb(3, 2), cb(4, 32), cb(5, 2), cb(6, 1, fmt=ttnn.uint32),
+        # the compute descriptor: one 2 KB page, 4 KB when a core's units exceed it (wide pools: score_fits)
+        dpage = 2048 if self._units(Wc) < 500 else 4096
+        cbs = [cb(0, 8), cb(1, 8), cb(2, 16), cb(3, 2), cb(4, 32), cb(5, 2), cb(6, 1, page=dpage, fmt=ttnn.uint32),
                cb(7, 1, 4096), cb(8, 1, 4096 + 64)]
         acc = lambda t: ttnn.TensorAccessorArgs(t).get_compile_time_args()  # noqa: E731
         dm = ttnn.DataMovementConfigDescriptor
@@ -117,9 +119,13 @@ class LaneSelOp:
         ttnn.generic_op([q, w, gk, lmeta, out], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return out
 
+    def _units(self, Wc):
+        return 32 * (Wc // 32) // len(self.grid) + 2
+
     def score_fits(self, Wc):
-        """A core's compute units (<= 32 sub-runs x Wc / 32 key tiles over the grid) fit its 2 KB descriptor page."""
-        return 32 * (Wc // 32) // len(self.grid) + 2 < 500
+        """A core's compute units (<= 32 sub-runs x Wc / 32 key tiles over the grid) fit its descriptor page (2 KB; 4 KB
+        past 500 units: a pool of > ~110 x 498 groups)."""
+        return self._units(Wc) < 1020
 
     def expand(self, ids, lmeta, tail, dense, r=4, n_sel=511):
         rows, K = int(ids.shape[-2]), int(ids.shape[-1])

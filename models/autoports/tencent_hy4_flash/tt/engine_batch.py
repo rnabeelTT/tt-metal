@@ -61,25 +61,46 @@ def _accept(smp, lgs, drafts):
 
 
 def _prog_trace(mesh):
-    """HY4_PROG_TRACE=1 (diagnostic): after warm-up, log every ttnn op that adds a program-cache entry (a serve-time
-    compile: the decoders then release and re-capture their traces) with its input shapes and the port's call site."""
+    """HY4_PROG_TRACE=1 (diagnostic): after warm-up, log every ttnn call that adds a program-cache entry (a serve-time
+    compile: the decoders then release and re-capture their traces) with its input shapes and the port's call site.
+    (Wraps the ttnn / ttnn.experimental / ttnn.transformer callables: the fast runtime mode skips the op hooks.)"""
     import traceback
 
     import ttnn
-    from ttnn import decorators as dec
 
     st = {"n": int(mesh.num_program_cache_entries())}
 
-    def hook(operation, args, kwargs, output):
-        n = int(mesh.num_program_cache_entries())
-        if n != st["n"]:
-            shp = [tuple(a.shape) for a in list(args) + list(kwargs.values()) if isinstance(a, ttnn.Tensor)][:4]
-            site = [f"{f.name}:{f.lineno}" for f in traceback.extract_stack()[:-2] if "tencent_hy4_flash" in f.filename][-4:]
-            logger.warning(f"HY4 PROG +{n - st['n']}: {getattr(operation, 'python_fully_qualified_name', operation)} "
-                           f"{shp} at {site}")
-            st["n"] = n
+    def wrap(fn, name):
+        def w(*args, **kwargs):
+            out = fn(*args, **kwargs)
+            n = int(mesh.num_program_cache_entries())
+            if n != st["n"]:
+                shp = [tuple(a.shape) for a in list(args) + list(kwargs.values()) if isinstance(a, ttnn.Tensor)][:4]
+                site = [f"{f.name}:{f.lineno}" for f in traceback.extract_stack()[:-1]
+                        if "tencent_hy4_flash" in f.filename][-4:]
+                logger.warning(f"HY4 PROG +{n - st['n']}: {name} {shp} at {site}")
+                st["n"] = n
+            return out
 
-    dec.POST_OPERATION_HOOKS.append(hook)
+        return w
+
+    skip = {"from_torch", "to_torch", "get_device_tensors", "deallocate", "Shape", "CoreCoord", "CoreRange",
+            "CoreRangeSet", "TensorAccessorArgs"}
+    mods = [(ttnn, "ttnn"), (ttnn.experimental, "ttnn.experimental"), (ttnn.transformer, "ttnn.transformer")]
+    dp = getattr(ttnn.experimental, "deepseek_prefill", None)
+    if dp is not None:
+        mods.append((dp, "ttnn.experimental.deepseek_prefill"))
+    for mod, mname in mods:
+        for a in dir(mod):
+            if a.startswith("_") or a in skip:
+                continue
+            f = getattr(mod, a, None)
+            if callable(f) and not isinstance(f, type) and not hasattr(f, "__self__") or (
+                    callable(f) and type(f).__name__ in ("FastOperation", "Operation", "builtin_function_or_method")):
+                try:
+                    setattr(mod, a, wrap(f, f"{mname}.{a}"))
+                except (AttributeError, TypeError):
+                    pass
 
 
 class Hy4BatchEngine:
@@ -200,6 +221,7 @@ class Hy4BatchEngine:
         """Slot's extent back to the pool (its kept sequence, if any, forgotten; the work buffer dropped unwritten)."""
         self.model.ext.pop(slot, None)
         self.kept.pop(slot, None)
+        self.model.swa_drop(slot)
         for ix in self._ixs():
             if ix.wb is not None and ix.wb[0] == slot:
                 ix.wb, ix.wb_hi = None, ix.gcap
@@ -367,6 +389,8 @@ class Hy4BatchEngine:
         if r <= 0 or r % 128 or r < max(self.pc_min, int(self.cfg.window)):
             return 0
         swa = next((l.attn for l in m.layers if l.attn.kind == "swa"), None)
+        if getattr(m, "_swa", None):  # split SWA rings: the window before r in the prefill ring or the slot's snapshot
+            return r if m.swa_window_ok(int(slot), r) else 0
         if swa is not None:  # ring rows hold the last swa.rows positions written (prefill padding, decode lookahead)
             hiw = max(getattr(m, "_hiw", {}).get(int(slot), 0), len(toks) + 96 + self.k)
             if r - int(self.cfg.window) < hiw - swa.rows:
@@ -409,6 +433,8 @@ class Hy4BatchEngine:
         if mm is not None:
             m.set_images(**mm)
         lg = m.prefill(ids[r:])
+        if self.pc_on and mm is None:  # (split SWA rings: the window before the last whole chunk -> host, for reuse)
+            m.swa_snapshot(self._full(n))
         m.prefill_caches_release()  # (before any decode replay: tt/model.py)
         self._fit(slot, n)
         lane = self.dec.add(slot, n, idl)
@@ -911,6 +937,13 @@ class Hy4BatchEngine:
                 if B <= self.S and m.pack_plan([Tb - 1] * B) == (B, Tb):
                     self.prefill_many([(s, rnd(Tb - 1), None) for s in range(B)])
                     m.warm_head_blocks(B * Tb)
+        # split SWA rings (tt/model.py swa_snapshot / rewind): a prefill continued from a slot's host snapshot after
+        # another slot's prefill took the prefill ring (the window's slab copies in and out)
+        if self.pc_on and getattr(m, "_swa", None) and self.chunk + 1064 < m.max_ctx:
+            a = rnd(self.chunk + 1000)
+            self.prefill(0, a)
+            self.prefill(1, rnd(64))
+            self.prefill(0, a + rnd(64))
         logger.info(f"warm: prefill buckets done; {m.dram_report()}")
         # batched programs: slot 0 past the dense regime (its rows select), the others short (dense rows)
         long_n = self.chunk + 1000 if self.chunk + 1064 < m.max_ctx else int(prompt_len or 64)
@@ -948,21 +981,20 @@ class Hy4BatchEngine:
         m.prefill_caches_mark()  # (the warm-up prefills above ran before any capture: their cached constants stay)
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
-        for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
-            self._warm_spec(solo)
         steps = int(os.environ.get("HY4_WARM_STEPS", "3"))
-        for R in range(1, self.S + 1):
-            for _ in range(steps):
-                self.step({s: (None, None, False) for s in range(R)})
-        self._warm_bspec([0], steps=steps + 1)
-        for r in solo[:2]:  # capture the single-path traces of both regimes
-            for _ in range(steps):
-                self.step(r)
-        for b in dec.buckets[1:] if solo else []:  # and of every larger score bucket
-            dec.min_bucket = b
-            for _ in range(steps):
-                self.step(solo[0])
-        dec.min_bucket = 0
+        self._warm_capture(solo, steps)
+        # the long chunks' prefill matmuls size their CBs to the L1 room (tt/common.py l1_cb_room), which the captures
+        # above lowered (their L1 residents): a 2048-row chunk at serve time compiled 3 programs and released every
+        # trace (mix 2026-11-23). Compile them in that L1 state now (one prefill past the dense regime), then capture
+        # again (the decoders release their traces at the next pass; the room is stable after: no further compiles)
+        if os.environ.get("HY4_WARM_POSTCAP", "1") == "1" and self.chunk + 1064 < m.max_ctx:
+            n0 = int(m.mesh.num_program_cache_entries())
+            self.prefill(0, rnd(self.chunk + 1000))
+            self.prefill(0, rnd(int(prompt_len or 64)))  # (slot 0 short again: the dense traces, as captured above)
+            n1 = int(m.mesh.num_program_cache_entries())
+            logger.info(f"warm: post-capture long prefill compiled {n1 - n0} programs")
+            if n1 != n0:
+                self._warm_capture(solo, steps)
         for s in range(self.S):
             self.finish(s)
             m.set_slot(s)
@@ -978,6 +1010,25 @@ class Hy4BatchEngine:
             _prog_trace(self.model.mesh)
         logger.info(f"Hy4 batch engine warm-up {time.time() - t0:.1f} s ({self.S} slots, widths {widths}, "
                     f"{len(dec.btraces)} batched traces, {len(dec.traces)} single)")
+
+    def _warm_capture(self, solo, steps):
+        """The traced passes of warm(): every batch size, the batched spec, the single path (both regimes, every score
+        bucket)."""
+        dec = self.dec
+        for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
+            self._warm_spec(solo)
+        for R in range(1, self.S + 1):
+            for _ in range(steps):
+                self.step({s: (None, None, False) for s in range(R)})
+        self._warm_bspec([0], steps=steps + 1)
+        for r in solo[:2]:  # capture the single-path traces of both regimes
+            for _ in range(steps):
+                self.step(r)
+        for b in dec.buckets[1:] if solo else []:  # and of every larger score bucket
+            dec.min_bucket = b
+            for _ in range(steps):
+                self.step(solo[0])
+        dec.min_bucket = 0
 
     def _warm_spec(self, solo):
         """k > 0: the solo path's verify passes (k + 1 rows) and drafts, both regimes (slot 0 selects, slot 1 dense)

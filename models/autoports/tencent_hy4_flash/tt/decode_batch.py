@@ -147,6 +147,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         keys and restored stale group keys over the decoded groups)."""
         lane = self.lanes.index(None)
         m = self.model
+        m.swa_flush()
         m.set_slot(slot)
         if stage is None:
             nb = (pos // 32) * 32
@@ -503,6 +504,7 @@ class Hy4BatchDecoder(Hy4Decoder):
         -> a handle for collect(). A replayed pass's logits stay in its trace output until collect(): no other pass of
         this decoder may run in between."""
         tm = os.environ.get("HY4_TIME_BATCH", "0") in ("1", "2")  # 2: no device sync (copy = host enqueue time only)
+        self.model.swa_flush()
         t0 = time.perf_counter()
         pre, self._pre = getattr(self, "_pre", None), None
         if pre is not None and pre[0] == self._snap(rows):  # prebuilt during the last pass: add the token inputs

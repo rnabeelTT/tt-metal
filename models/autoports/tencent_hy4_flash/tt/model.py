@@ -30,6 +30,7 @@ from models.autoports.tencent_hy4_flash.tt.common import (
     l1_cb_room,
     num_devices,
     stream_enabled,
+    to_torch0,
     to_torch_cat,
     upload,
 )
@@ -349,6 +350,12 @@ class Hy4Model:
         set_active(0)
         self._img = None  # (slot, image embeddings, their slot indices): set_images
         self._slot_state = {}  # parked slots: (pos, Engram history / positions)
+        # split SWA rings (tt/attention.py HY4_SWA_SPLIT): the prefill ring's owner {"slot", "lo", "hi", "top",
+        # "pending"}: its sequence's positions [max(lo, top - ring), hi) are in the ring; pending: not yet copied to the
+        # slot's decode ring (swa_flush). _swa_snap {slot: (r, host rows)}: the window before r (prefix reuse, rewind)
+        self._swa = [l.attn for l in self.layers if l.attn.kind == "swa" and getattr(l.attn, "split", False)]
+        self._pf_own = None
+        self._swa_snap = {}
         logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}; "
                     f"{fastload.summary()}")
         store = getattr(self.engram, "store", None)
@@ -480,9 +487,105 @@ class Hy4Model:
             p += k
         return end
 
+    # ------------------------------------------------------------------ split SWA rings
+    def _swa_begin(self, p0: int):
+        """Before a prefill chunk at p0 of the active slot: the split SWA layers in pf mode (the prefill ring), the ring
+        taken over from another slot (its pending window copied to its decode ring first)."""
+        if not self._swa:
+            return
+        own = self._pf_own
+        if own is not None and own["slot"] != self.slot:
+            self.swa_flush()
+            own = self._pf_own = None
+        if own is not None and not own["pending"] and p0 != own["hi"]:  # (not a continuation of what the ring holds)
+            own = self._pf_own = None
+        if own is None:  # (p0 > 0: rewind() restored the window before p0, or warm-up's rewinds: unread garbage)
+            self._pf_own = {"slot": self.slot, "lo": p0, "hi": p0, "top": p0, "pending": True}
+        self._pf_own["pending"] = True
+        for a in self._swa:
+            a.pf_mode(True)
+
+    def _swa_wrote(self, p0: int, T: int, Tp: int):
+        own = self._pf_own
+        if self._swa and own is not None and own["slot"] == self.slot:
+            own["hi"], own["top"] = p0 + T, max(own["top"], p0 + Tp)
+
+    def swa_flush(self):
+        """End of a prefill (before any decode reads the slot's decode ring): the owner's window copied from the prefill
+        ring to its decode ring, the split SWA layers back to decode mode. Idempotent."""
+        own = self._pf_own
+        if not self._swa or own is None or not own["pending"]:
+            return
+        for a in self._swa:
+            a.migrate(own["slot"], own["hi"])
+            a.pf_mode(False)
+        own["pending"] = False
+
+    def _swa_ring_has(self, u: int, r: int) -> bool:
+        own, W = self._pf_own, self.cfg.window
+        ring = self._swa[0].ring_pf
+        return own is not None and own["slot"] == u and r <= own["hi"] and r - W >= max(own["lo"], own["top"] - ring)
+
+    def swa_window_ok(self, u: int, r: int) -> bool:
+        """Split SWA: slot u's sequence can continue from position r (prefix reuse): the window before r is in the
+        prefill ring or in its host snapshot."""
+        return not self._swa or self._swa_ring_has(u, r) or self._swa_snap.get(u, (None,))[0] == r
+
+    def swa_snapshot(self, r: int):
+        """Split SWA: the active slot's window before position r (in the prefill ring: its prefill just ran) -> host
+        (prefix reuse from r after the ring was taken over: rewind). One per slot; r <= 0: none."""
+        u = self.slot
+        if not self._swa or r < self.cfg.window or self._swa_snap.get(u, (None,))[0] == r:
+            return
+        if not self._swa_ring_has(u, r):
+            self._swa_snap.pop(u, None)
+            return
+        W = self.cfg.window
+        buf = ttnn.zeros((1, 1, len(self._swa) * W, self._swa[0].width), dtype=ttnn.bfloat16,
+                         layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        for k, a in enumerate(self._swa):
+            a.ring_copy(buf, k, r, save=True)
+        self._swa_snap[u] = (r, to_torch0(buf))
+        ttnn.deallocate(buf)
+
+    def swa_drop(self, u: int):
+        self._swa_snap.pop(u, None)
+        if self._pf_own is not None and self._pf_own["slot"] == u and not self._pf_own["pending"]:
+            self._pf_own = None
+
+    def _swa_rewind(self, r: int):
+        """rewind(r) of the active slot: the window before r into the prefill ring (from the host snapshot unless the
+        ring still holds it)."""
+        if not self._swa:
+            return
+        u = self.slot
+        if self._swa_ring_has(u, r):
+            self._pf_own["hi"] = r
+            return
+        if self._pf_own is not None:
+            self.swa_flush()
+        self._pf_own = {"slot": u, "lo": r, "hi": r, "top": r, "pending": False}
+        snap = self._swa_snap.get(u)
+        if snap is None or snap[0] != r:  # (warm-up's rewinds: the window is unread garbage)
+            return
+        W = self.cfg.window
+        buf = upload(self.mesh, snap[1].reshape(1, 1, -1, self._swa[0].width), ttnn.bfloat16, ttnn.ROW_MAJOR_LAYOUT)
+        for k, a in enumerate(self._swa):
+            a.ring_copy(buf, k, r, save=False)
+        ttnn.deallocate(buf)
+        self._pf_own["lo"] = r - W
+
     def reset(self):
         self.pos = 0
         self.__dict__.setdefault("_hiw", {})[self.slot] = 0
+        if self._swa:  # (a new sequence in the slot: its prefill ring window / snapshot are stale)
+            own = self._pf_own
+            if own is not None and own["slot"] == self.slot:
+                if own["pending"]:
+                    for a in self._swa:
+                        a.pf_mode(False)
+                self._pf_own = None
+            self._swa_snap.pop(self.slot, None)
         POSMAPS.pop(self.slot, None)  # image prompt state of the slot's previous sequence
         self._img = None
         for layer in self.layers:
@@ -542,6 +645,7 @@ class Hy4Model:
         self.pos = int(n)
         POSMAPS.pop(self.slot, None)
         self._img = None
+        self._swa_rewind(int(n))
         for layer in self.layers:
             if layer.attn.indexer is not None:
                 layer.attn.indexer.rewind(n)
@@ -640,6 +744,7 @@ class Hy4Model:
             lg = self.forward(ids[i : i + n], min_rows=rows,
                               logits_rows="last" if last or os.environ.get("HY4_PF_NOSYNC", "1") != "1" else "none")
             i += n
+        self.swa_flush()
         return lg
 
     # ------------------------------------------------------------------ traced first chunk (TTFT of short prompts)
@@ -678,6 +783,7 @@ class Hy4Model:
         for layer in self.layers:
             if layer.attn.indexer is not None:
                 layer.attn.indexer._traced_pf = True
+        self._swa_begin(0)
         try:
             if st is None:
                 st = {"tok": ttnn.to_device(tok_h, mesh),
@@ -705,6 +811,8 @@ class Hy4Model:
                     layer.attn.indexer._traced_pf = False
         self.pos = T
         self.__dict__.setdefault("_hiw", {})[self.slot] = Tb
+        self._swa_wrote(0, T, Tb)
+        self.swa_flush()
         for layer in self.layers:
             if layer.attn.indexer is not None:
                 layer.attn.indexer.after_traced_prefill(T, Tb)
@@ -756,6 +864,7 @@ class Hy4Model:
         align = 32 * self.N if split else 32
         Tp = -(-max(T, min_rows) // align) * align
         assert p0 + Tp <= self.max_ctx + 64 or Tp == -(-T // align) * align, "bucket padding past the cache"
+        self._swa_begin(p0)
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         tok[0, :T] = ids.reshape(-1).to(torch.int32)
         tok_t = upload(mesh, tok, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT,
@@ -787,6 +896,7 @@ class Hy4Model:
         self.pos = p0 + T
         hiw = self.__dict__.setdefault("_hiw", {})  # prefix reuse: the highest position this slot's caches were written
         hiw[self.slot] = max(hiw.get(self.slot, 0), p0 + Tp)
+        self._swa_wrote(p0, T, Tp)
         if logits_rows == "none":  # (prefill: a chunk before the last)
             ttnn.deallocate(X)
             return None
@@ -828,6 +938,7 @@ class Hy4Model:
         l1_cb_room(mesh, refresh=True)  # (as forward)
         B, Tb = plan
         Tp = B * Tb
+        self.swa_flush()  # (packed segments write their slots' decode rings directly)
         tok = torch.zeros(1, Tp, dtype=torch.int32)
         eng_rows = ({l.li: torch.zeros(Tp, 1536, dtype=torch.bfloat16) for l in self.layers if l.engram is not None}
                     if self.engram is not None else {})  # (no store: the Engram blocks are skipped, as in forward())

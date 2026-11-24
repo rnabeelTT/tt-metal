@@ -131,18 +131,23 @@ POOL_TOKEN_BYTES = 12 * 1216 + 12 * 256 // 4  # per token per die: the sparse la
 
 def pool_plan(users: int, max_model_len: int | None = None):
     """(P pool tokens, vLLM token budget, the largest max_model_len) of the shared pool for `users` (2..8) slots: the
-    cache budget (cache_budget_gib) less the per-slot SWA rings, the indexers' work buffer (sized for max_model_len;
+    cache budget (cache_budget_gib) less the SWA rings, the indexers' work buffer / score scratch (sized for max_model_len;
     default: the largest that fits) and the sink rows, over 15,360 B/token. The vLLM budget leaves each slot its
     extent's lookahead / rounding (640 tokens) and one prefill's bucket padding (2048) + the plugin's output reservation
     (512): vLLM preempts before the pool runs out."""
     S = int(users)
     budget = cache_budget_gib(S) * 2**30
     ring = -(-(2048 + 512 + 32) // 32) * 32
-    fixed = S * ring * 1216 * 30 + 12 * 96 * 1216 + 12 * 96 * 256
+    if os.environ.get("HY4_SWA_SPLIT", "1") == "1":  # (tt/attention.py: per slot a 576-row decode ring + one prefill ring)
+        rings = S * (-(-(512 + 64) // 32) * 32) + ring
+    else:
+        rings = S * ring
+    fixed = rings * 1216 * 30 + 12 * 96 * 1216 + 12 * 96 * 256
 
     def plan(mml):
         gcap = -(-((mml + 64) // 4 + 96) // 2048) * 2048
-        P = int((budget - fixed - 12 * gcap * 256) // POOL_TOKEN_BYTES) // 2048 * 2048
+        wb = (1 if os.environ.get("HY4_POOL_DIRECT", "1") == "1" else 12) * gcap * 256  # (direct: one score scratch)
+        P = int((budget - fixed - wb) // POOL_TOKEN_BYTES) // 2048 * 2048
         V = (P - S * 640 - 2048 - 512) // BLOCK_SIZE * BLOCK_SIZE
         return P, V
 

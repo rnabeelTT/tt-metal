@@ -77,7 +77,7 @@ class Hy4Decoder:
         a0 = next(l.attn for l in model.layers if l.attn.kind == "sparse")
         s0 = next((l.attn for l in model.layers if l.attn.kind == "swa"), None)
         self.sink_sparse = a0.sink_row
-        self.ring = s0.rows if s0 is not None else 0
+        self.ring = (s0.ring_dec if getattr(s0, "split", False) else s0.rows) if s0 is not None else 0  # (decode ring)
         self.sink_swa = s0.sink_row if s0 is not None else 0
         self.K_dense = -(-(cfg.idx_candidate_topk + 1) // K_CHUNK) * K_CHUNK
         self.K_swa = -(-(cfg.window + 1) // K_CHUNK) * K_CHUNK
@@ -89,6 +89,11 @@ class Hy4Decoder:
         cap = ((self.gcap - 32) // 32) * 32
         if self.gcap and (not self.buckets or cap > self.buckets[-1]):
             self.buckets.append(cap)
+        # the shared pool read directly (tt/indexer.py HY4_POOL_DIRECT): the single path selects with tt/lane_sel over
+        # each row's visible groups (one program for every context: one bucket)
+        self.direct = bool(a0.indexer is not None and getattr(a0.indexer, "direct", False))
+        if self.direct and self.buckets:
+            self.buckets = [self.buckets[-1]]
         self.min_bucket = 0  # warm-up: force a larger score bucket than the context needs (compile / capture it)
         self.si = self._alloc()
         self._alloc_outputs()
@@ -137,6 +142,8 @@ class Hy4Decoder:
         si.base_f = self._dev(z(1, 1, R, 1), ttnn.float32, ttnn.TILE_LAYOUT)
         si.vlen = self._dev(z(1, 1, 1, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         si.vcol = self._dev(z(1, 1, R, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+        si.lmeta = self._dev(z(1, 1, R, 16, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)  # (direct pool)
+        si.vmax = self._dev(z(1, 1, 1, 1, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         si.idx_tail_fd = self._dev(z(1, 1, R, self.K_dense - self.n_sel, dtype=torch.int32), ttnn.uint32,
                                    ttnn.ROW_MAJOR_LAYOUT)
         for r in range(1, 9):
@@ -179,6 +186,7 @@ class Hy4Decoder:
 
     def start(self, pos: int):
         """After a prefill of `pos` tokens: load the staging windows from the caches."""
+        self.model.swa_flush()
         nb = (pos // 32) * 32
         gb = ((nb // self.cfg.idx_ratio) // 32) * 32
         for layer in self.model.layers:
@@ -278,7 +286,8 @@ class Hy4Decoder:
                              .reshape(1, 1, 1, ROWS), ttnn.uint32)
         h["off_swa"] = [one(bw + nb % self.ring), one(bw + (nb + 32) % self.ring)] if self.ring else [one(0), one(0)]
         h["base_f"] = _tile(torch.full((1, 1, ROWS, 1), float(bs)), ttnn.float32)
-        h["off_grp"] = [one(gb), one(gb + 32)]
+        gbase = bs // r if getattr(self, "direct", False) else 0  # (direct: the slot's groups in the pool)
+        h["off_grp"] = [one(gbase + gb), one(gbase + gb + 32)]
         gpos = torch.zeros(32, dtype=torch.long)
         gpos[:16] = torch.arange(nb, nb + 64, r)
         gc, gs = cos_sin(rpos(gpos), cfg.rope_theta["sparse"], cfg.qk_rope)
@@ -317,6 +326,15 @@ class Hy4Decoder:
             cur = [self.n_sel + 1 + (int(pos[s]) - (int(pos[s]) // r) * r + 1) - 1 for s in range(R)]
             h["fd_cur"] = (R, ttnn.from_torch(torch.tensor(cur, dtype=torch.int32), dtype=ttnn.int32))
         sparse = p0 >= cfg.idx_candidate_topk
+        if getattr(self, "direct", False):  # tt/lane_sel rows: [group base, visible groups, cache base, selects]
+            meta = np.zeros((ROWS, 16), dtype=np.uint32)
+            meta[:, 0] = gbase
+            meta[:R, 1] = vis[:R].numpy().astype(np.uint32)
+            meta[:R, 2] = bs
+            meta[:R, 3] = 1 if sparse else 0
+            h["lmeta"] = _rm(torch.from_numpy(meta.view(np.int32)).reshape(1, 1, ROWS, 16), ttnn.uint32)
+            vm = int(meta[:R, 1].max()) if sparse and R else 0
+            h["vmax"] = _rm(torch.tensor([max(vm, 1)], dtype=torch.int32).reshape(1, 1, 1, 1), ttnn.uint32)
         bucket = 0
         if sparse:
             need = max(int(vis.max()), self.min_bucket)
@@ -336,7 +354,7 @@ class Hy4Decoder:
         if "fd_cur" in h:
             c(h["idx_tail_fd"], si.idx_tail_fd)
             c(h["fd_cur"][1], si.fd_cur[h["fd_cur"][0]])
-        for name in ("vlen", "vcol"):
+        for name in ("vlen", "vcol", "lmeta", "vmax"):
             if name in h and getattr(si, name, None) is not None:
                 c(h[name], getattr(si, name))
         for j in range(2):
@@ -381,6 +399,7 @@ class Hy4Decoder:
 
         R = len(ids)
         p0 = self.pos if p0 is None else int(p0)
+        self.model.swa_flush()
         t0 = _t.perf_counter()
         h, sparse, bucket = self._host_inputs(ids, p0)
         t1 = _t.perf_counter()

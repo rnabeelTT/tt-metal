@@ -226,7 +226,7 @@ class Hy4Attention:
             if ukv_stream_env() in ("1", "build") and udt == ttnn.bfloat16:
                 self._ukv_streams(wuk, wuvT)
         if share is not None:  # the DFly2 drafter: KV share with a target layer (its cache, sink and scratch rows)
-            self.cache, self.rows = share.cache, share.rows
+            self.cache, self.rows = share.cache, (share.ring_dec if getattr(share, "split", False) else share.rows)
             self.sink_row, self.scratch_row = share.sink_row, share.scratch_row
             self.slots, self.share = share.slots, share
             self.ext = getattr(share, "ext", None)
@@ -234,11 +234,24 @@ class Hy4Attention:
         # caches (row-major bf16, replicated): sparse layers hold every position + a sink block at the end; SWA layers
         # a ring of `ring` rows + the sink block
         self.ext = pool[1] if pool is not None else None
+        self.split, self.pf = False, False
         if self.kind == "sparse":
             self.rows = -(-max_ctx // 32) * 32 + 64  # + the decode staging window's lookahead (two 32-row slabs)
         else:
             self.rows = -(-(chunk + cfg.window + 32) // 32) * 32
         self.sink_row = self.slots * self.rows
+        ring_dec = -(-(cfg.window + 64) // 32) * 32
+        if (self.kind == "swa" and self.slots > 1 and ring_dec < self.rows
+                and os.environ.get("HY4_SWA_SPLIT", "1") == "1"):
+            # HY4_SWA_SPLIT=1 (default, 2+ slots): per slot a decode ring of window + 64 rows (576: the window and the
+            # staging lookahead) and ONE prefill ring of chunk + window + 32 rows (2592) after them, which the prefilling
+            # slot uses (pf mode, Hy4Model._swa_begin); Hy4Model.swa_flush copies the window before the prompt's end
+            # into the slot's decode ring (the same rows: bit-identical). Was: a 2592-row ring per slot.
+            self.split = True
+            self.ring_dec, self.ring_pf = ring_dec, self.rows
+            self.pf_base = self.slots * ring_dec
+            self.rows = ring_dec
+            self.sink_row = self.pf_base + self.ring_pf
         if self.kind == "sparse" and pool is not None:  # (rows: no wrap below the pool's end)
             self.rows = self.sink_row = int(pool[0])
         self.scratch_row = self.sink_row + 32  # 32 scratch rows: the DFly2 drafter's block latents (never target rows)
@@ -708,7 +721,10 @@ class Hy4Attention:
                 continue
             self.set_slot(slot)
             part = ttnn.slice(row_rm, (0, 0, b * Tb, 0), (1, 1, (b + 1) * Tb, self.width))
-            self._write_rows(part, 0, self._write_n(part, T))
+            if self.split:  # (decode mode: the slot's decode ring)
+                self.write_dec_window(part, T)
+            else:
+                self._write_rows(part, 0, self._write_n(part, T))
             ttnn.deallocate(part)
             if self.indexer is not None:
                 xs = ttnn.slice(x, (0, 0, b * Tb, 0), (1, 1, (b + 1) * Tb, int(x.shape[-1])), memory_config=mem)
@@ -755,19 +771,83 @@ class Hy4Attention:
         return self._out_part(x, o4, mem)
 
     def slot_base(self, u: int) -> int:
-        """Slot u's first cache row: its pool extent's base (sparse, pooled), else u * rows."""
+        """Slot u's first cache row: its pool extent's base (sparse, pooled), else u * rows (split SWA: its decode
+        ring)."""
         if self.kind == "sparse" and self.ext is not None:
             e = self.ext.get(u)
             return int(e[0]) if e is not None else self.trash_row
-        return u * self.rows
+        return u * (self.ring_dec if self.split else self.rows)
 
     def set_slot(self, u: int):
-        """The sequence slot the following prefill / staging calls address (its cache region: slot_base)."""
+        """The sequence slot the following prefill / staging calls address (its cache region: slot_base; split SWA in
+        pf mode: the prefill ring)."""
         assert 0 <= u < self.slots, (u, self.slots)
-        self.slot, self.base = u, self.slot_base(u)
+        self.slot, self.base = u, (self.pf_base if self.split and self.pf else self.slot_base(u))
         if self.indexer is not None:
             self.indexer.set_slot(u)
             self.indexer.cache_base = self.base
+
+    def pf_mode(self, on: bool):
+        """Split SWA: prefill chunks address the prefill ring (on) or the active slot's decode ring (off)."""
+        if self.split:
+            self.pf = bool(on)
+            self.rows = self.ring_pf if self.pf else self.ring_dec
+            self.base = self.pf_base if self.pf else self.slot_base(self.slot)
+
+    _OFFS_W = 64  # (slab_write offset tensors of the ring copies: one width, one program per slab count)
+
+    def _ring_offs(self, dst, src):
+        o = np.zeros(self._OFFS_W, dtype=np.int32)
+        n = len(dst)
+        assert 2 * n <= self._OFFS_W
+        o[:n], o[n : 2 * n] = dst, src
+        return upload(self.mesh, torch.from_numpy(o).reshape(1, 1, 1, -1), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
+
+    def ring_pos(self, n: int) -> np.ndarray:
+        """The 18 slab starts (positions) a decode ring holds after a prompt of n tokens: the window before the staging
+        window's base (n // 32) 32 and the window (the lookahead rows past n: unread until decode writes them)."""
+        b = (n // 32) * 32
+        return max(0, b - self.cfg.window) + 32 * np.arange(self.ring_dec // 32)
+
+    def migrate(self, u: int, n: int):
+        """Split SWA: slot u's decode ring <- the prefill ring rows of ring_pos(n) (one slab_write, cache to cache)."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        pos = self.ring_pos(n)
+        offs = self._ring_offs(u * self.ring_dec + pos % self.ring_dec, self.pf_base + pos % self.ring_pf)
+        slab_write(self.cache, self.cache, offs, len(pos), src_offs=True)
+        ttnn.deallocate(offs)
+
+    def ring_copy(self, buf, k: int, r: int, save: bool):
+        """Split SWA: the prefill ring's window before position r (16 slabs: positions r - 512 ..) <-> rows k 512 .. of
+        buf [n 512, 608] RM (save: ring -> buf; else buf -> ring)."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        W = self.cfg.window
+        pos = r - W + 32 * np.arange(W // 32)
+        ring = self.pf_base + pos % self.ring_pf
+        flat = k * W + 32 * np.arange(W // 32)
+        offs = self._ring_offs(flat, ring) if save else self._ring_offs(ring, flat)
+        if save:
+            slab_write(self.cache, buf, offs, len(pos), src_offs=True)
+        else:
+            slab_write(buf, self.cache, offs, len(pos), src_offs=True)
+        ttnn.deallocate(offs)
+
+    def write_dec_window(self, part, T: int):
+        """Split SWA, a packed prefill segment part [1, 1, Tb, 608] RM (positions 0 .., T real) -> the active slot's
+        decode ring: every row when Tb fits the ring, else the 18 slabs of ring_pos(T) (all rows would wrap onto each
+        other inside one slab_write)."""
+        from models.autoports.tencent_hy4_flash.tt.slab_write import slab_write
+
+        Tb = int(part.shape[-2])
+        if Tb <= self.ring_dec:
+            self._write_rows(part, 0, self._write_n(part, T))
+            return
+        pos = np.minimum(self.ring_pos(T), Tb - self.ring_dec + 32 * np.arange(self.ring_dec // 32))
+        offs = self._ring_offs(self.base + pos % self.ring_dec, pos)
+        slab_write(part, self.cache, offs, len(pos), src_offs=True)
+        ttnn.deallocate(offs)
 
     def rows_ok(self, p0: int, Tp: int) -> bool:
         """The row-parallel selecting-chunk path applies (sparse layer, every row selects, rows split evenly)."""
@@ -1081,6 +1161,7 @@ class Hy4Attention:
     # ------------------------------------------------------------------ trace-safe step (decode / verify rows)
     def init_stage(self, base: int):
         """After a prefill: the 64-row staging window starting at position `base` (32-aligned) from the cache."""
+        assert not self.pf, "split SWA: Hy4Model.swa_flush before decode"
         r0 = self.base + (base if self.kind == "sparse" else base % self.rows)
         if os.environ.get("HY4_STAGE_GATHER", "1") == "1":
             # the 64 window rows gathered by a runtime index tensor (ttnn.embedding over the row-major cache): a slice
