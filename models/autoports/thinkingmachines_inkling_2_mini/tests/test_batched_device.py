@@ -95,6 +95,8 @@ def main():
     traced = run(set(range(B)), tr)
     print(f"traced vs eager: logits pcc {pcc(traced, got):.6f}, max abs diff {(traced - got).abs().max():.4f}",
           flush=True)
+    if os.environ.get("DUMP"):  # (the logits, to compare two runs bitwise)
+        torch.save({"eager": got, "traced": traced}, os.environ["DUMP"])
     n = 50
     dec.set_inputs(torch.tensor([ids[prefix[b]] for b in range(B)]), torch.tensor(prefix))
     ttnn.synchronize_device(mesh)
