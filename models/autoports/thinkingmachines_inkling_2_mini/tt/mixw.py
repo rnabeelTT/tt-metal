@@ -61,11 +61,12 @@ class MixKernel:
             self.splits[RT] = (cores, per, work)
         return self.splits[RT]
 
-    def __call__(self, S, lg, n, nq, out_mc=ttnn.L1_MEMORY_CONFIG):
+    def __call__(self, S, lg, n, nq, out_mc=ttnn.L1_MEMORY_CONFIG, lg_off=0, lg_st=None):
         """S [1, n, T, H] fp32 interleaved, lg [1, n, T, nq*32] fp32 interleaved -> nq fp32 [1, 1, T, H]
         (T <= 32, or a multiple of 32: one softmax per row tile). Or S / lg: lists of n [1, 1, T, H] / [1, 1, T, nq*32]
         (no stacking copy; the sources share one memory config, the logits another); a logits entry may be (tensor,
-        first query tile, the tensor's tiles per row): a block's logits against several mixes' queries."""
+        first query tile, the tensor's tiles per row): a block's logits against several mixes' queries. Stacked:
+        lg [1, n, T, lg_st * 32] may hold several mixes' logits, this one's at tiles lg_off .. lg_off + nq - 1."""
         stacked = not isinstance(S, (list, tuple))
         if not stacked:
             lg = [e if isinstance(e, tuple) else (e, 0, nq) for e in lg]
@@ -85,8 +86,9 @@ class MixKernel:
         rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S0).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(lg0).get_compile_time_args()
         if stacked:
+            st = lg_st or nq
             src = [v for i in range(n)
-                   for v in (S.buffer_address(), i * RT * self.Ht, lg.buffer_address(), i * RT * nq, nq)]
+                   for v in (S.buffer_address(), i * RT * self.Ht, lg.buffer_address(), i * RT * st + lg_off, st)]
         else:
             src = [v for s_, (l_, off, st) in zip(S, lg) for v in (s_.buffer_address(), 0, l_.buffer_address(), off, st)]
         rd_rt = [[t0, per, r0, nr] + src for t0, r0, nr in work]

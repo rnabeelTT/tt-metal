@@ -50,6 +50,9 @@ POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"
 AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"
 GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"
 KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
+# I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
+# _messages; per layer only the mix program)
+MSG_PASS = __import__("os").environ.get("I2M_MSG_PASS", "1") == "1"
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
@@ -540,6 +543,7 @@ class BatchedDecoder:
 
     def _step(self):
         m, B, ops, cfg = self.m, self.B, self.m.ops, self.m.cfg
+        self._msg = None  # (the current pass's message logits: _messages)
         e = ttnn.embedding(self.tokens, m.embed, layout=ttnn.TILE_LAYOUT)
         x = _bf(ops.rms(ttnn.reshape(e, (1, 1, B, m.H)), m.embed_norm))
         if GLUE_L1:
@@ -555,7 +559,7 @@ class BatchedDecoder:
                     pre_x, pre_blocks, pre_ids = x, list(blocks_n), list(ids)
                 else:
                     x, blocks_n, ids = pre_x, list(pre_blocks), list(pre_ids)
-            msgs = m.messages(li - cfg.loop_start, prev_src) if (L.loop and p > 0) else None
+            msgs = self._messages(li - cfg.loop_start, prev_src) if (L.loop and p > 0) else None
             x, blk = self._layer(a, x, blocks_n, msgs, pos_w, pos_wr, pos_sdpa, tau, ids, D)
             if L.boundary:  # (the block: the layer's normed input, made once in _layer)
                 blocks_n, ids = blocks_n + [blk], ids + [a]
@@ -563,6 +567,7 @@ class BatchedDecoder:
                 x = self.materialize(x)
                 prev_src = [blocks_n[len(pre_blocks) + 1], ops.rms(x)]
         x = self.materialize(x)
+        self._msg = None
         if self.plan is None:
             return m.head(x, blocks_n)
         h = self._mix(("head", -1), blocks_n, ids, D, ops.rms(x), m.final_Q, 1)[0]
@@ -595,6 +600,20 @@ class BatchedDecoder:
         lg = dmm(cur, ops.qrep[id(Q)], ops.ckc, dtype=ttnn.float32, memory_config=L1)
         lgs = [(D[b], self.plan.off[(b, key)]) for b in ids] + [(lg, 0)]
         return ops.mixk.multi(blocks_n + [cur], lgs, nq)
+
+    def _messages(self, i, prev_src):
+        """m.messages(i, prev_src): the pass's sources' logits against every loop layer's queries in one matmul (made
+        at the pass's first loop layer), then this layer's mix."""
+        m = self.m
+        T = int(prev_src[0].shape[-2])
+        if not MSG_PASS or T > 32 or getattr(m, "msg_qcat", None) is None or m.ops.mixk is None:
+            return m.messages(i, prev_src)
+        if self._msg is None or self._msg[0] is not prev_src:
+            src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src]
+            S = ttnn.concat(src, dim=1, memory_config=L1)
+            self._msg = (prev_src, S, dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1))
+        _, S, lg = self._msg
+        return m.ops.mixk(S, lg, 2, 4, out_mc=L1, lg_off=4 * i, lg_st=4 * len(m.msg_Q))
 
     def _gate_norms(self, L, li, ins, messages):
         """The attention side's three message gates, each with its following norm, one program each (tt/gate.py

@@ -396,6 +396,10 @@ class Inkling2Model:
         self.msg_Q = []
         for i in range(mq.shape[0]):
             self.msg_Q.append(ops.query(mq[i].float().T * H**-0.5))
+        # every loop layer's message queries side by side ([1, 1, H, n_loop 4 32], each query in 32 columns): a decode
+        # pass computes its two sources' logits against all of them in one matmul (tt/batched.py _messages)
+        self.msg_qcat = ops.up(torch.cat([(mq[i].float().T * H**-0.5).repeat_interleave(32, dim=1)
+                                          for i in range(mq.shape[0])], 1).reshape(1, 1, H, -1))
         self.final_Q = self.ops.query(ck.final_query().float().reshape(-1, H).T * H**-0.5)
         self.final_norm = ops.up(ck.get("model.llm.norm.weight").float().reshape(1, 1, 1, -1))
         self.embed_norm = ops.up(ck.get("model.llm.embed_norm.weight").float().reshape(1, 1, 1, -1))
