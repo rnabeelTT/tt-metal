@@ -530,13 +530,14 @@ class BatchedDecoder:
             self.apps[a].load_slot(b, self.m.apps[a], lane)
 
     def set_inputs(self, tokens: torch.Tensor, positions: torch.Tensor):
-        """tokens [B] int, positions [B] int (-1 = idle slot)."""
+        """tokens [B] int (None: already on device), positions [B] int (-1 = idle slot)."""
         from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import tau_of
 
+        host = [] if tokens is None else [
+            (tokens.reshape(1, -1).to(torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, self.tokens)]
         pos = positions.to(torch.int64)
         pw = pos.clamp(min=0)  # idle slots write at position 0 of their own slot (a slot is prefilled before use)
-        host = [
-            (tokens.reshape(1, -1).to(torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, self.tokens),
+        host += [
             (pos.reshape(-1, 1).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
             (pw.to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_w),
             ((pw % self.ring_period).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_wr),

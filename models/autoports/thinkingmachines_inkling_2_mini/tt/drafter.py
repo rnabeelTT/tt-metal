@@ -805,13 +805,21 @@ class DSparkDrafter:
         self._write(self.in_p0, [[int(p0)]])
         self._write(self.in_n, [[int(n)]])
 
-    def _traced_body(self, taps_buf, d, commit):
+    def _traced_body(self, taps_buf, d, commit, out_tokens=None):
         self._ctrl()
         if commit:
             t = taps_buf if int(taps_buf.shape[2]) == RC else ttnn.slice(taps_buf, [0, 0, 0, 0], [1, 4, RC, self.H])
             self._commit_rows(t, self.idx_c, self.in_p0, self.idx_n)
         toks, _ = self._draft(d)
+        if out_tokens is not None:
+            self.write_tokens(toks, out_tokens)
         return toks
+
+    def write_tokens(self, toks, out_tokens):
+        """[anchor, drafts] (toks uint32 [1, 1, 1, d]) into out_tokens (uint32 [1, d + 1] ROW_MAJOR, the verify pass's
+        token input), on device."""
+        row = ttnn.concat([ttnn.reshape(self.in_anchor, (1, 1, 1, 1)), toks], dim=-1)
+        ttnn.copy(ttnn.reshape(row, tuple(out_tokens.shape)), out_tokens)
 
     def set_gumbel(self, tg):
         """Sampled drafts: tg = T * Gumbel noise, torch [d, TOPK] (row k: step k's candidates in rank order; zeros = the
@@ -827,16 +835,17 @@ class DSparkDrafter:
         ids = self._host(self.cand_id).reshape(self.d_max, TOPK)[:d].long()
         return ids, self._host(self.cand_lg).reshape(self.d_max, TOPK)[:d].float()
 
-    def capture(self, taps_buf=None, d: int = 3, commit: bool = True, sample: bool = False):
+    def capture(self, taps_buf=None, d: int = 3, commit: bool = True, sample: bool = False, out_tokens=None):
         """Trace ctrl [+ commit of RC rows of taps_buf ([1, 4, R >= RC, H] bf16 TILE, kept at its address)] + draft(d).
         The caller writes in_anchor / in_p0 / in_n (set_inputs) and the taps buffer before each replay(); sampled
-        drafts (sample) also the noise (set_gumbel)."""
+        drafts (sample) also the noise (set_gumbel). out_tokens: a uint32 [1, d + 1] ROW_MAJOR device tensor (the
+        verify pass's tokens) the trace also writes [anchor, drafts] into."""
         assert not commit or taps_buf is not None
         self.sample = sample
-        self._traced_body(taps_buf, d, commit)  # (compile every program before the capture)
+        self._traced_body(taps_buf, d, commit, out_tokens)  # (compile every program before the capture)
         ttnn.synchronize_device(self.mesh)
         self.trace = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        self.tokens = self._traced_body(taps_buf, d, commit)
+        self.tokens = self._traced_body(taps_buf, d, commit, out_tokens)
         ttnn.end_trace_capture(self.mesh, self.trace, cq_id=0)
         ttnn.synchronize_device(self.mesh)
         return self.trace

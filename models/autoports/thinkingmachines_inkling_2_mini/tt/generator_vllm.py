@@ -73,6 +73,44 @@ PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 # (default 1): the tower's weights (0.6 GB) stay on the host and are written to the device per image (+~85 ms on one die),
 # so the device only needs the forward's transients (~16 KB per padded patch row: 0.43 GiB at 4,095 image tokens)
 VISION = os.environ.get("I2M_VISION", "1") == "1"
+# I2M_HOST_PROF=1: each decode step's host timeline (plain / speculative), mean ms per segment every 100 steps
+HOST_PROF = os.environ.get("I2M_HOST_PROF", "0") == "1"
+
+
+class _Prof:
+    """Host timeline of a decode step: mark(k) adds the time since the previous mark to segment k; "outside" is the
+    time between the previous step's end and this one's start (the plugin, vLLM's scheduler, the API server)."""
+
+    last = None  # (the end of the previous step, plain or speculative)
+
+    def __init__(self, name):
+        self.name, self.acc, self.n, self.t = name, {}, 0, 0.0
+
+    def start(self, t):
+        if not HOST_PROF:
+            return
+        self.t = t
+        if _Prof.last is not None and t - _Prof.last < 0.05:  # (not across a prefill / an idle server)
+            self.acc["outside"] = self.acc.get("outside", 0.0) + t - _Prof.last
+
+    def mark(self, k):
+        if not HOST_PROF:
+            return
+        t = time.perf_counter()
+        self.acc[k] = self.acc.get(k, 0.0) + t - self.t
+        self.t = t
+
+    def end(self, k="out"):
+        if not HOST_PROF:
+            return
+        self.mark(k)
+        _Prof.last = self.t
+        self.n += 1
+        if self.n % 100 == 0:
+            tot = sum(self.acc.values())
+            logger.info(f"host timeline {self.name} (ms/step over 100): "
+                        + "  ".join(f"{k} {v * 10:.2f}" for k, v in self.acc.items()) + f"  total {tot * 10:.2f}")
+            self.acc = {}
 
 
 def _prefix_slots():
@@ -193,6 +231,7 @@ class Inkling2ForCausalLM:
         self._captured = False
         self.already_warmed_up_prefill = False
         self._decode_steps = 0
+        self._pp, self._ps = _Prof("plain"), _Prof("spec")
 
     @classmethod
     def get_placeholder_str(cls, modality: str, i: int) -> str | None:
@@ -322,7 +361,7 @@ class Inkling2ForCausalLM:
                 self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
                 self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R))
                 # (its taps buffer: the verify trace's taps output; sampled drafts: zero noise = greedy)
-                self.dr.capture(self.ver.taps, SPEC, sample=True)
+                self.dr.capture(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
                 tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
@@ -552,6 +591,7 @@ class Inkling2ForCausalLM:
 
     # ------------------------------------------------------------------ decode
     def decode_forward(self, *args, **kwargs):
+        t_in = time.perf_counter() if HOST_PROF else 0.0
         tokens = kwargs.get("tokens", args[0] if args else None)
         start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
         self._apply_remap(kwargs.get("slot_remap"))
@@ -569,9 +609,12 @@ class Inkling2ForCausalLM:
                 self.spec = None
             elif (live == [s["row"]] and self.row2slot[s["row"]] == 0 and kwargs.get("sampling_params") is not None
                   and int(pos[s["row"]]) + SPEC + 2 < SPEC_MAX_LEN - 64):  # (the drafter's caches end at SPEC_MAX_LEN)
+                self._ps.start(t_in)
                 return self._spec_decode(s["row"], int(tok[s["row"]]), int(pos[s["row"]]), R, kwargs)
             else:
                 self._spec_exit(int(pos[s["row"]]))
+        pf = self._pp
+        pf.start(t_in)
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
         if TIMING and W != getattr(self, "_last_w", None):
@@ -592,7 +635,9 @@ class Inkling2ForCausalLM:
         t0 = time.perf_counter()
         d.set_inputs(tok_s, pos_s)
         t1 = time.perf_counter()
+        pf.mark("inputs")
         dev = d.step()
+        pf.mark("enqueue")
         if TIMING:
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
@@ -603,11 +648,13 @@ class Inkling2ForCausalLM:
         else:
             lg = self._host_logits(dev, W)  # [W, V] by physical slot
         t3 = time.perf_counter()
+        pf.mark("readback")
         if sp is not None:  # device sampling: the tokens [R, 1]
             toks = self.hs.sample(idx, vals, [(r, self.row2slot[r]) for r in live], sp,
                                   output_tokens=_host_tensor(kwargs.get("output_tokens")),
                                   prompt_tokens=_host_tensor(kwargs.get("prompt_tokens")))
             out = torch.zeros((R, 1), dtype=torch.int32)
+            pf.mark("sample")
             for r, t in toks.items():
                 out[r, 0] = t
         else:
@@ -627,6 +674,7 @@ class Inkling2ForCausalLM:
                             f"readback {acc[2] / n * 1e3:.1f}  pack {acc[3] / n * 1e3:.1f}  outside (plugin + sampling) "
                             f"{acc[4] / n * 1e3:.1f}")
                 self._tacc = [0.0] * 5
+        pf.end("pack")
         return out
 
     # ------------------------------------------------------------------ speculative decode
@@ -638,6 +686,9 @@ class Inkling2ForCausalLM:
         self.topk(self.ver.step(), R)
         for j in range(1, R):  # leaving speculative decode from row j
             self.ver.move_row(j, 0)
+        toks = [ttnn.reshape(t, (1, 1, 1, 1)) for t in self.dr.prev[:SPEC]]
+        toks = ttnn.concat(toks, dim=-1) if SPEC > 1 else toks[0]
+        self.dr.write_tokens(toks, self.ver.tokens)  # (the drafter trace's token hand-off)
 
     def _dr_commit(self, taps, p0, valid):
         """A prefill chunk's taps [1, 4, T, H] (rows past `valid`: padding) into the drafter, <= 512 rows per call."""
@@ -648,9 +699,12 @@ class Inkling2ForCausalLM:
 
     def _spec_decode(self, r, t, p, nrows, kwargs):
         """The speculative request's step (token t at position p): one pass -> its accepted tokens, all in this step
-        ([nrows, d + 1] int32, -1 padded). A pass: the drafter's trace (commit the last pass's accepted rows, draft d),
-        then the verify trace."""
-        s = self.spec
+        ([nrows, d + 1] int32, -1 padded). A pass: the drafter's trace (commit the last pass's accepted rows, draft d;
+        it writes the verify pass's tokens on device), then the verify trace. The previous pass enqueued this pass's
+        drafter trace already (its inputs follow from what it emitted), so the drafter runs while the host hands the
+        tokens to vLLM; replayed again if vLLM's (row, token, position) differ (its outputs depend on its inputs
+        only)."""
+        s, pf = self.spec, self._ps
         commit = None  # (rows of the last pass's taps the drafter commits: (first position, count))
         if s["n"] is not None:
             i = p - 1 - s["n"]  # (vLLM holds tokens up to position p - 1: rows 0 .. i of the last pass)
@@ -666,23 +720,35 @@ class Inkling2ForCausalLM:
             pt = pt if isinstance(pt, torch.Tensor) else torch.as_tensor(pt)
             self.m.pages.set_row(0, pt[r], (p + R - 1) // 64 + 1)
         self.m.pages.sync(self.ver.table_key)
+        pf.mark("pages")
         sp = kwargs["sampling_params"]
-        self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))  # (the drafter samples from its q at the request's T)
+        pre, s["pre"] = s.get("pre"), None
         if commit is None:  # (right after the prefill, whose commit is done)
+            self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))  # (the drafter samples from its q at the request's T)
             _, drafts = self.dr.draft(t, p, d=d, sample=True)
+            self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
         else:
-            self.dr.set_inputs(t, *commit)
-            self.dr.replay()
-            drafts = [int(x) for x in torch.as_tensor(self.dr.tokens_host()).reshape(-1)[:d]]
+            if pre != (r, t, commit):
+                self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))
+                self.dr.set_inputs(t, *commit)
+                self.dr.replay()
+            drafts = None
+            self.vtr.set_inputs(None, torch.arange(p, p + R))
+        pf.mark("draft_inputs")
+        self.vtr.step()
+        pf.mark("v_enqueue")
+        idx, vals = self.topk.host(self.vtr.extra)
+        pf.mark("v_wait_read")
+        if drafts is None:
+            drafts = [int(x) for x in self.dr._host(self.ver.tokens).reshape(-1)[1:R]]
         q = None
         if float(_param(sp, "temperature", r, 0.0)) > 0.0:
             ci, cl = self.dr.cand_host(d)
             q = [(ci[j], cl[j]) for j in range(d)]
-        self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
-        self.vtr.step()
-        idx, vals = self.topk.host(self.vtr.extra)
+        pf.mark("dq_read")
         em, k = self.hs.spec(idx, vals, r, drafts, sp, outs=_row(kwargs.get("output_tokens"), r),
                              prompt=_row(kwargs.get("prompt_tokens"), r), q=q)
+        pf.mark("accept")
         self.ver.set_accept([k])
         if SPEC_DUMP and q is not None:  # (offline acceptance study: the target's candidates / the drafter's per step)
             self._dump.append({"idx": idx[: d + 1].clone(), "vals": vals[: d + 1].clone(), "drafts": list(drafts),
@@ -698,6 +764,12 @@ class Inkling2ForCausalLM:
             if TIMING:
                 logger.info(f"speculative decode off for this request: {s['nt'] / s['np']:.2f} tokens per pass")
             self._spec_exit(p + k + 1)
+        if self.spec is s and p + k + 1 + SPEC + 2 < SPEC_MAX_LEN - 64:  # the next pass's drafter, now
+            self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))
+            self.dr.set_inputs(em[-1], p, k + 1)
+            self.dr.replay()
+            s["pre"] = (r, em[-1], (p, k + 1))
+        pf.mark("next_draft")
         st = self.sp_stats
         st[0], st[1] = st[0] + 1, st[1] + k
         if TIMING and st[0] % 100 == 0:
@@ -705,6 +777,7 @@ class Inkling2ForCausalLM:
         out = torch.full((nrows, R), -1, dtype=torch.int32)
         out[:, 0] = 0  # (rows vLLM is not decoding: one token, as the plain path returns)
         out[r, : len(em)] = torch.tensor(em, dtype=torch.int32)
+        pf.end("tail")
         return out
 
     def _spec_exit(self, p=None):
