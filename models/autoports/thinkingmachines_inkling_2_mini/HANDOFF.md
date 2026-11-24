@@ -506,6 +506,20 @@ streamed q|k|v with k|v on one reader per bank, 4-row tiles, 4-column blocks (I2
 and lean aprep (I2M_APREP_LEAN: 10.6 -> 7.5 us). Traced B=1: one die 18.5 ms, TP2 14.0 (B=4 22.9). All-to-all
 multicast rounds measured ~155 us per round (concurrent multicasts into one rectangle serialize): rejected.
 
+Served at 929076d256e (2026-11-24, full profile env, real-text prompts, 1 user; TPOT ms / tok/s):
+
+| profile | spec T=1 | spec greedy | plain T=1 | TTFT 1K / 4K | 8 users x 128 total |
+|---|---|---|---|---|---|
+| p300x2 | 8.48-8.75 / ~116 | 8.64 / 116 | 10.96 / 91 | 0.59 / 1.43 s | ~198 tok/s |
+| p300 | 10.17 / 98 | 9.79 / 102 | 13.52 / 74 | 0.55 / 1.80 s | ~158 tok/s |
+| p150 | 15.51 / 64.5 | 14.89 / 67 | 18.84 / 53 | 1.01 / 3.35 s | ~105 tok/s |
+
+Spec gain is text-dependent (p300x2 math 6.1 ms, code 8.4, chat ~plain rate: few drafts accepted). Traced plain decode B=1:
+one die 18.0 ms (~57 % of the 512 GB/s floor), TP2 12.7 (~40 %), TP4 ~10.3 (~25 %); the multi-die gap is the
+per-die glue (pre / post / gates / route / SDPA, ~4.5-6 ms per step on every die). Measured, not kept: the decode
+all-reduce folded into post / pre (I2M_AR_MERGE, bitwise but TP2 12.75 -> 12.98 ms; the 96 AR programs cost only
+~0.4 ms in the trace).
+
 ## Next
 
 1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
