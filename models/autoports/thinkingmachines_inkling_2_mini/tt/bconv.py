@@ -20,6 +20,9 @@ import ttnn
 KDIR = Path(__file__).parent / "kernels"
 # I2M_BCONV_ROWS: <= 16 live rows -> the conv's SFPU work on those rows only (bconv_compute.cpp BCONV_ROWS)
 ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "1") == "1"
+# I2M_BCONV_LIVE (with ROWS): x / states / taps read and y / states written on the live rows only (faces 0 / 1), not
+# whole fp32 tiles: the conv pair moved ~2.8 MB per application, DRAM-bound
+LIVE = __import__("os").environ.get("I2M_BCONV_LIVE", "1") == "1"
 TILE = 32
 # speculative verify rows (tt/kernels/seqshift.hpp): (R, G, acc) while a verify pass runs / is captured, else None.
 # acc: uint32 [1, 32] row-major, group g's accepted row of the previous pass.
@@ -133,9 +136,11 @@ class BConvKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
+        live = ROWS and LIVE and int(x.shape[-2]) <= 16
+        ldefs = [("BCONV_LIVE", str(int(x.shape[-2])))] if live else []
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
-            defines=([("BCONV_TAP_STRIDE", str(stride))] if stride else []) + sdefs + ddefs,
+            defines=([("BCONV_TAP_STRIDE", str(stride))] if stride else []) + sdefs + ddefs + ldefs,
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("bconv_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
@@ -148,7 +153,7 @@ class BConvKernel:
         ]
         key = ("i2m_bconv", self.C, len(cores), cores[0].x, cores[0].y, str(x.dtype), int(x.shape[-2]), stride,
                repr(x.memory_config()), repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()),
-               SEQ[:2] if SEQ else None, None if dyn is None else (repr(dyn[0].memory_config()), repr(dyn[1].memory_config()),
+               SEQ[:2] if SEQ else None, live, None if dyn is None else (repr(dyn[0].memory_config()), repr(dyn[1].memory_config()),
                                                                     repr(dyn[2].memory_config())))
         io = list({id(t): t for t in [x] + list(s) + list(w_taps) + [wc, y] + ([acc] if acc else [])}.values())
         return kernels, cbs, io, key, y

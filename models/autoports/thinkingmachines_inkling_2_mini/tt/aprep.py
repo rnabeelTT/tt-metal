@@ -25,6 +25,10 @@ F32, BF = 4096, 2048
 # I2M_APREP_QG (default 1): decode q / k / v heads in groups (4 or 8 heads per core, as the grid allows: units q groups,
 # r, k groups, v groups, sink per user); the per-head math is row-local, so the outputs are unchanged
 QG = __import__("os").environ.get("I2M_APREP_QG", "1") == "1"
+# I2M_APREP_LEAN (default 1): units whose writer stores only their head rows skip zeroing the gathered tiles (row-local
+# math) and gather them at row 0, their SFPU steps on those rows only; a head group's tiles written with one barrier;
+# the ones tile made by the compute (off the reader's path). Outputs bitwise unchanged
+LEAN = __import__("os").environ.get("I2M_APREP_LEAN", "1") == "1"
 
 
 def _bits(x: float) -> int:
@@ -128,7 +132,11 @@ class AttnPrep:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         ud = [("APREP_QN", str(self.QN)), ("APREP_HG", str(self.HG)), ("APREP_KN", str(KN)),
-              ("APREP_KG", str(KG)), ("APREP_NH", str(w.NH)), ("APREP_NKVH", str(w.NKV))]
+              ("APREP_KG", str(KG)), ("APREP_NH", str(w.NH)), ("APREP_NKVH", str(w.NKV)),
+              ("APREP_NOZERO", str(int(LEAN))), ("APREP_WB1", str(int(LEAN))), ("APREP_ONES_C", str(int(LEAN))),
+              ("APREP_KVW", str(int(kv is not None and fill is None)))]
+        if LEAN and not prefill and self.QN > 1 and (KN > 1 or (kv is not None and fill is None)):
+            ud.append(("APREP_RB", str(max(self.HG, KG))))  # (head groups at row 0, SFPU on their rows only)
         dm = lambda src, ct, rt, riscv, noc, defs=(): ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
             defines=list(defs) + ud, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
@@ -144,7 +152,7 @@ class AttnPrep:
         key = ("i2m_aprep", B, nc, self.HG, KG, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
                repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
                tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())), prefill,
-               tuple(pq.shape), tuple(k.shape))
+               tuple(pq.shape), tuple(k.shape), LEAN)
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
         for t in [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ()):

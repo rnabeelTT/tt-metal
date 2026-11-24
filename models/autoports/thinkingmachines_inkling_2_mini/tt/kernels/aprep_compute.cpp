@@ -15,6 +15,7 @@
 #include "api/compute/compute_kernel_api.h"
 #include "api/compute/eltwise_binary_sfpu.h"
 #include "api/compute/eltwise_unary/binop_with_scalar.h"
+#include "api/compute/eltwise_unary/fill.h"
 #include "api/compute/eltwise_unary/rsqrt.h"
 #include "api/compute/matmul.h"
 #include "api/compute/pack.h"
@@ -34,6 +35,14 @@ inline void calculate_aprep_split(const uint32_t x, const uint32_t hi, const uin
         sfpi::vFloat h = sfpi::as<sfpi::vFloat>(sfpi::as<sfpi::vUInt>(v) & MASK);
         sfpi::dst_reg[hi * tile] = h;
         sfpi::dst_reg[lo * tile] = v - h;
+        sfpi::dst_reg++;
+    }
+}
+template <int ITERATIONS>
+inline void calculate_aprep_mul(const uint32_t a, const uint32_t b, const uint32_t o) {
+    constexpr uint32_t tile = 32;
+    for (int d = 0; d < ITERATIONS; d++) {
+        sfpi::dst_reg[o * tile] = sfpi::dst_reg[a * tile] * sfpi::dst_reg[b * tile];
         sfpi::dst_reg++;
     }
 }
@@ -64,6 +73,30 @@ ALWI void split_x2(uint32_t x, uint32_t hi, uint32_t lo) {
 ALWI void clip_scale(uint32_t idst, uint32_t thr, uint32_t tau) {
     MATH((SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_aprep_clip, (8), idst, VectorMode::RC, thr, tau)));
 }
+#ifndef APREP_ONES_C
+#define APREP_ONES_C 0  // (1: the ones tile is made here, not by the reader)
+#endif
+// APREP_RB: q / k / v head groups sit in rows 0 .. APREP_RB-1 (the reader rebases them); their SFPU steps run on those
+// rows only (VectorMode::R, 2 ceil(rows / 4) iterations per face), as the full-tile steps do on every row
+#ifndef APREP_RB
+#define APREP_RB 0
+#endif
+constexpr int RIT = 2 * ((APREP_RB + 3) / 4);
+ALWI void mul_rows(uint32_t a, uint32_t b, uint32_t o) {
+    MATH((SFPU_BINARY_INIT(unused)));
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_aprep_mul, (RIT), a, b, o, VectorMode::R)));
+}
+ALWI void split_rows(uint32_t x, uint32_t hi, uint32_t lo) {
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_aprep_split, (IN0_MASK, RIT), x, hi, lo, VectorMode::R)));
+}
+ALWI void clip_rows(uint32_t idst, uint32_t thr, uint32_t tau) {
+    MATH((SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_aprep_clip, (RIT), idst, VectorMode::R, thr, tau)));
+}
+ALWI void sfpu_drain() {
+#ifdef TRISC_MATH
+    TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
+#endif
+}
 ALWI void copy_from(uint32_t cb) {
     reconfig_data_format_srca(cb);
     copy_init(cb);
@@ -92,6 +125,18 @@ void kernel_main() {
     const uint32_t total = get_arg_val<uint32_t>(2);
 
     compute_kernel_hw_startup(cb_xf, cb_out);
+#if APREP_ONES_C
+    cb_reserve_back(cb_ones, 1);
+    tile_regs_acquire();
+    fill_tile_init();
+    fill_tile(0, 1.0f);
+    tile_regs_commit();
+    tile_regs_wait();
+    pack_reconfig_data_format(cb_ones);
+    pack_tile(0, cb_ones);
+    tile_regs_release();
+    cb_push_back(cb_ones, 1);
+#endif
     cb_wait_front(cb_ones, 1);
     for (uint32_t u = start; u < total; u += step) {
         uint32_t type, h0, h1;
@@ -123,13 +168,24 @@ void kernel_main() {
         for (uint32_t c = 0; c < nt; ++c) {
             copy_tile(cb_x, c, c);
         }
-        mul_binary_tile_init();
-        for (uint32_t c = 0; c < nt; ++c) {
-            mul_binary_tile(c, c, c);
-        }
-        MATH((SFPU_BINARY_INIT(unused)));
-        for (uint32_t c = 0; c < nt; ++c) {
-            split_x2(c, c, 4 + c);
+        const bool trim = APREP_RB > 0 && type != 1;
+        if (trim) {
+            for (uint32_t c = 0; c < nt; ++c) {
+                mul_rows(c, c, c);
+            }
+            for (uint32_t c = 0; c < nt; ++c) {
+                split_rows(c, c, 4 + c);
+            }
+            sfpu_drain();
+        } else {
+            mul_binary_tile_init();
+            for (uint32_t c = 0; c < nt; ++c) {
+                mul_binary_tile(c, c, c);
+            }
+            MATH((SFPU_BINARY_INIT(unused)));
+            for (uint32_t c = 0; c < nt; ++c) {
+                split_x2(c, c, 4 + c);
+            }
         }
         tile_regs_commit();
         tile_regs_wait();
@@ -168,7 +224,12 @@ void kernel_main() {
             rsqrt_tile_init<false>();
             rsqrt_tile<false>(0);
             binop_with_scalar_tile_init();
-            clip_scale(0, type == 1 ? rel_clip : qk_clip, tau);
+            if (trim) {
+                clip_rows(0, qk_clip, tau);
+                sfpu_drain();
+            } else {
+                clip_scale(0, type == 1 ? rel_clip : qk_clip, tau);
+            }
         }
         tile_regs_commit();
         tile_regs_wait();
@@ -190,9 +251,16 @@ void kernel_main() {
         for (uint32_t c = 0; c < nt; ++c) {
             copy_tile(cb_x, c, c);
         }
-        mul_binary_tile_init();
-        for (uint32_t c = 0; c < nt; ++c) {
-            mul_binary_tile(c, 7, c);
+        if (trim) {
+            for (uint32_t c = 0; c < nt; ++c) {
+                mul_rows(c, 7, c);
+            }
+            sfpu_drain();
+        } else {
+            mul_binary_tile_init();
+            for (uint32_t c = 0; c < nt; ++c) {
+                mul_binary_tile(c, 7, c);
+            }
         }
         tile_regs_commit();
         tile_regs_wait();

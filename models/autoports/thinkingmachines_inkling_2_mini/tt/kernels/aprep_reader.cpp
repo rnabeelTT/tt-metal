@@ -37,20 +37,36 @@ inline void zero(uint32_t l1, uint32_t bytes) {
 // b / 32, rowt tiles per row)
 template <typename Acc>
 inline void gather(const Acc& src, uint32_t l1, uint32_t off, uint32_t heads, uint32_t nt, uint32_t b, uint32_t face,
-                   uint32_t row, uint32_t tile, uint32_t rowt, uint32_t h0 = 0) {
-    zero(l1, nt * tile);
-    noc_async_read_barrier();
+                   uint32_t row, uint32_t tile, uint32_t rowt, uint32_t h0 = 0, bool zf = true, uint32_t rb = 0) {
+    if (zf) {
+        zero(l1, nt * tile);
+        noc_async_read_barrier();
+    }
     const uint32_t base = (b >> 5) * rowt, br = b & 31;
     for (uint32_t h = h0; h < heads; ++h) {
         for (uint32_t c = 0; c < nt; ++c) {
             for (uint32_t half = 0; half < 2; ++half) {
                 noc_async_read(src.get_noc_addr(base + off + h * nt + c, row_off(br, half, face, row)),
-                               l1 + c * tile + row_off(h, half, face, row), row);
+                               l1 + c * tile + row_off(h - rb, half, face, row), row);
             }
         }
     }
 }
 }  // namespace
+
+#ifndef APREP_ONES_C
+#define APREP_ONES_C 0
+#endif
+#ifndef APREP_RB
+#define APREP_RB 0  // (> 0: head group rows rebased to row 0, see aprep_compute.cpp)
+#endif
+// APREP_NOZERO: a unit whose writer stores only its own head rows (q / k / v groups, decode) skips zeroing the
+// other rows (the math is row-local: they never reach an output)
+#ifndef APREP_NOZERO
+#define APREP_NOZERO 0
+#endif
+constexpr bool ZQ = !(APREP_NOZERO && APREP_PQT == 0 && APREP_QN > 1);
+constexpr bool ZKV = !(APREP_NOZERO && APREP_PQT == 0 && (APREP_KN > 1 || APREP_KVW));
 
 void kernel_main() {
     const uint32_t pq_addr = get_arg_val<uint32_t>(0);
@@ -81,8 +97,8 @@ void kernel_main() {
     const auto av = TensorAccessor(kv_args, v_addr, BF_TILE);
     const auto atau = TensorAccessor(tau_args, tau_addr, F32_TILE);
 
-    // a bf16 tile of ones (the row-sum matmul operand), once
-    {
+    // a bf16 tile of ones (the row-sum matmul operand), once (APREP_ONES_C: made by the compute, off the read path)
+    if constexpr (!APREP_ONES_C) {
         cb_reserve_back(cb_ones, 1);
         volatile tt_l1_ptr uint32_t* p = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_ones));
         for (uint32_t i = 0; i < 512; ++i) {
@@ -98,7 +114,7 @@ void kernel_main() {
             const uint32_t nt = type == 0 ? HT : 1;
             cb_reserve_back(cb_xf, nt);
             if (type == 0) {
-                gather(apq, get_write_ptr(cb_xf), 0, h1, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT, h0);
+                gather(apq, get_write_ptr(cb_xf), 0, h1, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT, h0, ZQ, APREP_RB ? h0 : 0);
             } else if (DR == 32) {
                 gather(apq, get_write_ptr(cb_xf), R0, NH, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT);
             } else {  // DR 16: head h = face half h % 2 of pq tile R0 + h / 2 -> columns 0..15 of row h (16..31 zero)
@@ -122,7 +138,7 @@ void kernel_main() {
             }
         } else if (type == 2 || type == 3) {
             cb_reserve_back(cb_xb, HT);
-            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, h1, HT, b, BF_FACE, BF_ROW, BF_TILE, APREP_KVT, h0);
+            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, h1, HT, b, BF_FACE, BF_ROW, BF_TILE, APREP_KVT, h0, ZKV, APREP_RB ? h0 : 0);
             noc_async_read_barrier();
             cb_push_back(cb_xb, HT);
         } else {

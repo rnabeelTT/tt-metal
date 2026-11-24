@@ -12,6 +12,21 @@
 #include "seqshift.hpp"
 #endif
 
+// BCONV_LIVE (<= 16, tt/bconv.py I2M_BCONV_LIVE): only rows 0 .. LIVE-1 of each tile are read (faces 0 / 1); the
+// compute works on those rows only, the other rows are don't-care
+#ifdef BCONV_LIVE
+#define RD(src, dst, bytes) rd_live<bytes>(src, dst)
+template <uint32_t BYTES>
+inline void rd_live(uint64_t src, uint32_t dst) {
+    constexpr uint32_t face = BYTES / 4, n = BCONV_LIVE * (BYTES / 64);
+    noc_async_read(src, dst, n);
+    noc_async_read(src + face, dst + face, n);
+}
+#else
+#define RD(src, dst, bytes) noc_async_read(src, dst, bytes)
+#endif
+
+
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
     const uint32_t s0_addr = get_arg_val<uint32_t>(1);
@@ -69,17 +84,22 @@ void kernel_main() {
 #else
         cb_reserve_back(cb_w, 4);
 #endif
-        noc_async_read(ax.get_noc_addr(t), get_write_ptr(cb_x), x_bytes);
+        RD(ax.get_noc_addr(t), get_write_ptr(cb_x), x_bytes);
         const uint32_t s = get_write_ptr(cb_s);
-        noc_async_read(as0.get_noc_addr(t), s, F32);
-        noc_async_read(as1.get_noc_addr(t), s + F32, F32);
-        noc_async_read(as2.get_noc_addr(t), s + 2 * F32, F32);
+        RD(as0.get_noc_addr(t), s, F32);
+        RD(as1.get_noc_addr(t), s + F32, F32);
+        RD(as2.get_noc_addr(t), s + 2 * F32, F32);
 #ifdef BCONV_DYN
         const uint32_t e = get_write_ptr(cb_e), sc = get_write_ptr(cb_sc);
         const auto ae = TensorAccessor(w_args, w0_addr, 2048);
         for (uint32_t j = 0; j < 4; ++j) {
             noc_async_read(ae.get_noc_addr(t + j * BCONV_TAP_STRIDE), e + j * 2048, 2048);
+            #ifdef BCONV_LIVE
+            noc_async_read(asc.get_noc_addr(t + j * BCONV_TAP_STRIDE), sc + j * F32, 64);
+            noc_async_read(asc.get_noc_addr(t + j * BCONV_TAP_STRIDE) + 1024, sc + j * F32 + 1024, 64);
+#else
             noc_async_read(asc.get_noc_addr(t + j * BCONV_TAP_STRIDE), sc + j * F32, F32);
+#endif
         }
         noc_async_read_barrier();
         // the static row (row 0) into rows 1 .. B-1, as the add's row broadcast
@@ -94,10 +114,10 @@ void kernel_main() {
         noc_async_read_barrier();
 #else
         const uint32_t w = get_write_ptr(cb_w);
-        noc_async_read(aw0.get_noc_addr(t), w, F32);
-        noc_async_read(aw1.get_noc_addr(t + BCONV_TAP_STRIDE), w + F32, F32);
-        noc_async_read(aw2.get_noc_addr(t + 2 * BCONV_TAP_STRIDE), w + 2 * F32, F32);
-        noc_async_read(awc.get_noc_addr(t + 3 * BCONV_TAP_STRIDE), w + 3 * F32, F32);
+        RD(aw0.get_noc_addr(t), w, F32);
+        RD(aw1.get_noc_addr(t + BCONV_TAP_STRIDE), w + F32, F32);
+        RD(aw2.get_noc_addr(t + 2 * BCONV_TAP_STRIDE), w + 2 * F32, F32);
+        RD(awc.get_noc_addr(t + 3 * BCONV_TAP_STRIDE), w + 3 * F32, F32);
         noc_async_read_barrier();
 #endif
 #ifdef SEQ_R
