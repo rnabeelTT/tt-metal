@@ -75,8 +75,12 @@ indices: the kernel reads either width). MESH=4: 2,600 / 2,600 draws equal the h
 12.8 -> 11.0 ms (T=1), 12.7 -> 11.0 (greedy), spec 9.2 -> 8.7 / 9.1 -> 8.7 (chat falls back to plain decode); greedy
 streams identical. p300x2 crashed on its first prefill at HEAD ("CBs clash with L1 buffers": the decode traces' one-page
 L1 top-k candidates, each reserving 2 KB on every core, reached the 2048-row prefill SDPA's static CB region): they now
-live in DRAM (I2M_TOPK_DRAM). Lowest persistent L1 after the captures (die 0, tools/l1_probe.py): p300x2 spec 1,290,432
-vs the CB region's end 1,281,600 (thin), p300 1,353,408.
+live in DRAM (I2M_TOPK_DRAM). The rest were each decoder's last three gate-norm outputs (BatchedDecoder._gn, 2 KB L1
+pages, 3 per width + verify) kept on self past its trace capture: now returned, not kept. Lowest persistent L1 after the
+captures (die 0, tools/l1_probe.py, which names each new buffer's python holder): p300x2 spec 1,290,432 -> 1,421,248
+(only 8 x 4 B ccl semaphores below the init level 1,423,552; 136 KB above the 2048-row SDPA CB end 1,281,600), p300 the init
+level 1,480,384 (was 1,353,408), p150 the init level 1,545,216 (was 1,418,240). Traced decode unchanged (one die B=1 /
+B=4 18.0 / 32.7 ms, TP2 12.7 / 20.7 ms), logits bitwise (B=1 / B=4 / verify R=4 A=1, one die and TP2).
 
 ## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
 

@@ -640,23 +640,22 @@ class BatchedDecoder:
 
     def _gate_norms(self, L, li, ins, messages):
         """The attention side's three message gates, each with its following norm, one program each (tt/gate.py
-        GateKernel2) -> self._gn = (qn, kn, vn) bf16; False: not available (the separate ops then)."""
+        GateKernel2) -> (qn, kn, vn) bf16; None: not available (the separate ops then). (Not kept on self: a decoder
+        holding its last layer's three L1 rows kept them alive past every trace capture.)"""
         hs = ins * 3 if len(ins) == 1 else ins
         nws = [self.norm_rows[(li, "in")]] * 3 if L.sliding else [self.norm_rows[(li, k)] for k in "qkv"]
         if GATE_MULTI:  # the three gates in one program, on three core rectangles (tt/gate.py GateKernel2.multi)
             args = [L.gates[n].fused_args(hh, mm, nw) for n, hh, mm, nw in zip(("attn", "k", "v"), hs, messages[:3], nws)]
             g2 = self.m.ops.gate2k
             if all(a is not None for a in args) and len(g2.rects) >= 3:
-                self._gn = tuple(x for x, _ in g2.multi(args))
-                return True
+                return tuple(x for x, _ in g2.multi(args))
         out = []
         for n, hh, mm, nw in zip(("attn", "k", "v"), hs, messages[:3], nws):
             f = L.gates[n].fused_norm(hh, mm, nw)
             if f is None:
-                return False
+                return None
             out.append(f[0])
-        self._gn = tuple(out)
-        return True
+        return tuple(out)
 
     def _layer(self, a, x, blocks_n, messages, pos, pos_wr, pos_sdpa, tau, ids=(), D=None):
         m, ops = self.m, self.m.ops
@@ -692,8 +691,9 @@ class BatchedDecoder:
             ins = [_f32(x)]
         if fused is not None and messages is None:  # (normed in the program)
             qn, kn, vn = (fused * 3) if L.sliding else fused
-        elif messages is not None and GATE_NORM_ATTN and self.pre is not None and self._gate_norms(L, li, ins, messages):
-            qn, kn, vn = self._gn
+        elif messages is not None and GATE_NORM_ATTN and self.pre is not None and \
+                (gn := self._gate_norms(L, li, ins, messages)) is not None:
+            qn, kn, vn = gn
         elif L.sliding:
             h = ins[0]
             if messages is not None:
