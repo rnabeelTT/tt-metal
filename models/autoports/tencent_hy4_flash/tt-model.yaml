@@ -169,7 +169,7 @@ card:
     | p300x2 | T 0.9 | 131,076 | 128 | 1 | 1 | 38.86 | 3,373 | 55.4 | — | 41.15 |
 
     A long prompt is prefilled in 2,048-token parts with decode steps for the other users in between: while a 64K or
-    200K-token prompt is prefilled, the other users' longest pause between tokens is 0.7-0.8 s. Prefix reuse: a
+    200K-token prompt is prefilled, the other users' longest pause between tokens is 0.66-0.84 s. Prefix reuse: a
     10K-token prompt has a TTFT of 3.36 s cold and 0.69 s when it is resent or continued as the next chat turn. Images:
     one 1024 x 1024 image, TTFT 0.63 s alone and 1.33 s with 7 text users. Video (64 frames, 640 x 480): TTFT 1.48 s
     alone and 2.16 s with 7 text users. Needle retrieval at 32K, 131K and 200K tokens (depths 10, 50 and 90%): 9 of 9
@@ -187,6 +187,8 @@ card:
     - Per-user decode speed drops as users are added, and decode is slower at long context (see Performance).
     - Several long prompts that arrive together are prefilled one after another, so the last one waits longer for its
       first token; a long prompt's TTFT is also longer while other users are decoding.
+    - Rarely, a combination of request shapes the warm-up did not cover makes the server recompile once, pausing all
+      users for a few seconds.
     - Outputs differ slightly from the BF16 reference (bfp4 experts, FP8 Engram tables; see the agreement rows).
     - Weights are pinned to revision b2498eb of tencent/Hy4-flash. Later revisions are not supported.
     - Runs only on a QB2 (4 Blackhole dies); other boards are not supported.
