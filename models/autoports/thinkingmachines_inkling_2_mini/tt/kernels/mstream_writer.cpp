@@ -12,17 +12,17 @@
 // H < 32: the activation / output CB tiles are H x 32 (faces H x 16; rows < H live): rows 0 .. rows-1 of each face
 // move between those and the tensors' 32 x 32 tiles (the output rows past `rows` are not written).
 //
-// runtime args: [x_addr, out_addr, out_col0, ncols]
+// Segments (a core streaming several weights back to back, tt/mstream.py groups): segment s's activation lands at
+// cb_x tile s kt, its columns go to its own output tensor.
+//
+// runtime args: [nseg, then per segment: x_addr, out_addr, out_col0, ncols]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 
 void kernel_main() {
-    const uint32_t x_addr = get_arg_val<uint32_t>(0);
-    const uint32_t out_addr = get_arg_val<uint32_t>(1);
-    const uint32_t out_col0 = get_arg_val<uint32_t>(2);
-    const uint32_t ncols = get_arg_val<uint32_t>(3);
+    const uint32_t nseg = get_arg_val<uint32_t>(0);
 
     constexpr uint32_t cb_x = get_compile_time_arg_val(0);
     constexpr uint32_t cb_out = get_compile_time_arg_val(1);
@@ -37,40 +37,46 @@ void kernel_main() {
     static_assert(rows <= 32, "one tile row");
     constexpr uint32_t row_bytes = rows * 32;
 
-    if (ncols == 0) {
+    if (nseg == 0) {
         return;
     }
-    cb_reserve_back(cb_x, kt);
-    const uint32_t xl1 = get_write_ptr(cb_x);
-    const auto s_x = TensorAccessor(x_args, x_addr, 2048);
     constexpr uint32_t XT = H * 64;  // an activation CB tile (bf16)
-    for (uint32_t k = 0; k < kt; ++k) {
-        const uint64_t src = s_x.get_noc_addr(k);
-        if constexpr (rows > 16) {  // (all four faces)
-            noc_async_read(src, xl1 + k * XT, 2048);
-        } else {
-            noc_async_read(src, xl1 + k * XT, row_bytes);
-            noc_async_read(src + 512, xl1 + k * XT + XT / 2, row_bytes);
+    cb_reserve_back(cb_x, kt * nseg);
+    for (uint32_t s = 0; s < nseg; ++s) {
+        const uint32_t xl1 = get_write_ptr(cb_x) + s * kt * XT;
+        const auto s_x = TensorAccessor(x_args, get_arg_val<uint32_t>(1 + 4 * s), 2048);
+        for (uint32_t k = 0; k < kt; ++k) {
+            const uint64_t src = s_x.get_noc_addr(k);
+            if constexpr (rows > 16) {  // (all four faces)
+                noc_async_read(src, xl1 + k * XT, 2048);
+            } else {
+                noc_async_read(src, xl1 + k * XT, row_bytes);
+                noc_async_read(src + 512, xl1 + k * XT + XT / 2, row_bytes);
+            }
         }
     }
     noc_async_read_barrier();
-    cb_push_back(cb_x, kt);
+    cb_push_back(cb_x, kt * nseg);
 
-    const auto s_o = TensorAccessor(o_args, out_addr, OB);
-    for (uint32_t i = 0; i < ncols; ++i) {
-        cb_wait_front(cb_out, 1);
-        if (out_col0 + i * ostride < n_tiles) {
-            const uint64_t dst = s_o.get_noc_addr(out_col0 + i * ostride);
-            if constexpr (H == 32) {
-                noc_async_write(get_read_ptr(cb_out), dst, OB);
-            } else {  // rows 0 .. rows-1 of faces 0 / 1 (E = OB / 1024 bytes per element)
-                constexpr uint32_t E = OB / 1024;
-                noc_async_write(get_read_ptr(cb_out), dst, rows * 16 * E);
-                noc_async_write(get_read_ptr(cb_out) + H * 16 * E, dst + 256 * E, rows * 16 * E);
+    for (uint32_t s = 0; s < nseg; ++s) {
+        const auto s_o = TensorAccessor(o_args, get_arg_val<uint32_t>(2 + 4 * s), OB);
+        const uint32_t out_col0 = get_arg_val<uint32_t>(3 + 4 * s);
+        const uint32_t ncols = get_arg_val<uint32_t>(4 + 4 * s);
+        for (uint32_t i = 0; i < ncols; ++i) {
+            cb_wait_front(cb_out, 1);
+            if (out_col0 + i * ostride < n_tiles) {
+                const uint64_t dst = s_o.get_noc_addr(out_col0 + i * ostride);
+                if constexpr (H == 32) {
+                    noc_async_write(get_read_ptr(cb_out), dst, OB);
+                } else {  // rows 0 .. rows-1 of faces 0 / 1 (E = OB / 1024 bytes per element)
+                    constexpr uint32_t E = OB / 1024;
+                    noc_async_write(get_read_ptr(cb_out), dst, rows * 16 * E);
+                    noc_async_write(get_read_ptr(cb_out) + H * 16 * E, dst + 256 * E, rows * 16 * E);
+                }
+                noc_async_writes_flushed();
             }
-            noc_async_writes_flushed();
+            cb_pop_front(cb_out, 1);
         }
-        cb_pop_front(cb_out, 1);
     }
     noc_async_write_barrier();
 }

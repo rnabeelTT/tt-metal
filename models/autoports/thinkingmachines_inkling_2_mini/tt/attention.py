@@ -141,9 +141,15 @@ class AttnWeights:
             # q readers per bank: 2 on one die (28 q columns per bank; 3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies
             # (TP2 17.6 -> 17.2 ms, TP4 14.0 -> 13.9)
             qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "4" if N > 1 else "2"))
+            # I2M_MS_KV (default 1 on <= 2 dies): k and v on one core per bank (one die: 2 q cores of 13 columns + one k | v
+            # core of 8 per bank, 64.5 -> 57.0 us per call with tt/mstream.py knobs(); TP2: 3 q + 1 k | v, 42.6 -> 37.3)
+            kv = __import__("os").environ.get("I2M_MS_KV", "1" if N <= 2 else "0") == "1"
+            if kv:
+                qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "2" if N == 1 else "3"))
             self.ms = MultiStream(mesh, K, [(fqp, ttnn.float32, qr), (self.kd, ttnn.bfloat16, 1),
                                             (self.kd, ttnn.bfloat16, 1)], wdtype, interleaved=True,
-                                  fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2)
+                                  fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2,
+                                  groups=[[0], [1, 2]] if kv else None)
             self.ms_w = [self.w_q, self.w_k, self.w_v]
         # per-head scales (fp32): q [NH, HD], r [NH, DR] (head-sharded), as [1, 1, NH, HD] rows
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
