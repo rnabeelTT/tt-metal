@@ -181,50 +181,66 @@ card:
     other seven texts the decode KL is 0.002 - 0.012. Long context: a passphrase planted at 10 / 50 / 90 % depth of 135K,
     539K and 1,031K-token prompts is retrieved on 4 dies (TTFT 46 s, 286 s and 760 s). Benchmark evals (GPQA, LiveCodeBench, IFEval) were not run.
   performance: |
-    Measured 2026-11-23 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
-    with the code this package ships, served from the source tree. Random-token prompts of exactly the input length (ISL),
-    output pinned with ignore_eos (OSL), greedy, streamed; every request a distinct prompt (no prefix-cache hits);
-    `concurrency` users in a closed loop, N requests in all;
-    TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per user, TPOT = (E2EL - TTFT) /
-    (OSL - 1); total = output tokens / wall time.
+    Measured 2026-11-24 on a QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die rows on a subset of it) through vLLM 0.26
+    with the code this package ships, served from the source tree, each profile's own settings (speculative decoding on
+    except p150-long). Random-token prompts of exactly the input length (ISL), output pinned with ignore_eos (OSL),
+    greedy, streamed; every request a distinct prompt (no prefix-cache hits); `concurrency` users in a closed loop, N
+    requests in all; TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per user, TPOT =
+    (E2EL - TTFT) / (OSL - 1); total = output tokens / wall time. Speculative decoding serves a user decoding alone: on
+    random-token prompts the continuation is repetitive and drafts well, so the one-user rows past 128 input tokens
+    overstate what real text gets (below).
+
+    Speculative decoding on real text (the checkpoint's default sampling, temperature 1; greedy in brackets): three
+    held-out texts (math, code, chat) as 300-token prompts, 256 output tokens, one user, decode tok/s:
+    p300x2 64.5 -> 90 (64 -> 83), p300 49.0 -> 64 (49.8 -> 84), p150 38.9 -> 53 (41.3 -> 56). Math and code gain the
+    most (p300x2 about 100 tok/s); chat drafts least well and runs at the plain decode rate.
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill (tok/s) | Decode (tok/s/u) | Total (tok/s) | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | 128 | 128 | 1 | 2 | 396 | 323 | 59.9 | 50.9 | 2.52 |
-    | p300x2 | 1,024 | 256 | 1 | 2 | 410 | 2,498 | 60.7 | 55.5 | 4.61 |
-    | p300x2 | 4,096 | 256 | 1 | 2 | 1,196 | 3,425 | 58.4 | 46.0 | 5.56 |
-    | p300x2 | 16,384 | 256 | 1 | 2 | 4,660 | 3,516 | 57.4 | 28.1 | 9.10 |
-    | p300x2 | 128 | 128 | 2 | 4 | 592 | 216 | 48.5 | 79.7 | 3.21 |
-    | p300x2 | 128 | 128 | 4 | 8 | 768 | 167 | 39.9 | 129.6 | 3.95 |
-    | p300x2 | 128 | 128 | 8 | 16 | 1,295 | 99 | 31.4 | 191.6 | 5.34 |
-    | p300x2 | 128 | 128 | 16 | 32 | 2,416 | 53 | 20.6 | 238.3 | 8.59 |
-    | p300x2 | 128 | 128 | 32 | 64 | 4,600 | 28 | 13.4 | 291.3 | 14.06 |
-    | p300x2 | 1,024 | 256 | 2 | 4 | 675 | 1,517 | 39.3 | 71.4 | 7.17 |
-    | p300x2 | 1,024 | 256 | 4 | 8 | 1,264 | 810 | 40.3 | 134.8 | 7.60 |
-    | p300x2 | 1,024 | 256 | 8 | 16 | 2,670 | 384 | 31.8 | 191.6 | 10.69 |
-    | p300x2 | 1,024 | 256 | 16 | 32 | 5,512 | 186 | 21.8 | 238.2 | 17.19 |
-    | p300x2 | 1,024 | 256 | 32 | 64 | 11,206 | 91 | 15.4 | 295.3 | 27.74 |
-    | p300 | 128 | 128 | 1 | 2 | 389 | 329 | 53.8 | 46.5 | 2.75 |
-    | p300 | 1,024 | 256 | 1 | 2 | 458 | 2,236 | 51.0 | 46.9 | 5.45 |
-    | p300 | 4,096 | 256 | 1 | 2 | 1,719 | 2,383 | 51.0 | 38.1 | 6.72 |
-    | p300 | 16,384 | 256 | 1 | 2 | 6,923 | 2,367 | 43.5 | 20.0 | 12.78 |
-    | p300 | 128 | 128 | 2 | 4 | 1,260 | 102 | 35.6 | 53.0 | 4.83 |
-    | p300 | 128 | 128 | 4 | 8 | 1,701 | 75 | 30.0 | 86.3 | 5.93 |
-    | p300 | 128 | 128 | 8 | 16 | 2,292 | 56 | 20.6 | 121.1 | 8.45 |
-    | p300 | 128 | 128 | 16 | 32 | 3,730 | 34 | 14.1 | 161.0 | 12.72 |
-    | p300 | 1,024 | 256 | 2 | 4 | 1,789 | 572 | 30.6 | 50.5 | 10.13 |
-    | p300 | 1,024 | 256 | 4 | 8 | 3,404 | 301 | 29.1 | 84.2 | 12.16 |
-    | p300 | 1,024 | 256 | 8 | 16 | 5,270 | 194 | 23.1 | 125.5 | 16.31 |
-    | p300 | 1,024 | 256 | 16 | 32 | 7,308 | 140 | 18.0 | 190.8 | 21.46 |
-    | p150 | 128 | 128 | 1 | 2 | 462 | 277 | 42.4 | 37.0 | 3.46 |
-    | p150 | 1,024 | 256 | 1 | 2 | 886 | 1,156 | 40.1 | 35.3 | 7.25 |
-    | p150 | 4,096 | 256 | 1 | 2 | 3,205 | 1,278 | 40.1 | 26.8 | 9.57 |
-    | p150 | 128 | 128 | 2 | 4 | 550 | 233 | 33.2 | 58.5 | 4.38 |
-    | p150 | 128 | 128 | 4 | 8 | 933 | 137 | 26.1 | 88.2 | 5.80 |
-    | p150 | 128 | 128 | 8 | 16 | 1,728 | 74 | 17.3 | 112.9 | 9.07 |
-    | p150 | 1,024 | 256 | 2 | 4 | 1,251 | 819 | 30.4 | 53.2 | 9.63 |
-    | p150 | 1,024 | 256 | 4 | 8 | 2,630 | 389 | 24.8 | 79.3 | 12.91 |
-    | p150 | 1,024 | 256 | 8 | 16 | 6,017 | 170 | 19.0 | 105.3 | 19.45 |
+    | p300x2 | 128 | 128 | 1 | 2 | 437 | 293 | 54.1 | 45.9 | 2.79 |
+    | p300x2 | 1,024 | 256 | 1 | 2 | 506 | 2,024 | 81.1 | 70.1 | 3.65 |
+    | p300x2 | 4,096 | 256 | 1 | 2 | 1,283 | 3,193 | 82.2 | 58.4 | 4.39 |
+    | p300x2 | 16,384 | 256 | 1 | 2 | 4,812 | 3,405 | 120.5 | 36.9 | 6.93 |
+    | p300x2 | 128 | 128 | 2 | 4 | 616 | 208 | 49.1 | 80.0 | 3.20 |
+    | p300x2 | 128 | 128 | 4 | 8 | 839 | 153 | 43.2 | 135.6 | 3.77 |
+    | p300x2 | 128 | 128 | 8 | 16 | 1,325 | 97 | 35.1 | 206.9 | 4.95 |
+    | p300x2 | 128 | 128 | 16 | 32 | 2,433 | 53 | 24.6 | 269.6 | 7.59 |
+    | p300x2 | 128 | 128 | 32 | 64 | 4,731 | 27 | 13.7 | 292.7 | 13.99 |
+    | p300x2 | 1,024 | 256 | 2 | 4 | 708 | 1,446 | 50.0 | 88.2 | 5.80 |
+    | p300x2 | 1,024 | 256 | 4 | 8 | 1,285 | 797 | 44.3 | 145.3 | 7.05 |
+    | p300x2 | 1,024 | 256 | 8 | 16 | 2,699 | 379 | 38.4 | 219.3 | 9.34 |
+    | p300x2 | 1,024 | 256 | 16 | 32 | 5,535 | 185 | 25.6 | 264.3 | 15.50 |
+    | p300x2 | 1,024 | 256 | 32 | 64 | 11,285 | 91 | 15.5 | 295.1 | 27.75 |
+    | p300 | 128 | 128 | 1 | 2 | 387 | 331 | 56.8 | 48.8 | 2.62 |
+    | p300 | 1,024 | 256 | 1 | 2 | 517 | 1,981 | 110.1 | 90.3 | 2.83 |
+    | p300 | 4,096 | 256 | 1 | 2 | 1,798 | 2,278 | 106.7 | 61.1 | 4.19 |
+    | p300 | 16,384 | 256 | 1 | 2 | 7,041 | 2,327 | 102.9 | 26.9 | 9.52 |
+    | p300 | 128 | 128 | 2 | 4 | 546 | 234 | 43.9 | 74.4 | 3.44 |
+    | p300 | 128 | 128 | 4 | 8 | 813 | 157 | 35.1 | 115.5 | 4.43 |
+    | p300 | 128 | 128 | 8 | 16 | 1,203 | 106 | 26.3 | 169.9 | 6.03 |
+    | p300 | 128 | 128 | 16 | 32 | 2,127 | 60 | 18.8 | 230.6 | 8.88 |
+    | p300 | 1,024 | 256 | 2 | 4 | 821 | 1,247 | 37.6 | 67.3 | 7.61 |
+    | p300 | 1,024 | 256 | 4 | 8 | 1,461 | 701 | 38.9 | 127.7 | 8.02 |
+    | p300 | 1,024 | 256 | 8 | 16 | 3,218 | 318 | 27.8 | 165.1 | 12.41 |
+    | p300 | 1,024 | 256 | 16 | 32 | 7,087 | 144 | 21.9 | 218.7 | 18.72 |
+    | p150 | 128 | 128 | 1 | 2 | 448 | 286 | 57.5 | 48.1 | 2.66 |
+    | p150 | 1,024 | 256 | 1 | 2 | 831 | 1,232 | 40.7 | 36.1 | 7.10 |
+    | p150 | 4,096 | 256 | 1 | 2 | 3,209 | 1,276 | 54.9 | 32.6 | 7.86 |
+    | p150 | 128 | 128 | 2 | 4 | 660 | 194 | 33.0 | 56.7 | 4.51 |
+    | p150 | 128 | 128 | 4 | 8 | 941 | 136 | 24.7 | 84.2 | 6.08 |
+    | p150 | 128 | 128 | 8 | 16 | 1,668 | 77 | 18.5 | 120.2 | 8.52 |
+    | p150 | 1,024 | 256 | 2 | 4 | 1,446 | 708 | 32.8 | 55.6 | 9.22 |
+    | p150 | 1,024 | 256 | 4 | 8 | 2,692 | 380 | 26.4 | 82.9 | 12.35 |
+    | p150 | 1,024 | 256 | 8 | 16 | 5,663 | 181 | 20.7 | 113.9 | 17.98 |
+    | p150-long | 128 | 128 | 1 | 2 | 425 | 301 | 42.8 | 37.8 | 3.39 |
+    | p150-long | 1,024 | 256 | 1 | 2 | 835 | 1,226 | 41.2 | 36.5 | 7.02 |
+    | p150-long | 4,096 | 256 | 1 | 2 | 3,154 | 1,299 | 40.6 | 27.1 | 9.44 |
+    | p150-long | 128 | 128 | 2 | 4 | 582 | 220 | 33.9 | 59.1 | 4.33 |
+    | p150-long | 128 | 128 | 4 | 8 | 939 | 136 | 26.3 | 88.8 | 5.76 |
+    | p150-long | 128 | 128 | 8 | 16 | 1,603 | 80 | 20.1 | 129.1 | 7.93 |
+    | p150-long | 1,024 | 256 | 2 | 4 | 1,650 | 621 | 33.9 | 55.9 | 9.17 |
+    | p150-long | 1,024 | 256 | 4 | 8 | 2,711 | 378 | 25.8 | 81.2 | 12.60 |
+    | p150-long | 1,024 | 256 | 8 | 16 | 5,645 | 181 | 21.4 | 116.8 | 17.53 |
 
     Prefix cache (same server, `tools/prefix_serve.py`, greedy): a 4,438-token prompt (a document plus a question) cold,
     then resent, then the next chat turn on it, then 4 users asking about the same document at once:
