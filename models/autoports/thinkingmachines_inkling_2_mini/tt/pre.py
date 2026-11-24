@@ -12,7 +12,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, _bits, cbt, red_k, tile_rows
+from .post import BF, CX, CY, C, F32, RD_STAGED, _bits, cbt, red_k, tile_rows
 
 
 class PreKernel:
@@ -96,7 +96,7 @@ class PreKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed))),
-                ("PRE_TH", str(th))] + sdefs
+                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED)))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -113,7 +113,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, th, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
+        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

@@ -35,6 +35,11 @@ def red_k(T):
     return int(_RK) if _RK else (2 if T > 1 else 8)
 
 ROUTER_ROWS = int(__import__("os").environ.get("I2M_POST_ROUTER_ROWS", "4"))
+# the reader pushes the round-1 inputs, then the mix inputs, then the router weights (needed only after round 2), each
+# after its own barrier, instead of all after one. I2M_RD_STAGED (pre / post)
+RD_STAGED = __import__("os").environ.get("I2M_RD_STAGED", "1") == "1"
+# the roots zero the later rounds' gather rows after round 1, not before it (red.hpp). I2M_RED_ZLAZY
+ZLAZY = __import__("os").environ.get("I2M_RED_ZLAZY", "1") == "1"
 # the token-row CB tiles 8 / 16 rows tall (T <= 8 / 16): the fp32 unpacks / packs and the matmul passes scale with the
 # rows; the cross-core gather tiles (a row per core) stay 32 x 32. I2M_TINY=0: whole tiles
 TINY = __import__("os").environ.get("I2M_TINY", "1") == "1"
@@ -143,7 +148,7 @@ class PostKernel:
                     _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), r(cb_t3, f32, ET)]
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             self.mesh, out_mc) if rt else None
-        rdefs = [("POST_RT", str(ET)), ("POST_DUP", str(int(dup))), ("POST_CB_RW", str(cb_rw)),
+        rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_DUP", str(int(dup))), ("POST_CB_RW", str(cb_rw)),
                  ("POST_CB_XB", str(cb_xb)), ("POST_CB_P3", str(cb_p3)), ("POST_CB_G3", str(cb_g3)),
                  ("POST_CB_T3", str(cb_t3))]
         k = conv.kernel
@@ -195,7 +200,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

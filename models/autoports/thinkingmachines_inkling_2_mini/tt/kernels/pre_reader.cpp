@@ -127,6 +127,12 @@ void kernel_main() {
             rf(aq.get_noc_addr(t0 + i), get_write_ptr(cb_q) + (q * PER + i) * F32);
         }
     }
+#if PRE_RD_STAGED  // (the round-1 inputs pushed before the mix's are read)
+    noc_async_read_barrier();
+    cb_push_back(cb_ones, 1);
+    cb_push_back(cb_sel, NSEL);
+    cb_push_back(cb_q, NQ * PER);
+#endif
     constexpr uint32_t ab = 11 + 2 * NQ;
     cb_reserve_back(cb_d, NB * NQ);  // [b][q]
     cb_reserve_back(cb_blk, NB * PER);
@@ -151,9 +157,11 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
+#if !PRE_RD_STAGED
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NSEL);
     cb_push_back(cb_q, NQ * PER);
+#endif
     cb_push_back(cb_d, NB * NQ);
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {

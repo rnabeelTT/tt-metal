@@ -91,17 +91,20 @@ void kernel_main() {
     }
     noc_semaphore_wait(sem(s_go), 1);
     }
-    if (root) {  // the unused gather rows -> 0 (red.hpp)
-        {
-            cb_reserve_back(cb_zero, 1);
-            const uint32_t z = get_write_ptr(cb_zero);
-            noc_async_read(zz.get_noc_addr(0), z, 2048);
-            noc_async_read_barrier();
-            for (uint32_t p = 0; p < GP; ++p) {
-                red_zero<G2_RK, C, NSEL>(z, g + p * NSEL * F32);
-            }
-            noc_async_write_barrier();
+    // the unused gather rows -> 0 (red.hpp); G2_ZLAZY: round 1's parts here, the later rounds' after round 1
+    uint32_t z = 0;
+    auto zero_parts = [&](uint32_t p0, uint32_t p1) {
+        for (uint32_t p = p0; p < p1; ++p) {
+            red_zero<G2_RK, C, NSEL>(z, g + p * NSEL * F32);
         }
+        noc_async_write_barrier();
+    };
+    if (root) {
+        cb_reserve_back(cb_zero, 1);
+        z = get_write_ptr(cb_zero);
+        noc_async_read(zz.get_noc_addr(0), z, 2048);
+        noc_async_read_barrier();
+        zero_parts(0, G2_ZLAZY ? 4 : GP);
     }
 
     // one round: parts -> the roots; with a broadcast, the roots' ntot totals -> everyone's tb
@@ -178,6 +181,9 @@ void kernel_main() {
     {
     DeviceZoneScopedN("G2_W_R1");
     round(4, cb_tot, tot, 1, true);
+    }
+    if (G2_ZLAZY && root && GP > 4) {
+        zero_parts(4, GP);
     }
     {
     DeviceZoneScopedN("G2_W_R2");

@@ -104,26 +104,30 @@ void kernel_main() {
         }
         noc_semaphore_wait(sem(s_go), 1);
     }
-    if (root) {
-        // zero the unused gather rows (red.hpp): a zero block (2 KB, read once) copied over them
-        {
-            cb_reserve_back(cb_zero, 1);
-            const uint32_t z = get_write_ptr(cb_zero);
-            noc_async_read(zz.get_noc_addr(0), z, 2048);
-            noc_async_read_barrier();
+    // the unused gather rows -> 0 (red.hpp): a zero block (2 KB, read once) copied over them; POST_ZLAZY: round 1's here,
+    // the later rounds' after round 1 (off the critical path: a root's zeroing delays its round-1 send)
 #if POST_RT
-            constexpr uint32_t P3 = 2 * POST_RT;
-            const uint32_t g3 = get_write_ptr(POST_CB_G3);
+    constexpr uint32_t P3 = 2 * POST_RT;
+    const uint32_t g3 = get_write_ptr(POST_CB_G3);
 #else
-            constexpr uint32_t P3 = 0;
-            const uint32_t g3 = 0;
+    constexpr uint32_t P3 = 0;
+    const uint32_t g3 = 0;
 #endif
-            for (uint32_t p = 0; p < 4 + (NORM ? 2 : 0) + P3; ++p) {
-                red_zero<POST_RK, C, NQ>(z, p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
-                                                                    : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32);
-            }
-            noc_async_write_barrier();
+    constexpr uint32_t PALL = 4 + (NORM ? 2 : 0) + P3;
+    uint32_t z = 0;
+    auto zero_parts = [&](uint32_t p0, uint32_t p1) {
+        for (uint32_t p = p0; p < p1; ++p) {
+            red_zero<POST_RK, C, NQ>(z, p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
+                                                                : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32);
         }
+        noc_async_write_barrier();
+    };
+    if (root) {
+        cb_reserve_back(cb_zero, 1);
+        z = get_write_ptr(cb_zero);
+        noc_async_read(zz.get_noc_addr(0), z, 2048);
+        noc_async_read_barrier();
+        zero_parts(0, POST_ZLAZY ? 4 : PALL);
     }
 
     for (uint32_t i = 0; i < PER; ++i) {
@@ -211,6 +215,9 @@ void kernel_main() {
     {
         DeviceZoneScopedN("P_W_R1");
         round(cb_part, 4, cb_gath, g1, cb_tot, tot, 2, 1);
+    }
+    if (POST_ZLAZY && root) {
+        zero_parts(4, PALL);
     }
     if constexpr (NORM) {
         round(cb_part2, 2, cb_gath2, g2, cb_tot2, tot2, 1, 2);

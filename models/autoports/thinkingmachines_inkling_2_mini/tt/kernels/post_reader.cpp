@@ -135,6 +135,12 @@ void kernel_main() {
             read_rows<TH, 2, TH>(sel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF);
         }
     }
+#if POST_RD_STAGED  // (the round-1 inputs pushed first, then the mix's, then the router's)
+    noc_async_read_barrier();
+    cb_push_back(cb_q, PER);
+    cb_push_back(cb_ones, 1);
+    cb_push_back(cb_sel, NQ);
+#endif
     cb_reserve_back(cb_d, NB);
     cb_reserve_back(cb_blk, NB * PER);
     const uint32_t a_blk = a;
@@ -152,6 +158,14 @@ void kernel_main() {
             rf(nw.get_noc_addr(t0 + i), get_write_ptr(cb_nw) + i * F32);
         }
     }
+#if POST_RD_STAGED
+    noc_async_read_barrier();
+    cb_push_back(cb_d, NB);
+    cb_push_back(cb_blk, NB * PER);
+    if constexpr (NORM) {
+        cb_push_back(cb_nw, PER);
+    }
+#endif
 #if POST_RT
     {  // the router weight's bf16 hi / lo rows of this core's tiles: [half][t][e]
         constexpr uint32_t ET = POST_RT;
@@ -171,6 +185,7 @@ void kernel_main() {
 #if POST_RT
     cb_push_back(POST_CB_RW, 2 * PER * POST_RT);
 #endif
+#if !POST_RD_STAGED
     cb_push_back(cb_q, PER);
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NQ);
@@ -179,4 +194,5 @@ void kernel_main() {
     if constexpr (NORM) {
         cb_push_back(cb_nw, PER);
     }
+#endif
 }
