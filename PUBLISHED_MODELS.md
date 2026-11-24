@@ -17,12 +17,15 @@ kernel sources; the bundles do not carry the tt_metal / ttnn C++, which was not 
 Agent skills (picked up from `.claude/skills/`, symlinks into `models/experimental/hybrid_moe/skills/`):
 `blackhole-decode-perf` (decode-speed review once a new model runs with reference quality) and `hybrid-moe-bringup`.
 
-The per-model branches these came from were deleted on 2026-11-22; each tip is kept as the tag `archive/<branch>`
+Since 2026-11-24 (the Hy4-flash merge) this branch is on upstream tt-metal 0fe57024bca (2026-11-18); the models published before then were built on upstream 05875866f20 (2026-09-09), so their tags are the way to rebuild them.
+
+The per-model branches these came from were deleted on 2026-11-22 and 2026-11-24; each tip is kept as the tag `archive/<branch>`
 (e.g. `archive/ornith_opt`, `archive/raahem/inkling-small-hybrid`), so old branch names in cards and handoffs still
 resolve with `git show archive/<branch>`.
 
 | Package (Hub) | Published | Tag (exact code) | Package yaml | Source branch |
 |---|---|---|---|---|
+| [hy4-flash](https://huggingface.co/raahemnabeel/hy4-flash) | 2026-11-24 | `published/hy4-flash` | `models/autoports/tencent_hy4_flash/tt-model.yaml` | `raahem/hy4-flash-hybrid` |
 | [inkling-2-mini](https://huggingface.co/raahemnabeel/inkling-2-mini) | 2026-11-24 | `published/inkling-2-mini` | `models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml` | `raahem/inkling-2-mini` |
 | [inkling-small-hybrid-qb2](https://huggingface.co/raahemnabeel/inkling-small-hybrid-qb2) | 2026-11-21 | `published/inkling-small-hybrid-qb2` | `models/autoports/thinkingmachines_inkling_small/tt-model-hybrid.yaml` | `raahem/inkling-small-hybrid` |
 | [minimax-m2.7-hybrid-qb2](https://huggingface.co/raahemnabeel/minimax-m2.7-hybrid-qb2) | 2026-11-18 | `published/minimax-m2.7-hybrid-qb2` | `models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml` | `raahem/qwen35-397b-hybrid-moe` |
