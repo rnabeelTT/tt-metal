@@ -475,6 +475,13 @@ all loop layers' message mixes in one program per pass (I2M_MSG_ALL), the TP2 Mo
 (I2M_MOE_NOCLONE), the one-die MoE output read in place at any width (I2M_MOE_INPLACE). Traced one die B=1 20.4 -> 19.8,
 B=4 35.4 -> 34.7; TP2 B=1 15.3 -> 14.8, B=4 24.5 -> 24.1 ms.
 
+Later the same day (all bitwise): round signalling (flush + semaphore, linked multicasts; post T=1 21.2 -> 18.7 us);
+router weights pushed after round 1's inputs (I2M_RD_STAGED) and later rounds' gather rows zeroed lazily (I2M_RED_ZLAZY);
+streamed q|k|v with k|v on one reader per bank, 4-row tiles, 4-column blocks (I2M_MS_KV / MS_HMIN / MS_G; 64.5 -> 57 us,
+1 and 2 dies only); the short convs on live rows only (I2M_BCONV_LIVE: sliding pair 12.1 -> 7.7 us, global 16.2 -> 10.9)
+and lean aprep (I2M_APREP_LEAN: 10.6 -> 7.5 us). Traced B=1: one die 18.5 ms, TP2 14.0 (B=4 22.9). All-to-all
+multicast rounds measured ~155 us per round (concurrent multicasts into one rectangle serialize): rejected.
+
 ## Next
 
 1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
