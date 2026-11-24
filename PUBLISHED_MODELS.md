@@ -23,6 +23,7 @@ resolve with `git show archive/<branch>`.
 
 | Package (Hub) | Published | Tag (exact code) | Package yaml | Source branch |
 |---|---|---|---|---|
+| [inkling-2-mini](https://huggingface.co/raahemnabeel/inkling-2-mini) | 2026-11-24 | `published/inkling-2-mini` | `models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml` | `raahem/inkling-2-mini` |
 | [inkling-small-hybrid-qb2](https://huggingface.co/raahemnabeel/inkling-small-hybrid-qb2) | 2026-11-21 | `published/inkling-small-hybrid-qb2` | `models/autoports/thinkingmachines_inkling_small/tt-model-hybrid.yaml` | `raahem/inkling-small-hybrid` |
 | [minimax-m2.7-hybrid-qb2](https://huggingface.co/raahemnabeel/minimax-m2.7-hybrid-qb2) | 2026-11-18 | `published/minimax-m2.7-hybrid-qb2` | `models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml` | `raahem/qwen35-397b-hybrid-moe` |
 | [ornith-1.5-397b-hybrid-qb2](https://huggingface.co/raahemnabeel/ornith-1.5-397b-hybrid-qb2) | 2026-11-16 | `published/ornith-1.5-397b-hybrid-qb2` | `models/autoports/qwen_qwen3_5_122b_a10b/tt-model-o397-hybrid.yaml` | `ornith397-hybrid` |
@@ -38,7 +39,7 @@ resolve with `git show archive/<branch>`.
 | [qwen3-vl-reranker-8b](https://huggingface.co/raahemnabeel/qwen3-vl-reranker-8b), [qwen3-vl-embedding-8b](https://huggingface.co/raahemnabeel/qwen3-vl-embedding-8b), [qwen3-reranker-4b](https://huggingface.co/raahemnabeel/qwen3-reranker-4b) | 2026-11-02 | `published/qwen3-vl-reranker-8b` (recovered, autoport only) | `models/autoports/qwen_qwen3_vl_reranker_8b/tt-model.yaml` | none: recovered from the bundles, see `models/autoports/qwen_qwen3_vl_reranker_8b/recovered/README.md` |
 
 Not here on purpose: the GLM packages (glm-4.5-air, glm-5.3-flash), the `-v1` original bundles (private), unpublished
-work (`raahem/hy4-flash-hybrid`, `raahem/m27-rows-sdpa`, `qwen4_prep`, Inkling-2-Mini).
+work (`raahem/hy4-flash-hybrid`, `raahem/m27-rows-sdpa`, `qwen4_prep`).
 
 ## Adding a model
 
