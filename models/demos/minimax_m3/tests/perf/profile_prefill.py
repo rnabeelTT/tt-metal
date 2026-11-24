@@ -17,18 +17,14 @@ single chunk profiles both classes; the report separates them by the layer tag.
 
 What you get per zone: summed DEVICE KERNEL DURATION [ns] per device (with the across-device skew),
 op count, bytes moved (from the CSV's input/output shapes + dtypes) and the implied GB/s. Parse with
-    python3 models/demos/minimax_m3/tests/perf/parse_zone_perf.py <ops_perf_results_*.csv> --html report.html
+    python3 models/demos/minimax_m3/tests/perf/visualize_zones.py <ops_perf_results_*.csv>
 
 Zone list — dense layer: input_norm, attn/{qkv_proj,split_heads,qk_norm,rope,kv_write,
 ring_joint_sdpa,concat_heads,o_proj,ccl_out_allreduce}, post_attn_norm, mlp/{gate_up_proj,swiglu,
 down_proj,tp_allreduce}. Sparse layer: the same front end plus attn/{index_branch,index_k_write,
-cache_read/{deshard,slice},ag_kv,ag_index_k,indexer,sparse_sdpa} and mlp/{shared_expert,router_topk,
-routing_setup,dispatch,experts_mm,combine,reduce_ws_rs,tp_allgather,add_shared}.
-
-`cache_read/deshard` is the one to watch: the MSA cache-read path converts the ENTIRE packed cache
-(num_users*num_layers slots x3 tensors) from NdShard to DRAM-interleaved on EVERY sparse layer to work
-around the round-robin slice corruption (see attention/prefill.py). That is ~60x more traffic than the
-layer needs; this zone measures the real cost.
+ag_kv,ag_index_k,indexer,sparse_sdpa} and mlp/{shared_expert,router_topk,routing_setup,dispatch,
+experts_mm,combine,reduce_ws_rs,tp_allgather,add_shared}. The MSA cache read is the ag_kv + ag_index_k
+gathers (high_bw_all_gather straight from the cache slot); there is no separate cache_read zone.
 
 Tokens come from a REAL golden trace's metadata.json (tiled to length, exactly like
 scripts/run_prefill_perf.sh's make_trace): MoE expert routing is content-dependent, so random token ids would
@@ -53,7 +49,8 @@ Env:
   PROFILE_STAGE       which stage to profile, 0..PROFILE_STAGES-1. Stage k owns global layers
                       [k*60/S, (k+1)*60/S); PROFILE_LAYER_IDS must fall inside that range and
                       PROFILE_NUM_LAYERS takes the first N of it                             [default 0]
-  PROFILE_FABRIC      fabric config: 1d | 1d_ring | 2d | 2d_torus_xy                        [default 1d]
+  M3_FABRIC           fabric config: 1d | 1d_ring | 2d | 2d_torus_xy (utils/fabric_env.py)     [default 1d]
+  M3_CCL_TOPOLOGY     legacy-CCL topology: linear | ring (ring needs a ring/torus fabric)   [default linear]
   EXPERT_DTYPE        MoE routed-expert weight dtype: "bf4" or "bf8"                  [default bf4]
   HF_MODEL            real MiniMax-M3 weights dir (read by ModelArgs)
   M3_PROFILE_ZONES    set to 1 by this script before the model is imported
@@ -66,7 +63,7 @@ way run_prefill_perf.sh does:
 
 Manual equivalent:
   cd $TT_METAL_HOME && source python_env/bin/activate && export PYTHONPATH=$TT_METAL_HOME
-  export HF_MODEL=/mnt/models/MiniMaxAI/MiniMax-M3-ref
+  export HF_MODEL=/mnt/weka/model-weights/llm/minimax/MiniMax-M3
   export TT_MESH_GRAPH_DESC_PATH=$TT_METAL_HOME/tt_metal/fabric/mesh_graph_descriptors/single_bh_galaxy_mesh_graph_descriptor.textproto
   PROFILE_CACHE=25600 PREFILL_TRACE_DIR=<golden> \
     python3 -m tracy -v -r -p models/demos/minimax_m3/tests/perf/profile_prefill.py
@@ -95,12 +92,16 @@ os.environ.setdefault("TT_METAL_DEVICE_PROFILER", "1")
 from loguru import logger  # noqa: E402
 
 import ttnn  # noqa: E402
+from models.demos.minimax_m3.tt.ccl import L1_SMALL_SIZE  # noqa: E402
+from models.demos.minimax_m3.tt.moe import shared_overlap  # noqa: E402
+from models.demos.minimax_m3.utils.fabric_env import ccl_topology_from_env, fabric_config_from_env  # noqa: E402
 
 
 def _raise_nproc_limit():
-    """tt-metal JIT-compiles device kernels in parallel and each `g++ -flto=auto` fans out to
-    `make -j<nproc>`; a low RLIMIT_NPROC makes clone3 fail mid-build ("posix_spawn: Operation not
-    permitted"). Raise the soft limit to the hard limit. Copied from galaxy_prefill_kv_pcc.py."""
+    """tt-metal JIT-compiles device kernels in parallel and each target spawns its own chain of
+    short-lived processes (g++, cc1plus/lto1, as, ld); a low RLIMIT_NPROC makes clone3 fail
+    mid-build ("posix_spawn: Operation not permitted"). Raise the soft limit to the hard limit.
+    Copied from galaxy_prefill_kv_pcc.py."""
     soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
     if soft != resource.RLIM_INFINITY and (hard == resource.RLIM_INFINITY or soft < hard):
         try:
@@ -110,19 +111,8 @@ def _raise_nproc_limit():
             print(f"[zone-prof] WARNING: could not raise RLIMIT_NPROC (soft={soft}): {e}", file=sys.stderr)
 
 
-# MSA layers pick the top-16 of 128-token blocks; topk_large_indices aborts with fewer than 16 blocks,
-# so a chunk must cover at least this many tokens. Keep in sync with tt/attention/msa.py.
-MSA_MIN_TOKENS = 16 * 128  # 2048
-
 # sparse_attention_freq marks layers 0-2 dense and 3-59 sparse (tt/layer.py).
 FIRST_SPARSE_LAYER = 3
-
-FABRIC_CONFIGS = {
-    "1d": ttnn.FabricConfig.FABRIC_1D,
-    "1d_ring": ttnn.FabricConfig.FABRIC_1D_RING,
-    "2d": ttnn.FabricConfig.FABRIC_2D,
-    "2d_torus_xy": ttnn.FabricConfig.FABRIC_2D_TORUS_XY,
-}
 
 
 def load_tokens(n: int):
@@ -152,8 +142,9 @@ def plan(chunk: int, cache: int):
     chunks (the runtime fills the cache one chunk at a time, so a partial prefix is not reachable),
     and `total` is the cache capacity the KV cache must be allocated for.
     """
-    assert chunk % 1024 == 0, f"chunk ({chunk}) must be a multiple of 1024 (MSA needs S%1024==0)"
-    assert chunk >= MSA_MIN_TOKENS, f"chunk ({chunk}) below the MSA floor {MSA_MIN_TOKENS}"
+    # Whole 128-token MSA blocks per SP rank (SP <= 8). A cold chunk below the 2048-token top-k window reads
+    # the KV cache, so there is no 2048 floor.
+    assert chunk > 0 and chunk % 1024 == 0, f"chunk ({chunk}) must be a positive multiple of 1024"
     n_prefix = cache // chunk
     cache_aligned = n_prefix * chunk
     n_chunks = n_prefix + 1
@@ -254,6 +245,7 @@ def build_runtime(mesh, chunk, total, num_layers_override, layer_ids=None, stage
         weight_cache_path=cache_path,
         first_layer_idx=first_layer_idx,
         layer_indices=layer_ids,
+        topology=ccl_topology_from_env(),
         is_first_rank=True,
         is_last_rank=is_last_stage,
     )
@@ -264,30 +256,6 @@ def build_runtime(mesh, chunk, total, num_layers_override, layer_ids=None, stage
         mesh, num_layers=num_layers, max_seq_len=total, num_users=1, head_dim=hf_config.head_dim
     )
     return runtime, kv_cache, hf_config, global_layer_indices
-
-
-def cache_traffic_note(hf_config, global_layer_indices, total, sp):
-    """Log the whole-cache de-shard traffic the `cache_read/deshard` zone should be moving.
-
-    The packed cache is [num_users*num_layers, 1, seq_local, head_dim] per chip (kv_cache.py), and the
-    MSA cache-read converts the WHOLE tensor per layer, for each of K / V / index_k. Printing the
-    expected bytes up front makes the measured GB/s in the report immediately interpretable.
-    """
-    num_layers = len(global_layer_indices)
-    n_sparse = sum(1 for i in global_layer_indices if i >= FIRST_SPARSE_LAYER)
-    seq_local = total // sp
-    elems = num_layers * seq_local * hf_config.head_dim  # per chip, per cache tensor
-    kv_bytes = elems * 1.0625  # bf8_b: 1 byte + 1/16 block scale
-    ik_bytes = elems * (2.0 if os.getenv("M3_INDEX_CACHE_BF16") == "1" else 1.0625)
-    per_layer = 2 * (2 * kv_bytes + ik_bytes)  # read + write, K + V + index_k
-    logger.info(
-        f"[zone-prof] whole-cache de-shard traffic (the cache_read/deshard hypothesis):\n"
-        f"    packed cache per chip: {num_layers} layers x {seq_local} rows x {hf_config.head_dim} = "
-        f"{elems/1e6:.1f}M elems/tensor ({kv_bytes/2**20:.0f} MiB K, {kv_bytes/2**20:.0f} MiB V, "
-        f"{ik_bytes/2**20:.0f} MiB index_k)\n"
-        f"    per sparse layer (read+write x3 tensors): {per_layer/2**20:.0f} MiB\n"
-        f"    x {n_sparse} sparse layers: {per_layer * n_sparse/2**30:.1f} GiB per chunk, per chip"
-    )
 
 
 def main():
@@ -302,10 +270,7 @@ def main():
     stage = int(os.getenv("PROFILE_STAGE", "0"))
     assert stages in (1, 2, 4), f"PROFILE_STAGES must be 1, 2 or 4 (got {stages})"
     assert 0 <= stage < stages, f"PROFILE_STAGE={stage} out of range for {stages} stages"
-    fabric_name = os.getenv("PROFILE_FABRIC", "1d")
-    assert (
-        fabric_name in FABRIC_CONFIGS
-    ), f"PROFILE_FABRIC must be one of {sorted(FABRIC_CONFIGS)} (got {fabric_name!r})"
+    fabric_config = fabric_config_from_env()
 
     n_chunks, cache, total = plan(chunk, cache_req)
     print(
@@ -322,11 +287,13 @@ def main():
     # TODO(profiling): the pipeline runner's intra-galaxy bindings use 2D fabric (PREFILL_FABRIC_MODE=2d);
     # 1d is the default here so stage captures compare like-for-like with the whole-galaxy baseline.
     # 2d / 2d_torus_xy are wired through but not yet validated on a carved sub-mesh (torus also needs the
-    # matching *_torus_xy mesh graph descriptor).
-    ttnn.set_fabric_config(FABRIC_CONFIGS[fabric_name])
-    galaxy = ttnn.open_mesh_device(ttnn.MeshShape(8, 4))
+    # matching *_torus_xy mesh graph descriptor). M3_CCL_TOPOLOGY=Ring puts the legacy CCLs on the ring
+    # (measured in PR #55668); high_bw_all_gather derives its own from the fabric.
+    ttnn.set_fabric_config(fabric_config)
+    galaxy = ttnn.open_mesh_device(ttnn.MeshShape(8, 4), l1_small_size=L1_SMALL_SIZE)
     print(
-        f"[zone-prof] galaxy opened {tuple(galaxy.shape)} ndev={galaxy.get_num_devices()} fabric={fabric_name}",
+        f"[zone-prof] galaxy opened {tuple(galaxy.shape)} ndev={galaxy.get_num_devices()} fabric={fabric_config} "
+        f"ccl_topology={ccl_topology_from_env()}",
         flush=True,
     )
     mesh = galaxy
@@ -346,7 +313,6 @@ def main():
             mesh, chunk, total, num_layers_override, layer_ids, stages=stages, stage=stage
         )
         num_layers = len(global_layer_indices)
-        cache_traffic_note(hf_config, global_layer_indices, total, sp)
 
         # Per-layer ReadDeviceProfiler for the UN-profiled phases only (warmup + prefix). The device
         # profiler buffer must be drained or it overflows and the next phase's data is dropped — but a
@@ -432,18 +398,19 @@ def main():
 
         print(
             f"\n[zone-prof] PROFILED CHUNK: {chunk} tok @ {cache} cache, {num_layers} layers "
-            f"(stage {stage}/{stages}, mesh {sp}x{tp}, fabric {fabric_name})\n"
+            f"(stage {stage}/{stages}, mesh {sp}x{tp}, fabric {fabric_config})\n"
             f"  wall-clock: {wall*1e3:.1f} ms  ({chunk_reads} profiler reads inside the chunk, "
             f"{prefix_reads} before it)\n"
             f"  device-kernel time per zone: parse the ops CSV with\n"
-            f"    python3 models/demos/minimax_m3/tests/perf/parse_zone_perf.py "
-            f"<generated/profiler/reports/*/ops_perf_results_*.csv> --html zones.html",
+            f"    python3 models/demos/minimax_m3/tests/perf/visualize_zones.py "
+            f"<generated/profiler/reports/*/ops_perf_results_*.csv>",
             flush=True,
         )
         print("[zone-prof] DONE", flush=True)
     finally:
         # Sub-mesh first: closing the parent runs a final profiler read on the parent's command queue,
         # and MeshDevice::close then refuses to close a mesh whose child still holds an in-use queue.
+        shared_overlap.release_all()
         for sub in galaxy.get_submeshes():
             ttnn.close_mesh_device(sub)
         ttnn.close_mesh_device(galaxy)

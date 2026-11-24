@@ -9,10 +9,17 @@ import torch
 import ttnn
 
 from tests.ttnn.utils_for_testing import assert_equal, assert_with_pcc
+from tests.ttnn.unit_tests.operations.data_movement.docstring_support import (
+    check_readable,
+    docstring_dtype_layout_params,
+    docstring_interleaved_buffer_type_params,
+    interleaved_memory_config,
+)
+from tests.ttnn.unit_tests.operations.data_movement.data_movement_test_utils import assert_exact, full_range_input
 from tests.ttnn.python_api_testing.sweep_tests.ttnn_pytorch_ops import (
     tilize_with_val_padding as pytorch_tilize_with_val_padding,
 )
-from models.common.utility_functions import is_blackhole, skip_for_blackhole
+from tt_py_test_utils_common.utility_functions import is_blackhole, skip_for_blackhole
 
 torch.manual_seed(0)
 
@@ -90,6 +97,27 @@ params += [
             "use_multicore": True,
         },
     )
+]
+
+# Column padding wider than one sub-block of the block-interleaved factory: every sub-block after
+# the one holding the source's last column starts inside the padding region, so the reader must
+# fill it without reading past the source row (the reader used to underflow the remaining width
+# and read `width_size` bytes from a 64-byte row). The 100-wide input also exercises the
+# misaligned (staging) path.
+params += [
+    pytest.param(
+        [[1, 1, 32, in_w]],
+        {
+            "dtype": [ttnn.bfloat16],
+            "layout": [ttnn.ROW_MAJOR_LAYOUT],
+            "input_mem_config": [ttnn.MemoryConfig(ttnn.TensorMemoryLayout.INTERLEAVED, ttnn.BufferType.DRAM)],
+            "output_mem_config": ttnn.MemoryConfig(ttnn.TensorMemoryLayout.INTERLEAVED, ttnn.BufferType.DRAM),
+            "output_tensor_shape": [1, 1, 32, out_w],
+            "pad_value": 7.0,
+        },
+        id=f"wide_col_pad-{in_w}-{out_w}",
+    )
+    for in_w, out_w in [(32, 5120), (2048, 5120), (100, 8448)]
 ]
 
 
@@ -969,3 +997,207 @@ def test_tilize_with_val_padding_block_per_node_cb_size(device, input_shape, pad
             assert (
                 device.num_program_cache_entries() == entries
             ), "tilize_with_val_padding must reuse the cached program on a cache hit"
+
+
+# Wide rows select the block-interleaved factory; the output height exceeds the input height rounded up
+# to a tile, so whole tile-rows (and, for batched inputs, every later slice) lie past the source rows.
+@pytest.mark.parametrize(
+    "input_shape, output_shape",
+    [
+        ([1, 1, 100, 2048], [1, 1, 256, 2048]),
+        ([2, 1, 100, 2048], [2, 1, 192, 2048]),
+        ([1, 1, 100, 2048], [1, 1, 256, 2112]),
+    ],
+)
+def test_tilize_with_val_padding_block_output_taller_than_input(device, input_shape, output_shape):
+    pad_value = 3.0
+    torch_input = torch.randn(input_shape, dtype=torch.bfloat16)
+    tt_input = ttnn.from_torch(
+        torch_input,
+        dtype=ttnn.bfloat16,
+        layout=ttnn.ROW_MAJOR_LAYOUT,
+        device=device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
+    tt_output = ttnn.tilize_with_val_padding(tt_input, output_shape, pad_value, use_multicore=True)
+
+    torch_golden = pytorch_tilize_with_val_padding(torch_input, output_shape, pad_value)
+    assert_equal(torch_golden, tt_output.cpu().to_torch_with_padded_shape())
+
+
+@pytest.mark.parametrize("pad_value", [10.2, 0.0])
+def test_tilize_with_val_padding_width_sharded_to_width_sharded(device, pad_value):
+    """WIDTH_SHARDED (legacy) input -> WIDTH_SHARDED (legacy) output, with height padding.
+
+    This shape selects TilizeWithValPaddingMultiCoreShardedFactory (see
+    can_use_tilize_with_val_padding_sharded_factory: L1 WIDTH_SHARDED in and out, non-ND, no
+    sub_core_grids, shapes equal except the padded height dim). That factory's reader
+    (reader_unary_pad_height_width_sharded) carries the borrowed input shard (via LocalTensorAccessor),
+    the STAGE dataflow buffer, and the PAD Scratchpad; the other
+    sharded tests in this file output ND_SHARDED and take the default factory instead
+    (test_tilize_with_val_padding_program_cache_addr_change_sharded is the exception -- it also hits
+    this factory, but only with the default pad_value). The incremental coverage here is the
+    pad-value axis: height padding (H_out > H_in) exercises the PAD buffer's fill/broadcast path, and
+    pad_value == 0.0 covers the zero-fill store loop.
+    """
+    torch.manual_seed(0)
+    num_cores = 2
+    # H_in is intentionally not tile-aligned: compute_output_specs derives the output shard height from
+    # the padded volume (64), while the output tensor's physical height is round_up(H_in, 32). Picking
+    # H_in=50 makes round_up(50,32)==64 so the two agree, and leaves 14 rows for the PAD path to fill.
+    height_in = 50
+    height_out = 64
+    width = 128
+    input_shape = [1, height_in, width]
+    output_padded_shape = [1, height_out, width]
+
+    shard_grid = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(num_cores - 1, 0))})
+    input_shard_spec = ttnn.ShardSpec(shard_grid, (height_in, width // num_cores), ttnn.ShardOrientation.ROW_MAJOR)
+    input_memory_config = ttnn.MemoryConfig(ttnn.TensorMemoryLayout.WIDTH_SHARDED, ttnn.BufferType.L1, input_shard_spec)
+    output_shard_spec = ttnn.ShardSpec(shard_grid, (height_out, width // num_cores), ttnn.ShardOrientation.ROW_MAJOR)
+    output_memory_config = ttnn.MemoryConfig(
+        ttnn.TensorMemoryLayout.WIDTH_SHARDED, ttnn.BufferType.L1, output_shard_spec
+    )
+
+    torch_input = torch.randn(input_shape, dtype=torch.bfloat16)
+    tt_input = ttnn.from_torch(torch_input, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT)
+    tt_input = ttnn.to_device(tt_input, device, memory_config=input_memory_config)
+
+    tt_output = ttnn.tilize_with_val_padding(
+        tt_input, output_padded_shape, pad_value, memory_config=output_memory_config
+    )
+    assert tt_output.layout == ttnn.TILE_LAYOUT
+    torch_golden = pytorch_tilize_with_val_padding(torch_input, output_padded_shape, pad_value)
+    assert_equal(torch_golden, tt_output.cpu().to_torch_with_padded_shape())
+
+
+L1 = ttnn.BufferType.L1
+DRAM = ttnn.BufferType.DRAM
+
+
+@pytest.mark.parametrize(
+    "in_buffer, out_buffer, width, num_cores",
+    [
+        (DRAM, DRAM, 512, 4),  # zero-copy factory needs L1
+        (DRAM, L1, 512, 4),
+        (L1, DRAM, 512, 4),
+        (DRAM, DRAM, 16384, 8),  # row of tiles doesn't fit in L1
+        (DRAM, L1, 16384, 8),  # wide row to L1 sharded output
+        (L1, None, 16384, 8),  # wide L1 sharded to DRAM interleaved
+    ],
+)
+def test_tilize_with_val_padding_width_sharded_dram_and_wide(device, in_buffer, out_buffer, width, num_cores):
+    torch.manual_seed(0)
+    height_in, height_out = 50, 64
+    input_shape = [1, height_in, width]
+    output_padded_shape = [1, height_out, width]
+    if DRAM in (in_buffer, out_buffer):
+        num_cores = min(num_cores, device.dram_grid_size().x)
+    while width % (num_cores * ttnn.TILE_SIZE) != 0:
+        num_cores -= 1
+    shard_grid = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(num_cores - 1, 0))})
+
+    def width_sharded(buffer_type, height):
+        spec = ttnn.ShardSpec(shard_grid, (height, width // num_cores), ttnn.ShardOrientation.ROW_MAJOR)
+        return ttnn.MemoryConfig(ttnn.TensorMemoryLayout.WIDTH_SHARDED, buffer_type, spec)
+
+    output_memory_config = (
+        width_sharded(out_buffer, height_out)
+        if out_buffer is not None
+        else ttnn.MemoryConfig(ttnn.TensorMemoryLayout.INTERLEAVED, DRAM)
+    )
+
+    torch_input = torch.randn(input_shape, dtype=torch.bfloat16)
+    tt_input = ttnn.from_torch(
+        torch_input,
+        dtype=ttnn.bfloat16,
+        layout=ttnn.ROW_MAJOR_LAYOUT,
+        device=device,
+        memory_config=width_sharded(in_buffer, height_in),
+    )
+
+    tt_output = ttnn.tilize_with_val_padding(tt_input, output_padded_shape, 0.0, memory_config=output_memory_config)
+    assert tt_output.layout == ttnn.TILE_LAYOUT
+    assert tt_output.memory_config() == output_memory_config
+    torch_golden = pytorch_tilize_with_val_padding(torch_input, output_padded_shape, 0.0)
+    assert_equal(torch_golden, tt_output.cpu().to_torch_with_padded_shape())
+
+
+def test_tilize_with_val_padding_wide_row_dram_width_sharded(device):
+    """DRAM width-sharded input whose row of tiles doesn't fit in L1."""
+    torch.manual_seed(0)
+    num_cores = device.dram_grid_size().x  # 12 DRAM banks on WH, 8 on BH
+    shard_shape = (2048, 3584)
+    tensor_shape = (shard_shape[0], shard_shape[1] * num_cores)
+    shard_grid = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(num_cores - 1, 0))})
+    sharded_dram_cfg = ttnn.MemoryConfig(
+        ttnn.TensorMemoryLayout.WIDTH_SHARDED,
+        ttnn.BufferType.DRAM,
+        ttnn.ShardSpec(shard_grid, shard_shape, ttnn.ShardOrientation.ROW_MAJOR),
+    )
+
+    torch_tensor = torch.randn(tensor_shape, dtype=torch.bfloat16)
+    tt_rm = ttnn.from_torch(
+        torch_tensor, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, memory_config=sharded_dram_cfg, device=device
+    )
+
+    tt_tile = ttnn.tilize_with_val_padding(
+        tt_rm, list(tensor_shape), 0.0, memory_config=sharded_dram_cfg, use_multicore=True
+    )
+
+    assert tt_tile.layout == ttnn.TILE_LAYOUT
+    assert torch.equal(torch_tensor, ttnn.to_torch(tt_tile))
+
+
+# A pad value of the kind the docstring's pad_value line asks for: a float for BFLOAT16 and FLOAT32, and for the
+# integer dtypes an int at the end of the documented range.
+_DOCSTRING_PAD_VALUES = {
+    ttnn.bfloat16: -2.5,
+    ttnn.float32: -2.5,
+    ttnn.int32: -(2**24),
+    ttnn.uint32: 2**32 - 1,
+    ttnn.uint16: 2**16 - 1,
+}
+
+
+@pytest.mark.parametrize("buffer_type", docstring_interleaved_buffer_type_params(ttnn.tilize_with_val_padding))
+@pytest.mark.parametrize("dtype, layout", docstring_dtype_layout_params(ttnn.tilize_with_val_padding))
+@pytest.mark.parametrize(
+    "input_shape, output_tensor_shape",
+    [
+        ((2, 3, 50, 70), (2, 3, 128, 96)),  # pads the height past the next multiple of 32
+        ((2, 50, 64), (2, 64, 128)),  # pads the width past the next multiple of 32
+        ((1, 1, 40, 2000), (1, 1, 64, 2048)),  # a last dim of more than 1024
+        ((2, 2, 2, 50, 50), (2, 2, 2, 64, 64)),  # rank 5
+    ],
+    ids=["height", "width", "wide", "rank5"],
+)
+def test_tilize_with_val_padding_docstring_supported_inputs(
+    input_shape, output_tensor_shape, dtype, layout, buffer_type, device
+):
+    """Runs every dtype, layout and interleaved buffer type the ttnn.tilize_with_val_padding docstring lists.
+
+    The output shapes follow the docstring's output_tensor_shape rules. The data must come back unchanged and the
+    padding must hold pad_value. BFLOAT16 inputs leave out NaN, as the docstring requires, and compare zeros by value.
+    """
+    check_readable(dtype, layout, buffer_type)
+    memory_config = interleaved_memory_config(buffer_type)
+    pad_value = _DOCSTRING_PAD_VALUES[dtype]
+    input_tensor = ttnn.from_torch(
+        full_range_input(input_shape, dtype, nan=dtype != ttnn.bfloat16),
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        memory_config=memory_config,
+    )
+    output = ttnn.tilize_with_val_padding(input_tensor, list(output_tensor_shape), pad_value)
+
+    assert output.layout == ttnn.TILE_LAYOUT
+    assert output.dtype == dtype
+    assert output.memory_config() == memory_config
+    assert list(output.shape) == list(input_shape)
+    assert list(output.padded_shape) == list(output_tensor_shape)
+    expected = torch.full(output_tensor_shape, pad_value, dtype=torch.float64)
+    expected[tuple(slice(0, size) for size in input_shape)] = ttnn.to_torch(input_tensor).to(torch.float64)
+    actual = ttnn.from_device(output).to_torch_with_padded_shape()
+    assert_exact(expected, actual, signed_zeros=dtype != ttnn.bfloat16)

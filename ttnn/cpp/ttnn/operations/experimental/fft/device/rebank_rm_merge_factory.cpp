@@ -20,8 +20,8 @@
 
 #include <cstdint>
 
-#include <tt-metalium/experimental/metal2_host_api/program_run_args.hpp>
-#include <tt-metalium/experimental/metal2_host_api/program_spec.hpp>
+#include <tt-metalium/workload/run_args/program_run_args.hpp>
+#include <tt-metalium/workload/specification/program_spec.hpp>
 
 #include "ttnn/operations/core/data_movement_kernel/datamovement_kernel_config.hpp"
 #include "stockham_host.hpp"
@@ -30,7 +30,6 @@
 namespace ttnn::experimental::prim {
 
 using namespace tt::tt_metal;
-using namespace tt::tt_metal::experimental;
 
 namespace {
 
@@ -115,35 +114,30 @@ ttnn::device_operation::ProgramArtifacts RebankRmMergeFactory::create_program_ar
 
     KernelSpec reader{
         .unique_id = RM_READER,
-        .source =
-            "ttnn/cpp/ttnn/operations/experimental/fft/device/kernels/dataflow/rebank_rm_merge_reader.cpp",
-        .dfb_bindings =
-            {DFBBinding{
-                .dfb_spec_name = RM_BLOCK,
-                .accessor_name = "block",
-                .endpoint_type = DFBEndpointType::PRODUCER,
-            }},
+        .source = "ttnn/cpp/ttnn/operations/experimental/fft/device/kernels/dataflow/rebank_rm_merge_reader.cpp",
+        .dfb_bindings = {DFBBinding{
+            .dfb_spec_name = RM_BLOCK,
+            .accessor_name = "block",
+            .endpoint_type = DFBEndpointType::PRODUCER,
+        }},
         .tensor_bindings = {TensorBinding{.tensor_parameter_name = RM_INPUT, .accessor_name = "src"}},
         .compile_time_args = {{"chunk", N1}, {"is_bf16", is_bf16_flag}},
         .runtime_arg_schema = {.runtime_arg_names = {"base_unit", "num_units"}},
-        .hw_config = ttnn::create_reader_datamovement_config(device_raw->arch()),
+        .hw_config = ttnn::create_reader_datamovement_config(),
     };
 
     KernelSpec writer{
         .unique_id = RM_WRITER,
-        .source =
-            "ttnn/cpp/ttnn/operations/experimental/fft/device/kernels/dataflow/rebank_rm_merge_writer.cpp",
-        .dfb_bindings =
-            {DFBBinding{
-                .dfb_spec_name = RM_BLOCK,
-                .accessor_name = "block",
-                .endpoint_type = DFBEndpointType::CONSUMER,
-            }},
+        .source = "ttnn/cpp/ttnn/operations/experimental/fft/device/kernels/dataflow/rebank_rm_merge_writer.cpp",
+        .dfb_bindings = {DFBBinding{
+            .dfb_spec_name = RM_BLOCK,
+            .accessor_name = "block",
+            .endpoint_type = DFBEndpointType::CONSUMER,
+        }},
         .tensor_bindings = {TensorBinding{.tensor_parameter_name = RM_OUTPUT, .accessor_name = "dst"}},
-        .compile_time_args =
-            {{"chunk", N1}, {"chunks_per_merge", chunks_per_merge}, {"is_bf16", is_bf16_flag}},
+        .compile_time_args = {{"chunk", N1}, {"chunks_per_merge", chunks_per_merge}, {"is_bf16", is_bf16_flag}},
         .runtime_arg_schema = {.runtime_arg_names = {"base_unit", "num_units"}},
-        .hw_config = ttnn::create_writer_datamovement_config(device_raw->arch()),
+        .hw_config = ttnn::create_writer_datamovement_config(),
     };
 
     KernelRunArgs reader_run_args{.kernel = RM_READER};

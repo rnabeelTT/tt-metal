@@ -1,0 +1,9 @@
+{
+  "arch": "HYV4FlashForConditionalGeneration",
+  "main_class": "models.autoports.tencent_hy4_flash.tt.generator_vllm:HYV4FlashForConditionalGeneration",
+  "hf_model": "tencent/Hy4-flash",
+  "mesh_device": [
+    "P300x2"
+  ],
+  "notes": "Tencent Hy4-flash (HF hy_v4_flash, 220B total / ~11.3B active: 42 layers, 12 compressed-indexer sparse MLA + 30 sliding-window MLA layers, 41 latent-MoE layers of 512 experts top-16 + 1 shared, 4 hyper-connection streams, Engram n-gram memory on the host) on a (1,4) Blackhole mesh, text only. vLLM 0.26 does not know hy_v4_flash: serving/sitecustomize.py (on PYTHONPATH) registers the config class and the hy_v4 reasoning / tool parsers in every process. Registered by the vLLM TT plugin from EXTRA_MODELS_DIR."
+}

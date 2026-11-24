@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 namespace {
 constexpr uint32_t F32_FACE = 1024, F32_ROW = 64;  // fp32 face / face row bytes

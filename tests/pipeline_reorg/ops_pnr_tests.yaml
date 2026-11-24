@@ -6,7 +6,7 @@
 # one owning pipeline and one time budget.
 
 - name: ttnn release matmul tests
-  cmd: 'pytest tests/ttnn/nightly/unit_tests/operations/matmul -xv -m "not disable_fast_runtime_mode" --timeout=600'
+  cmd: 'pytest tests/ttnn/nightly/unit_tests/operations/matmul -xv -m "not disable_fast_runtime_mode and not requires_host_iommu" --timeout=600'
   skus:
     wh_n150_civ2:
       timeout: 50
@@ -14,6 +14,7 @@
       timeout: 50
   owner_id: U084B1CES7M # Borys Bradel
   team: ttnn
+  budget_type: package_and_release
   category: matmul
 
 - name: ttnn release fused tests
@@ -25,6 +26,7 @@
       timeout: 65
   owner_id: U084B1CES7M # Borys Bradel
   team: ttnn
+  budget_type: package_and_release
   category: fused
 
 - name: ttnn release reduction tests
@@ -36,6 +38,7 @@
       timeout: 45
   owner_id: U084B1CES7M # Borys Bradel
   team: ttnn
+  budget_type: package_and_release
   category: reduction
 
 - name: ttnn release moreh tests
@@ -47,4 +50,5 @@
       timeout: 45
   owner_id: U084B1CES7M # Borys Bradel
   team: ttnn
+  budget_type: package_and_release
   category: moreh

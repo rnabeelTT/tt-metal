@@ -28,12 +28,24 @@ struct SparseSDPAParams {
     std::optional<BlockCyclicLayout> block_cyclic = std::nullopt;
     bool has_block_cyclic() const { return block_cyclic.has_value(); }
     bool has_scaled_kv() const { return kv_format == transformer::SparseKVFormat::SCALED_FP8; }
+    // Worker cores: sub_core_grids, or all cores of the first subdevice.
+    tt::tt_metal::CoreRangeSet worker_core_grid;
+    // Key split (decode): each token's selected key chunks are spread in order over up to kv_split cores; the
+    // result is bit-identical to the one-core program (same running max per chunk, SALAD chain passed core to core
+    // in chunk order; see sparse_sdpa_common.hpp). 1 = off (one core per token, the original program). Only the
+    // first active_tokens query tokens are computed when set (the rest of the output is left unwritten); the
+    // effective split is min(kv_split, cores / active_tokens) and needs H == 32, a plain bf16/fp8 KV, no attention
+    // sink, no block-cyclic remap and at most SPLIT_MAX_LOCAL_CHUNKS chunks per core (else it falls back to 1).
+    uint32_t kv_split = 1;
+    std::optional<uint32_t> active_tokens = std::nullopt;
 };
 
 struct SparseSDPAInputs {
     Tensor q;        // [1, H, S, K_DIM] bf16/fp8_e4m3 ROW_MAJOR  (K_DIM = head dim, e.g. 576)
     Tensor kv;       // Plain [B,1,T,K_DIM] or packed scaled-FP8 rows; format is explicit in SparseSDPAParams
     Tensor indices;  // [1, 1, S, TOPK] uint32 ROW_MAJOR  (0xFFFFFFFF = masked)
+    // [1, 1, 1, H] ROW_MAJOR BF16; scaled like QK.
+    std::optional<Tensor> attention_sink;
 };
 
 }  // namespace ttnn::prim

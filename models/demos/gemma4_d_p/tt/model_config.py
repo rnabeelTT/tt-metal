@@ -3,8 +3,6 @@
 
 """Configuration and checkpoint loading for Gemma4-31B-it."""
 
-import errno
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,46 +11,27 @@ from loguru import logger
 from tqdm import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM
 
+from models.common.hf_layer_type_attention import layer_type_attention
 from models.demos.gemma4_d_p.tt.precision import dtype_to_str
 
-_RO_ERRNOS = (errno.EROFS, errno.EACCES, errno.EPERM)
 
+def resolve_cache_dir_from_tt_cache_path(tt_cache_path, *, dtype, mesh_shape):
+    """Return the TT tensor-cache directory beneath the configured root.
 
-def _writable_cache_mirror(preferred: Path) -> Path:
-    """Writable mirror for a preferred cache dir on RO mounts (CI MLPerf :ro)."""
-    root = Path(os.environ.get("TT_METAL_HOME") or os.environ.get("HOME") or "/tmp")
-    suffix = Path(*preferred.parts[-2:]) if len(preferred.parts) >= 2 else Path(preferred.name)
-    return root / "generated" / "gemma4_tt_cache" / suffix
-
-
-def _ensure_cache_dir(path: Path) -> Path:
-    """Return ``path``, creating it when possible.
-
-    CI mounts ``/mnt/MLPerf/huggingface`` read-only (``MLPERF_READ_ONLY``).
-    ``Path.mkdir`` then raises ``OSError: [Errno 30] Read-only file system``
-    when the cache subdir is missing. Reuse an existing dir; otherwise mirror
-    under ``$TT_METAL_HOME/generated/gemma4_tt_cache/...`` so cold builds can
-    still write.
+    Canonical bf16, 8x4 example:
+        tt_cache_path = "/mnt/models/huggingface/tt_cache/gemma4_d_p/google--gemma-4-31B-it"
+        cache_dir     = "/mnt/models/huggingface/tt_cache/gemma4_d_p/google--gemma-4-31B-it/tensor_cache_bf16_mesh8x4"
     """
-    if path.is_dir():
-        return path
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    except OSError as e:
-        if e.errno not in _RO_ERRNOS:
-            raise
-        if path.is_dir():
-            return path
-        alt = _writable_cache_mirror(path)
-        logger.warning(
-            "Gemma4 weight cache: {} is not writable ({}); using {}.",
-            path,
-            e,
-            alt,
-        )
-        alt.mkdir(parents=True, exist_ok=True)
-        return alt
+
+    if not tt_cache_path:
+        raise ValueError("tt_cache_path must be provided")
+
+    mesh_suffix = "x".join(str(size) for size in mesh_shape)
+    cache_dir = Path(tt_cache_path) / f"tensor_cache_{dtype_to_str(dtype)}_mesh{mesh_suffix}"
+    if not cache_dir.is_dir():
+        raise FileNotFoundError(f"Weight cache directory does not exist or is not a directory: {cache_dir}")
+
+    return cache_dir
 
 
 def validate_31b_config(config):
@@ -72,7 +51,18 @@ def validate_31b_config(config):
         "tie_word_embeddings": True,
         "attention_bias": False,
     }
-    mismatches = [name for name, value in expected.items() if getattr(config, name, None) != value]
+    attn = layer_type_attention(config)
+    actual = {
+        "num_key_value_heads": attn.sliding_kv_heads,
+        "num_global_key_value_heads": attn.full_kv_heads,
+        "head_dim": attn.sliding_head_dim,
+        "global_head_dim": attn.full_head_dim,
+    }
+    mismatches = [
+        name
+        for name, value in expected.items()
+        if (actual[name] if name in actual else getattr(config, name, None)) != value
+    ]
     for name in ("enable_moe_block", "hidden_size_per_layer_input", "num_kv_shared_layers", "use_double_wide_mlp"):
         if getattr(config, name, False):
             mismatches.append(name)
@@ -118,7 +108,6 @@ class Gemma4ModelArgs:
     attention_bias: bool = False
     # Layer pattern
     layer_types: tuple = None
-    model_cache_path: Path | None = None
 
     def __post_init__(self):
         if self.layer_types is None:
@@ -140,19 +129,16 @@ class Gemma4ModelArgs:
         sliding_rope = rope_params.get("sliding_attention", {})
         full_rope = rope_params.get("full_attention", {})
 
-        # num_global_key_value_heads: None means use same as sliding
-        num_global_kv = getattr(tc, "num_global_key_value_heads", None)
-        if num_global_kv is None:
-            num_global_kv = getattr(tc, "num_key_value_heads", 8)
+        attn = layer_type_attention(tc)
 
         return cls(
             hidden_size=tc.hidden_size,
             num_hidden_layers=tc.num_hidden_layers,
             num_attention_heads=tc.num_attention_heads,
-            num_key_value_heads=getattr(tc, "num_key_value_heads", 8),
-            head_dim=getattr(tc, "head_dim", 256),
-            num_global_key_value_heads=num_global_kv,
-            global_head_dim=getattr(tc, "global_head_dim", 512),
+            num_key_value_heads=attn.sliding_kv_heads,
+            head_dim=attn.sliding_head_dim,
+            num_global_key_value_heads=attn.full_kv_heads,
+            global_head_dim=attn.full_head_dim,
             attention_k_eq_v=getattr(tc, "attention_k_eq_v", False),
             sliding_window=getattr(tc, "sliding_window", 1024),
             rope_theta=sliding_rope.get("rope_theta", getattr(tc, "rope_theta", 10000.0)),
@@ -207,9 +193,9 @@ class Gemma4ModelArgs:
         return state_dict
 
     @staticmethod
-    def load_hf_config(model_path):
+    def load_hf_config(hf_model_id):
         """Load HuggingFace config."""
-        return AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        return AutoConfig.from_pretrained(hf_model_id, trust_remote_code=True)
 
     # ── Generator compatibility properties ─────────────────────────────────
     # The tt_transformers Generator expects these attribute names.
@@ -232,39 +218,8 @@ class Gemma4ModelArgs:
 
     @property
     def max_seq_len(self):
-        return getattr(self, "_max_seq_len", 131072)
+        return getattr(self, "_max_seq_len", 262144)
 
     @max_seq_len.setter
     def max_seq_len(self, value):
         self._max_seq_len = value
-
-    @staticmethod
-    def resolve_model_cache_path(model_path):
-        """Resolve the cache root for model artifacts."""
-        cache_dir = os.getenv("TT_CACHE_PATH")
-        if cache_dir:
-            cache_dir = Path(cache_dir)
-        elif Path(model_path).is_dir():
-            # Local checkpoint: cache next to the weights.
-            cache_dir = Path(model_path)
-        else:
-            # Otherwise model_path is an HF id like "google/gemma-4-31B-it".
-            # Caching under Path(model_path) would create that as a relative dir
-            # in cwd, which then makes transformers' AutoConfig.from_pretrained
-            # treat the id as a local path (os.path.isdir returns True) and fail
-            # to find config.json. Fall back to an HF_HOME-based cache instead.
-            hf_home = os.getenv("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
-            sanitized = str(model_path).replace("/", "--")
-            cache_dir = Path(hf_home) / "tt_cache" / sanitized
-        return _ensure_cache_dir(cache_dir)
-
-    def weight_cache_path(self, dtype, mesh_shape=None):
-        """Return the weight cache directory for this dtype and Galaxy mesh geometry."""
-        if self.model_cache_path is None:
-            raise ValueError("model_cache_path must be initialized before requesting a weight cache path")
-        dtype_str = dtype_to_str(dtype)
-        shape = mesh_shape if mesh_shape is not None else getattr(self, "cluster_shape", None)
-        if shape is None:
-            raise ValueError("Mesh shape must be initialized before requesting a weight cache path")
-        mesh_suffix = "x".join(str(d) for d in shape)
-        return _ensure_cache_dir(self.model_cache_path / f"tensor_cache_{dtype_str}_mesh{mesh_suffix}")

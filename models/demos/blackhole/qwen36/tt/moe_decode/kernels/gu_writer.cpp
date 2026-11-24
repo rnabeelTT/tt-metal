@@ -26,7 +26,7 @@
 #include "ckernel_defs.h"
 #include "gu_layout.hpp"
 #include "router_topk.hpp"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -59,9 +59,12 @@ void kernel_main() {
 
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
     const auto s_act = TensorAccessor(act_args, act_addr, act_row_bytes);
-    const auto s_route = TensorAccessor(route_args, route_addr, 64);
+    const auto s_route = TensorAccessor(route_args, route_addr, moe_topk::REC_BYTES);
     const auto s_lg = TensorAccessor(lg_args, logits_addr, moe_topk::LG_PAGE);
 
+#ifdef ROUTE_IN
+    constexpr uint32_t extra = 1;  // (the bias address after the slot list: unused)
+#else
     // logits [E / 2, E) (they gate the expert stream)
     cb_reserve_back(cb_lg, 1);
     const uint32_t lg = get_write_ptr(cb_lg);
@@ -89,6 +92,7 @@ void kernel_main() {
         moe_topk::route_select<topk>(lg, bias, num_experts / 2, num_experts, part, part + topk);
         cb_push_back(cb_part, 1);
     }
+#endif
 
     // x after the router tail: the compute needs it only with the first weight column
     cb_reserve_back(cb_x, kx);
@@ -107,7 +111,7 @@ void kernel_main() {
     // this die's window: positions beyond route[15] hold no expert (positions ascend per core); the compute takes the
     // count through the mailboxes
     uint32_t mine = 0;
-    while (mine < num_slots && get_arg_val<uint32_t>(7 + mine) <= route[15]) {
+    while (mine < num_slots && get_arg_val<uint32_t>(7 + mine) <= route[moe_topk::R_NLIVE]) {
         ++mine;
     }
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, mine);
@@ -120,12 +124,61 @@ void kernel_main() {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
         ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, static_cast<uint32_t>(route[16 + s]) << 16);
     }
+#ifndef ROUTE_IN  // (ROUTE_IN: the record is in the route buffer already)
     if (route_owner) {
-        noc_async_write(route_l1, s_route.get_noc_addr(0), 64);
+        noc_async_write(route_l1, s_route.get_noc_addr(0), moe_topk::REC_BYTES);
     }
+#endif
 
+#ifdef GU_FAR_W
+    // the far bank block (bank q + banks / 2) of each slot, streamed on this RISC's NoC (NOC1) into cb_w1, up to
+    // f_buffers - 1 slots ahead, pushed in slot order before the slot's output is drained (runtime args after the
+    // slot list and the bias: up_gate address, far bank)
+    constexpr uint32_t far_ct = lg_args.next_compile_time_args_offset();
+    constexpr uint32_t cb_w1 = get_compile_time_arg_val(far_ct);
+    constexpr uint32_t f_page_bytes = get_compile_time_arg_val(far_ct + 1);
+    constexpr uint32_t f_buffers = get_compile_time_arg_val(far_ct + 2);
+    constexpr uint32_t f_tile_bytes = get_compile_time_arg_val(far_ct + 3);
+    constexpr uint32_t f_blk_tiles = kx * m;
+    constexpr uint32_t f_blk_bytes = f_blk_tiles * f_tile_bytes;
+    constexpr uint32_t f_pages = f_blk_bytes / f_page_bytes;
+    static_assert(f_pages * f_page_bytes == f_blk_bytes, "page size must divide the block");
+    static_assert(f_buffers >= 2 && f_buffers <= 15, "far ring: 2..15 blocks (transaction ids 1..15)");
+    const uint32_t w_addr = get_arg_val<uint32_t>(7 + num_slots + extra);
+    const uint32_t far_bank = get_arg_val<uint32_t>(8 + num_slots + extra);
+    reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
+    const uint64_t far_noc = get_noc_addr_from_bank_id<true>(far_bank, w_addr);
+    const uint32_t f_base = get_write_ptr(cb_w1);
+    uint32_t issued = 0, pushed = 0;
+    auto issue_far = [&]() {
+        const uint32_t e = route[get_arg_val<uint32_t>(7 + issued) - 1];
+        cb_reserve_back(cb_w1, f_blk_tiles * (issued - pushed + 1));
+        uint32_t src = e * f_blk_bytes;
+        uint32_t dst = f_base + (issued % f_buffers) * f_blk_bytes;
+        const uint32_t trid = 1 + issued % f_buffers;
+        noc_async_read_one_packet_set_state<true>(far_noc, f_page_bytes, (pair + 2) & 0x3);
+        noc_async_read_set_trid(trid);
+        for (uint32_t p = 0; p < f_pages; ++p) {
+            noc_async_read_one_packet_with_state_with_trid((uint32_t)far_noc, src, dst, trid);
+            src += f_page_bytes;
+            dst += f_page_bytes;
+        }
+        ++issued;
+    };
+    while (issued < mine && issued < f_buffers - 1) {
+        issue_far();
+    }
+#endif
     for (uint32_t i = 0; i < mine; ++i) {
         const uint32_t s = get_arg_val<uint32_t>(7 + i);
+#ifdef GU_FAR_W
+        noc_async_read_barrier_with_trid(1 + pushed % f_buffers);
+        cb_push_back(cb_w1, f_blk_tiles);
+        ++pushed;
+        if (issued < mine) {
+            issue_far();
+        }
+#endif
         cb_wait_front(cb_act, np);
         for (uint32_t p = 0; p < np; ++p) {
             noc_async_write(
@@ -137,6 +190,10 @@ void kernel_main() {
         cb_pop_front(cb_act, np);
     }
     noc_async_write_barrier();
+#ifdef GU_FAR_W
+    noc_async_read_one_packet_set_state<true>(get_noc_addr(MEM_ZEROS_BASE), 0, 1);
+    noc_async_read_set_trid(0);
+#endif
 #ifdef MOE_FUSED
     // the one-program MoE: tell every down core this core's activations are written
     // (runtime args after the slot list: num_down, then (x, y) NOC coordinates per down core)

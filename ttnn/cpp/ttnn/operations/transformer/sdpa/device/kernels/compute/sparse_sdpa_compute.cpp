@@ -24,7 +24,7 @@ constexpr bool EXP_APPROX_MODE = get_compile_time_arg_val(sparse_sdpa::compute_c
 #include "ttnn/cpp/ttnn/kernel_lib/tilize_helpers.hpp"
 #include "ttnn/cpp/ttnn/kernel_lib/untilize_helpers.hpp"
 #include "api/dataflow/circular_buffer.h"  // CircularBuffer: COMPILE_FOR_TRISC-aware CB lifecycle
-#include <tt-metalium/constants.hpp>       // tt::constants::TILE_HEIGHT
+#include "api/tile_constants.h"            // tt::constants::TILE_HEIGHT
 
 // In-place scores[tile] += row-broadcast of mask row 0. cb_qk_im is held (hold_wr_ptr), so re-pack at the
 // absolute position. Caller has init'd the bcast-rows op + single-tile pack.
@@ -89,7 +89,72 @@ ALWI void tilize_packed_field() {
     tilize_uninit(input_cb, output_cb);
 }
 
+// ---- Key split (exact) helpers: the single-core program's ops, with explicit tile indices ----
+
+// Running row max of score row `in_start` (reduce_c_row_group's exact op sequence: optional copy of the previous
+// max at prev_idx into DST, then the MAX row reduce), packed sequentially into out_cb (caller reserves/pushes).
+template <uint32_t in0_cb, uint32_t scale_cb, uint32_t reduce_cols>
+void split_row_max(uint32_t out_cb, uint32_t prev_cb, uint32_t prev_idx, uint32_t in_start, bool do_eltwise_max) {
+    tile_regs_acquire();
+    if (do_eltwise_max) {
+        CircularBuffer(prev_cb).wait_front(prev_idx + 1);
+        sdpa_reduce_copy_tile_to_dst_init_short(prev_cb);
+        copy_tile(prev_cb, prev_idx, 0);
+    }
+    CircularBuffer(in0_cb).wait_front(in_start + reduce_cols);
+    reduce_block_max_row_init_runtime(out_cb, reduce_cols, in0_cb, scale_cb, false);
+    reduce_block_max_row_runtime(in0_cb, scale_cb, in_start, 0, false, false);
+    reduce_block_max_row_uninit_runtime(in0_cb, false, false);
+    tile_regs_commit();
+    tile_regs_wait();
+    pack_tile<false>(0, out_cb);
+    tile_regs_release();
+}
+
+// Elementwise max of tiles [0, n) of in_cb (SFPI max: exact, no SFPLOADMACRO state shared with the pack-thread
+// exp), packed sequentially into out_cb (caller reserves/pushes).
+void split_tile_max(uint32_t in_cb, uint32_t n, uint32_t out_cb) {
+    CircularBuffer(in_cb).wait_front(n);
+    reconfig_data_format(in_cb, in_cb);
+    pack_reconfig_data_format(out_cb);
+    copy_init(in_cb);
+    add_binary_tile_init();
+    tile_regs_acquire();
+    copy_tile(in_cb, 0, 0);
+    for (uint32_t i = 1; i < n; ++i) {
+        copy_tile(in_cb, i, 1);
+        MATH((_llk_math_eltwise_binary_sfpu_params_(sdpa_max_sfpi, 0, 1, 0, VectorMode::RC)));
+        MATH(TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU));
+    }
+    tile_regs_commit();
+    tile_regs_wait();
+    configure_single_tile_pack(out_cb);
+    pack_tile(0, out_cb);
+    tile_regs_release();
+}
+
+// SALAD correction exp((m[i_prev] - m[i_cur]) * scale) in column 0 (sub_exp_first_col_blocks' exact op sequence,
+// with the two maxes at different indices of one CB), packed sequentially into out_cb.
+template <uint32_t scale_fp32>
+void split_corr(uint32_t m_cb, uint32_t i_prev, uint32_t i_cur, uint32_t out_cb) {
+    constexpr uint16_t scale_bf16 = scale_fp32 >> 16;
+    sub_init(m_cb, m_cb);
+    CircularBuffer(m_cb).wait_front(i_cur + 1);
+    tile_regs_acquire();
+    sub_tiles(m_cb, m_cb, i_prev, i_cur, 0);
+    tile_regs_commit();
+    tile_regs_wait();
+    PACK((exp_tile_first_column<EXP_APPROX_MODE, scale_bf16>(0)));
+    PACK(TTI_STALLWAIT(p_stall::STALL_PACK, p_stall::WAIT_SFPU));
+    configure_single_tile_pack(out_cb);
+    pack_tile<false>(0, out_cb);
+    tile_regs_release();
+}
+
 void kernel_main() {
+    constexpr bool sink_per_row = true;  // sparse query rows represent different heads
+    constexpr bool use_attention_sink = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::USE_ATTENTION_SINK) != 0;
+    constexpr uint32_t cb_attention_sink = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_ATTENTION_SINK);
     constexpr uint32_t H = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::H);
     constexpr uint32_t DHt = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::DHT);
     constexpr uint32_t vDHt = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::V_DHT);
@@ -128,6 +193,19 @@ void kernel_main() {
         get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::QUERY_SUBBLOCK);  // query tile-rows per DST group
     constexpr uint32_t packed_row_bytes = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::PACKED_ROW_BYTES);
     constexpr uint32_t Sqt = H / tt::constants::TILE_HEIGHT;  // total query tile-rows (32 heads each)
+    // Key split (1 = off; the factory allows it only for H == 32, plain KV, no attention sink). See sparse_sdpa_common.hpp.
+    constexpr uint32_t kv_split = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::KV_SPLIT);
+    constexpr bool split = kv_split > 1;
+    constexpr uint32_t cb_split_done = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_SPLIT_DONE);
+    constexpr uint32_t cb_xo = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_XO);
+    constexpr uint32_t cb_xs = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_XS);
+    constexpr uint32_t cb_xm = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_XM);
+    constexpr uint32_t cb_lm = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_LM);
+    constexpr uint32_t cb_lmax = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_LMAX);
+    constexpr uint32_t cb_pmax = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_PMAX);
+    constexpr uint32_t cb_xcorr = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_XCORR);
+    constexpr uint32_t cb_xin = get_compile_time_arg_val(sparse_sdpa::compute_ct_arg::CB_XIN);
+    static_assert(!split || (Sqt == 1 && !scaled_kv && !use_attention_sink), "key split: H == 32, plain KV, no sink");
     constexpr uint32_t q_groups = Sqt / qsb;                  // DST-bound work runs in this many query-row passes
     constexpr uint32_t KT_stride = Skt;                       // cb_qk_im physical row width
     constexpr uint32_t dst_size = compute_kernel_lib::DEST_AUTO_LIMIT;
@@ -148,8 +226,10 @@ void kernel_main() {
     scale_cb.wait_front(1);  // persistent reduce scaler; the streaming reduce assumes it is ready
 
     for (uint32_t tok = 0; tok < tok_count; ++tok) {
-        // tilize Q rows -> [Sqt, DHt]
-        compute_kernel_lib::tilize<DHt, cb_q_rm, cb_q_in>(/*num_blocks=*/Sqt, /*total_input_pages=*/H);
+        if constexpr (!split) {
+            // tilize Q rows -> [Sqt, DHt]
+            compute_kernel_lib::tilize<DHt, cb_q_rm, cb_q_in>(/*num_blocks=*/Sqt, /*total_input_pages=*/H);
+        }
 
         // Per-token control from the reader: num_active_chunks (>=1; all-sentinel chunks are skipped) and
         // num_valid_keys (last chunk's mask boundary). read_tile_value mailbox-distributes the UNPACK read so
@@ -159,7 +239,227 @@ void kernel_main() {
             cb_ctrl, /*tile=*/0, /*element_offset=*/sparse_sdpa::control_message::ACTIVE_CHUNKS);
         const uint32_t num_valid_keys =
             ckernel::read_tile_value(cb_ctrl, /*tile=*/0, /*element_offset=*/sparse_sdpa::control_message::VALID_KEYS);
+        [[maybe_unused]] uint32_t split_begin = 0, split_end = 0, split_role = 0, split_parts = 0, split_j = 0;
+        if constexpr (split) {
+            split_begin = ckernel::read_tile_value(cb_ctrl, 0, sparse_sdpa::control_message::CHUNK_BEGIN);
+            split_end = ckernel::read_tile_value(cb_ctrl, 0, sparse_sdpa::control_message::CHUNK_END);
+            split_role = ckernel::read_tile_value(cb_ctrl, 0, sparse_sdpa::control_message::ROLE);
+            split_parts = ckernel::read_tile_value(cb_ctrl, 0, sparse_sdpa::control_message::PARTS);
+            split_j = ckernel::read_tile_value(cb_ctrl, 0, sparse_sdpa::control_message::SPLIT_J);
+        }
         ctrl_cb.pop_front(1);
+
+        if constexpr (split) {
+            // ===== Key split (exact; protocol in sparse_sdpa_common.hpp) =====
+            // Every op below is the single-core program's op on the same operands, so each chunk's scores, running
+            // max, exp terms, row-sum, P V and SALAD combine are bit-identical to the unsplit op's.
+            if (split_role == sparse_sdpa::split_role::IDLE) {
+                continue;
+            }
+            const uint32_t L = split_end - split_begin;  // local chunks (>= 1)
+            const bool last_part = split_role == sparse_sdpa::split_role::LAST;
+            compute_kernel_lib::tilize<DHt, cb_q_rm, cb_q_in>(/*num_blocks=*/Sqt, /*total_input_pages=*/H);
+            CircularBuffer xo_cb(cb_xo), xs_cb(cb_xs), xm_cb(cb_xm), lm_cb(cb_lm), lmax_cb(cb_lmax);
+            CircularBuffer pmax_cb(cb_pmax), xcorr_cb(cb_xcorr), xin_cb(cb_xin);
+            // Row r = 1 + local chunk index in cb_qk_im (scores), cb_xo (P V / running out), cb_xs (row-sum / running
+            // sum) and cb_xm (running max). Row 0 holds the state before this core's first chunk: the running out /
+            // sum from participant j - 1 (cb_xo / cb_xs, written over the NoC) and the prefix max (cb_xm).
+            // cb_qk_im / cb_xo / cb_xs keep their write pointer at the base (hold pushes): packs use row offsets.
+            qk_cb.reserve_back((L + 1) * KT_stride);
+            xo_cb.reserve_back((L + 1) * vDHt);
+            xs_cb.reserve_back(L + 1);
+            q_in_cb.wait_front(Sqt * DHt);
+
+            // ---- Phase A: scores, boundary mask and per-chunk row max of every local chunk ----
+            for (uint32_t k = 0; k < L; ++k) {
+                const uint32_t chunk = split_begin + k;
+                const uint32_t row = k + 1;
+                compute_kernel_lib::tilize<DHt, cb_k_rm, cb_k_in>(
+                    /*num_blocks=*/Skt, /*total_input_pages=*/Skt * tt::constants::TILE_HEIGHT);
+                reconfig_full_operand(cb_k_in, cb_q_in);
+                pack_reconfig_data_format(cb_qk_im);
+                k_in_cb.wait_front((k + 1) * Skt * DHt);
+                mm_no_mop_init_short(cb_q_in, cb_k_in, /*transpose=*/true, 1, qsb, DHt);
+                configure_row_pack_width(cb_qk_im, 1);
+                for (uint32_t kt = 0; kt < Skt; ++kt) {
+                    blocked_matmul_and_pack<true, /*in1_stride=*/1, /*out_num_cols=*/KT_stride>(
+                        cb_q_in,
+                        cb_k_in,
+                        cb_qk_im,
+                        /*in0_index_start=*/0,
+                        /*in1_index_start=*/k * Skt * DHt + kt * DHt,
+                        /*row_subblock_idx=*/row,
+                        /*out_col_offset=*/kt,
+                        /*subblock_w=*/1,
+                        /*subblock_h=*/qsb,
+                        /*inner_dim=*/DHt,
+                        /*matmul_stride=*/DHt,
+                        /*skip_pack_configure=*/true);
+                }
+                cb_push_back_hold_wr_ptr(cb_qk_im, (k == 0 ? 2 : 1) * KT_stride);  // (row 0 is unused padding)
+
+                reconfig_data_format(cb_qk_im, cb_scale);
+                if (chunk == num_active_chunks - 1) {
+                    qk_cb.wait_front((row + 1) * KT_stride);
+                    const uint32_t k_chunk = Skt * tt::constants::TILE_WIDTH;
+                    const uint32_t valid_last = num_valid_keys - (num_active_chunks - 1) * k_chunk;
+                    const uint32_t full_start =
+                        (valid_last + tt::constants::TILE_WIDTH - 1) / tt::constants::TILE_WIDTH;
+                    const uint32_t part_t = valid_last / tt::constants::TILE_WIDTH;
+                    const bool has_part_mask = (valid_last % tt::constants::TILE_WIDTH) != 0;
+                    if (full_start < Skt) {
+                        neginf_cb.wait_front(1);
+                        add_bcast_rows_init(cb_qk_im, cb_neginf);
+                        configure_single_tile_pack(cb_qk_im);
+                        for (uint32_t t = full_start; t < Skt; ++t) {
+                            add_bcast_row_mask_tile(cb_qk_im, cb_neginf, row * Skt + t);
+                        }
+                    }
+                    if (has_part_mask) {
+                        mask_part_cb.wait_front(1);
+                        add_bcast_rows_init(cb_qk_im, cb_mask_part);
+                        configure_single_tile_pack(cb_qk_im);
+                        add_bcast_row_mask_tile(cb_qk_im, cb_mask_part, row * Skt + part_t);
+                    }
+                    pack_to_unpack_sync();
+                    if (has_part_mask) {
+                        mask_part_cb.pop_front(1);
+                    }
+                }
+                lm_cb.reserve_back(1);
+                configure_single_tile_pack(cb_lm);
+                split_row_max<cb_qk_im, cb_scale, KT_stride>(cb_lm, cb_lm, 0, row * KT_stride, false);
+                lm_cb.push_back(1);
+            }
+
+            // Local max -> every higher participant (the writer sends it); prefix max of the lower ones -> cb_xm row 0.
+            if (split_j + 1 < split_parts) {
+                lmax_cb.reserve_back(1);
+                split_tile_max(cb_lm, L, cb_lmax);
+                lmax_cb.push_back(1);
+            }
+            xm_cb.reserve_back(1);
+            if (split_j > 0) {
+                pmax_cb.wait_front(kv_split);
+                split_tile_max(cb_pmax, split_j, cb_xm);
+                pmax_cb.pop_front(kv_split);
+            }
+            xm_cb.push_back(1);  // (participant 0: unused padding)
+            lm_cb.pop_front(L);
+
+            // ---- Phase B: running max, exp terms + row-sum, P V of every local chunk ----
+            for (uint32_t k = 0; k < L; ++k) {
+                const uint32_t row = k + 1;
+                exp_packthread_tile_init<true, scale_fp32, InputClamping::None>();
+                reconfig_data_format(cb_qk_im, cb_scale);
+                pack_reconfig_data_format(cb_qk_im);
+                xm_cb.reserve_back(1);
+                configure_single_tile_pack(cb_xm);
+                // m_c = max(m_{c-1}, rowmax(S_c)); global chunk 0 has no previous max.
+                split_row_max<cb_qk_im, cb_scale, KT_stride>(
+                    cb_xm, cb_xm, k, row * KT_stride, /*do_eltwise_max=*/!(split_j == 0 && k == 0));
+                xm_cb.push_back(1);
+                for (uint32_t kc = 0; kc < Skt; kc += exp_sbw) {
+                    sub_exp_block_bcast_cols<false, scale_fp32>(
+                        cb_qk_im,
+                        cb_xm,
+                        cb_xs,
+                        /*cols_in_row=*/KT_stride,
+                        /*q_subblock=*/row,
+                        /*global_col_base=*/kc,
+                        /*sbh=*/qsb,
+                        /*sbw=*/exp_sbw);
+                }
+                pack_to_unpack_sync();
+
+                reconfig_data_format(cb_k_in, cb_qk_im);
+                mm_no_mop_init_short(cb_qk_im, cb_k_in, /*transpose=*/false, 1, qsb, Skt);
+                configure_row_pack_width(cb_xo, 1);
+                for (uint32_t vd = 0; vd < vDHt; ++vd) {
+                    blocked_matmul_and_pack<false, /*in1_stride=*/DHt, /*out_num_cols=*/vDHt>(
+                        cb_qk_im,
+                        cb_k_in,
+                        cb_xo,
+                        /*in0_index_start=*/row * Skt,
+                        /*in1_index_start=*/k * Skt * DHt + vd,
+                        /*row_subblock_idx=*/row,
+                        /*out_col_offset=*/vd,
+                        /*subblock_w=*/1,
+                        /*subblock_h=*/qsb,
+                        /*inner_dim=*/Skt,
+                        /*matmul_stride=*/KT_stride,
+                        /*skip_pack_configure=*/true);
+                }
+                pack_to_unpack_sync();
+                reconfig_data_format_srca(cb_qk_im);
+            }
+
+            // ---- SALAD chain, in chunk order: fold row k (state after the previous chunk) into row k + 1 ----
+            if (split_j > 0) {
+                xin_cb.wait_front(1);  // row 0 of cb_xo / cb_xs landed
+                xin_cb.pop_front(1);
+            }
+            cb_push_back_hold_wr_ptr(cb_xo, (L + 1) * vDHt);
+            cb_push_back_hold_wr_ptr(cb_xs, L + 1);
+            const uint32_t k0 = split_j == 0 ? 1 : 0;  // global chunk 0 starts the chain (no combine)
+            if (k0 == 1) {
+                xcorr_cb.reserve_back(1);  // keep correction k at index k
+                xcorr_cb.push_back(1);
+            }
+            for (uint32_t k = k0; k < L; ++k) {
+                exp_packthread_tile_init<EXP_APPROX_MODE>();
+                xcorr_cb.reserve_back(1);
+                split_corr<scale_fp32>(cb_xm, k, k + 1, cb_xcorr);
+                xcorr_cb.push_back(1);
+                PACK((llk_pack_init<ckernel::PackMode::Default, false, false, false>(cb_xo, dst_size)));
+                pack_reconfig_l1_acc(1);
+                salad_correct_fused<qsb, vDHt, dst_size>(
+                    cb_xo,
+                    cb_xs,
+                    cb_xcorr,
+                    cb_xo,
+                    cb_xs,
+                    /*ob_q_subblock=*/k,
+                    /*sum_q_subblock=*/k,
+                    /*write_q_subblock=*/k + 1);
+                pack_reconfig_l1_acc(0);
+                pack_to_unpack_sync();
+            }
+
+            if (last_part) {
+                // Finalize the state after the token's last chunk (row L), as the unsplit op does.
+                xo_cb.pop_front(L * vDHt);
+                xs_cb.pop_front(L);
+                reconfig_data_format(cb_qk_im, cb_scale);
+                normalize_row_streaming<
+                    /*profiling_enabled=*/false,
+                    vDHt,
+                    dst_size,
+                    cb_col_identity,
+                    cb_recip_scratch,
+                    cb_out_im,
+                    scale_fp32,
+                    use_attention_sink,
+                    cb_attention_sink,
+                    sink_per_row>(cb_xs, cb_xo, Sqt, cb_xm);
+            } else {
+                // The writer passes row L (out + sum) to participant j + 1.
+                CircularBuffer done_cb(cb_split_done);
+                done_cb.reserve_back(1);
+                done_cb.push_back(1);
+                xo_cb.pop_front((L + 1) * vDHt);
+                xs_cb.pop_front(L + 1);
+            }
+            xm_cb.pop_front(L + 1);
+            xcorr_cb.pop_front(L);
+            qk_cb.pop_front((L + 1) * KT_stride);
+            k_in_cb.pop_front(L * Skt * DHt);
+            q_in_cb.pop_front(Sqt * DHt);
+            if (last_part) {
+                compute_kernel_lib::untilize<vDHt, cb_out_im, cb_out_rm>(/*num_blocks=*/Sqt);
+            }
+            continue;
+        }
 
         // Flash running state, ping-pong. Reset every token; all buffers start empty.
         CircularBuffer max_prev(cb_max_a), max_cur(cb_max_b);
@@ -498,7 +798,10 @@ void kernel_main() {
                     cb_col_identity,
                     cb_recip_scratch,
                     cb_out_im,
-                    scale_fp32>(sum_cur.get_cb_id(), out_cur.get_cb_id(), Sqt);
+                    scale_fp32,
+                    use_attention_sink,
+                    cb_attention_sink,
+                    sink_per_row>(sum_cur.get_cb_id(), out_cur.get_cb_id(), Sqt, max_cur.get_cb_id());
                 max_cur.pop_front(Sqt);  // running max no longer needed
             }
 

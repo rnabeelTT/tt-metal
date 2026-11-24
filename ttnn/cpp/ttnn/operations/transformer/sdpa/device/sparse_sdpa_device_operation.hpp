@@ -47,6 +47,8 @@ struct SparseSDPAOperation {
     static spec_return_value_t compute_output_specs(const operation_attributes_t&, const tensor_args_t&);
     static tensor_return_value_t create_output_tensors(const operation_attributes_t&, const tensor_args_t&);
     static ttsl::hash::hash_t compute_program_hash(const operation_attributes_t&, const tensor_args_t&);
+    // The key split the program actually uses (1 = off); see SparseSDPAParams::kv_split.
+    static uint32_t effective_kv_split(const operation_attributes_t&, const tensor_args_t&);
 };
 
 Tensor sparse_sdpa(
@@ -59,6 +61,10 @@ Tensor sparse_sdpa(
     uint32_t k_chunk_size,
     ttnn::DeviceComputeKernelConfig compute_kernel_config,
     std::optional<uint32_t> cache_batch_idx = std::nullopt,
-    std::optional<BlockCyclicLayout> block_cyclic = std::nullopt);
+    std::optional<BlockCyclicLayout> block_cyclic = std::nullopt,
+    const std::optional<Tensor>& attention_sink = std::nullopt,
+    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids = std::nullopt,
+    uint32_t kv_split = 1,
+    std::optional<uint32_t> active_tokens = std::nullopt);
 
 }  // namespace ttnn::prim

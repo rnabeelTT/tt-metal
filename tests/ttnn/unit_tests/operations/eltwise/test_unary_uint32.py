@@ -78,6 +78,34 @@ def test_unary_uint32(ttnn_op, value_ranges, input_shape, device):
     assert torch.equal(output_tensor, torch_output_tensor)
 
 
+UINT32_EDGE_VALUES = [0, 1, 2, 2147483646, 2147483647, 2147483648, 2147483649, 3000000000, 4294967294, 4294967295]
+
+
+@pytest.mark.parametrize(
+    "ttnn_op, reference",
+    [
+        (ttnn.gtz, lambda x: x > 0),
+        (ttnn.gez, lambda x: x >= 0),
+        (ttnn.ltz, lambda x: x < 0),
+        (ttnn.lez, lambda x: x <= 0),
+    ],
+)
+@pytest.mark.parametrize("input_shape", [torch.Size([2, 64, 64]), torch.Size([3, 33, 47])])
+def test_unary_zero_comp_uint32(ttnn_op, reference, input_shape, device):
+    # int64 holds the full uint32 range exactly, so the reference compares are exact.
+    torch.manual_seed(0)
+    num_elements = input_shape.numel()
+    torch_input_tensor = torch.randint(0, 2**32, (num_elements,), dtype=torch.int64)
+    torch_input_tensor[::3] = 0
+    torch_input_tensor[1 : 1 + len(UINT32_EDGE_VALUES)] = torch.tensor(UINT32_EDGE_VALUES, dtype=torch.int64)
+    torch_input_tensor = torch_input_tensor.reshape(input_shape)
+
+    input_tensor = ttnn.from_torch(torch_input_tensor, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
+    output_tensor = ttnn.to_torch(ttnn_op(input_tensor), dtype=torch.int64)
+
+    assert torch.equal(output_tensor, reference(torch_input_tensor).to(torch.int64))
+
+
 height_sharded_memory_config = ttnn.create_sharded_memory_config(
     [128, 160],
     core_grid=ttnn.CoreRangeSet({ttnn.CoreRange((1, 0), (1, 6)), ttnn.CoreRange((3, 0), (3, 6))}),
@@ -232,12 +260,10 @@ def test_bitwise_scalar_uint32_full_range(device, ttnn_function, scalar):
 )
 @pytest.mark.parametrize("shift", [0, 1, 4, 31, 32])
 def test_bitwise_shift_scalar_uint32(device, ttnn_function, shift):
-    # Torch CPU does not implement shifts for the uint32 dtype, so reinterpret the full-range values as
-    # int32 to compute the golden, then mask to 32 bits to emulate the uint32 output.
-    x_uint32 = torch.tensor(
-        [[1, 2, 255, 4096, 2147483648, 4294967294, 4294967295, 0x80000001, 1234567890, 0]], dtype=torch.int64
+    x_torch = torch.tensor(
+        [[1, 2, 255, 4096, 0x80000000, 0xDEADBEEF, 0xFFFFFFFE, 0xFFFFFFFF, 0x80000001, 1234567890, 0]],
+        dtype=torch.uint32,
     )
-    x_torch = (x_uint32 & 0xFFFFFFFF).to(torch.int32)
 
     golden_fn = ttnn.get_golden_function(ttnn_function)
     z_torch = golden_fn(x_torch, shift)
@@ -245,9 +271,8 @@ def test_bitwise_shift_scalar_uint32(device, ttnn_function, shift):
     x_tt = ttnn.from_torch(x_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
     z_tt_out = ttnn_function(x_tt, shift)
 
-    tt_out = ttnn.to_torch(z_tt_out).to(torch.int64) & 0xFFFFFFFF
-    z_torch_uint64 = z_torch.to(torch.int64) & 0xFFFFFFFF
-    assert torch.equal(tt_out, z_torch_uint64)
+    tt_out = ttnn.to_torch(z_tt_out, dtype=torch.uint32)
+    assert torch.equal(tt_out, z_torch)
 
 
 @pytest.mark.parametrize(
@@ -259,10 +284,10 @@ def test_bitwise_shift_scalar_uint32(device, ttnn_function, shift):
 )
 @pytest.mark.parametrize("shift", [0, 1, 4, 31, 32])
 def test_bitwise_shift_scalar_uint32_full_range(device, ttnn_function, shift):
-    # Torch CPU does not implement shifts for the uint32 dtype, so reinterpret the full-range values as
-    # int32 to compute the golden, then mask to 32 bits to emulate the uint32 output.
+    # torch.linspace is not implemented for uint32, so generate in float64 and
+    # cast before invoking the registered golden.
     x_values = torch.linspace(0, 4294967295, 1024, dtype=torch.float64)
-    x_torch = (x_values.to(torch.int64) & 0xFFFFFFFF).to(torch.int32)
+    x_torch = x_values.to(torch.uint32)
 
     golden_fn = ttnn.get_golden_function(ttnn_function)
     z_torch = golden_fn(x_torch, shift)
@@ -270,6 +295,5 @@ def test_bitwise_shift_scalar_uint32_full_range(device, ttnn_function, shift):
     x_tt = ttnn.from_torch(x_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
     z_tt_out = ttnn_function(x_tt, shift)
 
-    tt_out = ttnn.to_torch(z_tt_out).to(torch.int64) & 0xFFFFFFFF
-    z_torch_uint64 = z_torch.to(torch.int64) & 0xFFFFFFFF
-    assert torch.equal(tt_out, z_torch_uint64)
+    tt_out = ttnn.to_torch(z_tt_out, dtype=torch.uint32)
+    assert torch.equal(tt_out, z_torch)

@@ -12,7 +12,8 @@
 //    interleaved ttnn tensor (see gu_reader.cpp), transaction-id pipelined.
 //
 // EP_EXPERTS: only this die's window of the union (local ids).
-// SPLIT_PAIR (m = 1): runtime arg `group` is this core's bank; it streams that bank's block only.
+// SPLIT_PAIR (m = 1): runtime arg `group` is this core's bank; it streams that bank's block only. GU_ONE_BANK: likewise
+// (any odd m; gub_compute.cpp).
 //
 // runtime args: [table_addr, w_addr, ws_addr, id_addr, group q, slot0, vc, (EP_EXPERTS) ep_offset_addr]
 
@@ -48,8 +49,11 @@ void kernel_main() {
     constexpr auto id_args = TensorAccessorArgs<table_args.next_compile_time_args_offset()>();
 
     constexpr uint32_t m = n_tiles / banks;
-#ifdef SPLIT_PAIR
-    constexpr uint32_t nb = 1;  // split-pair: this core streams only its own bank's block (`pair` is the bank)
+#if defined(SPLIT_PAIR) || defined(GU_FAR_W) || defined(GU_ONE_BANK)
+    // split-pair: this core streams only its own bank's block (`pair` is the bank); GU_FAR_W: only bank q's block (the
+    // writer streams bank q + banks / 2's on the other NoC); GU_ONE_BANK: only this core's bank (`pair`; union.py
+    // ExpertGateUpRows.onebank)
+    constexpr uint32_t nb = 1;
 #else
     constexpr uint32_t nb = gu_layout::blocks<m>();
 #endif
@@ -64,9 +68,9 @@ void kernel_main() {
     // route table -> union
     cb_reserve_back(cb_scr, 1);
     const uint32_t scr = get_write_ptr(cb_scr);
-    const auto s_table = TensorAccessor(table_args, table_addr, 64);
+    const auto s_table = TensorAccessor(table_args, table_addr, moe_topk::REC_BYTES);
     for (uint32_t r = 0; r < rows; ++r) {
-        noc_async_read(s_table.get_noc_addr(r), scr + 64 * r, 64);
+        noc_async_read(s_table.get_noc_addr(r), scr + moe_topk::REC_BYTES * r, moe_topk::REC_BYTES);
     }
     noc_async_read_barrier();
     cb_push_back(cb_id, 2);

@@ -23,8 +23,12 @@
 #include "api/compute/lcm.h"
 #include "api/compute/xlogy.h"
 #include "api/compute/atan2.h"
+#include "api/compute/nextafter.h"
+#include "api/compute/logaddexp.h"
+#include "api/compute/logaddexp2.h"
 #include "api/compute/binary_comp.h"
 #include "api/compute/isclose.h"
+#include "api/compute/situ_glu.h"
 #include "api/compute/bcast.h"
 #include "ttnn/operations/eltwise/binary_ng/device/kernels/compute/eltwise_utils_common.hpp"
 #include "ttnn/operations/eltwise/binary_ng/device/kernels/compute/eltwise_utils.hpp"
@@ -81,7 +85,6 @@ ALWI void process_tile(
     tile_regs_release();
 
     pack_reconfig_data_format(cb_llk_post, cb_out);
-    PACK((llk_pack_hw_configure<DST_ACCUM_MODE>(cb_out)));
 
     PREPROCESS(
         BCAST_OP,
@@ -119,7 +122,7 @@ ALWI void process_tile(
 #if HAS_ACTIVATIONS(POST)
             BINARY_SFPU_INIT
 #endif
-#if ISCLOSE_OP
+#ifdef ISCLOSE_OP
             BINARY_SFPU_OP(i * 2, i * 2 + 1, i * 2, rtol_bits, atol_bits);
 #else
             BINARY_SFPU_OP(i * 2, i * 2 + 1, i * 2);

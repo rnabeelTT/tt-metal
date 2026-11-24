@@ -20,24 +20,15 @@ Matmuls: custom_mm (1x32 activation tiles, LoFi, FP32 accumulation), worker core
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import os
+
+from pathlib import Path
 
 import torch
 
 import ttnn
 
 KERNEL_DIR = Path(__file__).parent / "kernels"
-# QWEN35_MOE_DECODE_FIDELITY (default lofi: every existing port unchanged): the expert matmuls' math fidelity. LoFi reads
-# 5 significant bits of the weight (srcA), so the fused path stores weights rounded to 5 (fused.round_sig): fine for
-# bfp4, lossy for bfp8. hifi2 adds the low srcA phase (the weight at full bfp8 precision, the activation at 7 bits as
-# in LoFi): the unfused path's routed fidelity in the bfp8 policies; fused.round_sig is then the identity.
-_FID = {"lofi": ttnn.MathFidelity.LoFi, "hifi2": ttnn.MathFidelity.HiFi2, "hifi3": ttnn.MathFidelity.HiFi3,
-        "hifi4": ttnn.MathFidelity.HiFi4}
-MATH_FIDELITY_NAME = os.environ.get("QWEN35_MOE_DECODE_FIDELITY", "lofi").lower()
-MATH_FIDELITY = _FID[MATH_FIDELITY_NAME]
-
 TILE = 32
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 MAX_PACKET_BYTES = 16384
@@ -76,7 +67,16 @@ def gu_ring(kt, m, nb, tile_bytes, want, even=False):
     return n
 
 
-ROUTERS = ("softmax", "sigb")  # Qwen3.5-MoE softmax top-k + gated shared expert; GLM-4.5-Air sigmoid + selection bias
+ROUTERS = ("softmax", "sigb", "keys")  # Qwen3.5-MoE softmax top-k + gated shared expert; GLM-4.5-Air sigmoid + selection
+# bias; "keys" (Hy4-flash): the sigb router with the sigmoid / key precomputed on the Tensix (logits row [keys | s] FP32)
+
+
+def router_defines(router):
+    return {"softmax": [], "sigb": [("ROUTER_SIGB", "1")], "keys": [("ROUTER_SIGB", "1"), ("ROUTER_KEYS", "1")]}[router]
+
+
+def is_sig(router):
+    return router in ("sigb", "keys")
 
 
 def ep_offsets(mesh_device, experts_per_die):
@@ -91,90 +91,66 @@ def ep_offsets(mesh_device, experts_per_die):
     )
 
 
-# QWEN35_MOE_ACT=inkling: Inkling-2's softcapped expert activation in the gate|up kernels (with [gate | up] packing)
-MOE_ACT = os.environ.get("QWEN35_MOE_ACT", "silu")
-
-
 def _ep_defines(ep_experts, gate_first=False):
-    act = [("ACT_INKLING", "1")] if (gate_first and MOE_ACT == "inkling") else []
-    return ([("EP_EXPERTS", str(ep_experts))] if ep_experts else []) + ([("GATE_FIRST", "1")] if gate_first else []) + act
+    # MOE_SWIGLU_LIMIT (process-wide, e.g. Hy4-flash's 10): clamp gate <= L and |up| <= L before the SwiGLU
+    lim = os.environ.get("MOE_SWIGLU_LIMIT")
+    return (
+        ([("EP_EXPERTS", str(ep_experts))] if ep_experts else [])
+        + ([("GATE_FIRST", "1")] if gate_first else [])
+        + ([("SWIGLU_LIMIT", f"{float(lim)}f")] if lim else [])
+    )
 
 
 def logits_row_bytes(num_experts, router):
     """L1 bytes of one gathered router-logits row (kernels/router_topk.hpp): BF16 with the shared-gate column (softmax),
     FP32 without it (sigb), + the sigb selection bias (Q23 int32 per expert)."""
+    if router == "keys":
+        return 128 * (2 * num_experts // TILE) + 4 * num_experts + 64  # [keys | s] FP32, then the (unused) bias
     if router == "sigb":
         return 128 * (num_experts // TILE) + 4 * num_experts + 64  # + 64: the bias lands 64-byte aligned
     return 64 * (num_experts // TILE + 1)
 
 
-_BANK_WORKERS = {}
+_WORKERS_OVERRIDE = [None]  # union.PerDeviceOp: the bank workers of the device group an op instance is built for
 
 
-def _robust_readers(rows=False):
-    """QWEN35_ROBUST_READERS: reader placement right for every die of the mesh (see bank_workers). "rows" (default): only
-    for the multi-row ops (decode widths 2..32, bandwidth bound: 32 users 24.7 -> 19.2 ms per step on Ornith-35B), the
-    one-row ops keep die 0's placement (latency bound: 4.57 vs 4.85 ms per token with the robust one); "1": every op;
-    "0": none."""
-    v = os.environ.get("QWEN35_ROBUST_READERS", "rows")
-    return v == "1" or (v == "rows" and rows)
+def bank_workers(mesh_device):
+    """The optimal reader core per DRAM bank (a mesh: its FRONT device's; union.PerDeviceOp builds per device)."""
+    if _WORKERS_OVERRIDE[0] is not None:
+        return list(_WORKERS_OVERRIDE[0])
+    return list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))
 
 
-def _device_bank_workers(mesh_device):
-    """Each die's own optimal NOC0 reader core per DRAM bank (logical coordinates), one list per die. The dies are
-    harvested differently: on this QuietBox 2 the east banks' reader column is 6 / 5 / 7 / 5 on dies 0..3."""
+_DEV_WORKERS = {}
+
+
+def device_worker_groups(mesh_device):
+    """[(bank workers, [MeshCoordinate])]: the mesh's devices grouped by their optimal DRAM bank workers (1x1
+    submeshes: the mesh query answers for its front device only; QB2 chips differ in harvested columns, the centre
+    DRAM column's workers at logical x 5 / 6 / 7). One group: every device alike (or not a mesh)."""
     key = id(mesh_device)
-    cached = _BANK_WORKERS.get(key)
-    if cached is not None and cached[0] is mesh_device:
-        return cached[1]
-    if getattr(mesh_device, "get_num_devices", lambda: 1)() == 1:
-        per = [list(ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(mesh_device, ttnn.NOC.NOC_0))]
-    else:
-        rows, cols = mesh_device.shape[0], mesh_device.shape[1]
-        per = []
-        for coord in (ttnn.MeshCoordinate(r, c) for r in range(rows) for c in range(cols)):
-            a = mesh_device.get_optimal_dram_bank_to_logical_worker_assignment(ttnn.NOC.NOC_0, coord)
-            per.append([a[b] for b in sorted(a)])
-    _BANK_WORKERS[key] = (mesh_device, per)
-    return per
-
-
-def _dies_agree(per):
-    return all([(c.x, c.y) for c in w] == [(c.x, c.y) for c in per[0]] for w in per)
-
-
-def bank_workers(mesh_device, rows=False):
-    """The reader core per DRAM bank used on every die (one program serves the whole mesh). A die's optimal reader for a
-    bank is the first unharvested worker column east of the bank's DRAM column; logical columns skip harvested ones, so
-    one logical column is a different physical column per die, and a reader physically WEST of a die's east DRAM column
-    gets its data the long way round the row (gpt-oss measured 2.85 vs 2.38 ms per token with die 0's placement). Robust
-    (after tt-metal #61548): per bank the largest logical column any die wants, which is at or east of the bank on every
-    die. Dies that agree (and QWEN35_ROBUST_READERS=0) keep die 0's placement exactly."""
-    per = _device_bank_workers(mesh_device)
-    if not _robust_readers(rows) or _dies_agree(per):
-        return list(per[0])
-    out = []
-    for b in range(len(per[0])):
-        ys = {w[b].y for w in per}
-        assert len(ys) == 1, f"bank {b}: optimal reader rows differ across dies: {ys}"
-        out.append(ttnn.CoreCoord(max(w[b].x for w in per), ys.pop()))
-    return out
-
-
-def bank_columns(mesh_device, wx, rows=False):
-    """Candidate reader columns for a bank whose (bank_workers) reader sits at column wx, nearest first. Dies that agree:
-    +dx before -dx around wx (the original placement). Otherwise readers stay on their bank's side of the DRAM columns on
-    every die: east banks grow east only (x >= wx); west banks stay below the smallest column any die gives an east bank
-    (a west-bank reader at or past it would sit east of the east DRAM column on that die)."""
-    grid_x = mesh_device.compute_with_storage_grid_size().x
-    per = _device_bank_workers(mesh_device)
-    if not _robust_readers(rows) or _dies_agree(per):
-        return [wx + dx for d in range(grid_x) for dx in ((d, -d) if d else (0,)) if 0 <= wx + dx < grid_x]
-    west = min(c.x for w in per for c in w)
-    east = min(c.x for w in per for c in w if c.x > west)
-    if wx >= east:
-        return list(range(wx, grid_x))
-    return sorted(range(0, east), key=lambda x: (abs(x - wx), x < wx))
+    if key in _DEV_WORKERS and _DEV_WORKERS[key][0] is mesh_device:
+        return _DEV_WORKERS[key][1]
+    n = getattr(mesh_device, "get_num_devices", lambda: 1)()
+    groups = None
+    if n > 1:
+        try:
+            shape = mesh_device.shape
+            subs = mesh_device.create_submeshes(ttnn.MeshShape(1, 1))
+            coords = [ttnn.MeshCoordinate(r, c) for r in range(shape[0]) for c in range(shape[1])]
+            assert len(subs) == len(coords) and [s.get_device_ids()[0] for s in subs] == list(mesh_device.get_device_ids())
+            by = {}
+            for sub, co in zip(subs, coords):
+                w = tuple((c.x, c.y) for c in ttnn.device.get_optimal_dram_bank_to_logical_worker_assignment(sub, ttnn.NOC.NOC_0))
+                by.setdefault(w, []).append(co)
+            groups = [([ttnn.CoreCoord(x, y) for x, y in w], cs) for w, cs in by.items()]
+            _DEV_WORKERS[key] = (mesh_device, groups, subs)  # (the submeshes stay referenced)
+            return groups
+        except Exception as e:  # noqa: BLE001
+            print(f"moe_decode: per-device bank workers unavailable ({type(e).__name__}: {e}); front device's for all")
+    groups = [(bank_workers(mesh_device), None)]
+    _DEV_WORKERS[key] = (mesh_device, groups, None)
+    return groups
 
 
 _NOC_COORDS = {}
@@ -221,27 +197,17 @@ def noc_coords(mesh_device):
     return table
 
 
-def offrow_candidates(mesh_device, w, rows=False):
-    """(x, y) candidates for a bank whose reader row is shared with another bank's: the next row inward first, then the
-    rows beyond it (the robust placement leaves fewer columns per row: east banks grow east only)."""
-    grid = mesh_device.compute_with_storage_grid_size()
-    d = -1 if w.y > 0 else 1
-    ys = [w.y + d * i for i in (1, 2, 3) if 0 <= w.y + d * i < grid.y]
-    return [(x, y) for y in ys for x in bank_columns(mesh_device, w.x, rows)]
-
-
-def place_along_rows(mesh_device, per_bank, used=None, rows=False):
+def place_along_rows(mesh_device, per_bank, used=None):
     """{bank: count} -> {bank: [CoreCoord]}: each bank's cores on its optimal reader's row, nearest first (+dx before
     -dx), then the rows above / below (off-row placement measured slower). `used`: (x, y) cores already taken
     (updated)."""
-    workers = bank_workers(mesh_device, rows)
+    workers = bank_workers(mesh_device)
     grid = mesh_device.compute_with_storage_grid_size()
     used = set() if used is None else used
     out = {}
     for b, n in per_bank.items():
         w = workers[b]
-        xs = bank_columns(mesh_device, w.x, rows)
-        cand = [(x, w.y + dy) for dy in (0, -1, 1, -2, 2) for x in xs]
+        cand = [(w.x + dx, w.y + dy) for dy in (0, -1, 1, -2, 2) for d in range(grid.x) for dx in ((d, -d) if d else (0,))]
         cores = []
         for x, y in cand:
             if len(cores) == n:
@@ -269,15 +235,27 @@ def place_banks_offrow(mesh_device, per_bank, used=None):
     placed = {}
     for b in sorted(noc1):
         w = workers[b]
+        y = w.y - 1 if w.y > 0 else w.y + 1
         cores = []
-        for x, y in offrow_candidates(mesh_device, w):
-            if len(cores) < per_bank[b] and (x, y) not in used:
-                used.add((x, y))
-                cores.append(ttnn.CoreCoord(x, y))
+        for d in range(grid.x):
+            for dx in ((d, -d) if d else (0,)):
+                x = w.x + dx
+                if len(cores) < per_bank[b] and 0 <= x < grid.x and (x, y) not in used:
+                    used.add((x, y))
+                    cores.append(ttnn.CoreCoord(x, y))
         assert len(cores) == per_bank[b], f"no room for {per_bank[b]} cores near bank {b}"
         placed[b] = cores
     placed.update(place_along_rows(mesh_device, {b: n for b, n in per_bank.items() if b not in noc1}, used=used))
     return placed, noc1
+
+
+def gu_variant_key():
+    """The env knobs the gate|up ops read when built (cache keys of fused.FusedMoEDecode)."""
+    return tuple(os.environ.get(k, "") for k in ("QWEN35_MOE_GU1B1", "QWEN35_MOE_GU1B1_READERS", "QWEN35_MOE_GU_FARW",
+                                                 "QWEN35_MOE_GU_FARW_NEAR",
+                                                 "QWEN35_MOE_GU_FARW_FAR", "QWEN35_MOE_GUR_READERS", "QWEN35_MOE_DN_CHUNK",
+                                                 "QWEN35_MOE_DN_READERS", "QWEN35_MOE_GUDN", "QWEN35_MOE_GU1B",
+                                                 "QWEN35_MOE_GU1B_READERS", "QWEN35_MOE_GU1B_ONROW", "QWEN35_MOE_PER_DEVICE"))
 
 
 def _range_set(cores):
@@ -304,9 +282,11 @@ def _rt(args, cores=None):
     return rt
 
 
-def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, reader_noc=None):
+def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, reader_noc=None, compute_name=None,
+             unpack_fp32=()):
     """reader / writer / compute: (compile args, {(x, y): runtime args}). reader_noc: ttnn.NOC.NOC_1 swaps the reader /
-    writer NOCs (readers off their bank's row: NOC1 routes Y first, keeping the responses off the bank row's links)."""
+    writer NOCs (readers off their bank's row: NOC1 routes Y first, keeping the responses off the bank row's links).
+    compute_name: the compute kernel's file stem (default `name`); unpack_fp32: cb indices unpacked to DST as FP32."""
     dm = ttnn.DataMovementConfigDescriptor
     rd_ct, rd_args = reader
     wr_ct, wr_args = writer
@@ -338,17 +318,22 @@ def _kernels(cores, name, reader, writer, compute, defines=(), dst_full=False, r
                 defines=list(defines),
             ),
         ]
+    cfg = ttnn.ComputeConfigDescriptor(
+        math_fidelity=ttnn.MathFidelity.LoFi, fp32_dest_acc_en=True, math_approx_mode=False, dst_full_sync_en=dst_full,
+    )
+    if unpack_fp32:
+        modes = [ttnn.UnpackToDestMode.Default] * 64
+        for i in unpack_fp32:
+            modes[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg.unpack_to_dest_mode = modes
     return dms + [
         ttnn.KernelDescriptor(
-            kernel_source=str(KERNEL_DIR / f"{name}_compute.cpp"),
+            kernel_source=str(KERNEL_DIR / f"{compute_name or name}_compute.cpp"),
             core_ranges=cores,
             compile_time_args=cp_ct,
             runtime_args=cp_rt if cp_rt is not None else [],
             defines=list(defines),
-            config=ttnn.ComputeConfigDescriptor(
-                math_fidelity=MATH_FIDELITY, fp32_dest_acc_en=True, math_approx_mode=False,
-                dst_full_sync_en=dst_full,
-            ),
+            config=cfg,
         ),
     ]
 
@@ -365,8 +350,9 @@ class MoEDecodeBuffers:
             else {}
         )
         kw = dict(device=mesh_device, memory_config=ttnn.L1_MEMORY_CONFIG, **rep)
-        self.route = ttnn.from_torch(
-            torch.zeros(1, 1, 1, 32, dtype=torch.int32), dtype=ttnn.uint16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
+        self.route = ttnn.from_torch(  # k = 16: the 128-byte record (ROUTE_WIDE)
+            torch.zeros(1, 1, 1, 64 if k == 16 else 32, dtype=torch.int32), dtype=ttnn.uint16,
+            layout=ttnn.ROW_MAJOR_LAYOUT, **kw
         )
         self.act = ttnn.from_torch(
             torch.zeros(1, 1, k + 1, inter, dtype=torch.bfloat16), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, **kw
@@ -395,13 +381,19 @@ class ExpertGateUp:
         self.n_tiles = 2 * inter // TILE
         self.pairs = self.n_tiles // 2
         self.m, self.nb, self.groups, self.group_pairs = gu_layout(self.n_tiles, self.banks)
-        assert num_experts % 64 == 0 and k <= 15, (num_experts, k)
+        assert num_experts % 64 == 0 and k <= 16, (num_experts, k)  # k = 16: ROUTE_WIDE
         self.E, self.k, self.inter = num_experts, k, inter
         self.readers = min(readers, k)
         self.slots = [([0] if r == 0 and shared else []) + list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
         self.tile_bytes = TILE_BYTES[weight_dtype]
         self.weight_dtype = weight_dtype
         self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers)  # bank blocks in the cb_w ring (buffers - 2 read ahead)
+        # QWEN35_MOE_GU_FARW=1 (nb = 2): the writer streams bank q + banks / 2's block on NOC1 (union.py ExpertGateUpRows)
+        self.farw = os.environ.get("QWEN35_MOE_GU_FARW", "0") == "1" and self.nb == 2 and not shared and not ep_experts
+        # (an n >= 2 value: the multi-row op at n rows and more only, union.farw_rows)
+        if self.farw:
+            self.buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_NEAR", "3"))
+            self.far_buffers = int(os.environ.get("QWEN35_MOE_GU_FARW_FAR", "3"))
         self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
         self.dst_full = self.m * self.nb > 4  # FP32 DST: 4 tiles half-sync, 8 full-sync
         assert self.m * self.nb <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
@@ -411,10 +403,16 @@ class ExpertGateUp:
         self.assign = [(c, q, r) for q in range(self.groups) for r, c in enumerate(placed[q])]
         self.cores = _range_set([c for c, _, _ in self.assign])
 
-    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None, ep_offset=None):
+    def parts(self, x, logits, up_gate, shared_up_gate, act, route, notify=None, bias=None, ep_offset=None,
+              route_in=False):
         """(kernels, cbs). notify = (semaphore id, [(NOC x, y)] of the down cores) for the one-program MoE. bias: the
-        sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page)."""
-        assert (bias is not None) == (self.router == "sigb") and (notify is None or self.router == "softmax")
+        sigb router's selection bias (Q23 int32 [1, 1, 1, E] row-major, one DRAM page). route_in (ROUTE_IN): the route
+        record is in `route` already (an earlier program took the top-k, e.g. Hy4-flash's router_post): no logits
+        read and no router tail here (`logits` unused)."""
+        if route_in:
+            assert notify is None and not self.ep_experts and not self.shared
+            logits = route
+        assert (bias is not None) == is_sig(self.router) and (notify is None or self.router == "softmax")
         assert (ep_offset is not None) == bool(self.ep_experts) and (notify is None or not self.ep_experts)
         cb_x, cb_w, cb_route, cb_scr, cb_part, cb_lg, cb_act = 0, 1, 2, 3, 4, 5, 16
         lg_bytes = logits_row_bytes(self.E, self.router)
@@ -427,6 +425,10 @@ class ExpertGateUp:
             _cb(self.cores, cb_lg, ttnn.bfloat16, lg_bytes, 1),
             _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * len(self.group_pairs[0]), tiny=True),
         ]
+        cb_w1 = 7
+        if self.farw:
+            assert notify is None, "GU_FAR_W: not with the one-program MoE"
+            cbs.append(_cb(self.cores, cb_w1, self.weight_dtype, self.tile_bytes, self.far_buffers * self.kt * self.m))
         tail = [] if notify is None else [len(notify[1])] + [v for xy in notify[1] for v in xy]
         bias_arg = [] if bias is None else [bias.buffer_address()]
         rd_rt, wr_rt, cp_rt = {}, {}, {}
@@ -437,6 +439,8 @@ class ExpertGateUp:
             rd_rt[(c.x, c.y)] = [logits.buffer_address(), up_gate.buffer_address(), shared_up_gate.buffer_address(), j, vc, len(sl)] + sl + bias_arg + ep_arg
             wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), route.buffer_address(), logits.buffer_address(), j, int(i == 0 and notify is None), len(sl)] + sl + bias_arg + tail
             cp_rt[(c.x, c.y)] = [len(sl)]
+            if self.farw:
+                wr_rt[(c.x, c.y)] += [up_gate.buffer_address(), j + self.banks // 2]
         rd_ct = [cb_w, cb_route, cb_scr, self.kt, self.n_tiles, self.E, self.k, cb_part, self.tile_bytes]
         rd_ct += [self.page_bytes, self.banks, self.buffers] + ttnn.TensorAccessorArgs(logits).get_compile_time_args()
         wr_ct = [cb_x, cb_act, cb_route, self.kt, self.k, self.E, 2 * self.inter, cb_part, cb_lg, self.m, self.banks]
@@ -444,16 +448,112 @@ class ExpertGateUp:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         cp_ct = [cb_x, cb_w, cb_act, self.kt, self.m, self.banks]
         defines = [] if notify is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(notify[0]))]
-        if self.router == "sigb":
-            defines.append(("ROUTER_SIGB", "1"))
+        if self.farw:
+            wr_ct += [cb_w1, self.page_bytes, self.far_buffers, self.tile_bytes]
+            cp_ct += [cb_w1]
+            defines += [("GU_FAR_W", "1")]
+        defines += router_defines(self.router) + ([("ROUTE_WIDE", "1")] if self.k == 16 else [])
         defines += _ep_defines(self.ep_experts, self.gate_first)
+        if route_in:
+            defines += [("ROUTE_IN", "1")]
         return _kernels(self.cores, "gu", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, cp_rt), defines, dst_full=self.dst_full), cbs
 
-    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None):
-        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias, ep_offset=ep_offset)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        io = [up_gate, shared_up_gate, x, logits, route, act] + [t for t in (bias, ep_offset) if t is not None]
-        return ttnn.generic_op(io, program)
+    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=False):
+        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset,
+                                                    route_in=route_in)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=False):
+        kernels, cbs = self.parts(x, logits, up_gate, shared_up_gate, act, route, bias=bias, ep_offset=ep_offset,
+                                  route_in=route_in)
+        lg = [] if route_in else [logits]
+        io = [up_gate, shared_up_gate, x] + lg + [route, act] + [t for t in (bias, ep_offset) if t is not None]
+        return kernels, [], cbs, io
+
+
+class ExpertGateUp1B:
+    """One-row gate|up in the one-bank layout (QWEN35_MOE_GU1B1; m odd, routed experts only, the route record already in
+    `route`: ROUTE_IN, e.g. Hy4-flash's router_post): every core streams ONE DRAM bank's [kt, m] block per slot (the
+    two-bank cores of ExpertGateUp read ~230 GB/s per die, capped by the far bank's path), `readers` cores per bank
+    (`on_row` of them on the bank's row, union.place_onebank); partner cores (banks b, b + banks / 2, same rank and
+    slots) swap their gate matmul results as FP32 tiles and each computes the SwiGLU of its own up columns
+    (gu1b_*.cpp). Same matmuls, same DST values, same SFPU sequence as ExpertGateUp (exact); same activation buffer
+    layout, so ExpertDown is unchanged. Call signature as ExpertGateUp (logits / bias unused)."""
+
+    def __init__(self, mesh_device, hidden, inter, num_experts, k, weight_dtype, readers=2, on_row=2, buffers=5,
+                 xring=4):
+        from .union import place_onebank
+
+        self.mesh_device = mesh_device
+        self.banks = len(bank_workers(mesh_device))
+        self.kt = hidden // TILE
+        self.n_tiles = 2 * inter // TILE
+        self.m, self.nb, _, _ = gu_layout(self.n_tiles, self.banks)
+        assert self.nb == 2, "one-bank layout: odd columns per bank"
+        self.E, self.k, self.inter = num_experts, k, inter
+        self.readers = min(readers, k)
+        self.slots = [list(range(1 + r, k + 1, self.readers)) for r in range(self.readers)]
+        self.tile_bytes = TILE_BYTES[weight_dtype]
+        self.weight_dtype = weight_dtype
+        self.buffers = gu_ring(self.kt, self.m, 1, self.tile_bytes, buffers)
+        self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
+        self.xring = xring
+        placed = place_onebank(mesh_device, self.banks, self.readers, on_row)
+        self.assign = [(c, b, r) for b in range(self.banks) for r, c in enumerate(placed[b])]
+        half = self.banks // 2
+        self.partner = {(b, r): placed[(b + half) % self.banks][r] for b in range(self.banks) for r in range(self.readers)}
+        self.cores = _range_set([c for c, _, _ in self.assign])
+
+    def program(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=True):
+        assert route_in and ep_offset is None, "ExpertGateUp1B: route record in `route` (ROUTE_IN), no EP"
+        cb_x, cb_w, cb_route, cb_up, cb_xo, cb_xi, cb_act = 0, 1, 2, 9, 10, 11, 16
+        m = self.m
+        nmax = (m + 1) // 2
+        xt = 32 * 32 * 4
+        cbs = [
+            _cb(self.cores, cb_x, ttnn.bfloat16, 64, self.kt, tiny=True),
+            _cb(self.cores, cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt * m),
+            _cb(self.cores, cb_route, ttnn.uint16, 128, 1),
+            _cb(self.cores, cb_up, ttnn.float32, xt, 2 * nmax),
+            _cb(self.cores, cb_xo, ttnn.float32, xt, 2 * nmax),
+            _cb(self.cores, cb_xi, ttnn.float32, xt, self.xring * nmax),
+            _cb(self.cores, cb_act, ttnn.bfloat16, 64, 2 * nmax, tiny=True),
+        ]
+        rd_rt, wr_rt, cp_rt = {}, {}, {}
+        for c, b, r in self.assign:
+            sl = self.slots[r]
+            pc = self.mesh_device.worker_core_from_logical_core(self.partner[(b, r)])
+            rd_rt[(c.x, c.y)] = [route.buffer_address(), up_gate.buffer_address(), b, (b + r) & 0x3, len(sl)] + sl
+            wr_rt[(c.x, c.y)] = [x.buffer_address(), act.buffer_address(), b, pc.x, pc.y, len(sl)] + sl
+            cp_rt[(c.x, c.y)] = [len(sl)]
+        rd_ct = [cb_w, cb_route, self.kt, m, self.tile_bytes, self.page_bytes, self.buffers, self.k]
+        rd_ct += ttnn.TensorAccessorArgs(route).get_compile_time_args()
+        wr_ct = [cb_x, cb_act, cb_route, self.kt, 2 * self.inter, m, self.banks, cb_xo, cb_xi, xt, self.xring]
+        for t in (x, act):
+            wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        cp_ct = [cb_x, cb_w, cb_act, self.kt, m, cb_up, cb_xo, cb_xi]
+        defines = [("ROUTE_WIDE", "1")] if self.k == 16 else []
+        defines += _ep_defines(None)
+        half = self.banks // 2
+        kernels = []
+        for hi in (False, True):
+            sel = [(c.x, c.y) for c, b, _ in self.assign if (b >= half) == hi]
+            cr = _range_set([ttnn.CoreCoord(x_, y_) for x_, y_ in sel])
+            kernels += _kernels(
+                cr, "gu1b",
+                (rd_ct, {k_: v for k_, v in rd_rt.items() if k_ in sel}),
+                (wr_ct, {k_: v for k_, v in wr_rt.items() if k_ in sel}),
+                (cp_ct, {k_: v for k_, v in cp_rt.items() if k_ in sel}),
+                defines + ([("ROLE_HI", "1")] if hi else []), dst_full=False, unpack_fp32=(cb_up, cb_xi),
+            )
+        semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, self.cores, 0) for i in (0, 1)]
+        io = [up_gate, x, route, act]
+        return kernels, semaphores, cbs, io
+
+    def __call__(self, x, logits, up_gate, shared_up_gate, act, route, bias=None, ep_offset=None, route_in=True):
+        kernels, semaphores, cbs, io = self.program(x, logits, up_gate, shared_up_gate, act, route, bias, ep_offset,
+                                                    route_in=route_in)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
 
 
 class ExpertDown:
@@ -517,13 +617,18 @@ class ExpertDown:
         defines = [] if wait is None else [("MOE_FUSED", "1"), ("MOE_SEM", str(wait[0])), ("MOE_NOTIFIERS", str(wait[1]))]
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
+        if self.k == 16:
+            defines.append(("ROUTE_WIDE", "1"))
         defines += _ep_defines(self.ep_experts)
         return _kernels(self.cores, "dn", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), defines), cbs
 
     def __call__(self, act, route, down, shared_down, out):
+        kernels, semaphores, cbs, io = self.program(act, route, down, shared_down, out)
+        return ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs))
+
+    def program(self, act, route, down, shared_down, out):
         kernels, cbs = self.parts(act, route, down, shared_down, out)
-        program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        return ttnn.generic_op([down, shared_down, act, route, out], program)
+        return kernels, [], cbs, [down, shared_down, act, route, out]
 
 
 class ExpertMoE:

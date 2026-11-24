@@ -5,18 +5,121 @@
 #include "ttnn/operations/data_movement/common/common.hpp"
 
 #include <algorithm>
+#include "ttnn/operations/core/program_cache_l1.hpp"
 #include "ttnn/operations/data_movement/pad/pad.hpp"
 #include "ttnn/operations/data_movement/squeeze/squeeze.hpp"
 #include "ttnn/operations/data_movement/reshape_on_device/reshape.hpp"
 #include "ttnn/operations/data_movement/reshape_view/reshape.hpp"
 
+#include <bit>
 #include <numeric>
-#include <tt-metalium/tt_align.hpp>
+#include <tt-metalium/bfloat16.hpp>
+#include <tt-metalium/math.hpp>
+#include <tt-metalium/constants.hpp>
+#include <tt-metalium/experimental/per_core_allocation/memory_config.hpp>
+#include <tt-metalium/experimental/range_lockstep_allocation/memory_config.hpp>
 
 #include <tt-metalium/hal.hpp>
 #include <tt-metalium/program_descriptors.hpp>
+#include <tt-metalium/mesh_buffer.hpp>
 
 namespace ttnn::operations::data_movement {
+
+bool is_nd_sharded_memory_config(const tt::tt_metal::MemoryConfig& mem_config) {
+    return mem_config.memory_layout() == tt::tt_metal::TensorMemoryLayout::ND_SHARDED ||
+           (mem_config.nd_shard_spec().has_value() && !mem_config.shard_spec().has_value());
+}
+
+bool is_functionally_same_memory_config(
+    const tt::tt_metal::MemoryConfig& config_a, const tt::tt_metal::MemoryConfig& config_b) {
+    if (config_a == config_b) {
+        return true;  // same provenance, or interleaved: operator== is already exact
+    }
+    if (config_a.memory_layout() != config_b.memory_layout() || config_a.buffer_type() != config_b.buffer_type()) {
+        return false;
+    }
+    // The allocation flags change allocator semantics, so they are part of a layout's identity.
+    namespace per_core_allocation = tt::tt_metal::experimental::per_core_allocation;
+    namespace range_lockstep_allocation = tt::tt_metal::experimental::range_lockstep_allocation;
+    if (per_core_allocation::is_per_core_allocation(config_a) !=
+            per_core_allocation::is_per_core_allocation(config_b) ||
+        range_lockstep_allocation::is_range_lockstep_allocation(config_a) !=
+            range_lockstep_allocation::is_range_lockstep_allocation(config_b)) {
+        return false;
+    }
+    // A genuinely ND layout is only described by its nd_shard_spec, which operator== already
+    // compared, so there is nothing left to relax. Not relaxed either: an ND-sharded *request*
+    // against a tensor whose ND spec normalized to 2D, which differs by memory_layout() above and
+    // so still reshards even though the distribution matches. Normalizing that equivalence is a
+    // wider change than a no-op gate warrants.
+    if (is_nd_sharded_memory_config(config_a) || is_nd_sharded_memory_config(config_b)) {
+        return false;
+    }
+    // Buffer creation follows the nd spec, so disagreeing nd specs allocate differently even when
+    // the 2D specs match. Only the one-sided case (no shadow spec yet) is relaxed.
+    if (config_a.nd_shard_spec().has_value() && config_b.nd_shard_spec().has_value() &&
+        config_a.nd_shard_spec() != config_b.nd_shard_spec()) {
+        return false;
+    }
+    // Layout-only sharded configs (no shard_spec) are deliberately not equal: reshape leaves those
+    // to its auto-derive path rather than treating them as a no-op.
+    return config_a.shard_spec().has_value() && config_a.shard_spec() == config_b.shard_spec();
+}
+
+tt::tt_metal::MemoryConfig drop_normalized_nd_shard_spec(const tt::tt_metal::MemoryConfig& mem_config) {
+    if (!mem_config.shard_spec().has_value() || !mem_config.nd_shard_spec().has_value()) {
+        return mem_config;
+    }
+    namespace per_core_allocation = tt::tt_metal::experimental::per_core_allocation;
+    namespace range_lockstep_allocation = tt::tt_metal::experimental::range_lockstep_allocation;
+    const bool per_core = per_core_allocation::is_per_core_allocation(mem_config);
+    const bool range_lockstep = range_lockstep_allocation::is_range_lockstep_allocation(mem_config);
+    tt::tt_metal::MemoryConfig stripped{mem_config.memory_layout(), mem_config.buffer_type(), mem_config.shard_spec()};
+    // Mutually exclusive by construction, so at most one of these runs. Both require an L1 sharded
+    // config, which `stripped` still is.
+    if (per_core) {
+        per_core_allocation::set_per_core_allocation(stripped, true);
+    } else if (range_lockstep) {
+        range_lockstep_allocation::set_range_lockstep_allocation(stripped, true);
+    }
+    return stripped;
+}
+
+tt::tt_metal::MemoryConfig derive_nd_shard_spec_for_reshaped_output(
+    const tt::tt_metal::MemoryConfig& src_cfg,
+    const ttnn::Shape& src_padded_shape,
+    const ttnn::Shape& out_padded_shape,
+    bool is_tiled) {
+    const auto& src_nd = src_cfg.nd_shard_spec().value();
+    const uint32_t rank = out_padded_shape.rank();
+    // A shard spec's rank may legally be lower than its tensor's (BufferDistributionSpec only
+    // requires shard rank <= tensor rank), so align the shard shape to the source tensor rank
+    // first, then adapt both the shard and the padded shape to the output rank. Bailing on a rank
+    // mismatch instead would carry a stale-rank shard spec onto the output and re-trip the rank
+    // abort this path exists to avoid.
+    const ttnn::Shape src_shard_at_src_rank =
+        squeeze_or_unsqueeze_shape_to_ND(src_nd.shard_shape, src_padded_shape.rank());
+    const ttnn::Shape src_shard = squeeze_or_unsqueeze_shape_to_ND(src_shard_at_src_rank, rank);
+    const ttnn::Shape src_padded = squeeze_or_unsqueeze_shape_to_ND(src_padded_shape, rank);
+    ttsl::SmallVector<uint32_t> new_shard(rank);
+    for (uint32_t d = 0; d < rank; ++d) {
+        const uint32_t src_dim = src_padded[d] == 0 ? 1 : src_padded[d];
+        const uint32_t shard_d = src_shard[d] == 0 ? 1 : src_shard[d];
+        const uint32_t num_shards = (src_dim + shard_d - 1) / shard_d;  // per-dim shard count on the source
+        const uint32_t out_dim = out_padded_shape[d] == 0 ? 1 : out_padded_shape[d];
+        new_shard[d] = (out_dim + num_shards - 1) / num_shards;  // ceil-divide the output dim across those shards
+    }
+    if (is_tiled && rank >= 2) {
+        // Tiled shard shapes must be tile multiples on the inner two dims: round up, then clamp to
+        // the padded dim. A dim too small for that many tile-aligned shards (e.g. 64 fits two
+        // 32-tall shards, not four) lands on fewer cores; that is inherent, not a bug.
+        const uint32_t th = tt::constants::TILE_HEIGHT;
+        const uint32_t tw = tt::constants::TILE_WIDTH;
+        new_shard[rank - 1] = std::min(((new_shard[rank - 1] + tw - 1) / tw) * tw, out_padded_shape[rank - 1]);
+        new_shard[rank - 2] = std::min(((new_shard[rank - 2] + th - 1) / th) * th, out_padded_shape[rank - 2]);
+    }
+    return tt::tt_metal::MemoryConfig{src_cfg.buffer_type(), src_nd.with_shard_shape(ttnn::Shape(new_shard))};
+}
 
 ttnn::Shape squeeze_shape_to_ND(const ttnn::Shape& shape, const uint32_t n) {
     if (shape.rank() <= n) {
@@ -150,9 +253,61 @@ const std::map<uint32_t, std::array<float, 2>> noc_l1_local_bw = {
     {32768, {27.805, 50.123}},
     {65536, {27.84, 50.21}}};
 
-float get_transaction_noc_bw(uint32_t transaction_size, bool is_dram, bool is_local, bool is_read, tt::ARCH arch) {
+// Busy AICLK that OpPerformanceModelGeneral divides by:
+// tt::umd::wormhole::AICLK_BUSY_VAL (1000 MHz), tt::umd::blackhole::AICLK_BUSY_VAL (1350 MHz).
+struct NocBwArchParams {
+    int table_index;
+    float clock_hz;
+    float l1_peak_gbps;
+    uint32_t dram_latency;
+    uint32_t local_latency;
+    uint32_t write_latency;
+    uint32_t read_latency;
+};
+
+constexpr NocBwArchParams kWormholeNocBw{
+    .table_index = WormholeIndex,
+    .clock_hz = 1.0e9f,
+    .l1_peak_gbps = 32.0f,
+    .dram_latency = 358,
+    .local_latency = 56,
+    .write_latency = 256,
+    .read_latency = 259,
+};
+
+constexpr NocBwArchParams kBlackholeNocBw{
+    .table_index = BlackholeIndex,
+    .clock_hz = 1.35e9f,
+    .l1_peak_gbps = 50.0f,
+    .dram_latency = 529,
+    .local_latency = 88,
+    .write_latency = 404,
+    .read_latency = 403,
+};
+
+NocBwArchParams noc_bw_arch_params(tt::ARCH arch) {
+    switch (arch) {
+        case tt::ARCH::WORMHOLE_B0: return kWormholeNocBw;
+        case tt::ARCH::BLACKHOLE: return kBlackholeNocBw;
+        default: TT_THROW("Unsupported architecture for NOC bandwidth model: {}", arch);
+    }
+}
+
+uint32_t noc_latency_cycles(const NocBwArchParams& params, bool is_dram, bool is_local, bool is_write) {
+    if (is_dram) {
+        return params.dram_latency;
+    }
+    if (is_local) {
+        return params.local_latency;
+    }
+    if (is_write) {
+        return params.write_latency;
+    }
+    return params.read_latency;
+}
+
+float get_transaction_noc_bw(uint32_t transaction_size, bool is_dram, bool is_local, bool is_read, int table_index) {
     const auto& dict = is_dram ? noc_dram_bw : is_local ? noc_l1_local_bw : is_read ? noc_l1_read_bw : noc_l1_write_bw;
-    const int index = (arch == tt::ARCH::WORMHOLE_B0) ? WormholeIndex : BlackholeIndex;
 
     uint32_t lower_pow2 = std::pow(2, std::floor(std::log2(transaction_size)));
 
@@ -170,8 +325,8 @@ float get_transaction_noc_bw(uint32_t transaction_size, bool is_dram, bool is_lo
     if (upper_it == dict.end()) {
         upper_it = std::prev(dict.end());
     }
-    float lower_bw = lower_it->second[index];
-    float upper_bw = upper_it->second[index];
+    float lower_bw = lower_it->second[table_index];
+    float upper_bw = upper_it->second[table_index];
 
     if (transaction_size - lower_pow2 < upper_pow2 - transaction_size) {
         return lower_bw;
@@ -181,19 +336,20 @@ float get_transaction_noc_bw(uint32_t transaction_size, bool is_dram, bool is_lo
 
 uint32_t get_effective_l1_cores(
     uint32_t transaction_size, tt::ARCH arch, bool is_write, uint32_t num_nocs, uint32_t num_cores) {
-    float max_bw = (arch == tt::ARCH::WORMHOLE_B0) ? 32.0f : 50.0f;
-    auto aggregate_bw = max_bw * num_nocs;
-    float achieved_l1_bw =
-        get_transaction_noc_bw(transaction_size, /*is_dram=*/false, /*is_local=*/false, /*is_read=*/!is_write, arch);
+    const auto params = noc_bw_arch_params(arch);
+    auto aggregate_bw = params.l1_peak_gbps * num_nocs;
+    float achieved_l1_bw = get_transaction_noc_bw(
+        transaction_size, /*is_dram=*/false, /*is_local=*/false, /*is_read=*/!is_write, params.table_index);
     uint32_t effective_cores = std::ceil((float)aggregate_bw / (float)achieved_l1_bw);
     effective_cores = std::min(effective_cores, num_cores);  // Limit to available cores
     return effective_cores;
 }
 
 uint32_t get_effective_dram_cores(uint32_t transaction_size, tt::ARCH arch, bool single_noc, uint32_t num_cores) {
+    const auto params = noc_bw_arch_params(arch);
     auto aggregate_bw = single_noc == 1 ? 190 : 265;
-    float achieved_dram_bw =
-        get_transaction_noc_bw(transaction_size, /*is_dram=*/true, /*is_local=*/false, /*is_read=*/true, arch);
+    float achieved_dram_bw = get_transaction_noc_bw(
+        transaction_size, /*is_dram=*/true, /*is_local=*/false, /*is_read=*/true, params.table_index);
     uint32_t effective_cores = std::ceil((float)aggregate_bw / (float)achieved_dram_bw);
     effective_cores = std::min(effective_cores, num_cores);  // Limit to available cores
     return effective_cores;
@@ -203,25 +359,18 @@ uint32_t get_effective_dram_cores(uint32_t transaction_size, tt::ARCH arch, bool
 
 std::pair<uint32_t, uint32_t> get_cycles_for_transaction_size(
     uint32_t transaction_size, bool is_dram, bool is_local, uint32_t num_transactions, tt::ARCH arch, bool is_read) {
-    bool is_write = !is_read;
-    // measured initial latency based on the transaction and device types
-    uint32_t latency_cyles = 1;
-    if (is_dram) {
-        latency_cyles = (arch == tt::ARCH::WORMHOLE_B0) ? 358 : 529;
-    } else if (is_local) {
-        latency_cyles = (arch == tt::ARCH::WORMHOLE_B0) ? 56 : 88;
-    } else if (is_write) {
-        latency_cyles = (arch == tt::ARCH::WORMHOLE_B0) ? 256 : 404;
-    } else {
-        latency_cyles = (arch == tt::ARCH::WORMHOLE_B0) ? 259 : 403;
-    }
+    const bool is_write = !is_read;
+    const auto params = noc_bw_arch_params(arch);
+    const uint32_t latency_cycles = noc_latency_cycles(params, is_dram, is_local, is_write);
 
     transaction_size = std::max(transaction_size, 16u);
-    auto transaction_bw = get_transaction_noc_bw(transaction_size, is_dram, is_local, is_read, arch);
-    float device_frequency_hz = (arch == tt::ARCH::WORMHOLE_B0) ? 1e9 : 1.2e9;
-    uint32_t cycles =
-        std::ceil((float)(num_transactions * transaction_size * device_frequency_hz) / (float)(transaction_bw * 1e9));
-    return {cycles, latency_cyles};
+    const auto transaction_bw =
+        get_transaction_noc_bw(transaction_size, is_dram, is_local, is_read, params.table_index);
+    const float device_frequency_hz = params.clock_hz;
+    const uint32_t cycles = static_cast<uint32_t>(std::ceil(
+        static_cast<float>(num_transactions * transaction_size * device_frequency_hz) /
+        static_cast<float>(transaction_bw * 1e9)));
+    return {cycles, latency_cycles};
 }
 
 int common_tm_bw_model(
@@ -237,7 +386,7 @@ int common_tm_bw_model(
     auto element_size_bytes = input_tensor.element_size();
     bool input_is_2d_sharded =
         input_tensor.memory_config().is_sharded() && input_tensor.memory_config().shard_spec().has_value();
-    bool input_is_dram = input_tensor.buffer()->buffer_type() == tt::tt_metal::BufferType::DRAM;
+    bool input_is_dram = input_tensor.memory_config().buffer_type() == tt::tt_metal::BufferType::DRAM;
     bool input_is_tiled = input_tensor.layout() == Layout::TILE;
     uint32_t input_size_bytes = input_shape.volume() * element_size_bytes;
 
@@ -246,9 +395,7 @@ int common_tm_bw_model(
     uint32_t num_nocs = device_rows + device_cols;
 
     auto arch = input_tensor.device()->arch();
-    if (arch != tt::ARCH::WORMHOLE_B0 && arch != tt::ARCH::BLACKHOLE) {
-        TT_THROW("Unsupported architecture for common_bw_model: {}", arch);
-    }
+    noc_bw_arch_params(arch);  // Throw for an unsupported arch before the roofline math.
     uint32_t num_cores = device_rows * device_cols;
 
     uint32_t total_num_cores = num_cores;
@@ -273,7 +420,7 @@ int common_tm_bw_model(
 
     uint32_t num_read_transactions = std::ceil((float)input_size_bytes / (float)input_transaction_size);
 
-    bool output_is_dram = output_tensor.buffer()->buffer_type() == tt::tt_metal::BufferType::DRAM;
+    bool output_is_dram = output_tensor.memory_config().buffer_type() == tt::tt_metal::BufferType::DRAM;
     bool output_is_tiled = output_tensor.layout() == Layout::TILE;
     bool output_2d_is_sharded =
         output_tensor.memory_config().is_sharded() && output_tensor.memory_config().shard_spec().has_value();
@@ -434,11 +581,14 @@ uint32_t get_estimated_size_of_cbs(
 }
 
 uint32_t get_max_l1_space(const Tensor& input_tensor_a) {
+    return static_cast<uint32_t>(ttnn::operations::core::available_program_l1_capacity(input_tensor_a.device()));
+}
+
+uint32_t get_static_l1_space(const Tensor& input_tensor_a) {
     auto* device = input_tensor_a.device();
-    auto lowest_address = device->lowest_occupied_compute_l1_address();
-    uint32_t max_l1_space = lowest_address.has_value() ? lowest_address.value() : device->l1_size_per_core();
-    max_l1_space = max_l1_space - device->allocator()->get_base_allocator_addr(tt::tt_metal::HalMemType::L1);
-    return max_l1_space;
+    const uint32_t base = device->allocator()->get_base_allocator_addr(tt::tt_metal::HalMemType::L1);
+    const uint32_t ceiling = device->l1_size_per_core();
+    return ceiling > base ? ceiling - base : 0;
 }
 
 uint32_t get_pending_l1_output_reservation(
@@ -488,11 +638,24 @@ uint32_t get_pending_l1_output_reservation(
     // busiest bank holds ceil(num_pages / num_banks) of them. Reserving the average
     // (total_bytes / num_banks) underestimates whenever num_pages is not a multiple of
     // num_banks, which can still leave the CBs overlapping the output on the fullest bank.
-    const uint64_t alignment = input_tensor_a.device()->allocator()->get_alignment(tt::tt_metal::BufferType::L1);
-    const uint64_t aligned_page_bytes = tt::align(static_cast<uint64_t>(page_bytes), alignment);
+    const auto& allocator = *input_tensor_a.device()->allocator();
+    const uint64_t page_alignment = allocator.get_alignment(tt::tt_metal::BufferType::L1);
+    const uint64_t aligned_page_bytes = tt::align(static_cast<uint64_t>(page_bytes), page_alignment);
     const uint64_t num_pages = tt::div_up(static_cast<uint64_t>(total_bytes), static_cast<uint64_t>(page_bytes));
     const uint64_t pages_on_fullest_bank = tt::div_up(num_pages, static_cast<uint64_t>(num_banks));
-    return static_cast<uint32_t>(pages_on_fullest_bank * aligned_page_bytes);
+    const uint64_t bytes_on_fullest_bank = pages_on_fullest_bank * aligned_page_bytes;
+
+    // That per-bank size is what the bank manager asks its free list for, but the L1 free lists are
+    // built with the DRAM alignment as both their block alignment and their minimum allocation
+    // (BankManager::init_allocators is handed dram_alignment_bytes so L1<->DRAM transfers stay
+    // aligned), so the allocation that actually lowers lowest_occupied_compute_l1_address is that
+    // size rounded up once more. Reserve what the allocator will take, not what the pages add up
+    // to, or a decision made within that last granule of the budget is more permissive than the
+    // program factory it predicts. (Under the opt-in HYBRID allocator mode the per-page rounding is
+    // also the DRAM alignment; tile pages and tile-width row-major pages are multiples of it, so
+    // that mode is not accounted for separately here.)
+    const uint64_t allocation_granule = allocator.get_alignment(tt::tt_metal::BufferType::DRAM);
+    return static_cast<uint32_t>(tt::align(std::max(bytes_on_fullest_bank, allocation_granule), allocation_granule));
 }
 
 bool is_enough_space(
@@ -545,38 +708,61 @@ ttnn::Tensor pad_to_tile_vol(
 }
 uint32_t wrap_index(int index, int size) { return index < 0 ? size + index : index; }
 
-// not unit tested, use with caution
-uint16_t float_to_uint16(float f) {
-    // For positive infinity, return the maximum uint16_t value
-    // For negative infinity, return the minimum uint16_t value
-    if (std::isinf(f)) {
-        return (f > 0) ? std::numeric_limits<uint16_t>::max() : std::numeric_limits<uint16_t>::min();
-    }
-
-    // For Not-a-Number (NaN), return 0
+namespace {
+// Rounds to nearest and clamps to Int's range; NaN gives 0.
+template <typename Int>
+Int saturating_float_to_int(float f) {
     if (std::isnan(f)) {
         return 0;
     }
-
-    // Handle overflow and underflow
-    const float max_uint16 = static_cast<float>(std::numeric_limits<uint16_t>::max());
-    const float min_uint16 = static_cast<float>(std::numeric_limits<uint16_t>::min());
-    if (f >= max_uint16) {
-        return std::numeric_limits<uint16_t>::max();
+    if (f >= static_cast<float>(std::numeric_limits<Int>::max())) {
+        return std::numeric_limits<Int>::max();
     }
-    if (f <= min_uint16) {
-        return std::numeric_limits<uint16_t>::min();
+    if (f <= static_cast<float>(std::numeric_limits<Int>::min())) {
+        return std::numeric_limits<Int>::min();
     }
-
-    // For all other finite values, safely cast after rounding
-    return static_cast<uint16_t>(std::round(f));
+    return static_cast<Int>(std::round(f));
 }
+}  // namespace
+
+uint16_t float_to_uint16(float f) { return saturating_float_to_int<uint16_t>(f); }
 
 // based off pack_two_bfloat16_into_uint32
 uint32_t pack_two_uint16_into_uint32(std::pair<uint16_t, uint16_t> two_uint16s) {
     // first -> lower 16
     // second -> upper 16
     return (uint32_t)two_uint16s.first | ((uint32_t)two_uint16s.second << 16);
+}
+
+uint32_t pack_scalar_into_uint32(DataType dtype, float value) {
+    // No default, so -Wswitch rejects a new DataType without a case here.
+    switch (dtype) {
+        case DataType::FLOAT32: return std::bit_cast<uint32_t>(value);
+        case DataType::BFLOAT16: return pack_two_bfloat16_into_uint32({bfloat16(value), bfloat16(value)});
+        case DataType::UINT16: {
+            const uint16_t v = float_to_uint16(value);
+            return pack_two_uint16_into_uint32({v, v});
+        }
+        // 32-bit integers truncate, matching fill_pad and the single-core tile pad.
+        case DataType::INT32: return std::bit_cast<uint32_t>(saturating_float_to_int<int32_t>(std::trunc(value)));
+        case DataType::UINT32: return saturating_float_to_int<uint32_t>(std::trunc(value));
+        // UINT8 truncates like the 32-bit integers and fills all four bytes.
+        case DataType::UINT8: return saturating_float_to_int<uint8_t>(std::trunc(value)) * 0x01010101u;
+        case DataType::BFLOAT8_B:
+        case DataType::BFLOAT4_B:
+        case DataType::FP8_E4M3:
+        case DataType::INT8:
+        case DataType::MXFP8_E4M3:
+        case DataType::MXFP8_E5M2:
+        case DataType::MXFP6_E2M3:
+        case DataType::MXFP6_E3M2:
+        case DataType::MXFP4:
+        case DataType::MXINT8:
+        case DataType::MXINT4:
+        case DataType::MXINT2:
+        case DataType::INVALID: break;
+    }
+    TT_THROW("Cannot pack a scalar value for dtype {}", dtype);
 }
 
 ttnn::Shape compute_padded_shape(
@@ -657,7 +843,8 @@ std::array<uint32_t, 2> compute_height_sharded_shard_shape(
     const uint32_t total_num_cores) {
     auto [tensor_height, tensor_width] = squeezed_tensor_hw;
     auto squeezed_height_padded_to_tile =
-        layout == tt::tt_metal::Layout::TILE ? tt::round_up(tensor_height, total_num_cores) : tensor_height;
+        layout == tt::tt_metal::Layout::TILE ? tt::round_up(tensor_height, total_num_cores * tt::constants::TILE_HEIGHT)
+                                             : tensor_height;
     return {tt::div_up(squeezed_height_padded_to_tile, total_num_cores), tensor_width};
 }
 
@@ -706,9 +893,15 @@ ttnn::MemoryConfig create_sharded_memory_config(
             case ShardStrategy::WIDTH:
                 computed_shard_shape = compute_width_sharded_shard_shape(squeezed_tensor_hw, total_num_cores);
                 break;
-            case ShardStrategy::HEIGHT:
-                computed_shard_shape = compute_height_sharded_shard_shape(squeezed_tensor_hw, layout, total_num_cores);
+            case ShardStrategy::HEIGHT: {
+                // A tiled tensor pads each batch's height to a whole tile, so shards must cover the padded rows.
+                const uint32_t physical_height = layout == tt::tt_metal::Layout::TILE
+                                                     ? batch_size * tt::round_up(height, tt::constants::TILE_HEIGHT)
+                                                     : tensor_height;
+                computed_shard_shape =
+                    compute_height_sharded_shard_shape({physical_height, tensor_width}, layout, total_num_cores);
                 break;
+            }
             default: TT_ASSERT(false, "Invalid shard strategy");
         }
     }
@@ -787,9 +980,24 @@ uint32_t per_shard_page_size_bytes(const ttnn::Tensor& t, uint32_t row_bytes) {
         return spec.shape[1] * t.element_size();
     }
     if (mc.is_sharded()) {
-        return static_cast<uint32_t>(t.buffer()->aligned_page_size());
+        return static_cast<uint32_t>(t.mesh_buffer().aligned_page_size());
     }
     return row_bytes;
+}
+
+bool has_subaligned_shard_row(const tt::tt_metal::MemoryConfig& memory_config, uint32_t element_size) {
+    if (!memory_config.shard_spec().has_value()) {
+        return false;
+    }
+    const auto layout = memory_config.memory_layout();
+    if (layout != tt::tt_metal::TensorMemoryLayout::BLOCK_SHARDED &&
+        layout != tt::tt_metal::TensorMemoryLayout::WIDTH_SHARDED) {
+        return false;
+    }
+    const uint32_t alignment = (memory_config.buffer_type() == tt::tt_metal::BufferType::DRAM)
+                                   ? tt::tt_metal::hal::get_dram_alignment()
+                                   : tt::tt_metal::hal::get_l1_alignment();
+    return (memory_config.shard_spec()->shape[1] * element_size) % alignment != 0;
 }
 
 void push_buffer_set(
@@ -858,7 +1066,8 @@ BlockPlan make_block_plan(
     uint32_t output_single_tile_size,
     uint32_t tile_height,
     uint32_t tile_width,
-    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids) {
+    const std::optional<tt::tt_metal::CoreRangeSet>& sub_core_grids,
+    std::optional<uint32_t> max_block_tiles) {
     const bool has_staging = (direction == BlockDirection::Tilize);
 
     TT_FATAL(
@@ -885,7 +1094,9 @@ BlockPlan make_block_plan(
     const uint32_t fixed_staging_bytes = has_staging ? (2 * dram_alignment) : 0;
     const uint32_t budget_for_tiles = (max_l1_size > fixed_staging_bytes) ? (max_l1_size - fixed_staging_bytes) : 0;
     const uint32_t bytes_per_tile_pair = input_single_tile_size + output_single_tile_size + staging_bytes_per_tile;
-    const uint32_t cb_block_size_limit = (bytes_per_tile_pair == 0) ? 0 : budget_for_tiles / bytes_per_tile_pair;
+    const uint32_t l1_block_size_limit = (bytes_per_tile_pair == 0) ? 0 : budget_for_tiles / bytes_per_tile_pair;
+    const uint32_t cb_block_size_limit =
+        max_block_tiles.has_value() ? std::min(l1_block_size_limit, *max_block_tiles) : l1_block_size_limit;
 
     BlockPlan plan;
     plan.split = (core_order == BlockCoreOrder::RowMajor)
@@ -933,6 +1144,15 @@ const BlockBufferSet& buffer_set_for_core(const BlockPlan& plan, const tt::tt_me
         core.str(),
         (in_full && in_cliffrow) ? "both" : "neither");
     return in_cliffrow ? plan.cliffrow : plan.full;
+}
+
+bool codegen_supported_on_arch(const ttnn::Tensor& input) {
+    const auto* device = input.device();
+    if (device == nullptr) {
+        return false;
+    }
+    const auto arch = device->arch();
+    return arch == tt::ARCH::WORMHOLE_B0 || arch == tt::ARCH::BLACKHOLE;
 }
 
 }  // namespace ttnn::operations::data_movement

@@ -46,15 +46,19 @@ enum CompileTimeArg : uint32_t {
     kOutputBankOwnedSchedule,
     kNumDramBanks,
     kPrefetchPackets,
+    // Trace-safe cache-slot select, appended last so main's arg order is untouched.
+    kHasSlotMetadata,
     kNumFixedCompileTimeArgs,
 };
 
-constexpr uint32_t my_transport_rank = get_compile_time_arg_val(kMyTransportRank);
+// Per-chip values (the transport rank, the target counts per direction) are common runtime args, not compile-time
+// args, so every chip of a mesh runs the same binary (one program for the whole mesh; see the program factory).
+uint32_t my_transport_rank;  // common arg 0
 constexpr uint32_t cb_output_id = get_compile_time_arg_val(kCbOutputId);
 constexpr uint32_t packet_size_in_pages = get_compile_time_arg_val(kPacketSizeInPages);
 constexpr uint32_t input_tensor_page_size = get_compile_time_arg_val(kInputTensorPageSize);
-constexpr uint32_t num_targets_forward_direction = get_compile_time_arg_val(kNumTargetsForwardDirection);
-constexpr uint32_t num_targets_backward_direction = get_compile_time_arg_val(kNumTargetsBackwardDirection);
+uint32_t num_targets_forward_direction;   // common arg 1
+uint32_t num_targets_backward_direction;  // common arg 2
 constexpr Topology topology = static_cast<Topology>(get_compile_time_arg_val(kTopology));
 constexpr uint32_t contig_pages_advanced = get_compile_time_arg_val(kContigPagesAdvanced);
 constexpr uint32_t num_inputs = get_compile_time_arg_val(kNumInputs);
@@ -65,7 +69,8 @@ constexpr uint32_t num_links = get_compile_time_arg_val(kNumLinks);
 // The parent fused op owns this protocol decision and passes the same flag to both
 // all-gather directions and its receiver, keeping producer and consumer in sync.
 constexpr bool split_forwarding_enabled = get_compile_time_arg_val(kSplitForwardingEnabled);
-constexpr bool full_mesh_rank_mapping = get_compile_time_arg_val(kFullMeshRankMapping);
+constexpr uint32_t full_mesh_rank_mapping =
+    get_compile_time_arg_val(kFullMeshRankMapping);  // k{Axis,RowMajor,ColumnMajor}RankMapping
 constexpr auto snake_orientation =
     static_cast<ttnn::ccl::snake_ring::Orientation>(get_compile_time_arg_val(kSnakeOrientation));
 constexpr uint32_t mesh_rows = get_compile_time_arg_val(kMeshRows);
@@ -73,14 +78,12 @@ constexpr uint32_t mesh_cols = get_compile_time_arg_val(kMeshCols);
 constexpr bool partial_readiness_enabled = get_compile_time_arg_val(kPartialReadinessEnabled);
 constexpr bool output_bank_owned_schedule = get_compile_time_arg_val(kOutputBankOwnedSchedule);
 constexpr uint32_t num_dram_banks = get_compile_time_arg_val(kNumDramBanks);
+constexpr bool has_slot_metadata = get_compile_time_arg_val(kHasSlotMetadata);
 
 static_assert(!partial_readiness_enabled || num_inputs == 1, "partial readiness requires one gathered input");
 static_assert(
     !partial_readiness_enabled || !split_forwarding_enabled,
     "partial readiness and split forwarding are mutually exclusive");
-static_assert(
-    !partial_readiness_enabled || (num_targets_forward_direction > 0 && num_targets_backward_direction > 0),
-    "partial readiness requires both ring directions");
 
 // Prefetch: batch multiple packets of DRAM reads before a single barrier.
 // This keeps more reads in flight across interleaved DRAM banks, hiding latency.
@@ -126,6 +129,11 @@ FORCE_INLINE void prefetch_bank_owned_slices(
 }
 
 void kernel_main() {
+    my_transport_rank = get_common_arg_val<uint32_t>(0);
+    num_targets_forward_direction = get_common_arg_val<uint32_t>(1);
+    num_targets_backward_direction = get_common_arg_val<uint32_t>(2);
+    // partial readiness requires both ring directions
+    ASSERT(!partial_readiness_enabled || (num_targets_forward_direction > 0 && num_targets_backward_direction > 0));
     constexpr auto inputs_args = make_tensor_accessor_args_tuple<num_inputs, kNumFixedCompileTimeArgs + num_inputs>();
     constexpr auto outputs_args = make_tensor_accessor_args_tuple<
         num_inputs,
@@ -202,13 +210,19 @@ void kernel_main() {
         // Use the data CB as temporary metadata scratch. It is empty at this point and avoids
         // a separate tiny-CB read race on the all-gather worker cores.
         CircularBuffer cb_meta(cb_output_id);
-        const uint32_t slot_id =
-            trace_metadata::read_metadata_scalar_u32(meta_noc, meta_args, slot_id_addr, cb_meta.get_write_ptr());
-        for (uint32_t input_idx = 0; input_idx < num_inputs; input_idx++) {
-            const uint32_t cache_batch_idx = trace_metadata::bounded_cache_batch_idx(
-                slot_id, kv_cache_num_layers, kv_cache_layer_idx, input_cache_batch_extent[input_idx]);
-            input_batch_base[input_idx] = cache_batch_idx * input_batch_head_count[input_idx] *
-                                          input_tensor_Ht[input_idx] * input_tensor_Wt[input_idx];
+        // Guarded: the slot is optional even when the extent metadata is present (a kv_deduped gather
+        // hands the op a rebuilt BATCH-1 slab with no slot to select), so only recompose when the
+        // factory actually wired a slot tensor. main's bounded_cache_batch_idx clamps the recomposed
+        // index against the input's real batch extent (#53904).
+        if constexpr (has_slot_metadata) {
+            const uint32_t slot_id =
+                trace_metadata::read_metadata_scalar_u32(meta_noc, meta_args, slot_id_addr, cb_meta.get_write_ptr());
+            for (uint32_t input_idx = 0; input_idx < num_inputs; input_idx++) {
+                const uint32_t cache_batch_idx = trace_metadata::bounded_cache_batch_idx(
+                    slot_id, kv_cache_num_layers, kv_cache_layer_idx, input_cache_batch_extent[input_idx]);
+                input_batch_base[input_idx] = cache_batch_idx * input_batch_head_count[input_idx] *
+                                              input_tensor_Ht[input_idx] * input_tensor_Wt[input_idx];
+            }
         }
         const uint32_t kv_actual = trace_metadata::read_metadata_scalar_u32(
             meta_noc, kv_meta_args, kv_actual_isl_addr, cb_meta.get_write_ptr());
@@ -238,7 +252,7 @@ void kernel_main() {
 
     Noc noc_obj;
     CircularBuffer cb_output(cb_output_id);
-    constexpr uint32_t my_tensor_rank =
+    const uint32_t my_tensor_rank =
         ttnn::ring_attention_all_gather::tensor_rank_from_transport_rank<full_mesh_rank_mapping>(
             my_transport_rank, mesh_rows, mesh_cols, snake_orientation);
 

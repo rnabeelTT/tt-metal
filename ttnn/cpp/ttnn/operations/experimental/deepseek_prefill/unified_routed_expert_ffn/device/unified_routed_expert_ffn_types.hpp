@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <tuple>
 #include <vector>
@@ -16,6 +17,16 @@
 #include "ttnn/types.hpp"
 
 namespace ttnn::operations::experimental::deepseek_prefill::unified_routed_expert_ffn {
+
+// The worker rectangle this op always runs on, independent of the device grid. Fixed rather than
+// derived: the K-axis split, the activated L1 multicast pattern and the padded per_core_N all
+// assume it, and the program factory asserts the device is at least this large.
+//
+// Exported because a hybrid routed-expert forward has to hand moe_fused_swiglu the SAME grid --
+// that op defaults to the full device grid instead -- or the two halves block differently and the
+// measured token-count crossover between them stops applying. Read it, do not restate it.
+inline constexpr uint32_t kCoreGridX = 11;
+inline constexpr uint32_t kCoreGridY = 8;
 
 // Maximum number of global experts the op supports.
 //
@@ -36,13 +47,16 @@ inline constexpr uint32_t MAX_GLOBAL_EXPERTS = tt::constants::TILE_HW;  // 1024
 // distinct program. For SwiGluOai the alpha/limit are baked to the M3/gpt-oss
 // values (1.702 / 7.0, SwiGLUConfigGPTOSS) in the kernel — no extra params.
 // Likewise SituGlu bakes the Kimi K3 betas (beta_gate=4.0, beta_up=25.0,
-// SituGluConfigKimi).
+// SituGluConfigKimi) and ClampedSiluGlu the DeepSeek-V4 limit (10.0,
+// ClampedSiluGluConfigDsV4).
 enum class RoutedExpertActivation : uint8_t {
     Silu = 0,  // plain SiLU SwiGLU: silu(gate) * up                      (DeepSeek default)
     SwiGluOai =
         1,  // clamped swigluoai: (clamp(up,±L)+1)·clamp(gate,max=L)·σ(α·clamp(gate,max=L))  (MiniMax-M3 / gpt-oss)
     // SiTU-GLU: (beta_gate*tanh(gate/beta_gate)*sigmoid(gate)) * (beta_up*tanh(up/beta_up))  (Kimi K3)
     SituGlu = 2,
+    // clamped SiLU-GLU: silu(min(gate,L)) * clamp(up,±L)  (DeepSeek V4)
+    ClampedSiluGlu = 3,
 };
 
 // Attributes (the constants known at host time).
@@ -79,10 +93,59 @@ struct UnifiedRoutedExpertFfnParams {
 
     std::optional<ttnn::DeviceComputeKernelConfig> compute_kernel_config;
 
-    static constexpr auto attribute_names =
-        std::forward_as_tuple("m_tiles", "experts_per_chip", "x_is_row_major", "activation", "fuse_bias");
+    // Active-token band this op owns. An expert whose count falls outside it is dropped
+    // like a zero count, which is how a hybrid dispatch splits the experts between this op
+    // and moe_fused_swiglu over ONE shared counts vector -- no masked tensors, no host sync.
+    // Compile-time in the kernels, so it belongs to the program-cache key.
+    uint32_t min_active_tokens = 0;
+    uint32_t max_active_tokens = std::numeric_limits<uint32_t>::max();
+
+    // L1 address the circular buffers must end below (0: the whole L1). A caller that keeps
+    // buffers resident in L1 passes the lowest such address so the CB blocking is fitted to the
+    // L1 left free instead of clashing with them. It sizes the CBs, so it is part of the
+    // program-cache key: a program fitted under one L1 layout is never replayed under another.
+    uint32_t l1_end = 0;
+
+    // x_row_index given (row-major x only): x is the token-ordered input and buffer row r of an expert region reads
+    // x row x_row_index[r] instead of x row r, so no dispatch gather has to build the [rows, emb] buffer first.
+    // Changes the reader program, so it is part of the program-cache key.
+    bool x_indexed = false;
+
+    // Output written ROW_MAJOR bf16 (row-major x only): the down matmul's final pack untilizes each output tile-row
+    // in the compute kernel and the writer stores it as 32 row segments, so a consumer that gathers rows needs no
+    // separate untilize of the whole buffer. Changes the compute and writer programs (part of the cache key).
+    bool output_row_major = false;
+
+    // Row-major output only: one output row the writer sets to zeros (UINT32_MAX: none). Rows outside every expert
+    // region are left uninitialized; a caller whose combine reads such a row (gpt-oss: the spare row its non-local
+    // pairs point at) names it here instead of zeroing it with a separate op.
+    uint32_t zero_output_row = std::numeric_limits<uint32_t>::max();
+
+    static constexpr auto attribute_names = std::forward_as_tuple(
+        "m_tiles",
+        "experts_per_chip",
+        "x_is_row_major",
+        "activation",
+        "fuse_bias",
+        "min_active_tokens",
+        "max_active_tokens",
+        "l1_end",
+        "x_indexed",
+        "output_row_major",
+        "zero_output_row");
     auto attribute_values() const {
-        return std::forward_as_tuple(m_tiles, experts_per_chip, x_is_row_major, activation, fuse_bias);
+        return std::forward_as_tuple(
+            m_tiles,
+            experts_per_chip,
+            x_is_row_major,
+            activation,
+            fuse_bias,
+            min_active_tokens,
+            max_active_tokens,
+            l1_end,
+            x_indexed,
+            output_row_major,
+            zero_output_row);
     }
 };
 
@@ -129,6 +192,9 @@ struct UnifiedRoutedExpertFfnInputs {
     std::vector<Tensor> gate_biases;
     std::vector<Tensor> up_biases;
     std::vector<Tensor> down_biases;
+    // Optional dispatch row index (x_indexed): UINT32 ROW_MAJOR, one page, one entry per buffer row (the output's
+    // row count): the x row each buffer row holds. Rows no pair writes may hold any valid x row; they are never read.
+    std::optional<Tensor> x_row_index;
 };
 
 }  // namespace ttnn::operations::experimental::deepseek_prefill::unified_routed_expert_ffn

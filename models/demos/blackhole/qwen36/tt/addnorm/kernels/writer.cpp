@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 void kernel_main() {
     const uint32_t out_addr = get_arg_val<uint32_t>(0);

@@ -7,7 +7,7 @@ import pytest
 import ttnn
 from loguru import logger
 from tests.ttnn.utils_for_testing import assert_with_pcc
-from models.common.utility_functions import is_single_chip, ti_skip
+from tt_py_test_utils_common.utility_functions import is_single_chip, ti_skip
 
 from ttnn import ShardTensorToMesh, ReplicateTensorToMesh, ConcatMeshToTensor
 
@@ -41,9 +41,20 @@ def test_multi_device_subset_mesh(silicon_arch_name, silicon_arch_wormhole_b0):
     ttnn.close_mesh_device(multi_device)
 
 
-def test_multi_device_open_close_full_mesh_device_fixture(mesh_device):
-    """Using `mesh_device` pytest fixture defined in conftest.py"""
-    pass
+@pytest.mark.parametrize("mesh_device", [(2, 2)], indirect=True)
+def test_worker_core_from_logical_core(mesh_device, expect_error):
+    worker_core_from_logical_core = ttnn._ttnn.multi_device.experimental.worker_core_from_logical_core
+    logical_core = ttnn.CoreCoord(0, 0)
+    for row in range(2):
+        for column in range(2):
+            mesh_coordinate = ttnn.MeshCoordinate(row, column)
+            unit_mesh = mesh_device.create_submesh(ttnn.MeshShape(1, 1), offset=mesh_coordinate)
+            assert worker_core_from_logical_core(mesh_device, mesh_coordinate, logical_core) == (
+                unit_mesh.worker_core_from_logical_core(logical_core)
+            )
+
+    with expect_error(RuntimeError, "not found in mesh"):
+        worker_core_from_logical_core(mesh_device, ttnn.MeshCoordinate(2, 0), logical_core)
 
 
 def test_multi_device_open_close_full_mesh_device_fixture(mesh_device):
@@ -755,3 +766,24 @@ def test_multihost_sanity(mesh_device):
     torch_loop_back_tensor = ttnn.to_torch(ttnn_loop_back_tensor, mesh_composer=ConcatMeshToTensor(mesh_device, dim=3))
 
     assert_with_pcc(torch_gelu, torch_loop_back_tensor, pcc=0.9999)
+
+
+def test_mesh_coordinate_range_value_equality():
+    a = ttnn.MeshCoordinateRange(ttnn.MeshCoordinate(0, 0), ttnn.MeshCoordinate(1, 1))
+    b = ttnn.MeshCoordinateRange(ttnn.MeshCoordinate(0, 0), ttnn.MeshCoordinate(1, 1))
+    c = ttnn.MeshCoordinateRange(ttnn.MeshCoordinate(0, 0), ttnn.MeshCoordinate(0, 1))
+    assert a is not b
+    assert a == b and not (a != b)
+    assert a != c
+    assert hash(a) == hash(b)
+    assert {a: 1}[b] == 1
+
+
+def test_mesh_coordinate_range_set_value_equality(expect_error):
+    r = ttnn.MeshCoordinateRange(ttnn.MeshCoordinate(0, 0), ttnn.MeshCoordinate(1, 1))
+    a = ttnn.MeshCoordinateRangeSet(r)
+    b = ttnn.MeshCoordinateRangeSet(r)
+    assert a == b
+    assert a != ttnn.MeshCoordinateRangeSet()
+    with expect_error(TypeError, "unhashable"):
+        hash(a)

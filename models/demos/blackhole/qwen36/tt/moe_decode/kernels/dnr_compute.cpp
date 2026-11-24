@@ -32,7 +32,11 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_in0, cb_w, cb_out, cols);
+    // (tt-metal main: the custom_mm templates take one layout enum instead of split_acc / dense_packing)
+    constexpr CustomMmDestLayout mm_layout = dense_packing
+        ? (split_acc ? CustomMmDestLayout::DenseSplitAcc : CustomMmDestLayout::Dense)
+        : (split_acc ? CustomMmDestLayout::DefaultSplitAcc : CustomMmDestLayout::Default);
+    custom_mm_block_init<transpose, mm_layout>(cb_in0, cb_w, cb_out, cols);
 
     uint32_t slots = 0;
     UNPACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
@@ -40,7 +44,7 @@ void kernel_main() {
     PACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
 #ifdef EP_EXPERTS
     if (slots == 0) {  // none of the union on this die: the writer writes zero rows
-        custom_mm_block_uninit<dense_packing>();
+        custom_mm_block_uninit<mm_layout>(cb_out);
         return;
     }
 #endif
@@ -105,9 +109,9 @@ void kernel_main() {
         cb_wait_front(cb_w, cs * kt * cols);
         for (uint32_t g = 0; g < groups; ++g) {
             if (s0 + cs < slots) {
-                custom_mm_block<false>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
+                custom_mm_block<mm_layout, false>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
             } else {
-                custom_mm_block<true>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
+                custom_mm_block<mm_layout, true>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
             }
         }
         cb_pop_front(cb_w, cs * kt * cols);
@@ -122,5 +126,5 @@ void kernel_main() {
     }
     tile_regs_release();
     cb_push_back(cb_out, groups * cols);
-    custom_mm_block_uninit<dense_packing>();
+    custom_mm_block_uninit<mm_layout>(cb_out);
 }

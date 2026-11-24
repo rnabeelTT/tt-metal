@@ -68,6 +68,40 @@ inline void round_sig7() {
 }  // namespace ckernel::sfpu
 #endif
 
+
+#ifdef SWIGLU_LIMIT
+#ifdef TRISC_MATH
+namespace ckernel::sfpu {
+// SwiGLU input clamps (Hy4-flash: gate <= L, |up| <= L), on the result rows.
+template <int ITERATIONS, bool BOTH>
+inline void clamp_lim() {
+    for (int d = 0; d < ITERATIONS; d++) {
+        sfpi::vFloat x = sfpi::dst_reg[0];
+        v_if(x > SWIGLU_LIMIT) { x = SWIGLU_LIMIT; }
+        v_endif;
+        if constexpr (BOTH) {
+            v_if(x < -SWIGLU_LIMIT) { x = -SWIGLU_LIMIT; }
+            v_endif;
+        }
+        sfpi::dst_reg[0] = x;
+        sfpi::dst_reg++;
+    }
+}
+}  // namespace ckernel::sfpu
+#endif
+ALWI void clamp_gate_rows(uint32_t idst) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, clamp_lim, (kRowIters, false), idst, VectorMode::R));
+}
+ALWI void clamp_up_rows(uint32_t idst) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, clamp_lim, (kRowIters, true), idst, VectorMode::R));
+}
+#define SWIGLU_CLAMP_GATE(i) clamp_gate_rows(i)
+#define SWIGLU_CLAMP_UP(i) clamp_up_rows(i)
+#else
+#define SWIGLU_CLAMP_GATE(i)
+#define SWIGLU_CLAMP_UP(i)
+#endif
+
 ALWI void round_rows(uint32_t idst) {
     MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, round_sig7, (kRowIters), idst, VectorMode::R));
 }
@@ -111,8 +145,12 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
+    // (tt-metal main: the custom_mm templates take one layout enum instead of split_acc / dense_packing)
+    constexpr CustomMmDestLayout mm_layout = dense_packing
+        ? (split_acc ? CustomMmDestLayout::DenseSplitAcc : CustomMmDestLayout::Dense)
+        : (split_acc ? CustomMmDestLayout::DefaultSplitAcc : CustomMmDestLayout::Default);
     constexpr uint32_t ct = m;  // one bank block's columns
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+    custom_mm_block_init<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
 
 #ifdef EP_EXPERTS
     uint32_t num_slots = 0;  // this die's window of the top-k: the live slot count from BRISC
@@ -126,11 +164,23 @@ void kernel_main() {
     cb_wait_front(cb_x, kt);
     for (uint32_t i = 0; i < num_slots; ++i) {
         tile_regs_acquire();
+#ifdef GU_FAR_W
+        // bank q's block from cb_w (reader, NOC0), bank q + banks / 2's from cb_w1 (writer, NOC1): same DST order
+        static_assert(nb == 2, "GU_FAR_W: two bank blocks per slot");
+        constexpr uint32_t cb_w1 = get_compile_time_arg_val(6);
+        cb_wait_front(cb_w, kt * m);
+        custom_mm_block<mm_layout, true>(cb_x, cb_w, 0, 0, 0, kt, m);
+        cb_pop_front(cb_w, kt * m);
+        cb_wait_front(cb_w1, kt * m);
+        custom_mm_block<mm_layout, true>(cb_x, cb_w1, 0, 0, m, kt, m);
+        cb_pop_front(cb_w1, kt * m);
+#else
         gu_layout::static_for<nb>([&](auto h) {
             cb_wait_front(cb_w, kt * m);
-            custom_mm_block<true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
+            custom_mm_block<mm_layout, true>(cb_x, cb_w, 0, 0, decltype(h)::value * m, kt, m);
             cb_pop_front(cb_w, kt * m);
         });
+#endif
 
 #ifdef ACT_INKLING
         silu_tile_init();  // (the sigmoid setup inkling_act uses)
@@ -143,8 +193,12 @@ void kernel_main() {
         gu_layout::static_for<np>([&](auto p) {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
 #ifdef GATE_FIRST
+            SWIGLU_CLAMP_GATE(u);
+            SWIGLU_CLAMP_UP((gu_layout::gate_dst<m, banks>(u)));
             silu_rows(u);  // [gate | up] packing: the first-half column is the gate
 #else
+            SWIGLU_CLAMP_GATE((gu_layout::gate_dst<m, banks>(u)));
+            SWIGLU_CLAMP_UP(u);
             silu_rows(gu_layout::gate_dst<m, banks>(u));
 #endif
         });
@@ -170,8 +224,8 @@ void kernel_main() {
         tile_regs_release();
         cb_push_back(cb_act, np);
 
-        custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+        custom_mm_block_init_short<transpose, mm_layout>(cb_x, cb_w, cb_act, ct);
     }
     cb_pop_front(cb_x, kt);
-    custom_mm_block_uninit<dense_packing>();
+    custom_mm_block_uninit<mm_layout>(cb_act);
 }

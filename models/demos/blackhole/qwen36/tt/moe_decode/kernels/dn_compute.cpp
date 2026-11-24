@@ -21,7 +21,11 @@ void kernel_main() {
     constexpr bool transpose = false;
     constexpr bool split_acc = true;
     constexpr bool dense_packing = false;
-    custom_mm_block_init<transpose, split_acc, dense_packing>(cb_in0, cb_w, cb_out, cols);
+    // (tt-metal main: the custom_mm templates take one layout enum instead of split_acc / dense_packing)
+    constexpr CustomMmDestLayout mm_layout = dense_packing
+        ? (split_acc ? CustomMmDestLayout::DenseSplitAcc : CustomMmDestLayout::Dense)
+        : (split_acc ? CustomMmDestLayout::DefaultSplitAcc : CustomMmDestLayout::Default);
+    custom_mm_block_init<transpose, mm_layout>(cb_in0, cb_w, cb_out, cols);
 
 #ifdef EP_EXPERTS
     // this die's window of the top-k: live slots from BRISC (the down kernels' K is slots x K per slot); 0 -> no output
@@ -30,7 +34,7 @@ void kernel_main() {
     MATH(live = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(live = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     if (live == 0) {
-        custom_mm_block_uninit<dense_packing>();
+        custom_mm_block_uninit<mm_layout>(cb_out);
         return;
     }
     const uint32_t k_tiles = live * (kt / get_compile_time_arg_val(5));  // kt = slots x K per slot
@@ -40,7 +44,7 @@ void kernel_main() {
     cb_wait_front(cb_in0, k_tiles);
     cb_wait_front(cb_w, k_tiles * cols);
     tile_regs_acquire();
-    custom_mm_block<true>(cb_in0, cb_w, 0, 0, 0, k_tiles, cols);
+    custom_mm_block<mm_layout, true>(cb_in0, cb_w, 0, 0, 0, k_tiles, cols);
     tile_regs_commit();
     cb_pop_front(cb_w, k_tiles * cols);
     cb_pop_front(cb_in0, k_tiles);
@@ -52,5 +56,5 @@ void kernel_main() {
     }
     tile_regs_release();
     cb_push_back(cb_out, cols);
-    custom_mm_block_uninit<dense_packing>();
+    custom_mm_block_uninit<mm_layout>(cb_out);
 }

@@ -15,6 +15,7 @@
 //      - Two buffers at distinct positions in the same kernel
 //      - Error path: buffer not enumerated in tensor_buffers
 
+#include "impl/buffers/buffer_impl.hpp"
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -39,6 +40,7 @@
 #include <tt_stl/assert.hpp>
 
 #include "multi_device_fixture.hpp"
+#include "distributed/mesh_device_impl.hpp"
 
 namespace tt::tt_metal {
 namespace {
@@ -59,11 +61,11 @@ KernelDescriptor MakeBlankReaderKernel(CoreCoord core = {0, 0}) {
 }
 
 std::shared_ptr<Buffer> MakeDramBuffer(IDevice* device, uint32_t size = 2048) {
-    return Buffer::create(device, size, size, BufferType::DRAM);
+    return BufferImpl::create(device, size, size, BufferType::DRAM);
 }
 
 std::shared_ptr<Buffer> MakeL1Buffer(IDevice* device, uint32_t size = 2048) {
-    return Buffer::create(device, size, size, BufferType::L1);
+    return BufferImpl::create(device, size, size, BufferType::L1);
 }
 
 MeshTensor MakeSingleTileL1MeshTensor(const std::shared_ptr<distributed::MeshDevice>& mesh_device) {
@@ -174,7 +176,7 @@ TEST(DescriptorPatching, CPU_ResolvedBindings_EmptyAfterAddingCb_IsFalse) {
 
 class DescriptorPatchingDeviceTest : public GenericMeshDeviceFixture {
 protected:
-    IDevice* device() { return get_mesh_device()->get_devices()[0]; }
+    auto* device() { return get_mesh_device()->impl().get_devices()[0]; }
 };
 
 // resolve_bindings correctly maps a single per-core buffer arg.
@@ -190,7 +192,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_PerCoreBuffer_Correc
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -216,7 +218,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_BufferAtNonZeroArgId
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -237,7 +239,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_TwoBuffers_CorrectIn
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get(), buf_b.get()});
 
     ASSERT_EQ(resolved.rt_args.size(), 2u);
@@ -259,7 +261,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CommonBuffer_IsCommo
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -281,7 +283,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_PerCoreMeshTensorArg
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{tensor_buffer});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -304,7 +306,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CommonMeshTensorArg_
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{tensor_buffer});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -337,7 +339,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CbTensor_ResolvesToT
         .tensor = &tensor,
     });
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{tensor_buffer});
 
     ASSERT_EQ(resolved.rt_args.size(), 1u);
@@ -365,7 +367,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ProgramConstruction_CbWithBothBuffer
         .tensor = &tensor,
     });
 
-    EXPECT_ANY_THROW((void)Program{desc});
+    EXPECT_ANY_THROW((void)Program(*get_mesh_device(), desc));
 }
 
 TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyDescriptorRuntimeArgs_CbTensor_UpdatesAddress) {
@@ -393,7 +395,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyDescriptorRuntimeArgs_CbTensor_
         .tensor = &tensor_a,
     });
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
 
     auto cbs = program.circular_buffers();
     ASSERT_EQ(cbs.size(), 1u);
@@ -434,7 +436,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyDescriptorRuntimeArgs_CbBothBuf
         }}},
         .tensor = &tensor,
     });
-    Program program{valid_desc};
+    Program program{*get_mesh_device(), valid_desc};
 
     // Now pass a malformed descriptor (both fields set) to apply_descriptor_runtime_args.
     ProgramDescriptor bad_desc = valid_desc;
@@ -450,7 +452,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_NoBufferArgs_Returns
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{});
 
     EXPECT_TRUE(resolved.empty());
@@ -467,7 +469,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyResolvedBindings_PatchesPerCore
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     // Pre-apply: arg[0] should be buf_a's address.
@@ -494,7 +496,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyResolvedBindings_PatchesCommonA
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     // Pre-apply: common arg[1] should be buf_a's address.
@@ -522,7 +524,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ApplyResolvedBindings_RepeatedApplic
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()});
 
     apply_resolved_bindings(program, resolved, std::vector<Buffer*>{buf_b.get()});
@@ -563,7 +565,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CbOnly_PopulatesCbs_
         .buffer = buf_l1.get(),
     });
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(program, desc, std::vector<Buffer*>{buf_l1.get()});
 
     // resolve_bindings is policy-free: every CB `.buffer = ...` binding is
@@ -598,7 +600,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_DuplicateBuffer_Retu
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     // tensor_buffers reflects "X used twice" — the same Buffer* appears at
     // both slots.  resolve_bindings must report empty so the adapter takes
     // the slow path.
@@ -621,7 +623,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_OutputAliasesInput_K
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     // [input=buf_a, output=buf_a]; first entry is the input, the second is the in-place output.
     ResolvedBindings resolved =
         resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get(), buf_a.get()}, /*num_input_buffers=*/1);
@@ -642,7 +644,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_InputRegionDuplicate
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     // Both entries are inputs (no output region); the repeat is ambiguous → bail.
     ResolvedBindings resolved =
         resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get(), buf_a.get()}, /*num_input_buffers=*/2);
@@ -662,7 +664,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_OutputAliasRepeatedI
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     // [input_a=X, input_b=X, output_tensor=X | return=X]; num_input_buffers=3 (tensor_args), 1 output.
     ResolvedBindings resolved = resolve_bindings(
         program,
@@ -687,7 +689,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_InplaceOutputTensorI
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     // num_input_buffers=2 (input + output_tensor), 1 output (return). Default opt-in (false) → bail.
     ResolvedBindings resolved = resolve_bindings(
         program, desc, std::vector<Buffer*>{buf_a.get(), buf_a.get(), buf_a.get()}, /*num_input_buffers=*/2);
@@ -706,7 +708,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_InplaceOutputTensorI
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     ResolvedBindings resolved = resolve_bindings(
         program,
         desc,
@@ -733,7 +735,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_RtArgBufferNotInTens
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
 
     // buf_a is not in the tensor list — should throw.
     EXPECT_ANY_THROW(resolve_bindings(program, desc, std::vector<Buffer*>{buf_other.get()}));
@@ -776,7 +778,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CbBufferNotInTensorL
         .buffer = buf_l1_in_args.get(),
     });
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
 
     // tensor_buffers contains only buf_l1_in_args.  buf_l1_pegged is the
     // workload-scoped resource — must NOT throw, just skip.
@@ -815,7 +817,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_ScalarMatchingBuffer
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     EXPECT_NO_THROW(resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()}));
 }
 
@@ -830,7 +832,7 @@ TEST_F(DescriptorPatchingDeviceTest, Tensix_ResolveBindings_CommonScalarMatching
     ProgramDescriptor desc;
     desc.kernels = {kd};
 
-    Program program{desc};
+    Program program{*get_mesh_device(), desc};
     EXPECT_NO_THROW(resolve_bindings(program, desc, std::vector<Buffer*>{buf_a.get()}));
 }
 

@@ -42,9 +42,9 @@ void kernel_main() {
 
     cb_reserve_back(cb_scr, 1);
     const uint32_t scr = get_write_ptr(cb_scr);
-    const auto s_table = TensorAccessor(table_args, table_addr, 64);
+    const auto s_table = TensorAccessor(table_args, table_addr, moe_topk::REC_BYTES);
     for (uint32_t r = 0; r < rows; ++r) {
-        noc_async_read(s_table.get_noc_addr(r), scr + 64 * r, 64);
+        noc_async_read(s_table.get_noc_addr(r), scr + moe_topk::REC_BYTES * r, moe_topk::REC_BYTES);
     }
 #ifdef DN_PAD
     // the last DN_PAD K rows of every slot are zero padding (an even K for custom_mm): never read from DRAM, zeroed once

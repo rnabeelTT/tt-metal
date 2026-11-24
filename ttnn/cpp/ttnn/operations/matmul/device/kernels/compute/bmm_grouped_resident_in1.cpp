@@ -168,6 +168,19 @@ inline void reblock_and_untilize(
     interm_dfb.pop_front(num_tiles_in_row_of_subblocks);
 }
 
+// pack-untilize row width: the host's UNTILIZE_CHUNK_W (<= 16 tiles, exact with fp32 DEST) capped at 8 tiles: with a
+// 16-bit DEST, 16-tile rows came out wrong past tile 10 (tiles 10..15 of every chunk). The largest multiple of the
+// subblock width <= the cap dividing the block width; the in1 writer computes the same (same function).
+constexpr uint32_t untilize_chunk_cap(uint32_t host_w, uint32_t sub_w, uint32_t block_w) {
+    uint32_t cap = host_w < 8u ? host_w : 8u;
+    for (uint32_t c = cap - cap % sub_w; c >= sub_w; c -= sub_w) {
+        if (block_w % c == 0) {
+            return c;
+        }
+    }
+    return sub_w;
+}
+
 void kernel_main() {
 // RUNTIME ARGS
 #ifdef MATMUL_DRAM_SHARDED
@@ -609,7 +622,7 @@ void kernel_main() {
                     // The pack-untilize path is exact up to 16 tiles of row width (2026-10-01: 24+ tiles came out wrong
                     // on Blackhole), so a wide output block is untilized in chunks of UNTILIZE_CHUNK_W tiles, each
                     // pushed as its own row-major [32, chunk] piece; the writer stores them as partial sticks.
-                    constexpr uint32_t untilize_chunk_w = UNTILIZE_CHUNK_W;
+                    constexpr uint32_t untilize_chunk_w = untilize_chunk_cap(UNTILIZE_CHUNK_W, out_subblock_w, out_block_w);
                     constexpr uint32_t subblocks_per_chunk = untilize_chunk_w / out_subblock_w;
                     constexpr uint32_t n_chunks = out_block_w / untilize_chunk_w;
                     static_assert(untilize_chunk_w % out_subblock_w == 0 && out_block_w % untilize_chunk_w == 0);

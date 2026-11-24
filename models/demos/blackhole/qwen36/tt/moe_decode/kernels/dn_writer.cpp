@@ -77,15 +77,15 @@ void kernel_main() {
 #endif
 #ifdef EP_EXPERTS
     constexpr auto route_args = TensorAccessorArgs<out_args.next_compile_time_args_offset()>();
-    const auto s_route = TensorAccessor(route_args, get_arg_val<uint32_t>(4), 64);
+    const auto s_route = TensorAccessor(route_args, get_arg_val<uint32_t>(4), moe_topk::REC_BYTES);
     uint32_t live = 0;
     {
         cb_reserve_back(cb_in0, kin);  // the route record lands in the (still unused) activation buffer
         const uint32_t rec = get_write_ptr(cb_in0);
-        noc_async_read(s_route.get_noc_addr(0), rec, 64);
+        noc_async_read(s_route.get_noc_addr(0), rec, moe_topk::REC_BYTES);
         noc_async_read_barrier();
         invalidate_l1_cache();
-        live = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec)[15];
+        live = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec)[moe_topk::R_NLIVE];
     }
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, live);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, live);

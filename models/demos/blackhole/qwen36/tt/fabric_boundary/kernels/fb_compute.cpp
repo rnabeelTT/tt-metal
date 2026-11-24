@@ -28,7 +28,7 @@
 #include "api/compute/pack.h"
 #include "api/compute/reduce.h"
 #include "api/compute/tile_move_copy.h"
-#include "tools/profiler/kernel_profiler.hpp"
+#include "api/debug/kernel_profiler.hpp"
 
 // SFPU ops on the scalar statistic in element (0, 0) of DST: first rows of faces 0 / 1 only (as the gate|up stream's
 // row ops), not the whole tile.
@@ -49,7 +49,7 @@ ALWI void rsqrt_scalar(uint32_t idst) {
         DST_SYNC_MODE,
         DST_ACCUM_MODE,
         calculate_rsqrt,
-        (APPROX, kScalarIters, DST_ACCUM_MODE, false, false),
+        (APPROX, kScalarIters, DST_ACCUM_MODE, false),
         idst,
         VectorMode::R));
 }

@@ -19,8 +19,8 @@
 #include <cstdint>
 #include <memory>
 
-#include <tt-metalium/experimental/metal2_host_api/program_run_args.hpp>
-#include <tt-metalium/experimental/metal2_host_api/program_spec.hpp>
+#include <tt-metalium/workload/run_args/program_run_args.hpp>
+#include <tt-metalium/workload/specification/program_spec.hpp>
 
 #include "ttnn/operations/core/data_movement_kernel/datamovement_kernel_config.hpp"
 #include "apply_twiddles_shared.hpp"
@@ -29,7 +29,6 @@
 namespace ttnn::experimental::prim {
 
 using namespace tt::tt_metal;
-using namespace tt::tt_metal::experimental;
 
 namespace {
 
@@ -135,10 +134,10 @@ ttnn::device_operation::ProgramArtifacts ApplyTwiddlesFactory::create_program_ar
              TensorBinding{.tensor_parameter_name = AT_TW_I, .accessor_name = "tw_i"}},
         .compile_time_args = {{"n1", N1}},
         .runtime_arg_schema = {.runtime_arg_names = {"base_row", "num_rows", "n2"}},
-        .hw_config = ttnn::create_reader_datamovement_config(device_raw->arch()),
+        .hw_config = ttnn::create_reader_datamovement_config(),
     };
 
-    KernelSpec writer = shared::make_writer(device_raw->arch(), N1, is_bf16);
+    KernelSpec writer = shared::make_writer(N1, is_bf16);
     KernelSpec compute = shared::make_compute();
 
     KernelRunArgs reader_run_args{.kernel = AT_READER};

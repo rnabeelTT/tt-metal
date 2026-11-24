@@ -369,7 +369,7 @@ def test_binary_left_shift(device, ttnn_function, ttnn_dtype):
     ],
 )
 def test_bitwise_right_shift(device, ttnn_function, ttnn_dtype):
-    x_torch = torch.tensor(
+    x_bits = torch.tensor(
         [
             [
                 19,
@@ -394,27 +394,61 @@ def test_bitwise_right_shift(device, ttnn_function, ttnn_dtype):
         ],
         dtype=torch.int32,
     )
+    y_bits = torch.tensor([[5, 31, 4, 5, 0, 1, 4, 1, 32, 66, 1, 14, 0, 1, 31, 31, 1, 5]], dtype=torch.int32)
 
-    y_torch = torch.tensor([[5, 31, 4, 5, 0, 1, 4, 1, 32, 66, 1, 14, 0, 1, 31, 31, 1, 5]], dtype=torch.int32)
-    if ttnn_dtype == ttnn.uint32:  # Stimulate uint32 input
-        x_uint32 = x_torch.to(torch.int64) & 0xFFFFFFFF
-        y_uint32 = y_torch.to(torch.int64) & 0xFFFFFFFF
-        x_torch = x_uint32.to(torch.int32)
-        y_torch = y_uint32.to(torch.int32)
+    if ttnn_dtype == ttnn.uint32:
+        torch_dtype = torch.uint32
+        x_torch = (x_bits.to(torch.int64) & 0xFFFFFFFF).to(torch.uint32)
+        y_torch = (y_bits.to(torch.int64) & 0xFFFFFFFF).to(torch.uint32)
+    else:
+        torch_dtype = torch.int32
+        x_torch = x_bits
+        y_torch = y_bits
 
     golden_fn = ttnn.get_golden_function(ttnn_function)
     z_torch = golden_fn(x_torch, y_torch)
     x_tt = ttnn.from_torch(x_torch, dtype=ttnn_dtype, layout=ttnn.TILE_LAYOUT, device=device)
     y_tt = ttnn.from_torch(y_torch, dtype=ttnn_dtype, layout=ttnn.TILE_LAYOUT, device=device)
     z_tt_out = ttnn_function(x_tt, y_tt)
-    tt_out = ttnn.to_torch(z_tt_out)
+    tt_out = ttnn.to_torch(z_tt_out, dtype=torch_dtype)
 
-    if ttnn_dtype == ttnn.uint32:  # Simulate the uint32 output
-        tt_out = tt_out.to(torch.int64)
-        z_torch_uint64 = z_torch.to(torch.int64) & 0xFFFFFFFF
-        assert torch.equal(tt_out, z_torch_uint64)
-    else:
-        assert torch.equal(tt_out, z_torch)
+    assert torch.equal(tt_out, z_torch)
+
+
+def test_bitwise_right_shift_uint32_out_of_range(device):
+    x_torch = torch.tensor(
+        [[0x80000000, 0xFFFFFFFF, 0x80000001, 0xDEADBEEF, 0x80000000, 0xFFFFFFFF]],
+        dtype=torch.uint32,
+    )
+    y_torch = torch.tensor([[31, 32, 33, 66, 0x80000000, 0xFFFFFFFF]], dtype=torch.uint32)
+
+    golden_fn = ttnn.get_golden_function(ttnn.bitwise_right_shift)
+    expected = golden_fn(x_torch, y_torch)
+    assert torch.equal(expected, torch.ones_like(expected))
+
+    x_tt = ttnn.from_torch(x_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
+    y_tt = ttnn.from_torch(y_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
+    actual = ttnn.to_torch(ttnn.bitwise_right_shift(x_tt, y_tt), dtype=torch.uint32)
+
+    assert torch.equal(actual, expected)
+
+
+def test_logical_right_shift_uint32_out_of_range(device):
+    x_torch = torch.tensor(
+        [[0x80000000, 0xFFFFFFFF, 0x80000001, 0xDEADBEEF, 0x80000000, 0xFFFFFFFF]],
+        dtype=torch.uint32,
+    )
+    y_torch = torch.tensor([[31, 32, 33, 66, 0x80000000, 0xFFFFFFFF]], dtype=torch.uint32)
+
+    golden_fn = ttnn.get_golden_function(ttnn.logical_right_shift)
+    expected = golden_fn(x_torch, y_torch)
+    assert torch.equal(expected, torch.tensor([[1, 0, 0, 0, 0, 0]], dtype=torch.uint32))
+
+    x_tt = ttnn.from_torch(x_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
+    y_tt = ttnn.from_torch(y_torch, dtype=ttnn.uint32, layout=ttnn.TILE_LAYOUT, device=device)
+    actual = ttnn.to_torch(ttnn.logical_right_shift(x_tt, y_tt), dtype=torch.uint32)
+
+    assert torch.equal(actual, expected)
 
 
 @pytest.mark.parametrize(
@@ -431,7 +465,7 @@ def test_bitwise_right_shift(device, ttnn_function, ttnn_dtype):
     ],
 )
 def test_logical_right_shift(device, ttnn_function, ttnn_dtype):
-    x_torch = torch.tensor(
+    x_bits = torch.tensor(
         [
             [
                 19,
@@ -456,25 +490,25 @@ def test_logical_right_shift(device, ttnn_function, ttnn_dtype):
         ],
         dtype=torch.int32,
     )
+    y_bits = torch.tensor([[5, 31, 4, 5, 0, 1, 4, 1, 32, 66, 1, 14, 0, 1, 31, 31, 1, 5]], dtype=torch.int32)
 
-    y_torch = torch.tensor([[5, 31, 4, 5, 0, 1, 4, 1, 32, 66, 1, 14, 0, 1, 31, 31, 1, 5]], dtype=torch.int32)
-    if ttnn_dtype == ttnn.uint32:  # Stimulate uint32 input
-        x_torch = x_torch.to(torch.int64) & 0xFFFFFFFF
-        y_torch = y_torch.to(torch.int64) & 0xFFFFFFFF
+    if ttnn_dtype == ttnn.uint32:
+        torch_dtype = torch.uint32
+        x_torch = (x_bits.to(torch.int64) & 0xFFFFFFFF).to(torch.uint32)
+        y_torch = (y_bits.to(torch.int64) & 0xFFFFFFFF).to(torch.uint32)
+    else:
+        torch_dtype = torch.int32
+        x_torch = x_bits
+        y_torch = y_bits
 
     golden_fn = ttnn.get_golden_function(ttnn_function)
     z_torch = golden_fn(x_torch, y_torch)
     x_tt = ttnn.from_torch(x_torch, dtype=ttnn_dtype, layout=ttnn.TILE_LAYOUT, device=device)
     y_tt = ttnn.from_torch(y_torch, dtype=ttnn_dtype, layout=ttnn.TILE_LAYOUT, device=device)
     z_tt_out = ttnn_function(x_tt, y_tt)
-    tt_out = ttnn.to_torch(z_tt_out)
+    tt_out = ttnn.to_torch(z_tt_out, dtype=torch_dtype)
 
-    if ttnn_dtype == ttnn.uint32:  # Simulate the uint32 output
-        tt_out = tt_out.to(torch.int64)
-        z_torch_uint64 = z_torch.to(torch.int64) & 0xFFFFFFFF
-        assert torch.equal(tt_out, z_torch_uint64)
-    else:
-        assert torch.equal(tt_out, z_torch)
+    assert torch.equal(tt_out, z_torch)
 
 
 @pytest.mark.parametrize(
@@ -1842,6 +1876,64 @@ def test_binary_remainder_int32_float_scalar_row_major_sharded_output_dtype(outp
         ttnn.remainder(input_tensor, 1.5, sub_core_grids=other_cores)
 
 
+def _nd_sharded_int32_input(torch_input, layout, cores, device):
+    memory_config = ttnn.MemoryConfig(
+        ttnn.BufferType.L1,
+        ttnn.NdShardSpec(
+            ttnn.Shape([1, 1, 32, 32]),
+            cores,
+            ttnn.ShardOrientation.ROW_MAJOR,
+            ttnn.ShardDistributionStrategy.ROUND_ROBIN_1D,
+        ),
+    )
+    input_tensor = ttnn.from_torch(
+        torch_input, dtype=ttnn.int32, layout=layout, device=device, memory_config=memory_config
+    )
+    assert input_tensor.memory_config().shard_spec is None
+    return input_tensor
+
+
+@pytest.mark.parametrize(
+    "ttnn_op, torch_op",
+    [
+        pytest.param(ttnn.remainder, torch.remainder, id="remainder"),
+        pytest.param(ttnn.fmod, torch.fmod, id="fmod"),
+        pytest.param(ttnn.div, torch.div, id="div"),
+        pytest.param(
+            lambda x, s, **kw: ttnn.div(x, s, rounding_mode="trunc", **kw),
+            lambda x, s: torch.div(x, s, rounding_mode="trunc"),
+            id="div_trunc",
+        ),
+        pytest.param(
+            lambda x, s, **kw: ttnn.div(x, s, rounding_mode="floor", **kw),
+            lambda x, s: torch.div(x, s, rounding_mode="floor"),
+            id="div_floor",
+        ),
+    ],
+)
+@pytest.mark.parametrize("layout", [ttnn.TILE_LAYOUT, ttnn.ROW_MAJOR_LAYOUT])
+def test_binary_int32_float_scalar_nd_sharded_sub_core_grids(ttnn_op, torch_op, layout, device):
+    """ND-sharded inputs have no 2D shard_spec; promotion must read the grid from nd_shard_spec (#64039)."""
+    torch_input = ((torch.arange(96 * 128).reshape(1, 1, 96, 128) % 17) - 8).to(torch.int32)
+    shard_cores = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(1, 0), ttnn.CoreCoord(3, 1))})
+    sub_core_grids = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(3, 1))})
+    input_tensor = _nd_sharded_int32_input(torch_input, layout, shard_cores, device)
+
+    result = ttnn_op(input_tensor, 1.5, sub_core_grids=sub_core_grids)
+    assert result.layout == layout
+    assert_equal(torch_op(torch_input.float(), 1.5), ttnn.to_torch(result).float())
+
+
+@pytest.mark.parametrize("ttnn_op", [ttnn.remainder, ttnn.fmod, ttnn.div])
+def test_binary_int32_float_scalar_nd_sharded_sub_core_grids_missing_shard_cores(ttnn_op, device, expect_error):
+    torch_input = ((torch.arange(96 * 128).reshape(1, 1, 96, 128) % 17) - 8).to(torch.int32)
+    shard_cores = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(1, 0), ttnn.CoreCoord(3, 1))})
+    input_tensor = _nd_sharded_int32_input(torch_input, ttnn.TILE_LAYOUT, shard_cores, device)
+    other_cores = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(2, 1))})
+    with expect_error(RuntimeError, "requested grid to contain all input shard cores"):
+        ttnn_op(input_tensor, 1.5, sub_core_grids=other_cores)
+
+
 @pytest.mark.parametrize(
     "ttnn_op",
     [
@@ -2306,3 +2398,15 @@ def test_mixed_float_int_promotion(device, ttnn_op, float_dtype, int_dtype, int_
     rtol = 0.05 if expected_dtype == ttnn.bfloat16 else 0.01
     rel_err = (tt_out.float() - z_torch.float()).abs() / z_torch.float().abs().clamp_min(1e-3)
     assert rel_err.max() < rtol, f"max relative error {rel_err.max():.4g} exceeds {rtol}"
+
+
+@pytest.mark.parametrize("activation", [ttnn.UnaryOpType.SIGMOID, ttnn.UnaryOpType.TANH, ttnn.UnaryOpType.SQRT])
+def test_binary_int32_fused_float_only_activation_is_rejected(device, activation, expect_error):
+    t = ttnn.from_torch(
+        torch.tensor([[1, 2, 3, 4]], dtype=torch.int32).repeat(32, 8),
+        dtype=ttnn.int32,
+        layout=ttnn.TILE_LAYOUT,
+        device=device,
+    )
+    with expect_error(RuntimeError, "does not support integer input dtype"):
+        ttnn.add(t, t, input_tensor_a_activations=[activation])

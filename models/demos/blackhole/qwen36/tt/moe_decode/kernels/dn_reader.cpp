@@ -23,9 +23,7 @@
 
 #include "api/dataflow/dataflow_api.h"
 #include "noc_state.hpp"
-#ifdef MOE_FUSED
-#include "router_topk.hpp"
-#endif
+#include "router_topk.hpp"  // the route record layout (REC_BYTES, R_NLIVE), and MOE_FUSED's top-k
 
 void kernel_main() {
     const uint32_t w_addr = get_arg_val<uint32_t>(0);
@@ -74,8 +72,8 @@ void kernel_main() {
     moe_topk::merge<topk>(keys, ids, part, part + topk);
     cb_pop_front(cb_part, 1);
 #else
-    const auto s_route = TensorAccessor(src_args, src_addr, 64);
-    noc_async_read(s_route.get_noc_addr(0), scr, 64);
+    const auto s_route = TensorAccessor(src_args, src_addr, moe_topk::REC_BYTES);
+    noc_async_read(s_route.get_noc_addr(0), scr, moe_topk::REC_BYTES);
     noc_async_read_barrier();
     volatile tt_l1_ptr uint16_t* route = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(scr);
     for (uint32_t j = 0; j < topk; ++j) {
@@ -84,7 +82,7 @@ void kernel_main() {
 #endif
 #ifdef EP_EXPERTS
     static_assert(S0 == 1, "expert parallelism: routed experts only");
-    const uint32_t n_live = route[15];
+    const uint32_t n_live = route[moe_topk::R_NLIVE];
 #else
     constexpr uint32_t n_live = topk;
 #endif
