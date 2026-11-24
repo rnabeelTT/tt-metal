@@ -37,7 +37,18 @@ void kernel_main() {
         for (uint32_t k = 0; k < kt; ++k) {
             matmul_tiles(cb_x, cb_w, k, k, 0);
         }
-#ifdef HEAD_SOFTCAP
+#if defined(HEAD_SOFTCAP) && defined(HEAD_SC_ITERS)
+        // the live rows only (HEAD_SC_ITERS: the SFPU row groups of faces 0 / 1 holding rows 0 .. rows - 1)
+        binop_with_scalar_tile_init();
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                             (APPROX, MUL_UNARY, HEAD_SC_ITERS, DST_ACCUM_MODE), 0, VectorMode::R, inv_c));
+        tanh_tile_init();
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_tanh, (false, DST_ACCUM_MODE, HEAD_SC_ITERS), 0,
+                             VectorMode::R));
+        binop_with_scalar_tile_init();
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                             (APPROX, MUL_UNARY, HEAD_SC_ITERS, DST_ACCUM_MODE), 0, VectorMode::R, c));
+#elif defined(HEAD_SOFTCAP)
         binop_with_scalar_tile_init();
         mul_unary_tile(0, inv_c);
         tanh_tile_init();

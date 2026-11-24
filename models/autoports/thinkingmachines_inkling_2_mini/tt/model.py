@@ -425,6 +425,10 @@ class Inkling2Model:
             Vs = Vp // N
             self.shead = StreamHead(mesh, H, Vs, HEAD_DT, cfg.final_logit_softcapping,
                                     readers=int(os.environ.get("I2M_HEAD_READERS", "2")),
+                                    # (I2M_HEAD_BUFFERS: weight columns per reader ring; 2 with the live-row softcap
+                                    # streams fastest: P150 one die / TP2 / TP4 slice 1.30 / 0.66 / 0.34 -> 1.06 / 0.54 /
+                                    # 0.28 ms)
+                                    buffers=int(os.environ.get("I2M_HEAD_BUFFERS", "2")),
                                     fidelity=ttnn.MathFidelity.HiFi4 if os.environ.get("I2M_HEAD_HIFI4") == "1"
                                     else ttnn.MathFidelity.HiFi2)
             self.lm_head = self.shead.weight([un.T[:, d * Vs : (d + 1) * Vs].contiguous().to(torch.bfloat16)

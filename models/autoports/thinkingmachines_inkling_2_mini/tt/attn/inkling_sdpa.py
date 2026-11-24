@@ -198,6 +198,7 @@ def inkling_sdpa_decode(
             BCAST,
             BALANCE,
             FIN2,
+            FUSE,
             tuple(repr(t.memory_config()) for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)),
         )
         st = _PF_CACHE.get(key)
@@ -500,6 +501,10 @@ BALANCE = __import__("os").environ.get("I2M_SDPA_BALANCE", "0") == "1"
 # I2M_SDPA_FIN2 (default 0): the sink and the normalization in 4 compute steps (O / (l + exp(s - m))) instead of 9 (not
 # bitwise: fewer roundings)
 FIN2 = __import__("os").environ.get("I2M_SDPA_FIN2", "0") == "1"
+# I2M_SDPA_FUSE (default 1): fewer compute steps, the same arithmetic (bitwise): the running max / sum change CBs by
+# swapping roles instead of copying, the reduction's O update and the finalize's sum / reciprocal / O scale keep their
+# intermediates in DST (bf16 DST and CBs: a pack + unpack round trip is exact)
+FUSE = __import__("os").environ.get("I2M_SDPA_FUSE", "1") == "1"
 # I2M_SDPA_MU_SPLIT (default 1): multi-user decode (pt_per_item, few units) splits each (user, kv head) over cores
 MU_SPLIT = __import__("os").environ.get("I2M_SDPA_MU_SPLIT", "1") == "1"
 # I2M_SDPA_MU_MIN (default 4): a split unit with at most this many chunks (1024 positions) runs on one core, as unsplit
@@ -517,6 +522,7 @@ def _mi_defines(mi, pos_stick, trim=False, bcast=False, pt_pre=64):
         ("SDPA_BCAST_PT", str(pt_pre)),
         ("SDPA_BALANCE", str(int(trim and BALANCE))),
         ("SDPA_FIN2", str(int(FIN2))),
+        ("SDPA_FUSE", str(int(FUSE))),
     ]
 
 

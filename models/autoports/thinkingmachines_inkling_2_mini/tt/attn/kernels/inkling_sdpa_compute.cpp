@@ -42,6 +42,111 @@
 #ifndef SDPA_FIN2
 #define SDPA_FIN2 0
 #endif
+#ifndef SDPA_FUSE
+#define SDPA_FUSE 0
+#endif
+
+ALWI void swap_cbs(uint32_t& a, uint32_t& b) {
+    const uint32_t t = a;
+    a = b;
+    b = t;
+}
+
+// SDPA_FUSE helpers (one Q tile row; bf16 DST and CBs, so values kept in DST equal their packed + unpacked copies)
+// out0 = exp((a0 - b) * scale), out1 = exp((a1 - b) * scale): the two sub_exp_block steps in one DST round
+template <uint32_t scale_fp32>
+void sub_exp_pair(uint32_t a0, uint32_t a1, uint32_t b, uint32_t out0, uint32_t out1) {
+    constexpr uint16_t scale_bf16 = scale_fp32 >> 16;
+    sub_init(a0, b);
+    exp_tile_init<EXP_APPROX_MODE>();
+    CircularBuffer(a0).wait_front(1);
+    CircularBuffer(a1).wait_front(1);
+    CircularBuffer(b).wait_front(1);
+    CircularBuffer(out0).reserve_back(1);
+    CircularBuffer(out1).reserve_back(1);
+    tile_regs_acquire();
+    sub_tiles(a0, b, 0, 0, 0);
+    sub_tiles(a1, b, 0, 0, 1);
+    MATH((exp_tile_first_column<EXP_APPROX_MODE, scale_bf16>(0)));
+    MATH((exp_tile_first_column<EXP_APPROX_MODE, scale_bf16>(1)));
+    tile_regs_commit();
+    tile_regs_wait();
+    pack_tile(0, out0);
+    pack_tile(1, out1);
+    tile_regs_release();
+    CircularBuffer(out0).push_back(1);
+    CircularBuffer(out1).push_back(1);
+}
+
+// sum = 1 / (sum * emd + emd2) (the product as srcA of the add, as add_block_inplace(sum, emd2)); o *= emd (bcast
+// cols); emd / emd2 popped
+template <uint32_t cols>
+void fin_sum_recip_scale(uint32_t sum, uint32_t emd, uint32_t emd2, uint32_t o) {
+    CircularBuffer cb_sum(sum), cb_o(o);
+    reconfig_data_format(sum, emd);
+    pack_reconfig_data_format(sum);
+    cb_sum.wait_front(1);
+    CircularBuffer(emd).wait_front(1);
+    CircularBuffer(emd2).wait_front(1);
+    cb_o.wait_front(cols);
+    tile_regs_acquire();
+    mul_init(sum, emd);
+    mul_tiles(sum, emd, 0, 0, 0);
+    add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(emd2);
+    add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCA>(emd2, 0, 0);
+    recip_tile_init();
+    MATH((recip_tile_first_column(0)));
+    mul_bcast_cols_init(o, emd);
+    for (uint32_t j = 0; j < cols; ++j) {
+        mul_tiles_bcast_cols(o, emd, j, 0, 1 + j);
+    }
+    tile_regs_commit();
+    cb_sum.pop_front(1);
+    cb_o.pop_front(cols);
+    cb_sum.reserve_back(1);
+    cb_o.reserve_back(cols);
+    tile_regs_wait();
+    pack_tile(0, sum);
+    for (uint32_t j = 0; j < cols; ++j) {
+        pack_tile(1 + j, o);
+    }
+    tile_regs_release();
+    cb_sum.push_back(1);
+    cb_o.push_back(cols);
+    CircularBuffer(emd).pop_front(1);
+    CircularBuffer(emd2).pop_front(1);
+}
+
+// acc += child * emd2 (bcast cols; the product as srcB of the add, as add_block_inplace(acc, im2)); child / emd2 popped
+template <uint32_t cols>
+void acc_add_scaled(uint32_t acc, uint32_t child, uint32_t emd2) {
+    CircularBuffer cb_acc(acc), cb_child(child);
+    reconfig_data_format(child, emd2);
+    pack_reconfig_data_format(acc);
+    cb_acc.wait_front(cols);
+    cb_child.wait_front(cols);
+    CircularBuffer(emd2).wait_front(1);
+    tile_regs_acquire();
+    mul_bcast_cols_init(child, emd2);
+    for (uint32_t j = 0; j < cols; ++j) {
+        mul_tiles_bcast_cols(child, emd2, j, 0, j);
+    }
+    add_reuse_dest_init<EltwiseBinaryReuseDestType::DEST_TO_SRCB>(acc);
+    for (uint32_t j = 0; j < cols; ++j) {
+        add_reuse_dest_tiles<EltwiseBinaryReuseDestType::DEST_TO_SRCB>(acc, j, j);
+    }
+    tile_regs_commit();
+    cb_acc.pop_front(cols);
+    cb_child.pop_front(cols);
+    cb_acc.reserve_back(cols);
+    tile_regs_wait();
+    for (uint32_t j = 0; j < cols; ++j) {
+        pack_tile(j, acc);
+    }
+    tile_regs_release();
+    cb_acc.push_back(cols);
+    CircularBuffer(emd2).pop_front(1);
+}
 
 // matmul_blocks (stock compute_common.hpp) for one 1 x N subblock per in0 tile row (subblock_h 1, one in1 subblock,
 // one K block), with in0 starting at tile in0_off and the added mask block offset by row * mask_row_stride: the band
@@ -336,10 +441,15 @@ void kernel_main() {
             pack_reconfig_data_format(cb_out_accumulate_im);
             add_block_inplace<true>(cb_out_accumulate_im, cb_out_im, out_chunk_tiles);
         }
+#if SDPA_FUSE
+        swap_cbs(cb_cur_max, cb_prev_max);
+        swap_cbs(cb_cur_sum, cb_prev_sum);
+#else
         reconfig_data_format(cb_cur_max, cb_cur_max);
         pack_reconfig_data_format(cb_prev_max);
         move_block<true>(cb_cur_max, cb_prev_max, Sq_chunk_t);
         move_block<true>(cb_cur_sum, cb_prev_sum, Sq_chunk_t);
+#endif
     }
 
     }
@@ -364,12 +474,20 @@ void kernel_main() {
                 cb_exp_max_diff_2,
                 Sq_chunk_t);
             mul_block_bcast_cols_inplace<Sq_chunk_t, vDHt>(cb_out_accumulate_im, cb_exp_max_diff);
+#if SDPA_FUSE
+            acc_add_scaled<vDHt>(cb_out_accumulate_im, cb_out_o, cb_exp_max_diff_2);
+            CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
+            CircularBuffer(cb_m_in).pop_front(Sq_chunk_t);
+            swap_cbs(cb_cur_max, cb_prev_max);
+            swap_cbs(cb_cur_sum, cb_prev_sum);
+#else
             mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_o, cb_exp_max_diff_2, cb_out_accumulate_im_2);
             add_block_inplace<true>(cb_out_accumulate_im, cb_out_accumulate_im_2, out_chunk_tiles);
             CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
             CircularBuffer(cb_m_in).pop_front(Sq_chunk_t);
             move_block<true>(cb_cur_max, cb_prev_max, Sq_chunk_t);
             move_block<true>(cb_cur_sum, cb_prev_sum, Sq_chunk_t);
+#endif
         }
     }
     }
@@ -397,6 +515,20 @@ void kernel_main() {
         reconfig_data_format(cb_sink, cb_prev_max);
         pack_reconfig_data_format(cb_cur_max);
         max_block<vector_mode>(cb_sink, cb_prev_max, cb_cur_max, Sq_chunk_t);
+#if SDPA_FUSE
+        if constexpr (MI == 1) {
+            /* EXP_MAX_DIFF, EXP_MAX_DIFF_2 in one DST round; then SUM = 1 / (SUM * EXP_MAX_DIFF + EXP_MAX_DIFF_2) and
+               OUT_ACC *= EXP_MAX_DIFF in one; OUT = OUT_ACC * SUM */
+            reconfig_data_format(cb_prev_max, cb_cur_max);
+            pack_reconfig_data_format(cb_exp_max_diff);
+            sub_exp_pair<scale_fp32>(cb_prev_max, cb_sink, cb_cur_max, cb_exp_max_diff, cb_exp_max_diff_2);
+            CircularBuffer(cb_cur_max).pop_front(Sq_chunk_t);
+            fin_sum_recip_scale<vDHt>(cb_prev_sum, cb_exp_max_diff, cb_exp_max_diff_2, cb_out_accumulate_im);
+            mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_accumulate_im, cb_prev_sum, cb_out_final);
+            CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
+        } else
+#endif
+        {
         reconfig_data_format(cb_prev_max, cb_cur_max);
         pack_reconfig_data_format(cb_exp_max_diff);
         sub_exp_block<scale_fp32>(cb_prev_max, cb_cur_max, cb_exp_max_diff, Sq_chunk_t);
@@ -419,12 +551,19 @@ void kernel_main() {
         recip_block_inplace(cb_prev_sum, Sq_chunk_t);
         mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_accumulate_im, cb_prev_sum, cb_out_final);
         CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
+        }
 #endif
     } else if (has_parent) {
         if constexpr (MI == 1) {
+#if SDPA_FUSE
+            // the writer sends OUT_ACC / PREV_MAX / PREV_SUM in place once this (dataless) token lands: all packed
+            CircularBuffer(cb_out_l).reserve_back(1);
+            CircularBuffer(cb_out_l).push_back(1);
+#else
             move_block<true>(cb_out_accumulate_im, cb_out_o, out_chunk_tiles);
             move_block<true>(cb_prev_max, cb_out_m, Sq_chunk_t);
             move_block<true>(cb_prev_sum, cb_out_l, Sq_chunk_t);
+#endif
         }
     }
     CircularBuffer(cb_q_in).pop_front(q_chunk_tiles);

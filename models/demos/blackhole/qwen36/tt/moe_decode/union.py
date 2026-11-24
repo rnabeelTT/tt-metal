@@ -166,6 +166,8 @@ class RouteRows:
         dm = ttnn.DataMovementConfigDescriptor
         defines = [("ROUTER_SIGB", "1")] if self.router == "sigb" else []
         defines += [("ROUTE_SPLIT", str(P))] if P > 1 else []
+        # QWEN35_ROUTE_KEYS=1 (sigb): the routing weights from the selection keys, no second sigmoid pass (bitwise)
+        defines += [("ROUTE_KEYS", "1")] if self.router == "sigb" and os.environ.get("QWEN35_ROUTE_KEYS") == "1" else []
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),

@@ -29,6 +29,10 @@
 #define SDPA_POS_WORDS 16  // the cur_pos stick in uint32 words
 #endif
 
+#ifndef SDPA_FUSE
+#define SDPA_FUSE 0
+#endif
+
 void kernel_main() {
     Noc noc;
 
@@ -298,6 +302,8 @@ void kernel_main() {
             UnicastEndpoint intermed_src;
 
             CircularBuffer cb_l(cb_l_in);
+            CircularBuffer cb_m(cb_m_in);
+            CircularBuffer cb_o(cb_out_o);
             cb_l.reserve_back(PNHt);
             noc.async_read(
                 intermed_src,
@@ -306,10 +312,10 @@ void kernel_main() {
                 {.noc_x = my_noc_x, .noc_y = my_noc_y, .addr = intermed_l1_read_addr},
                 {});
             intermed_l1_read_addr += ml_read_size;
+#if !SDPA_FUSE
             noc.async_read_barrier();
             cb_l.push_back(PNHt);
-
-            CircularBuffer cb_m(cb_m_in);
+#endif
             cb_m.reserve_back(PNHt);
             noc.async_read(
                 intermed_src,
@@ -318,10 +324,10 @@ void kernel_main() {
                 {.noc_x = my_noc_x, .noc_y = my_noc_y, .addr = intermed_l1_read_addr},
                 {});
             intermed_l1_read_addr += ml_read_size;
+#if !SDPA_FUSE
             noc.async_read_barrier();
             cb_m.push_back(PNHt);
-
-            CircularBuffer cb_o(cb_out_o);
+#endif
             cb_o.reserve_back(out_chunk_tiles);
             noc.async_read(
                 intermed_src,
@@ -329,7 +335,11 @@ void kernel_main() {
                 o_read_size,
                 {.noc_x = my_noc_x, .noc_y = my_noc_y, .addr = intermed_l1_read_addr},
                 {});
-            noc.async_read_barrier();
+            noc.async_read_barrier();  // (SDPA_FUSE: one barrier for the child's l, m and o)
+#if SDPA_FUSE
+            cb_l.push_back(PNHt);
+            cb_m.push_back(PNHt);
+#endif
             cb_o.push_back(out_chunk_tiles);
         }
     }
@@ -340,9 +350,20 @@ void kernel_main() {
             continue;
         }
         // send (l, m, o) to the parent's round slot, then bump its round counter
+#if SDPA_FUSE
+        // the compute's final OUT_ACC and running max / sum CBs (no copies; they swap roles once per chunk and per
+        // merged child: an odd count leaves them in max_1 / sum_1)
+        const bool odd = ((k_chunk_end - k_chunk_start) + num_active_children) & 1;
+        CircularBuffer cb_done(cb_out_l);  // (the compute's token: its last pack is done)
+        cb_done.wait_front(1);
+        CircularBuffer cb_out_w(tt::CBIndex::c_26);
+        CircularBuffer cb_out_m_buf(odd ? tt::CBIndex::c_27 : tt::CBIndex::c_28);
+        CircularBuffer cb_out_l_buf(odd ? tt::CBIndex::c_29 : tt::CBIndex::c_30);
+#else
         CircularBuffer cb_out_w(cb_out_worker);
         CircularBuffer cb_out_m_buf(cb_out_m);
         CircularBuffer cb_out_l_buf(cb_out_l);
+#endif
         CircularBuffer cb_intermed(cb_intermed_out);
         cb_out_w.wait_front(out_chunk_tiles);
         cb_out_m_buf.wait_front(PNHt);
@@ -380,6 +401,9 @@ void kernel_main() {
         cb_out_w.pop_front(out_chunk_tiles);
         cb_out_m_buf.pop_front(PNHt);
         cb_out_l_buf.pop_front(PNHt);
+#if SDPA_FUSE
+        cb_done.pop_front(1);
+#endif
         noc.async_atomic_barrier();
         continue;
     }

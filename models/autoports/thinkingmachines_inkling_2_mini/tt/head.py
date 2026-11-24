@@ -8,6 +8,7 @@ writer (FP32 logits pages) are this port's (kernels/head_*.cpp). One tile row (<
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -23,9 +24,14 @@ def _bits(f):
 
 
 class StreamHead(DecodeLinear):
-    def __init__(self, mesh_device, k, n, weight_dtype, softcap, readers=2, fidelity=ttnn.MathFidelity.HiFi2):
-        super().__init__(mesh_device, k, n, weight_dtype, readers=readers, fidelity=fidelity)
+    def __init__(self, mesh_device, k, n, weight_dtype, softcap, readers=2, fidelity=ttnn.MathFidelity.HiFi2,
+                 buffers=2):
+        super().__init__(mesh_device, k, n, weight_dtype, readers=readers, fidelity=fidelity, buffers=buffers)
         self.softcap = softcap
+        # I2M_HEAD_SC (default 1): the softcap on the live rows only (rows <= 16: faces 0 / 1; an SFPU row group is 4
+        # rows x 8 columns, two per 4 rows) instead of the whole tile; the same SFPU functions, so the live logits are
+        # bitwise unchanged
+        self.sc_rows = os.environ.get("I2M_HEAD_SC", "1") == "1"
 
     def __call__(self, x, w, rows, out_memory_config=ttnn.DRAM_MEMORY_CONFIG):
         """x [1, 1, rows, K] bf16 TILE (rows <= 32), w = weight([W]) -> softcapped logits [1, 1, rows, N] fp32 TILE."""
@@ -71,7 +77,9 @@ class StreamHead(DecodeLinear):
             ]
         kernels.append(ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "head_compute.cpp"), core_ranges=self.cores, compile_time_args=cp_ct,
-            runtime_args=cp_rt, defines=[("HEAD_SOFTCAP", "1")],
+            runtime_args=cp_rt,
+            defines=[("HEAD_SOFTCAP", "1")] + ([("HEAD_SC_ITERS", str(2 * ((rows + 3) // 4)))]
+                                               if self.sc_rows and rows <= 16 else []),
             config=ttnn.ComputeConfigDescriptor(math_fidelity=self.fidelity, fp32_dest_acc_en=True,
                                                 math_approx_mode=False)))
         ttnn.generic_op([x, w, out], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))

@@ -21,6 +21,8 @@ _os.environ.setdefault("QWEN35_MOE_GU_OFFROW", "2")
 # the sigb router's top-k split over 8 cores per row (4 at 8 rows; <= 32 cores): the same selection and weights;
 # TP4 traced B = 1 16.6 -> 16.1 ms, B = 8 29.2 -> 28.8
 _os.environ.setdefault("QWEN35_ROUTE_SPLIT", "8")
+# the sigb routing weights from the merged selection keys (no second sigmoid pass on the leader; bitwise)
+_os.environ.setdefault("QWEN35_ROUTE_KEYS", "1")
 # the prefill MoE dispatch over many cores (qwen36 dispatch_mc; bit-identical to moe_sorted_dispatch)
 _os.environ.setdefault("QWEN35_DISPATCH_MC", "1")
 
