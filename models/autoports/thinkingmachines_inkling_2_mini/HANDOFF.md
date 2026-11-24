@@ -202,6 +202,12 @@ every resume whose window started inside the first 256 keys or left the junk blo
 the resume vs the fresh prefill, bitwise with the same chunk shapes). The global KV is paged through vLLM's block tables
 with the prefix cache off too (I2M_PREFIX=0 had left every slot on the 8 scratch blocks: positions 512 apart aliased).
 
+Concurrent serving: `_slot_for` used to drop map entries whose ENGINE slot equalled the plugin state slot handed to a
+prefill (two numberings): a live request in that engine slot lost its row and decoded token 0 ('!') to max_tokens.
+It now drops only the entry under the handed state slot (a lone request after a burst can get a higher engine slot
+until the finished rows' slots free at the next decode step). Idle decode rows attend at position 0 (computed, finite)
+instead of being skipped by the SDPA.
+
 Checks: resuming at a chunk boundary is bit-exact vs the whole prefill (tests/test_packed_device.py); the packed conv
 kernels' states and snapshot rows are exact (tests/test_pfseg_device.py). Served (p300x2, tools/prefix_serve.py): a 4.4K
 prompt cold TTFT 4.4 s, the same prompt again 0.54 s, the next chat turn 0.53 s, a new question on the same document

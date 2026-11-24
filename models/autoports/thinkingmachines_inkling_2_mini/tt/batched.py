@@ -543,9 +543,12 @@ class BatchedDecoder:
         host = [] if tokens is None else [
             (tokens.reshape(1, -1).to(torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, self.tokens)]
         pos = positions.to(torch.int64)
-        pw = pos.clamp(min=0)  # idle slots: position 0 (global layers: a free slot's row maps it to the idle block)
+        # idle slots run as a one-token sequence at position 0 (written to scratch: a free slot's global row maps
+        # block 0 to the idle block, sliding rows write the ring's scratch block): skipped by the SDPA instead, their
+        # rows were never written and went inf / NaN through the steps, into the MoE routing and the cross-row ops
+        pw = pos.clamp(min=0)
         host += [
-            (pos.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
+            (pw.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
             (pw.to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_w),
             # (idle rows: the ring's scratch block, see AttnCache)
             (torch.where(pos < 0, self.ring_period, pw % self.ring_period).to(torch.int32), ttnn.int32,
