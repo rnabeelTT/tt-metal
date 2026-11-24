@@ -11,6 +11,7 @@
 #include "api/compute/common.h"
 #include "api/compute/compute_kernel_api.h"
 #include "api/compute/eltwise_binary_sfpu.h"
+#include "api/compute/matmul.h"
 #include "api/compute/pack.h"
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
@@ -81,7 +82,41 @@ void kernel_main() {
     const uint32_t nt = get_arg_val<uint32_t>(0);
 
     compute_kernel_hw_startup(cb_s, cb_y);
+#ifdef BCONV_DYN
+    constexpr uint32_t cb_d = 8, cb_e = 9, cb_sc = 10;
+    cb_wait_front(cb_d, 1);
+#endif
     for (uint32_t t = 0; t < nt; ++t) {
+#ifdef BCONV_DYN
+        // tap j = d @ e_j (exact: one 1 per column) + sc_j (fp32, SFPU) -> cb_w, then the static path below
+        cb_wait_front(cb_e, 4);
+        cb_wait_front(cb_sc, 4);
+        cb_reserve_back(cb_w, 4);
+        tile_regs_acquire();
+        reconfig_data_format(cb_e, cb_d);  // matmul: in1 -> srcA, in0 -> srcB
+        matmul_init(cb_d, cb_e, 0);
+        for (uint32_t j = 0; j < 4; ++j) {
+            matmul_tiles(cb_d, cb_e, 0, j, j);
+        }
+        reconfig_data_format_srca(cb_sc);
+        copy_init(cb_sc);
+        for (uint32_t j = 0; j < 4; ++j) {
+            copy_tile(cb_sc, j, 4 + j);
+        }
+        for (uint32_t j = 0; j < 4; ++j) {
+            c_add(j, 4 + j, j);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_reconfig_data_format(cb_w);
+        for (uint32_t j = 0; j < 4; ++j) {
+            pack_tile(j, cb_w);
+        }
+        tile_regs_release();
+        cb_push_back(cb_w, 4);
+        cb_pop_front(cb_e, 4);
+        cb_pop_front(cb_sc, 4);
+#endif
         cb_wait_front(cb_x, 1);
         cb_wait_front(cb_s, 3);
         cb_wait_front(cb_w, 4);
@@ -133,4 +168,7 @@ void kernel_main() {
         cb_pop_front(cb_s, 3);
         cb_pop_front(cb_w, 4);
     }
+#ifdef BCONV_DYN
+    cb_pop_front(cb_d, 1);
+#endif
 }

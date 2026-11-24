@@ -143,8 +143,6 @@ class GateKernel2:
         assert T <= 16 and h.dtype == ttnn.float32 and m.dtype == ttnn.float32 and (norm or not rt)
         assert not rt or T <= self.ROUTER_ROWS
         dup = dup and T == 1
-        if m.memory_config() != h.memory_config():
-            m = ttnn.to_memory_config(m, h.memory_config())
         odt = ttnn.bfloat16 if norm else ttnn.float32
         out = ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), odt, ttnn.TILE_LAYOUT, pk.mesh, out_mc)
         ET = int(router[0].shape[-1]) // 32 if rt else 4
@@ -175,7 +173,7 @@ class GateKernel2:
         rhi, rlo = router if rt else (wd, wd)
         rd_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, PER, R, self.Ht, NSEL, cb_nw, cb_rw, int(norm), int(rt),
                  ET] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(wd).get_compile_time_args()
+            + ttnn.TensorAccessorArgs(wd).get_compile_time_args() + ttnn.TensorAccessorArgs(m).get_compile_time_args()
         rd_common = [h.buffer_address(), m.buffer_address(), wd.buffer_address(), wfg.buffer_address(),
                      pk.ones.buffer_address(), sel.buffer_address(), (nw if norm else wd).buffer_address(),
                      rhi.buffer_address(), rlo.buffer_address()]
@@ -211,7 +209,7 @@ class GateKernel2:
                                   defines=[("ROWS", str(T))]),
         ]
         key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup,
-               tuple(repr(t.memory_config()) for t in (h, wd, out) + ((lg,) if rt else ())))
+               tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])
         return kernels, cbs, io, key, ((out, lg) if norm else out)

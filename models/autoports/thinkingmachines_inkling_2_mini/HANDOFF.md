@@ -469,10 +469,16 @@ best, 2.22 tokens per pass); d = 1 at T=1 (51 vs 56 tok/s one die); tree verific
 pass: the MoE expert union makes it 49 vs 37 ms one die for ~+12 % tokens). Verify pass cost (one die, 4 rows): MoE
 18.7 ms (the expert union of 4 consecutive tokens; at its bandwidth floor), the rest ~18 ms.
 
+Glue round (2026-11-24, all bitwise): aprep in 4-head groups (I2M_APREP_QG, 15.4 -> 10.6 us), the global layers'
+dynamic conv taps built in the conv program with k and v in one program (I2M_DYN_FUSED, 8 programs 54 us -> 31 us),
+all loop layers' message mixes in one program per pass (I2M_MSG_ALL), the TP2 MoE sub-shard sum without clone / slice
+(I2M_MOE_NOCLONE), the one-die MoE output read in place at any width (I2M_MOE_INPLACE). Traced one die B=1 20.4 -> 19.8,
+B=4 35.4 -> 34.7; TP2 B=1 15.3 -> 14.8, B=4 24.5 -> 24.1 ms.
+
 ## Next
 
-1. Decode glue: a persistent width-sharded layout for the one-row activations (the norms' reshards and casts are ~1/3
-   of the remaining glue), then fused mix + norm / gate rounds; the one-row MoE without the duplicated row.
+1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
+   the streamed q|k|v run at ~58 % of bandwidth (72 vs ~42 us, ~1.4 ms one die).
 2. Prefill: long-context SDPA past 4 items per stream (smaller CBs: single-buffered tables), 2048-token chunks in the served config (pool cap),
    the block-mix logits once per block (MixPlan for prefill), the gate head (rms / concat / matmuls).
 3. DSpark speculative decoding (acceptance 1.2 per pass measured: low priority).

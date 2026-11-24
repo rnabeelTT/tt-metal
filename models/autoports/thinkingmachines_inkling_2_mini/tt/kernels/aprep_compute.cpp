@@ -20,6 +20,7 @@
 #include "api/compute/pack.h"
 #include "api/compute/reconfig_data_format.h"
 #include "api/compute/tile_move_copy.h"
+#include "aprep_units.hpp"
 
 #ifdef TRISC_MATH
 namespace ckernel::sfpu {
@@ -93,7 +94,8 @@ void kernel_main() {
     compute_kernel_hw_startup(cb_xf, cb_out);
     cb_wait_front(cb_ones, 1);
     for (uint32_t u = start; u < total; u += step) {
-        const uint32_t type = u % 5;
+        uint32_t type, h0, h1;
+        aprep_unit(u % APREP_NU, APREP_NH, APREP_NKVH, type, h0, h1);
         if (type == 4) {  // sink
             cb_wait_front(cb_xf, 1);
             cb_reserve_back(cb_out, 1);

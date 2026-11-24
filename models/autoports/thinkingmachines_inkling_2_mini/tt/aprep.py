@@ -22,6 +22,9 @@ import ttnn
 from .bconv import KDIR, _cb, _range_set, _rt
 
 F32, BF = 4096, 2048
+# I2M_APREP_QG (default 1): decode q / k / v heads in groups (4 or 8 heads per core, as the grid allows: units q groups,
+# r, k groups, v groups, sink per user); the per-head math is row-local, so the outputs are unchanged
+QG = __import__("os").environ.get("I2M_APREP_QG", "1") == "1"
 
 
 def _bits(x: float) -> int:
@@ -34,7 +37,13 @@ class AttnPrep:
         assert w.DR in (16, 32) and w.NH < 32
         self.w, self.B, self.kv_mc, self.mesh = w, B, kv_mc, w.mesh
         grid = self.mesh.compute_with_storage_grid_size()
-        self.total = 5 * B
+        nu = lambda hg, kg: -(-w.NH // hg) + 2 * -(-w.NKV // kg) + 2  # noqa: E731
+        # (heads per unit; a group never crosses a 16-row face)
+        opts = [(4, 4), (8, 4), (8, 8)] if QG and B <= 32 else []
+        self.HG, self.KG = next(((hg, kg) for hg, kg in opts if nu(hg, kg) * B <= grid.x * grid.y), (w.NH, w.NKV))
+        self.QN, self.KN = -(-w.NH // self.HG), -(-w.NKV // self.KG)
+        self.NU = nu(self.HG, self.KG)
+        self.total = self.NU * B
         nc = min(self.total, grid.x * grid.y)
         self.cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
         self.crs = _range_set(self.cores)
@@ -70,6 +79,9 @@ class AttnPrep:
             v_o = al([1, B, 32, w.HD], self.kv_mc)
         s_o = al([1, B, w.NH, 32], omc)
         tau_t = tau if glob else pq  # (unused on sliding layers)
+        KG = self.KG if kv is not None else w.NKV  # (k / v head groups only when the rows go to the caches here)
+        KN = -(-w.NKV // KG)
+        total = (self.QN + 2 * KN + 2) * B
         cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out = 0, 1, 2, 3, 4, 5, 6
         f32, bf = ttnn.float32, ttnn.bfloat16
         cbs = [_cb(self.crs, cb_xf, f32, F32, 2 * HT), _cb(self.crs, cb_xb, bf, BF, 2 * HT),
@@ -83,17 +95,18 @@ class AttnPrep:
             + ttnn.TensorAccessorArgs(pq).get_compile_time_args() + ttnn.TensorAccessorArgs(k).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(tau_t).get_compile_time_args()
         rd_rt = [[pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address(), i, nc,
-                  self.total] for i in range(nc)]
+                  total] for i in range(nc)]
         cp_ct = [cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out, HT, w.DR // 32, int(glob), _bits(w.qk_clip),
                  _bits(w.rel_clip), _bits(1.0 / w.HD), _bits(w.eps), _bits(1.0 / w.scale)]
-        cp_rt = [[i, nc, self.total] for i in range(nc)]
+        cp_rt = [[i, nc, total] for i in range(nc)]
         wr_ct = [cb_out, HT] + ttnn.TensorAccessorArgs(q_o).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(r_o).get_compile_time_args() + ttnn.TensorAccessorArgs(k_o).get_compile_time_args()
         wr_extra, wr_defs = [], [("APREP_KV", "0")]
         if kv is not None:
             kc, vc, wpos, tab = kv
             cb_st = 7
-            cbs.append(_cb(self.crs, cb_st, bf, BF, 1))
+            # (positions page, table chunk, then every head's row of every k / v tile: 2 x 64 B per head and tile)
+            cbs.append(_cb(self.crs, cb_st, bf, 512 + HT * w.NKV * 128, 1))
             wr_ct += ttnn.TensorAccessorArgs(kc).get_compile_time_args() \
                 + ttnn.TensorAccessorArgs(wpos).get_compile_time_args() + ttnn.TensorAccessorArgs(tab).get_compile_time_args()
             wr_extra = [kc.buffer_address(), vc.buffer_address(), wpos.buffer_address(), tab.buffer_address()]
@@ -107,26 +120,28 @@ class AttnPrep:
                        ("APREP_BLK", str(int(kc.shape[2]))), ("APREP_POS_PAGE", str(pos_page)),
                        ("APREP_TAB_PAGE", str(tab_page)), ("APREP_FILL", str(int(fill is not None)))] + fill_defs
         wr_rt = [[q_o.buffer_address(), r_o.buffer_address(), k_o.buffer_address(), v_o.buffer_address(),
-                  s_o.buffer_address(), i, nc, self.total] + wr_extra for i in range(nc)]
+                  s_o.buffer_address(), i, nc, total] + wr_extra for i in range(nc)]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         for i in (cb_xf, cb_f):
             u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
+        ud = [("APREP_QN", str(self.QN)), ("APREP_HG", str(self.HG)), ("APREP_KN", str(KN)),
+              ("APREP_KG", str(KG)), ("APREP_NH", str(w.NH)), ("APREP_NKVH", str(w.NKV))]
         dm = lambda src, ct, rt, riscv, noc, defs=(): ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
-            defines=list(defs), config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
+            defines=list(defs) + ud, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("aprep_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0,
                [("APREP_PQT", str(int(pq.shape[-1]) // 32)), ("APREP_KVT", str(int(k.shape[-1]) // 32))]
                if prefill else []),
             dm("aprep_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1, wr_defs),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "aprep_compute.cpp"), core_ranges=self.crs,
-                                  compile_time_args=cp_ct, runtime_args=_rt(self.cores, cp_rt), config=cfg),
+                                  compile_time_args=cp_ct, runtime_args=_rt(self.cores, cp_rt), config=cfg, defines=ud),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_aprep", B, nc, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
+        key = ("i2m_aprep", B, nc, self.HG, KG, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
                repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
                tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())), prefill,
                tuple(pq.shape), tuple(k.shape))

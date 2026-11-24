@@ -28,6 +28,10 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce, 
 from models.autoports.minimaxai_minimax_m2_7.tt.moe import sparse_matmul_program_config
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
+# I2M_MOE_INPLACE (default 1): one die, any decode width: the next pre program reads the MoE's shared output buffer in
+# place (was: one row only; wider batches cloned it)
+INPLACE = __import__("os").environ.get("I2M_MOE_INPLACE", "1") == "1"
+
 TILE = 32
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 PF_CHUNK = int(os.environ.get("I2M_MOE_PF_CHUNK", "32"))
@@ -165,7 +169,10 @@ class MoE:
         if self.fused and T <= self.fe.rows_max:
             # packed all-reduce: it reads the shared expert-output buffer's live rows directly (no clone / slice)
             # (one die: the next pre program reads row 0 of the shared buffer in place too: no clone / slice)
-            raw = len(self.fe.subs) == 1 and ((self.N > 1 and packed_rows(T)) or (self.N == 1 and packed_out and T == 1))
+            from .moe_fused import NOCLONE
+
+            raw = (len(self.fe.subs) == 1 or NOCLONE) and ((self.N > 1 and packed_rows(T))
+                                                            or (self.N == 1 and packed_out and (T == 1 or INPLACE)))
             out = self.fe.forward(x, logits=logits, dup=dup, raw=raw)
             rows = T if raw else None
         elif self.fused and T <= 2 * self.fe.rows_max and SPLIT_DECODE:

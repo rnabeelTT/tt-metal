@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "aprep_units.hpp"
 
 namespace {
 constexpr uint32_t F32_FACE = 1024, F32_ROW = 64, F32_TILE = 4096;
@@ -36,11 +37,11 @@ inline void zero(uint32_t l1, uint32_t bytes) {
 // b / 32, rowt tiles per row)
 template <typename Acc>
 inline void gather(const Acc& src, uint32_t l1, uint32_t off, uint32_t heads, uint32_t nt, uint32_t b, uint32_t face,
-                   uint32_t row, uint32_t tile, uint32_t rowt) {
+                   uint32_t row, uint32_t tile, uint32_t rowt, uint32_t h0 = 0) {
     zero(l1, nt * tile);
     noc_async_read_barrier();
     const uint32_t base = (b >> 5) * rowt, br = b & 31;
-    for (uint32_t h = 0; h < heads; ++h) {
+    for (uint32_t h = h0; h < heads; ++h) {
         for (uint32_t c = 0; c < nt; ++c) {
             for (uint32_t half = 0; half < 2; ++half) {
                 noc_async_read(src.get_noc_addr(base + off + h * nt + c, row_off(br, half, face, row)),
@@ -90,12 +91,16 @@ void kernel_main() {
         cb_push_back(cb_ones, 1);
     }
     for (uint32_t u = start; u < total; u += step) {
-        const uint32_t b = u / 5, type = u % 5;
+        const uint32_t b = u / APREP_NU;
+        uint32_t type, h0, h1;
+        aprep_unit(u % APREP_NU, NH, NKV, type, h0, h1);
         if (type == 0 || type == 1) {
             const uint32_t nt = type == 0 ? HT : 1;
             cb_reserve_back(cb_xf, nt);
-            if (type == 0 || DR == 32) {
-                gather(apq, get_write_ptr(cb_xf), type == 0 ? 0 : R0, NH, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT);
+            if (type == 0) {
+                gather(apq, get_write_ptr(cb_xf), 0, h1, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT, h0);
+            } else if (DR == 32) {
+                gather(apq, get_write_ptr(cb_xf), R0, NH, nt, b, F32_FACE, F32_ROW, F32_TILE, APREP_PQT);
             } else {  // DR 16: head h = face half h % 2 of pq tile R0 + h / 2 -> columns 0..15 of row h (16..31 zero)
                 const uint32_t l1 = get_write_ptr(cb_xf);
                 zero(l1, F32_TILE);
@@ -117,7 +122,7 @@ void kernel_main() {
             }
         } else if (type == 2 || type == 3) {
             cb_reserve_back(cb_xb, HT);
-            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, NKV, HT, b, BF_FACE, BF_ROW, BF_TILE, APREP_KVT);
+            gather(type == 2 ? ak : av, get_write_ptr(cb_xb), 0, h1, HT, b, BF_FACE, BF_ROW, BF_TILE, APREP_KVT, h0);
             noc_async_read_barrier();
             cb_push_back(cb_xb, HT);
         } else {
@@ -140,9 +145,12 @@ void kernel_main() {
             for (uint32_t col = 0; col < 32; ++col) {
                 p[f32_idx(31, col)] = 0;
             }
-            for (uint32_t h = 0; h < NH; ++h) {
-                for (uint32_t col = 0; col < 32; ++col) {
-                    p[f32_idx(h, col)] = s[h];
+            for (uint32_t h = 0; h < NH; ++h) {  // (row h: 16 words in each of its two faces)
+                volatile tt_l1_ptr uint32_t* r = p + (h >> 4) * 512 + (h & 15) * 16;
+                const uint32_t v = s[h];
+                for (uint32_t col = 0; col < 16; ++col) {
+                    r[col] = v;
+                    r[256 + col] = v;
                 }
             }
             cb_push_back(cb_xf, 1);

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "aprep_units.hpp"
 
 void kernel_main() {
     const uint32_t q_addr = get_arg_val<uint32_t>(0);
@@ -46,7 +47,9 @@ void kernel_main() {
 
 #endif
     for (uint32_t u = start; u < total; u += step) {
-        const uint32_t b = u / 5, type = u % 5;
+        const uint32_t b = u / APREP_NU;
+        uint32_t type, h0, h1;
+        aprep_unit(u % APREP_NU, APREP_NH, APREP_NKVH, type, h0, h1);
         const uint32_t nt = (type == 1 || type == 4) ? 1 : HT;
 #if APREP_KV
         if (type == 2 || type == 3) {
@@ -81,30 +84,49 @@ void kernel_main() {
             const uint32_t row = p % APREP_BLK, r = row % 32;
             const uint32_t face = r < 16 ? r * 32 : 1024 + (r - 16) * 32;
             const auto& ac = type == 2 ? ack : acv;
+            // every tile's head rows staged at once (one read barrier, one write barrier)
+            cb_wait_front(cb_out, HT);
+            const uint32_t l1 = get_read_ptr(cb_out);
             for (uint32_t c = 0; c < HT; ++c) {
-                cb_wait_front(cb_out, 1);
-                const uint32_t l1 = get_read_ptr(cb_out);
-                for (uint32_t h = 0; h < APREP_NKV; ++h) {
+                for (uint32_t h = h0; h < h1; ++h) {
                     for (uint32_t f = 0; f < 2; ++f) {  // (left / right face of the row)
-                        const uint32_t sl = st + 512 + (h * 2 + f) * 64 + (r & 1) * 32;
-                        noc_async_read(get_noc_addr(l1 + f * 512 + h * 32), sl, 32);
+                        const uint32_t sl = st + 512 + ((c * APREP_NKV + h) * 2 + f) * 64 + (r & 1) * 32;
+                        noc_async_read(get_noc_addr(l1 + c * BF + f * 512 + h * 32), sl, 32);
                     }
                 }
-                noc_async_read_barrier();
-                for (uint32_t h = 0; h < APREP_NKV; ++h) {
+            }
+            noc_async_read_barrier();
+            for (uint32_t c = 0; c < HT; ++c) {
+                for (uint32_t h = h0; h < h1; ++h) {
                     const uint64_t tile =
                         ac.get_noc_addr(((blk * APREP_NKV + h) * (APREP_BLK / 32) + row / 32) * HT + c);
                     for (uint32_t f = 0; f < 2; ++f) {
-                        noc_async_write(st + 512 + (h * 2 + f) * 64 + (r & 1) * 32, tile + face + f * 512, 32);
+                        noc_async_write(st + 512 + ((c * APREP_NKV + h) * 2 + f) * 64 + (r & 1) * 32,
+                                        tile + face + f * 512, 32);
                     }
                 }
-                noc_async_write_barrier();
-                cb_pop_front(cb_out, 1);
             }
+            noc_async_write_barrier();
+            cb_pop_front(cb_out, HT);
             continue;
 #endif
         }
 #endif
+        if ((type == 0 && APREP_QN > 1) || ((type == 2 || type == 3) && APREP_KN > 1)) {
+            // rows [h0, h1) of each tile (a head group: inside one 16-row face pair)
+            const uint32_t n = h1 - h0, o = (h0 >> 4) * 1024 + (h0 & 15) * 32;
+            for (uint32_t c = 0; c < nt; ++c) {
+                cb_wait_front(cb_out, 1);
+                const uint32_t l1 = get_read_ptr(cb_out);
+                const uint64_t dst = type == 0 ? aq.get_noc_addr(b * HT + c)
+                                     : type == 2 ? ak.get_noc_addr(b * HT + c) : av.get_noc_addr(b * HT + c);
+                noc_async_write(l1 + o, dst + o, n * 32);
+                noc_async_write(l1 + o + 512, dst + o + 512, n * 32);
+                noc_async_write_barrier();
+                cb_pop_front(cb_out, 1);
+            }
+            continue;
+        }
         for (uint32_t c = 0; c < nt; ++c) {
             cb_wait_front(cb_out, 1);
             const uint32_t l1 = get_read_ptr(cb_out);

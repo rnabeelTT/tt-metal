@@ -68,6 +68,7 @@ def main():
         return a, b
 
     worst, ok = 1.0, True
+    dump = {"seq": seq, "seqw": seqw}
     for name, d in (("eager", ver), ("traced", None)):
         if d is None:
             prefill()
@@ -75,6 +76,7 @@ def main():
             d.set_inputs(ids[P : P + R], torch.arange(P, P + R))
             d.capture()
         a, b = two_passes(d)
+        dump[name] = (a, b)
         for tag, got, ref in (("pass 1", a, seqw[:R]), (f"pass 2 (accept {A + 1})", b, seqw[A + 1 :])):
             print(f"  {name} {tag} per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
             p = min(pcc(got[r], ref[r]) for r in range(R))
@@ -84,6 +86,8 @@ def main():
             print(f"{name} {tag}: min row pcc {p:.6f}, top-1 agree {top:.3f}, max |diff| {md:.4f}", flush=True)
         if isinstance(d, TracedDecoder):
             d.release()
+    if os.environ.get("DUMP"):  # (the logits, to compare two runs bitwise)
+        torch.save(dump, os.environ["DUMP"])
     # the drafter's taps vs the HF target's (tools/dspark_taps.py fixture), one verify pass on a fixture text
     tf = "/cache/fixtures/dspark_taps.pt"
     if os.path.exists(tf):

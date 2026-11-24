@@ -36,6 +36,9 @@ SUBS = {1: [(384, 384)] * 3, 2: [(384, 384), (192, 256)], 4: [(288, 384)]}  # (r
 # I2M_MOE_MERGE (default 1): equal-width sub-shards stacked as virtual experts e * S + s (one gate|up and one down
 # program for all of them, the sub-shard sum in the down kernel's fp32 accumulation; qwen36 union.py `subs`)
 MERGE = os.environ.get("I2M_MOE_MERGE", "1") == "1"
+# I2M_MOE_NOCLONE (default 1): unmerged sub-shards (TP2: 384 + 256) summed straight from their own output buffers (no
+# clone of the first), and the sum returned whole for a caller that reads its live rows (no slice)
+NOCLONE = os.environ.get("I2M_MOE_NOCLONE", "1") == "1"
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -186,10 +189,11 @@ class FusedExperts:
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)
             if acc is None:  # (one sub-shard: the shared out buffer itself, consumed before the next layer's MoE)
-                acc = b.out if len(self.subs) == 1 and (ROW1 or raw) else ttnn.clone(b.out)
-            else:
+                acc = b.out if (len(self.subs) == 1 and (ROW1 or raw)) or (len(self.subs) > 1 and NOCLONE) \
+                    else ttnn.clone(b.out)
+            else:  # (each sub-shard's rows op has its own out buffer)
                 acc = ttnn.add(acc, b.out)
-        if raw and len(self.subs) == 1:  # (the shared out buffer, m rows: the caller reads its first M right away)
+        if raw and (len(self.subs) == 1 or NOCLONE):  # (m rows: the caller reads its first M right away)
             return acc
         if M == 1 and not ROW1:
             acc = ttnn.slice(acc, [0, 0, 0, 0], [1, 1, 1, self.H])

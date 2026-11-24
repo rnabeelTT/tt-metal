@@ -53,6 +53,9 @@ KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cac
 # I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
 # _messages; per layer only the mix program)
 MSG_PASS = __import__("os").environ.get("I2M_MSG_PASS", "1") == "1"
+# I2M_MSG_ALL (default 1): with MSG_PASS, all of the pass's loop layers' messages mixed in one program (one core group
+# per layer, DRAM outputs) instead of one mix program per layer
+MSG_ALL = __import__("os").environ.get("I2M_MSG_ALL", "1") == "1"
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 
 
@@ -114,6 +117,9 @@ BCONV_KERNEL = __import__("os").environ.get("I2M_BCONV_KERNEL", "1") == "1"
 APREP = __import__("os").environ.get("I2M_APREP", "1") == "1"
 # I2M_KV_PAIR (default 1): a sliding layer's k and v convs in one program (tt/bconv.py bconv_pair)
 KV_PAIR = __import__("os").environ.get("I2M_KV_PAIR", "1") == "1"
+# I2M_DYN_FUSED (default 1): a global layer's dynamic k / v conv taps (the head lags expanded over the channels + the
+# static taps) made inside the conv program, k and v in one program (was: two matmuls, an add and a conv each)
+DYN_FUSED = __import__("os").environ.get("I2M_DYN_FUSED", "1") == "1"
 APREP_OLD = __import__("os").environ.get("I2M_APREP_OLD", "")  # (debug) letters of q r k v s from the op path
 APREP_DRAM = __import__("os").environ.get("I2M_APREP_DRAM", "0") == "1"  # (debug) SDPA inputs moved to DRAM
 L1 = ttnn.L1_MEMORY_CONFIG
@@ -206,8 +212,14 @@ class BatchedDynConv:
             self.scat = ttnn.concat([self.static[3], self.static[2], self.static[1], ttnn.add(self.static[0], 1.0)],
                                     dim=-1)
 
+    def dyn_args(self, h):
+        """The kernel's in-program taps (bconv.parts dyn=): (per-head lags [1, 1, B, nh K], expansion, static row)."""
+        return dmm(_bf(h), self.lane.wproj, self.lane.ckc, dtype=ttnn.bfloat16), self.ecat, self.scat
+
     def step(self, x, h):
         lane = self.lane
+        if self.kernel is not None and DYN_FUSED:
+            return self.kernel.step(x, self.s, dyn=self.dyn_args(h))
         dyn = dmm(_bf(h), lane.wproj, lane.ckc, dtype=ttnn.bfloat16)  # [1,1,B,nh*K]
         if self.kernel is not None:
             # y = x + sum_L tap_L x_{t-L} = x (tap_0 + 1) + s2 tap_1 + s1 tap_2 + s0 tap_3   (s0 = x_{t-3})
@@ -308,6 +320,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
             from models.autoports.thinkingmachines_inkling_2_mini.tt.bconv import bconv_pair
 
             k, v = bconv_pair(ba.k.kernel, pk, ba.k.s, ba.v.kernel, pv, ba.v.s)
+        elif KV_PAIR and DYN_FUSED and ba.k.kernel is not None and ba.v.kernel is not None:  # (global: dynamic taps)
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.bconv import bconv_pair
+
+            k, v = bconv_pair(ba.k.kernel, pk, ba.k.s, ba.v.kernel, pv, ba.v.s,
+                              dyn=(ba.k.dyn_args(xk), ba.v.dyn_args(xv)))
         elif w.sliding:
             k, v = ba.k.step(pk), ba.v.step(pv)
         else:
@@ -611,8 +628,13 @@ class BatchedDecoder:
         if self._msg is None or self._msg[0] is not prev_src:
             src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src]
             S = ttnn.concat(src, dim=1, memory_config=L1)
-            self._msg = (prev_src, S, dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1))
-        _, S, lg = self._msg
+            lg = dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1)
+            nl = len(m.msg_Q)
+            allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
+            self._msg = (prev_src, S, lg, allm)
+        _, S, lg, allm = self._msg
+        if allm is not None:
+            return allm[i]
         return m.ops.mixk(S, lg, 2, 4, out_mc=L1, lg_off=4 * i, lg_st=4 * len(m.msg_Q))
 
     def _gate_norms(self, L, li, ins, messages):
