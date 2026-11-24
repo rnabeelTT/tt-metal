@@ -102,6 +102,14 @@ constexpr uint32_t CB_HN = get_compile_time_arg_val(13), CB_G = get_compile_time
 constexpr uint32_t CB_OUT = get_compile_time_arg_val(18), OUT_BF = get_compile_time_arg_val(25);
 constexpr uint32_t CB_XB = get_compile_time_arg_val(31);
 uint32_t cp_kind = 2, pk_kind = 2;
+ALWI void cp_prep(uint32_t cb) {
+    drain();
+    if (cp_kind != 0) {
+        reconfig_full_operand_srca(cb);  // (token-row CBs: TH x 32 tiles; matmul in1: 32 x 32)
+        copy_init(cb);
+        cp_kind = 0;
+    }
+}
 ALWI void cp(uint32_t cb, uint32_t i, uint32_t d) {
     drain();
     if (cp_kind != 0) {
@@ -233,10 +241,10 @@ void kernel_main() {
     cb_pop_front(cb_sq, 4 * PER);
 
     if (root) {  // totals [sum h^2, sum m^2] from the gathered parts
-        cb_wait_front(cb_gath, GT);
         cb_wait_front(cb_sel, NSEL);
         tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, GT);
         for (uint32_t k = 0; k < 2; ++k) {
             for (uint32_t s = 0; s < NSEL; ++s) {
                 matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
@@ -252,8 +260,9 @@ void kernel_main() {
         cb_push_back(cb_tout, 2);
         cb_pop_front(cb_gath, GT);
     }
-    cb_wait_front(cb_tot, 2);
     tile_regs_acquire();
+    cp_prep(cb_tot);  // (configured before the totals arrive)
+    cb_wait_front(cb_tot, 2);
     cp(cb_tot, 0, 0);
     copy_tile(cb_tot, 1, 1);
     rnorm(0, inv_h, eps);
@@ -313,9 +322,9 @@ void kernel_main() {
     cb_pop_front(cb_wd, 2 * PER * R);
 
     if (root) {
-        cb_wait_front(cb_gath, GT);
         tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, GT);
         for (uint32_t k = 0; k < R; ++k) {
             for (uint32_t s = 0; s < NSEL; ++s) {
                 matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
@@ -332,8 +341,9 @@ void kernel_main() {
         cb_pop_front(cb_gath, GT);
     }
     // g = bf16(sum) (the Linear's bf16 output) via the packer
-    cb_wait_front(cb_tot2, R);
     tile_regs_acquire();
+    cp_prep(cb_tot2);  // (configured before the totals arrive)
+    cb_wait_front(cb_tot2, R);
     cp(cb_tot2, 0, 0);
     copy_tile(cb_tot2, 1, 1);
     tile_regs_commit();
@@ -438,9 +448,9 @@ void kernel_main() {
         cb_push_back(cb_part, 2);
         cb_pop_front(cb_sq, 2 * PER);
         if (root) {
-            cb_wait_front(cb_gath, GT);
             tile_regs_acquire();
-            mm_begin(cb_sel, cb_gath);
+            mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+            cb_wait_front(cb_gath, GT);
             for (uint32_t s = 0; s < NSEL; ++s) {
                 matmul_tiles(cb_sel, cb_gath, s, s, 0);
                 matmul_tiles(cb_sel, cb_gath, s, NSEL + s, 0);
@@ -453,8 +463,9 @@ void kernel_main() {
             cb_push_back(cb_tout, 1);
             cb_pop_front(cb_gath, GT);
         }
-        cb_wait_front(cb_tot3, 1);
         tile_regs_acquire();
+        cp_prep(cb_tot3);  // (configured before the totals arrive)
+        cb_wait_front(cb_tot3, 1);
         cp(cb_tot3, 0, 0);
         rnorm(0, inv_h, eps);
         tile_regs_commit();
@@ -522,9 +533,9 @@ void kernel_main() {
             cb_pop_front(cb_xb, PER);
             cb_pop_front(cb_rw, 2 * PER * ET);
             if (root) {
-                cb_wait_front(cb_gath, GT);
                 tile_regs_acquire();
-                mm_begin(cb_sel, cb_gath);
+                mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+                cb_wait_front(cb_gath, GT);
                 for (uint32_t e = 0; e < ET; ++e) {
                     for (uint32_t s = 0; s < NSEL; ++s) {
                         matmul_tiles(cb_sel, cb_gath, s, (2 * e) * NSEL + s, e);

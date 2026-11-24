@@ -98,6 +98,15 @@ ALWI void drain() {
 constexpr uint32_t CB_IN = get_compile_time_arg_val(0), CB_XO = get_compile_time_arg_val(11);
 constexpr uint32_t CB_OUT = get_compile_time_arg_val(26), OUT_BF = get_compile_time_arg_val(31);
 uint32_t cp_kind = 2, pk_kind = 2;
+ALWI void cp_prep(uint32_t cb) {
+    drain();
+    const uint32_t k = cb == CB_IN;
+    if (k != cp_kind) {
+        reconfig_full_operand_srca(cb);  // (token-row CBs: TH x 32 tiles; matmul in1: 32 x 32)
+        copy_init(cb);
+        cp_kind = k;
+    }
+}
 ALWI void cp(uint32_t cb, uint32_t i, uint32_t d) {
     drain();
     const uint32_t k = cb == CB_IN;
@@ -283,10 +292,10 @@ void kernel_main() {
 
     // ---- root: totals of round 1 (gather tiles [quantity][hi, lo][NSEL])
     if (root) {
-        cb_wait_front(cb_gath, 2 * K1 * NSEL);
         cb_wait_front(cb_sel, NSEL);
         tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, 2 * K1 * NSEL);
         for (uint32_t k = 0; k < K1; ++k) {
             for (uint32_t s = 0; s < NSEL; ++s) {
                 matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
@@ -305,8 +314,9 @@ void kernel_main() {
         cb_pop_front(cb_gath, 2 * K1 * NSEL);
     }
     // ---- r, lg_j
-    cb_wait_front(cb_tot, K1);
     tile_regs_acquire();
+    cp_prep(cb_tot);  // (configured before the totals arrive)
+    cb_wait_front(cb_tot, K1);
     cp(cb_tot, 0, 0);
     for (uint32_t q = 0; q < NQ; ++q) {
         copy_tile(cb_tot, 1 + q, 1 + q);
@@ -467,9 +477,9 @@ void kernel_main() {
             cb_pop_front(cb_sq, 2 * PER);
         }
         if (root) {
-            cb_wait_front(cb_gath, 2 * K1 * NSEL);  // (the shared gather buffer, pushed whole)
             tile_regs_acquire();
-            mm_begin(cb_sel, cb_gath);
+            mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+            cb_wait_front(cb_gath, 2 * K1 * NSEL);  // (the shared gather buffer, pushed whole)
             for (uint32_t q = 0; q < NQ; ++q) {
                 for (uint32_t s = 0; s < NSEL; ++s) {
                     matmul_tiles(cb_sel, cb_gath, s, (2 * q) * NSEL + s, q);

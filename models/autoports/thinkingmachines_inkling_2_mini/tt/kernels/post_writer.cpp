@@ -5,8 +5,12 @@
 // outputs. A round, one root per row (core t for row t < T): every core writes row t of its P partial tiles (hi / lo
 // halves) to row c of root t's gather tiles and increments root t's semaphore; each root's compute reduces them (0 / 1
 // matrices) into its totals (row 0), which root t writes into row t of core 0's totals buffer; core 0 multicasts the T
-// rows (one multicast per face: concurrent multicasts from several roots serialize) to every core's, then increments
+// rows (one multicast per face: concurrent multicasts from several roots serialize) to every core's, then sets
 // every core's done semaphore. Start: every core tells core 0 it is running; its go releases the writes.
+// Signals without round trips: a sender flushes its writes (not a barrier) before the semaphore increments behind
+// them (same route, same VC: in order); the totals' multicasts are linked, the done value set by a multicast behind
+// them (the matmul in0 sender's scheme); every write is acknowledged before the kernel ends. (An all-to-all of the
+// partials, every core multicasting to every core, measured ~150 us per round: concurrent multicasts serialize.)
 //
 // common args: s0, s1, s2, resid, out, mcast x0, y0, x1, y1, zeros, logits, root t x, y (t < T)
 
@@ -146,7 +150,7 @@ void kernel_main() {
                 noc_async_write(s + FO, rxy(t, d + p * NQ * F32 + 1024), 64);
             }
         }
-        noc_async_write_barrier();
+        noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
         for (uint32_t t = 0; t < T; ++t) {
             noc_semaphore_inc(rxy(t, s_g), 1);
         }
@@ -162,37 +166,44 @@ void kernel_main() {
             cb_push_back(cb_g, parts * NQ);
             cb_wait_front(cb_tout, ntot);
             const uint32_t ts = get_read_ptr(cb_tout);
+            // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
+            // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
             if constexpr (T == 1) {
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    noc_async_write_multicast_loopback_src(ts + k * FT, mc(tb + k * FT), 64, C);
-                    noc_async_write_multicast_loopback_src(ts + k * FT + FO, mc(tb + k * FT + FO), 64, C);
+                    noc_async_write_multicast(ts + k * FT, mc(tb + k * FT), 64, C - 1, true);
+                    noc_async_write_multicast(ts + k * FT + FO, mc(tb + k * FT + FO), 64, C - 1, true);
                 }
+                noc_async_writes_flushed();
+                *sem(s_done) = done_val;
+                noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
+                for (uint32_t k = 0; k < ntot; ++k) {
+                    noc_async_write(ts + k * FT, get_noc_addr(tb + k * FT), 64);
+                    noc_async_write(ts + k * FT + FO, get_noc_addr(tb + k * FT + FO), 64);
+                }
+                noc_async_write_barrier();
             } else {  // row 0 -> row c of core 0's totals
                 for (uint32_t k = 0; k < ntot; ++k) {
                     const uint32_t o = tb + k * FT + c * 64;
                     noc_async_write(ts + k * FT, rxy(0, o), 64);
                     noc_async_write(ts + k * FT + FO, rxy(0, o + FO), 64);
                 }
-            }
-            noc_async_write_barrier();
-            cb_pop_front(cb_tout, ntot);
-            if constexpr (T > 1) {
                 if (c != 0) {
+                    noc_async_writes_flushed();
                     noc_semaphore_inc(rxy(0, s_t), 1);
                 } else {  // rows 0..T-1 (contiguous per face) -> everyone
+                    noc_async_write_barrier();
                     noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
                     for (uint32_t k = 0; k < ntot; ++k) {
                         const uint32_t o = tb + k * FT;
-                        noc_async_write_multicast(o, mc(o), T * 64, C - 1);
-                        noc_async_write_multicast(o + FO, mc(o + FO), T * 64, C - 1);
+                        noc_async_write_multicast(o, mc(o), T * 64, C - 1, true);
+                        noc_async_write_multicast(o + FO, mc(o + FO), T * 64, C - 1, true);
                     }
-                    noc_async_write_barrier();
+                    noc_async_writes_flushed();
+                    *sem(s_done) = done_val;
+                    noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
                 }
             }
-            if (c == 0) {
-                noc_semaphore_inc_multicast(mc(s_done), 1, C - 1);
-                noc_semaphore_inc(get_noc_addr(s_done), 1);
-            }
+            cb_pop_front(cb_tout, ntot);
         }
         noc_semaphore_wait(sem(s_done), done_val);
         cb_push_back(cb_t, ntot);
@@ -240,6 +251,9 @@ void kernel_main() {
         }
     }
 #endif
+    // (the round sends are only flushed: every write and increment acknowledged before the kernel ends)
+    noc_async_write_barrier();
+    noc_async_atomic_barrier();
     *sem(s_ready) = 0;
     *sem(s_go) = 0;
     *sem(s_g) = 0;

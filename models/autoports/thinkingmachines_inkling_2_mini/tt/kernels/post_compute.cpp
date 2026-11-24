@@ -102,6 +102,15 @@ ALWI void drain() {
 constexpr uint32_t CB_ATT = get_compile_time_arg_val(0), CB_X = get_compile_time_arg_val(1);
 constexpr uint32_t CB_OUT = get_compile_time_arg_val(22), OUT_BF = get_compile_time_arg_val(27);
 uint32_t cp_kind = 2, pk_kind = 2;
+ALWI void cp_prep(uint32_t cb) {
+    drain();
+    const uint32_t k = cb == CB_ATT || cb == CB_X;
+    if (k != cp_kind) {
+        reconfig_full_operand_srca(cb);  // (token-row CBs: TH x 32 tiles; matmul in1: 32 x 32)
+        copy_init(cb);
+        cp_kind = k;
+    }
+}
 ALWI void cp(uint32_t cb, uint32_t i, uint32_t d) {
     drain();
     const uint32_t k = cb == CB_ATT || cb == CB_X;
@@ -288,10 +297,10 @@ void kernel_main() {
     DeviceZoneScopedN("P_C_R1");
     // ---- reduce round 1 -> r, lg
     if (root) {  // [sq hi | sq lo | dot hi | dot lo] x NQ tiles, row c = core c's row (this root's) -> totals row 0
-        cb_wait_front(cb_gath, 4 * NQ);
         cb_wait_front(cb_sel, NQ);
         tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, 4 * NQ);
         for (uint32_t k = 0; k < NQ; ++k) {
             matmul_tiles(cb_sel, cb_gath, k, k, 0);
             matmul_tiles(cb_sel, cb_gath, k, NQ + k, 0);
@@ -307,8 +316,9 @@ void kernel_main() {
         cb_push_back(cb_tout, 2);
         cb_pop_front(cb_gath, 4 * NQ);
     }
-    cb_wait_front(cb_tot, 2);
     tile_regs_acquire();
+    cp_prep(cb_tot);  // (configured before the totals arrive)
+    cb_wait_front(cb_tot, 2);
     cp(cb_tot, 0, 0);
     cp(cb_tot, 1, 1);
     drain();
@@ -459,9 +469,9 @@ void kernel_main() {
         cb_pop_front(cb_sq, 2 * PER);
         // reduce -> rn (into cb_red slot 0 again: r is no longer needed)
         if (root) {
-            cb_wait_front(cb_gath2, 2 * NQ);
             tile_regs_acquire();
-            mm_begin(cb_sel, cb_gath2);
+            mm_begin(cb_sel, cb_gath2);  // (configured before the gather arrives)
+            cb_wait_front(cb_gath2, 2 * NQ);
             for (uint32_t k = 0; k < NQ; ++k) {
                 matmul_tiles(cb_sel, cb_gath2, k, k, 0);
                 matmul_tiles(cb_sel, cb_gath2, k, NQ + k, 0);
@@ -474,8 +484,9 @@ void kernel_main() {
             cb_push_back(cb_tout, 1);
             cb_pop_front(cb_gath2, 2 * NQ);
         }
-        cb_wait_front(cb_tot2, 1);
         tile_regs_acquire();
+        cp_prep(cb_tot2);  // (configured before the totals arrive)
+        cb_wait_front(cb_tot2, 1);
         cp(cb_tot2, 0, 0);
         drain();
         binop_with_scalar_tile_init();
@@ -548,9 +559,9 @@ void kernel_main() {
             cb_pop_front(cb_rw, 2 * PER * ET);
             if (root) {
                 constexpr uint32_t cb_g3 = POST_CB_G3, cb_t3 = POST_CB_T3;
-                cb_wait_front(cb_g3, 2 * ET * NQ);
                 tile_regs_acquire();
-                mm_begin(cb_sel, cb_g3);
+                mm_begin(cb_sel, cb_g3);  // (configured before the gather arrives)
+                cb_wait_front(cb_g3, 2 * ET * NQ);
                 for (uint32_t e = 0; e < ET; ++e) {
                     for (uint32_t k = 0; k < NQ; ++k) {
                         matmul_tiles(cb_sel, cb_g3, k, (2 * e) * NQ + k, e);
