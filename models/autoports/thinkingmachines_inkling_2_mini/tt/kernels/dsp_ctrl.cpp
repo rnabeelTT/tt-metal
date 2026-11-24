@@ -8,8 +8,9 @@
 //   idx_b  uint32 [1, B]:  p + i                (block rows' RoPE rows; element 0 = the block's first cache row)
 //   cpos   int32 [NU]:     p + B - 1            (the SDPA's last key: the block rows sit at cache rows p .. p+B-1)
 //   wp0    w1[anchor] as row 0 of [1, 1, 1, 256] bf16 TILE (the first Markov step's input)
+//   e      embed[anchor] as row 0 of [1, 1, B, H] bf16 TILE (the block's input before embed_norm)
 //
-// runtime args: [p0_addr, n_addr, ic_addr, in_addr, ib_addr, cp_addr, anchor_addr, w1_addr, wp0_addr]
+// runtime args: [p0_addr, n_addr, ic_addr, in_addr, ib_addr, cp_addr, anchor_addr, w1_addr, wp0_addr, embed_addr, e_addr]
 
 #include <stdint.h>
 
@@ -66,6 +67,14 @@ void kernel_main() {
     }
     noc_async_write(l1 + 512, TensorAccessor(a6, cp_addr, NU * 4).get_noc_addr(0), NU * 4);
     noc_async_write_barrier();
-    w1_row(TensorAccessor(a8, get_arg_val<uint32_t>(7), 512), TensorAccessor(a9, get_arg_val<uint32_t>(8), 2048),
-           *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1 + 128), l1 + 1024);
+    const uint32_t anchor = *reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1 + 128);
+    w1_row(TensorAccessor(a8, get_arg_val<uint32_t>(7), 512), TensorAccessor(a9, get_arg_val<uint32_t>(8), 2048), anchor,
+           l1 + 1024);
+    // embed[anchor] as row 0 of the block input (rows 1 .. B-1 stay zero)
+    constexpr auto a10 = TensorAccessorArgs<a9.next_compile_time_args_offset()>();
+    constexpr auto a11 = TensorAccessorArgs<a10.next_compile_time_args_offset()>();
+    constexpr uint32_t HT = get_compile_time_arg_val(a11.next_compile_time_args_offset());
+    w1_row<HT>(TensorAccessor(a10, get_arg_val<uint32_t>(9), 64 * HT), TensorAccessor(a11, get_arg_val<uint32_t>(10), 2048),
+               anchor, l1 + 4096);
+    noc_async_atomic_barrier();
 }

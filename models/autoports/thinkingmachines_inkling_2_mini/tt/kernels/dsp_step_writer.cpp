@@ -111,7 +111,8 @@ void kernel_main() {
         noc_async_read_barrier();
         cb_push_back(cb_x, kt);
 
-        for (uint32_t i = 0; i < ncols; ++i) {
+        // base tiles BLA columns ahead of the outputs (the compute takes them in pairs; cb_base holds BLA + 1)
+        auto push_base = [&](uint32_t i) {
             cb_reserve_back(cb_base, 1);
             volatile tt_l1_ptr uint32_t* bt = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_base));
             volatile tt_l1_ptr uint32_t* bs = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(bseg + i * 128);
@@ -120,6 +121,15 @@ void kernel_main() {
                 bt[256 + j] = bs[16 + j];
             }
             cb_push_back(cb_base, 1);
+        };
+        constexpr uint32_t BLA = 3;
+        for (uint32_t i = 0; i < BLA && i < ncols; ++i) {
+            push_base(i);
+        }
+        for (uint32_t i = 0; i < ncols; ++i) {
+            if (i + BLA < ncols) {
+                push_base(i + BLA);
+            }
 
             cb_wait_front(cb_out, 1);
             volatile tt_l1_ptr uint32_t* t = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_read_ptr(cb_out));
@@ -168,13 +178,34 @@ void kernel_main() {
     noc_semaphore_wait_min(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sem), ncores);
     noc_semaphore_set(reinterpret_cast<volatile tt_l1_ptr uint32_t*>(sem), 0);
     volatile tt_l1_ptr uint32_t* c = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cand);
-    // merge: the lists' heads in local arrays (L1 reads only on a pop)
+    // merge: the lists' heads in local arrays (L1 reads only on a pop), a binary max-heap of list ids over them
     uint32_t hk[ncores], hid[ncores];
-    uint8_t head[ncores];
+    uint8_t head[ncores], hp[ncores];
     for (uint32_t q = 0; q < ncores; ++q) {
         head[q] = 0;
+        hp[q] = q;
         hk[q] = c[q * K * 2];
         hid[q] = c[q * K * 2 + 1];
+    }
+    auto better = [&](uint32_t a, uint32_t b) { return hk[a] > hk[b] || (hk[a] == hk[b] && hid[a] < hid[b]); };
+    auto sift = [&](uint32_t i) {
+        for (;;) {
+            const uint32_t l = 2 * i + 1;
+            if (l >= ncores) {
+                break;
+            }
+            const uint32_t m = (l + 1 < ncores && better(hp[l + 1], hp[l])) ? l + 1 : l;
+            if (!better(hp[m], hp[i])) {
+                break;
+            }
+            const uint8_t t = hp[i];
+            hp[i] = hp[m];
+            hp[m] = t;
+            i = m;
+        }
+    };
+    for (uint32_t i = ncores / 2; i-- > 0;) {
+        sift(i);
     }
 #ifndef LOCAL_OUT
     // out rows: ids at mine[0 .. K), logits at mine[K .. 2K), the T * Gumbel row at mine[2K .. 3K)
@@ -184,18 +215,11 @@ void kernel_main() {
     noc_async_read(TensorAccessor(t_args, get_arg_val<uint32_t>(11), 4 * NTAB).get_noc_addr(0), tab, 4 * NTAB);
 #endif
     for (uint32_t j = 0; j < K; ++j) {
-        uint32_t bq = 0, bk = hk[0], bi = hid[0];
-        for (uint32_t q = 1; q < ncores; ++q) {
-            const uint32_t k = hk[q];
-            if (k > bk || (k == bk && hid[q] < bi)) {
-                bq = q;
-                bk = k;
-                bi = hid[q];
-            }
-        }
+        const uint32_t bq = hp[0], bk = hk[bq], bi = hid[bq];
         const uint32_t h = ++head[bq];
         hk[bq] = h < K ? c[(bq * K + h) * 2] : 0;  // (exhausted: key 0, id ~0 never wins over a live entry)
         hid[bq] = h < K ? c[(bq * K + h) * 2 + 1] : 0xFFFFFFFFu;
+        sift(0);
 #ifdef LOCAL_OUT
         tk[j] = bk;
 #else

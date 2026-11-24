@@ -27,28 +27,38 @@ void kernel_main() {
     }
     compute_kernel_hw_startup(cb_x, cb_w, cb_out);
     cb_wait_front(cb_x, kt);
-    for (uint32_t j = 0; j < ncols; ++j) {
+    // two columns per DST acquire (matmuls in DST 0 / 1, base tiles in 2 / 3): half the per-column re-inits
+    for (uint32_t j = 0; j < ncols; j += 2) {
+        const uint32_t n = ncols - j >= 2 ? 2 : 1;
         reconfig_data_format(cb_w, cb_x);  // matmul: in1 (weights) -> srcA, in0 -> srcB
         matmul_init(cb_x, cb_w, 0);
-        cb_wait_front(cb_w, kt);
-        cb_wait_front(cb_base, 1);
+        cb_wait_front(cb_w, n * kt);
+        cb_wait_front(cb_base, n);
         tile_regs_acquire();
-        for (uint32_t k = 0; k < kt; ++k) {
-            matmul_tiles(cb_x, cb_w, k, k, 0);
+        for (uint32_t c = 0; c < n; ++c) {
+            for (uint32_t k = 0; k < kt; ++k) {
+                matmul_tiles(cb_x, cb_w, k, c * kt + k, c);
+            }
         }
         reconfig_data_format_srca(cb_base);
         copy_tile_to_dst_init_short(cb_base);
-        copy_tile(cb_base, 0, 1);
+        for (uint32_t c = 0; c < n; ++c) {
+            copy_tile(cb_base, c, 2 + c);
+        }
         add_binary_tile_init();
-        add_binary_tile(0, 1, 0);
+        for (uint32_t c = 0; c < n; ++c) {
+            add_binary_tile(c, 2 + c, c);
+        }
         tile_regs_commit();
-        cb_pop_front(cb_w, kt);
-        cb_pop_front(cb_base, 1);
-        cb_reserve_back(cb_out, 1);
+        cb_pop_front(cb_w, n * kt);
+        cb_pop_front(cb_base, n);
+        cb_reserve_back(cb_out, n);
         tile_regs_wait();
-        pack_tile(0, cb_out);
+        for (uint32_t c = 0; c < n; ++c) {
+            pack_tile(c, cb_out);
+        }
         tile_regs_release();
-        cb_push_back(cb_out, 1);
+        cb_push_back(cb_out, n);
     }
     cb_pop_front(cb_x, kt);
 }

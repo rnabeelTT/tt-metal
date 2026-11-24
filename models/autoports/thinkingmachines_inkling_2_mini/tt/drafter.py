@@ -76,6 +76,7 @@ DL = os.environ.get("DRAFT_DL", "1") == "1"  # block projections as bank-streame
 RMS_BF = os.environ.get("DRAFT_RMS", "bf16") == "bf16"
 ADD_BF = os.environ.get("DRAFT_ADD", "bf16") == "bf16"  # residual adds as one bf16 op
 ROPE_BF = os.environ.get("DRAFT_ROPE", "bf16") == "bf16"
+STASH = os.environ.get("DRAFT_STASH", "1") == "1"  # Markov steps 2..d read the fold weight from an L1 stash
 
 
 def _bits(f):
@@ -193,10 +194,6 @@ class DSparkDrafter:
         self.tmpl = ops.up(tmpl, dtype=BF16)
         rp = w["markov_head.rnn_proj.weight"]
         self.w_shh = mat(rp[:, :2 * R + H], BF16)  # [s, w1[prev], h] rows of rnn_proj
-        sel = torch.zeros(self.B - 1, 1, 1, 1, self.B)
-        for k in range(self.B - 1):
-            sel[k, 0, 0, 0, k + 1] = 1.0
-        self.sel = [ops.up(sel[k], dtype=BF16) for k in range(self.B - 1)]
         self.w_f = mat(rp[:, 2 * R + H:], BF16)
         self.b_rnn = vec(w["markov_head.rnn_proj.bias"])
         self.w1 = ttnn.as_tensor(w["markov_head.markov_w1.weight"], dtype=BF16, layout=RM, device=mesh,
@@ -230,19 +227,24 @@ class DSparkDrafter:
             return [dl.weight([p]) for p in parts] if self.vsim else [dl.weight(parts)]
 
         un = ck.get("model.llm.unembed.weight")[: self.V]
+        head_readers = int(os.environ.get("DRAFT_HEAD_READERS", "4"))
         if model is not None and N == 1 and NS == 1 and model.shead is not None and model.shead.n == Vp:
-            self.dl_head, self.lm_heads = model.shead, [model.lm_head]
+            # the target's per-bank head copy, streamed by our own placement (its 2 readers per bank: 1.94 vs 1.14 ms)
+            sh = model.shead
+            self.dl_head = DecodeLinear(mesh, H, Vs, sh.weight_dtype, readers=head_readers, fidelity=sh.fidelity)
+            assert (self.dl_head.C, self.dl_head.banks, self.dl_head.kt) == (sh.C, sh.banks, sh.kt)
+            self.lm_heads = [model.lm_head]
         else:
-            self.dl_head = DecodeLinear(mesh, H, Vs, head_dtype, readers=int(os.environ.get("DRAFT_HEAD_READERS", "4")),
-                                        fidelity=fid(head_dtype))
+            self.dl_head = DecodeLinear(mesh, H, Vs, head_dtype, readers=head_readers, fidelity=fid(head_dtype))
             wt = torch.nn.functional.pad(un.T.contiguous(), (0, Vp - self.V)).to(torch.bfloat16)
             self.lm_heads = per_slice(self.dl_head, wt)
         fw, fb = self._fold(un, w["markov_head.hidden_out.weight"], w["markov_head.hidden_out.bias"])
         wf = torch.zeros(R + 32, Vp)
         wf[:R, : self.V] = fw.T.float()
         wf[R, : self.V] = fb.float()
-        self.dl_fold = DecodeLinear(mesh, R + 32, Vs, fold_dtype, readers=int(os.environ.get("DRAFT_FOLD_READERS", "8")),
-                                    fidelity=fid(fold_dtype))
+        # (buffers even: the step compute takes its columns in pairs, which must not straddle the ring's end)
+        self.dl_fold = DecodeLinear(mesh, R + 32, Vs, fold_dtype, readers=int(os.environ.get("DRAFT_FOLD_READERS", "10")),
+                                    fidelity=fid(fold_dtype), buffers=4)
         self.folds = per_slice(self.dl_fold, wf.to(torch.bfloat16))
         del w
 
@@ -288,6 +290,8 @@ class DSparkDrafter:
         self.bases = [self._zeros([1, 8, self.NTs, 32], F32, RM) for _ in range(self.NS if self.vsim else 1)]
         self.prev = [self._u32([[0]]) for _ in range(d_max)]
         self.f_rnn = self._zeros([1, 1, 1, H], BF16)
+        self.e_in = self._zeros([1, 1, self.B, H], BF16)
+        self.hk = [self._zeros([1, 1, 1, H], BF16) for _ in range(d_max)]  # row k + 1 of the block hidden (Markov step k)
         self.chunk_in = {}  # T -> (p0 tensor, rope index tensor, last-row index tensor)
         # sampled drafts (capture(..., sample=True)): host-written T * Gumbel noise, per step the top TOPK ids / logits
         self.sample = False
@@ -437,15 +441,17 @@ class DSparkDrafter:
     def _ctrl(self):
         core = ttnn.CoreCoord(0, 0)
         crs = _crs([core])
-        io = [self.in_p0, self.in_n, self.idx_c, self.idx_n, self.idx_b, self.cpos, self.in_anchor, self.w1, self.wp[0]]
+        io = [self.in_p0, self.in_n, self.idx_c, self.idx_n, self.idx_b, self.cpos, self.in_anchor, self.w1, self.wp[0],
+              self.embed, self.e_in]
         ct = [0, RC, self.B, self.NKV]
         for t in io:
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        ct += [self.H // 32]
         k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_ctrl.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt({(0, 0): [t.buffer_address() for t in io]}),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))
-        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, F32, 4096, 1)])
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, F32, 4096 + 192 * self.H // 32, 1)])
         prog.custom_program_hash = _hash(("dsp_ctrl", tuple(ct)))
         ttnn.generic_op(io, prog)
 
@@ -500,6 +506,32 @@ class DSparkDrafter:
         prog.custom_program_hash = _hash(("dsp_heads", tuple(ct), tuple(j[2:] for j in jobs), TPC))
         ttnn.generic_op([t for j in jobs for t in j[:2]], prog)
 
+    def _rowcp(self, jobs):
+        """jobs (src, dst, row, idx): row `row` (+ element 0 of uint32 idx, if given) of src -> row 0 of dst (both TILE,
+        same width; one program, kernels/dsp_rowcp.cpp)."""
+        grid = self.mesh.compute_with_storage_grid_size()
+        TPC = 18
+        rt, cores = {}, []
+        for src, dst, row, idx in jobs:
+            wt = int(src.padded_shape[-1]) // 32
+            for t0 in range(0, wt, TPC):
+                j = len(cores)
+                c = ttnn.CoreCoord(j % grid.x, j // grid.x)
+                cores.append(c)
+                rt[(c.x, c.y)] = [src.buffer_address(), dst.buffer_address(), idx.buffer_address() if idx else 0, row, t0,
+                                  min(TPC, wt - t0), wt]
+        crs = _crs(cores)
+        idx0 = next((j[3] for j in jobs if j[3] is not None), self.idx_n)
+        ct = [0] + ttnn.TensorAccessorArgs(jobs[0][0]).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(jobs[0][1]).get_compile_time_args() + ttnn.TensorAccessorArgs(idx0).get_compile_time_args()
+        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_rowcp.cpp"), core_ranges=crs, compile_time_args=ct,
+                                  runtime_args=_rt(rt),
+                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                           noc=ttnn.NOC.NOC_0))
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, BF16, 128 + 256 * TPC, 1)])
+        prog.custom_program_hash = _hash(("dsp_rowcp", tuple(ct), len(cores)))
+        ttnn.generic_op([j[0] for j in jobs] + [j[3] for j in jobs if j[3] is not None] + [j[1] for j in jobs], prog)
+
     def _alloc(self, shape, dt=BF16):
         return ttnn.allocate_tensor_on_device(ttnn.Shape(shape), dt, TILE, self.mesh, DRAM)
 
@@ -525,15 +557,24 @@ class DSparkDrafter:
         return o
 
     def _stream(self, dl, kind, x, w, out, ct_w, rt_w, cp_src, cp_ct, cbs_extra, sems, u2d_cbs, defines=(),
-                wdefines=()):
-        """A DecodeLinear-placed program: dl_reader streams w per bank, writer `kind`, compute cp_src."""
+                wdefines=(), stash=None, load=True):
+        """A DecodeLinear-placed program: dl_reader streams w per bank, writer `kind`, compute cp_src. stash: an L1
+        tensor backing cb_w with all of each core's weight columns (kernels/dsp_fold_reader.cpp): load streams them in,
+        else they are already there."""
         cb_x, cb_w = 0, 1
-        cbs = [_cb(cb_x, dl.cores, BF16, 2048, dl.kt), _cb(cb_w, dl.cores, dl.weight_dtype, dl.tile_bytes,
-                                                          dl.buffers * dl.kt)] + cbs_extra(dl.cores)
-        rd_ct = [cb_w, dl.kt, dl.tile_bytes, dl.page_bytes, dl.buffers]
+        rd_src, rd_def, nbuf = DL_DIR / "dl_reader.cpp", [], dl.buffers
+        if stash is None or load:
+            wcb = _cb(cb_w, dl.cores, dl.weight_dtype, dl.tile_bytes, dl.buffers * dl.kt)
+        else:
+            wcb = ttnn.cb_descriptor_from_sharded_tensor(cb_w, stash)
+        if stash is not None:
+            rd_src, rd_def = KDIR / "dsp_fold_reader.cpp", [("FOLD_LOAD", "1")] if load else []
+        cbs = [_cb(cb_x, dl.cores, BF16, 2048, dl.kt), wcb] + cbs_extra(dl.cores)
+        rd_ct = [cb_w, dl.kt, dl.tile_bytes, dl.page_bytes, nbuf]
         rd, wr, cp = {}, {}, {}
         for slot, (c, b, c0, nc) in enumerate(dl.assign):
-            rd[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3]
+            rd[(c.x, c.y)] = [w.buffer_address(), b, c0, nc, (b + c0) & 0x3] \
+                + ([stash.buffer_address()] if stash is not None else [])
             wr[(c.x, c.y)] = rt_w(slot, b * dl.C + c0, nc)
             cp[(c.x, c.y)] = [nc]
 
@@ -547,7 +588,7 @@ class DSparkDrafter:
             if cores is None:
                 continue
             kernels += [
-                ttnn.KernelDescriptor(kernel_source=str(DL_DIR / "dl_reader.cpp"), core_ranges=cores,
+                ttnn.KernelDescriptor(kernel_source=str(rd_src), core_ranges=cores, defines=rd_def,
                                       compile_time_args=rd_ct, runtime_args=sub(rd, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
                 ttnn.KernelDescriptor(kernel_source=str(KDIR / kind), core_ranges=cores, compile_time_args=ct_w,
@@ -563,8 +604,9 @@ class DSparkDrafter:
         kernels.append(ttnn.KernelDescriptor(kernel_source=str(cp_src), core_ranges=dl.cores, compile_time_args=cp_ct,
                                              runtime_args=sub(cp, dl.cores), defines=list(defines), config=cfg))
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        prog.custom_program_hash = _hash((kind, tuple(ct_w), tuple(cp_ct), id(dl), tuple(defines), tuple(wdefines)))
-        ttnn.generic_op([x, w, out], prog)
+        prog.custom_program_hash = _hash((kind, tuple(ct_w), tuple(cp_ct), id(dl), tuple(defines), tuple(wdefines),
+                                          stash is not None, load))
+        ttnn.generic_op([x, w] + ([stash] if stash is not None else []) + [out], prog)
 
     def _base_logits(self, h, d):
         """rows 1..d of h [1, 1, B, H] bf16 @ LM head -> the base buffer(s) rows 1..d (FP32, compact; per slice)."""
@@ -578,17 +620,26 @@ class DSparkDrafter:
                          lambda slot, col0, nc: [h.buffer_address(), base.buffer_address(), col0, nc],
                          KDIR / "head_compute.cpp", cp_ct, lambda cores: [_cb(cb_out, cores, F32, 4096, 2)], [], [])
 
-    def _step(self, lat, row, prev, ks=0):
+    def _stash(self):
+        """L1 tensor holding each fold core's weight columns for the draft's later steps (one vocab slice per die)."""
+        dl = self.dl_fold
+        n = len(dl.assign)
+        rows = dl.cpc * dl.kt * 32
+        mc = ttnn.MemoryConfig(ttnn.TensorMemoryLayout.HEIGHT_SHARDED, ttnn.BufferType.L1,
+                               ttnn.ShardSpec(dl.cores, (rows, 32), ttnn.ShardOrientation.ROW_MAJOR))
+        return ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, n * rows, 32]), dl.weight_dtype, TILE, self.mesh, mc)
+
+    def _step(self, lat, row, prev, ks=0, stash=None):
         """lat [1, 1, 1, R] bf16 -> argmax_v ([lat, 1] @ [fold W; fold b] + base[row])_v into prev (uint32 [1, 1]) and
         w1[token] into wp[ks + 1]. Sampled (self.sample): the softcapped logits' top TOPK -> row ks of cand_id /
         cand_lg, the token argmax_j (logit_j + gum[ks, j]). Vocab-sharded (NS > 1): per slice the local result, gathered,
         then the merge program."""
         if self.NS == 1:
-            return self._step_prog(lat, row, prev, ks, self.folds[0], self.bases[0], None)
+            return self._step_prog(lat, row, prev, ks, self.folds[0], self.bases[0], None, stash)
         locs = []
         for s, fold in enumerate(self.folds):
             loc = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, 2 * TOPK]), U32, TILE, self.mesh, DRAM)
-            self._step_prog(lat, row, prev, ks, fold, self.bases[s if self.vsim else 0], loc)
+            self._step_prog(lat, row, prev, ks, fold, self.bases[s if self.vsim else 0], loc, stash)
             locs.append(loc)
         g = ttnn.concat(locs, dim=3) if self.vsim else \
             ttnn.all_gather(locs[0], dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
@@ -614,7 +665,7 @@ class DSparkDrafter:
         prog.custom_program_hash = _hash(("dsp_merge", tuple(ct), tuple(defines)))
         ttnn.generic_op(io, prog)
 
-    def _step_prog(self, lat, row, prev, ks, fold, base, loc):
+    def _step_prog(self, lat, row, prev, ks, fold, base, loc, stash=None):
         """One step program over one vocab slice (fold / base); loc: write the local result there (LOCAL_OUT)."""
         dl = self.dl_fold
         cb_base, cb_out, cb_bseg, cb_cand = 2, 16, 3, 4
@@ -644,13 +695,14 @@ class DSparkDrafter:
         w1_off = -(-cand_bytes // 64) * 64  # (the reducer's w1-row / loc staging scratch)
         wdef = wdef + [("W1_OFF", str(w1_off))]
         cand_bytes = w1_off + 1536
-        cbs = lambda cores: [_cb(cb_base, cores, F32, 4096, 2), _cb(cb_out, cores, F32, 4096, 2),  # noqa: E731
+        cbs = lambda cores: [_cb(cb_base, cores, F32, 4096, 4), _cb(cb_out, cores, F32, 4096, 4),  # noqa: E731
                              _cb(cb_bseg, cores, F32, dl.cpc * 128, 1), _cb(cb_cand, cores, F32, cand_bytes, 1)]
         sems = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, dl.cores, 0)]
         self._stream(dl, "dsp_step_writer.cpp", lat, fold, base if loc is None else loc, ct,
                      lambda slot, col0, nc: [lat.buffer_address(), base.buffer_address(), prev.buffer_address(),
                                              col0, nc, slot] + extra,
-                     KDIR / "dsp_step_compute.cpp", cp_ct, cbs, sems, [cb_base], defines=cdef, wdefines=wdef)
+                     KDIR / "dsp_step_compute.cpp", cp_ct, cbs, sems, [cb_base], defines=cdef, wdefines=wdef,
+                     stash=stash, load=ks == 0)
         # (prev / wp / cand rows are written by the program but are not its output tensor: persistent buffers)
 
     # ------------------------------------------------------------------ commit
@@ -668,8 +720,7 @@ class DSparkDrafter:
             srcs.append((i, self._norm_rope(k, Lw["k_norm_ctx"], C, S), v))
         self._kvw(srcs, p0_t, R)
         f = self._rms(mixes[self.L], self.rnn_norm)  # [1, 1, R, H]
-        table = ttnn.reshape(ttnn.to_layout(f, RM), (R, self.H))
-        ttnn.copy(ttnn.reshape(ttnn.embedding(last, table, layout=TILE), (1, 1, 1, self.H)), self.f_rnn)
+        self._rowcp([(f, self.f_rnn, 0, last)])
 
     def commit(self, taps, p0: int, valid: int | None = None):
         """Eager / prefill commit: taps torch [T, 4, H] bf16 or ttnn [1, 4, T, H] bf16 TILE (T: any for torch; a multiple
@@ -734,10 +785,7 @@ class DSparkDrafter:
 
     def block_hidden(self):
         """The block at position p (ctrl outputs) -> final normed hidden [1, 1, B, H] bf16."""
-        ops, H = self.ops, self.H
-        e = ttnn.embedding(self.in_anchor, self.embed, layout=TILE)
-        e = ttnn.pad(ttnn.reshape(e, (1, 1, 1, H)), [(0, 0), (0, 0), (0, self.B - 1), (0, 0)], 0.0)
-        hidden = ttnn.add(self._rms(e, self.embed_norm), self.tmpl)
+        hidden = ttnn.add(self._rms(self.e_in, self.embed_norm), self.tmpl)  # (e_in row 0: embed[anchor], by ctrl)
         C, S = self._rope(self.idx_b)
         residual = None
         for i, Lw in enumerate(self.layers):
@@ -765,18 +813,21 @@ class DSparkDrafter:
         self._base_logits(h, d)
         cf = ttnn.add(self._mm(self.f_rnn, self.w_f, F32, self.ckc), self.b_rnn)  # [1, 1, 1, 3R]
         s, sb, prev = self.zero_s, self.zero_sb, self.in_anchor
+        stash = self._stash() if STASH and d > 1 and not self.vsim else None
+        self._rowcp([(h, self.hk[k], k + 1, None) for k in range(d)])
         for k in range(d):
             wp = self.wp[k]  # (w1[prev]: written by ctrl / the previous step program)
-            hk = ttnn.matmul(self.sel[k], h, compute_kernel_config=self.ckc, dtype=BF16)  # row k+1 of h (exact)
-            pj = ttnn.add(self._mm(ttnn.concat([sb, wp, hk], dim=-1), self.w_shh, F32, self.ckc), cf)
+            pj = ttnn.add(self._mm(ttnn.concat([sb, wp, self.hk[k]], dim=-1), self.w_shh, F32, self.ckc), cf)
             gate = ttnn.sigmoid(ttnn.slice(pj, [0, 0, 0, 0], [1, 1, 1, R]))
             tc = ttnn.tanh(ttnn.slice(pj, [0, 0, 0, R], [1, 1, 1, 2 * R]))
             lat = ttnn.typecast(ttnn.tanh(ttnn.slice(pj, [0, 0, 0, 2 * R], [1, 1, 1, 3 * R])), BF16)
-            self._step(lat, k + 1, self.prev[k], k)
+            self._step(lat, k + 1, self.prev[k], k, stash)
             prev = self.prev[k]
             if k + 1 < d:
                 s = ttnn.lerp(tc, s, gate)
                 sb = ttnn.typecast(s, BF16)
+        if stash is not None:
+            ttnn.deallocate(stash)
         toks = ttnn.concat([ttnn.reshape(t, (1, 1, 1, 1)) for t in self.prev[:d]], dim=-1) if d > 1 else \
             ttnn.reshape(self.prev[0], (1, 1, 1, 1))
         return toks, h

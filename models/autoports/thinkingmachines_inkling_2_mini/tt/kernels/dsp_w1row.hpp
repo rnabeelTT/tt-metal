@@ -9,21 +9,22 @@
 
 #include "api/dataflow/dataflow_api.h"
 
-template <typename AW, typename AO>
+// NT = 8 tiles (a 256-wide row) by default; any NT: l1 scratch of 64 NT + 128 NT bytes
+template <uint32_t NT = 8, typename AW, typename AO>
 inline void w1_row(const AW& s_w, const AO& s_o, uint32_t tok, uint32_t l1) {
-    noc_async_read(s_w.get_noc_addr(tok), l1, 512);
+    noc_async_read(s_w.get_noc_addr(tok), l1, 64 * NT);
     noc_async_read_barrier();
     // tile t's row 0: 16 values in face 0 (tile offset 0), 16 in face 1 (offset 512); staged 64-aligned
-    const uint32_t st = l1 + 512;
+    const uint32_t st = l1 + 64 * NT;
     volatile tt_l1_ptr uint32_t* src = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1);
     volatile tt_l1_ptr uint32_t* dst = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(st);
-    for (uint32_t t = 0; t < 8; ++t) {
+    for (uint32_t t = 0; t < NT; ++t) {
         for (uint32_t w = 0; w < 8; ++w) {
             dst[t * 32 + w] = src[t * 16 + w];
             dst[t * 32 + 16 + w] = src[t * 16 + 8 + w];
         }
     }
-    for (uint32_t t = 0; t < 8; ++t) {
+    for (uint32_t t = 0; t < NT; ++t) {
         const uint64_t d = s_o.get_noc_addr(t);
         noc_async_write(st + t * 128, d, 32);
         noc_async_write(st + t * 128 + 64, d + 512, 32);
