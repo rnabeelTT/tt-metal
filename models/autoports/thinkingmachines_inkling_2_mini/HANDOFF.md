@@ -1,0 +1,537 @@
+# Inkling-2-Mini on Blackhole: bring-up log
+
+thinkingmachines/Inkling-2-Mini (26.4B looped MoE, 3.4B active / 5.4B effective per token, NVFP4/MXFP8 experts) on
+p150 / p300 (p150x2) / p300x2 (p150x4), everything on device. Goal: served through vLLM + the TT plugin and published
+with tt-model-manager, like the other ports. Branch `raahem/inkling-2-mini`.
+
+## Model, as ported
+
+24 layers, hidden 2304; layers 6..17 run 3 passes (48 applications, each with its own KV / conv state; passes 2-3
+restart from the pre-loop state and get messages from the previous pass through per-layer gates). Global attention at
+layers 5, 11, 17, 23 (8 applications), sliding window 1024 elsewhere. No RoPE: a hidden-state-conditioned relative bias
+(r @ proj over 1024 distances), per-token sink logits, sigmoid-gated o_proj, L2-clipped q/k, unweighted-RMS v; short
+convs on K, V (dynamic taps on the global layers), attention output and MoE output; block attention residuals over the
+inputs of layers 0, 6, 12, 18. MoE: 128 experts top-8 (sigmoid + selection bias, route_scale 8),
+act = 4 tanh(g/4) sigmoid(g) 25 tanh(u/25). Logit softcap 30.
+
+## Code
+
+- `tt/weights.py`: checkpoint reader (original names), NVFP4 / MXFP8 dequant bit-exact vs transformers 5.24.
+- `tt/attn/`: Inkling-Small's custom SDPA (relative bias in-band, sliding ring, causal rows) + per-row sinks and
+  per-item page tables (multi-user). `tests/test_sdpa_device.py` (TP1 / TP4 shapes).
+- `tt/attention.py`, `tt/sconv.py` (static fused kernels from Inkling-Small; `DynShortConv`), `tt/moe.py`
+  (sparse_matmul gather / masked paths), `tt/model.py` (block residuals, message gates, the 48-application schedule),
+  `tt/ccl.py` (replicated-residual all-reduce), `tt/wload.py` (weight cache).
+- Reference: `reference/golden.py` (per-application fixtures), `reference/ref_texts.py` (quality-gate reference).
+- Tests: `tests/test_apps_device.py` (teacher-forced per application, prefill + decode), `tools/teacher_force.py`.
+
+## Quality (teacher-forced vs the CPU reference, 8 held-out 1000-token texts)
+
+| configuration | top-1 | top-1 (confident) | KL (top-32) | NLL (ref 2.022) |
+|---|---|---|---|---|
+| noise floor: fp32 vs bf16 CPU reference | 0.975 | 0.998 | 0.010 | 2.020 |
+| bfp4 experts, bfp8 KV, 1 die | 0.938 | 0.989 | 0.040 | 2.029 |
+| bfp8 experts, bfp8 KV, 1 die | 0.967 | 0.997 | 0.016 | 2.029 |
+| **bfp8 experts, bf16 KV, 1 die** | **0.970** | **0.996** | **0.010** | 2.025 |
+| bf16 experts, bf16 KV, TP4 | 0.971 | 0.996 | 0.013 | 2.027 |
+
+bfp8 experts + bf16 KV is at the noise floor (bf16 experts add nothing). bfp4 is a measurable loss. Per-application
+test (bf16 experts): worst pcc 0.99888 (prefill and decode), head logits pcc 1.00000.
+
+## Host / ttnn issues found (keep)
+
+- Host -> device writes from file-backed memory (safetensors mmap, ttnn .tensorbin via as_tensor) crawl on this host
+  (kernel 7.0, page cache in large folios: get_user_pages splitting huge PMDs; 0.2 s -> tens of minutes,
+  intermittent). Clone checkpoint tensors; stage cache files through /dev/shm (`tt/wload.py`).
+- `ttnn.sparse_matmul` masked mode with fp32 dest accumulation mis-accumulates across in0 blocks (pcc 0.85): use one
+  in0 block over all of K.
+- `models/tt_transformers` `tt_all_reduce` on a (1, N) mesh only reduce-scatters, and returns its input unreduced for
+  cluster_axis=1: use stock `ttnn.all_reduce(cluster_axis=1, Linear)`.
+- transformers' last `hidden_states` entry is not the last layer's output: fixtures hook the layers.
+- Dev runner mounts the prefetcher fix (`cq_prefetch.cpp`) like the other ports' scripts.
+
+## Serving (vLLM, dev)
+
+`tools/serve_dev.sh` (MESH_DEVICE, SEQS, CTX): vLLM 0.26 + the TT plugin in the dev image, the port's bundle via
+EXTRA_MODELS_DIR, `--hf-config-path hf_config --trust-remote-code` (vLLM 0.26 / transformers 5.12 do not know
+inkling2_loop; the shim's arch is `TTInkling2LoopForConditionalGeneration`), `--reasoning-parser inkling
+--tool-call-parser inkling` (same message tokens as Inkling v1; tool calls parse). `tt/generator_vllm.py`: engine-owned
+slot caches, a row -> slot map for the plugin's condense remaps, host sampling (v0). `tools/smoke_serve.py`.
+
+Async decode (I2M_ASYNC, default 1; plugin decode_input_update_contract 1): when every live row samples exactly on device
+(no penalties, top-k >= 32 or 1, no top-p: the published T = 1 and greedy), the decode trace samples its token
+(tt/kernels/tsample.cpp: Gumbel-max over the top-32 candidates, T * Gumbel noise from the host, greedy = first max) into
+the next step's token input, and the step returns before the device finishes (the plugin reads the tokens later); steps
+with reload_inputs False take their positions from the adapter (vLLM's are a step stale). Other rows: the host sampler,
+as before. Served p150 plain TPOT 21.9 -> 19.3 ms (T=1), 22.1 -> 19.35 (greedy); greedy streams identical; device draws
+== host Gumbel-max bitwise, chi-square vs the exact softmax z -0.1 / +0.5 over 20K draws (tests/test_device_sampler_device.py).
+Vocab-sharded head (TP2 / TP4): the kernel merges the dies' all-gathered candidates like DeviceTopK.host (top 32 by
+logit, ties: lowest id) on every die (I2M_DEV_SAMPLE_SHARDED=0: host sampling). TP2 (MESH=2): 2,600 / 2,600 draws equal
+the host's, z +1.5 / +1.2 over 10K; served p300 plain TPOT 15.1 -> 13.8 ms (T=1), 15.0 -> 13.7 (greedy), greedy streams
+identical; spec unchanged (10.5-11.0 / 9.9-10.3 ms, run-to-run noise; streams identical). On 2+ dies the per-step input
+writes block behind the running trace (~9 ms of decode_forward) but the device stays busy.
+TP4 (p300x2, 2048-row chunks): device sampling on by default too (a die's 50,272-column slice gives uint16 candidate
+indices: the kernel reads either width). MESH=4: 2,600 / 2,600 draws equal the host's, z +1.4 / +1.1; served TPOT plain
+12.8 -> 11.0 ms (T=1), 12.7 -> 11.0 (greedy), spec 9.2 -> 8.7 / 9.1 -> 8.7 (chat falls back to plain decode); greedy
+streams identical. p300x2 crashed on its first prefill at HEAD ("CBs clash with L1 buffers": the decode traces' one-page
+L1 top-k candidates, each reserving 2 KB on every core, reached the 2048-row prefill SDPA's static CB region): they now
+live in DRAM (I2M_TOPK_DRAM). The rest were each decoder's last three gate-norm outputs (BatchedDecoder._gn, 2 KB L1
+pages, 3 per width + verify) kept on self past its trace capture: now returned, not kept. Lowest persistent L1 after the
+captures (die 0, tools/l1_probe.py, which names each new buffer's python holder): p300x2 spec 1,290,432 -> 1,421,248
+(only 8 x 4 B ccl semaphores below the init level 1,423,552; 136 KB above the 2048-row SDPA CB end 1,281,600), p300 the init
+level 1,480,384 (was 1,353,408), p150 the init level 1,545,216 (was 1,418,240). Traced decode unchanged (one die B=1 /
+B=4 18.0 / 32.7 ms, TP2 12.7 / 20.7 ms), logits bitwise (B=1 / B=4 / verify R=4 A=1, one die and TP2).
+
+## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
+
+| change | B=1 | B=4 | quality (prefill path) |
+|---|---|---|---|
+| first batched decode | 126 ms | 197 ms | 0.970 / 0.996 / 0.010 |
+| fused rms_norm, stacked block mix, merged gates, folded q/r scales | 113 ms | | 0.969 / 0.996 / 0.012 |
+| bfp8 attention + lm_head, tile-layout conv states | 103 ms | 171 ms | 0.971 / 0.997 / 0.014 |
+| fused MoE decode kernels (qwen36 moe_decode + ACT_INKLING), one fused-layout weight copy | 102 ms | 133 ms | 0.968 / 0.996 / 0.014 |
+| route once per layer | 97 ms | 126 ms | decode path: 0.967 / 0.994 / 0.018 (sparse 0.970 / 0.997 / 0.023) |
+| activations in L1, one-program batched conv step | 83.0 ms | 101.3 ms | |
+| fused block-mix + message-gate-tail kernels | 72.6 ms | 90.6 ms | decode 0.968 / 0.996 / 0.018, prefill 0.968 / 0.996 / 0.014 |
+| explicit 1D mcast matmul configs for every decode matmul (tt/dmm.py) | 57.8 ms | | |
+| one-row rms_norm width-sharded on 8 cores | 51.0 ms | 67.5 ms | decode 0.970 / 0.996 / 0.015 |
+| attention prep in one program (tt/aprep.py: head gather, l2 clips, rms, tau, sink, KV-write layout) | 42.5 ms | 58.8 ms | see below |
+| message gate in one program (tt/gate.py: two cross-core rounds through a root core) | 41.1 ms | | decode (8 x 736) 0.9669 / 0.9965 / 0.0191 |
+
+TP (same code, B = 4 traced): TP4 38.1 ms, TP2 43.5 ms; TP4 B = 1 device 34.9 ms (replicated glue + 96 all-reduces at
+39 us + the replicated LM head dominate: next, the fabric all-reduce boundary and a vocab-sharded head).
+
+Fused gate zones (tools/zones_gate.py, us): squares 6, root reduce #1 11.5, norm + partial down proj 6, root reduce #2
+9, forget / gain 10, tail 10 (fp32 unpack-to-dest copies with per-copy re-inits ~300 cycles each). Next step for it:
+one round (scale the partial projections by the rms factors after the reduce) and a tree reduce over the cores.
+
+At one row most ops are bound by the 32-row tile, not by bytes (attention projections ~60 us each vs a 32 us
+bandwidth floor; DRAM-sharded only wins at LoFi): wider batches are nearly free, single-user latency needs fused
+kernels (layer glue: norms / mixes / gates / convs ~50 ms of the 97).
+
+Fused MoE notes: the kernels' single-row sigb path routes wrongly (pcc 0.5): one row runs the 2-row path. Expert slices
+must be 128..768 columns: sub-shards 3 x 384 (1 die), 384 + 256 (2), 384 padded (4). Down rows op: 3 readers per bank
+(H = 2304 is 9 columns per bank) -> 16 rows max; wider batches use the sparse union path.
+
+Decode-quality noise: the teacher-forced decode eval (8 texts x 256 steps) moves by ~0.5 pt top-1 and ~0.005 KL
+between numerically equivalent variants (ulp-level rounding differences); code_mbpp alone swings KL 0.03 - 0.10.
+The attention-prep kernel at 8 x 736 steps: top-1 0.9671 = ops path 0.9671, top-1 (conf) 0.9954 vs 0.9951, KL 0.0171
+vs 0.0150 (all of the difference in code_mbpp / chat_french; with the ops path's r instead, KL 0.0108). The relative-bias
+query r is the sensitive input: its per-head sums of squares must not go through a plain TF32 matmul (truncation
+bias +1e-4 on the clip factor measurably moved quality); the kernel splits x^2 into hi + lo (exact).
+
+Bandwidth floor (one die, bfp8): every application re-reads its layer's weights (attention ~30 MB, 8 experts ~67 MB),
+~5.7 GB per token -> ~11 ms at 512 GB/s; 51 ms is ~22 %. Matmul notes (tools/bench_proj.py, traced, M = 32): the
+default config is 2-5x slow at one tile row (k / v 34 -> 13 us, o 60 -> 24, gate down 104 -> 20 with a 1D mcast_in0
+config on ~48 cores); DRAM-sharded is slower than 1D here. Small-N matmuls (mix logits N <= 4 tiles, gate down 8 tiles,
+router) still run on a few cores (~20 us each): split-K next. One-row rms_norm: 29 us interleaved, 10 us width-sharded
+on 8 cores incl. both reshards (tools/bench_norm.py).
+
+## Serving (P150, vLLM, greedy, 256 output tokens, tools/bench_serve.py)
+
+| concurrency | TTFT mean | decode tok/s / user | total tok/s |
+|---|---|---|---|
+| 1 | 1.71 s | 20.8 | 18.3 |
+| 2 | 2.52 s | 20.5 | 34.1 |
+| 4 | 5.47 s | 16.8 | 49.1 |
+| 8 | 11.97 s | 13.4 | 65.0 |
+
+(before the prefill MoE fix below.) After it, with decode sampling on device (SAMPLE_DEVICE=1: the qwen36 RowsTopK fused
+top-32 twice inside the decode trace, the second pass on the rows shifted by the first's max so bf16 resolves the
+candidates; host draw with vLLM semantics over the 32, tt/sampling.py; 0.5 ms at 1 row, 1.3 ms at 8):
+
+| concurrency | TTFT mean | decode tok/s / user | total tok/s |
+|---|---|---|---|
+| 1 | 0.79 s | 20.9 (24.7 at temperature 1) | 19.7 |
+| 2 | 1.18 s | 21.2 | 38.7 |
+| 4 | 2.56 s | 18.2 | 61.6 |
+| 8 | 5.63 s | 14.1 | 85.7 |
+
+Single-user device time depends on the text (greedy repetitive text 47 ms / step, sampled 40 ms): expert placement?
+(open). Decode width buckets (one trace per width, the narrowest covering the highest live
+slot), logits untilized on device (readback 8.3 -> 1.1 ms). Prefill: the MoE's masked union path was 84 % of a chunk;
+the sorted dispatch (MiniMax / Qwen3.5 moe_dispatch, grouped sparse matmuls) takes a 128-row chunk 1832 -> 733 ms,
+256 rows 1031 ms (prefill quality 0.969 / 0.996 / 0.016). Next for prefill: the multi-row block mix / message sums
+(~165 ms of the 128-row chunk), then batching prefills across users.
+
+## Serving profiles (measured through vLLM; tools/bench_card.py: random-token prompts, ignore_eos, greedy, streamed)
+
+Capacity (tools/mem_probe.py, DRAM per die after the build): one die 26.7 GiB of weights + 0.46 GiB per slot at 8K
+(8 x 8K leaves 1.2 GiB); TP2 16 x 32K leaves 6.3 GiB; TP4 32 x 64K leaves 3.8 GiB. Long context (TP4): passphrase
+found at depths 0.1 / 0.5 / 0.9 of 17K, 34K and 63K-token prompts (tools/needle_serve.py). 32-wide decode (TP4)
+quality 0.969 / 0.995 top-1 (the 17-32 rows run as two 16-row fused MoE calls).
+
+Served 2026-11-22 (evening; tools/bench_card.py, every request a distinct prompt): decode tok/s/user at 1 user,
+total tok/s and TTFT at 16 / 32 users (128-token prompts), before -> after this round:
+
+| profile | 1 user | 16 users x 128: total, TTFT | 32 users x 128: total, TTFT | 1K x 16: total, TTFT |
+|---|---|---|---|---|
+| p300x2 (4 dies, 32 x 64K) | 30.3 -> 35.9-37.1 | 146 -> 206, 6.6 -> 3.2 s | 163 -> 240, 13.4 -> 6.5 s | 146 -> 157, 14.5 -> 14.7 s |
+| p300 (2 dies, 16 x 32K) | 28.7 -> 33.3-34.0 | 116 -> 170, 9.0 -> 3.9 s | | 114 -> 118, 19.8 -> 19.8 s |
+| p150 (1 die, 8 x 8K) | 24.7 -> 25.7-26.3 | (8 users) 65 -> 76, 6.0 -> 4.0 s | | (8 users) 50 -> 50 |
+
+Full tables: tt-model.yaml card.performance. One-die DRAM (tools/mem_probe.py): model 30.51 GiB (1.03 free), the
+adapter's decode widths 0.42 GiB, one prefix snapshot 0.16 GiB; so one die keeps 1 snapshot, 4 prefill lanes and no
+MixPlan (its ~184 MB of concatenated queries). Served step on 4 dies, 1 user (I2M_TIMING=1): device 26.0 ms, inputs
+0.2, readback 0.2 (the dies' top-k candidates all-gathered on device: 1.3 ms when each die was read), plugin + sampling
+0.5. Gap: prefill ~1,100 tok/s on 4 dies (long prompts queue).
+
+Served-path bug found and fixed: vLLM does not clear a reused block-table row past the new request's allocation;
+stale ids reached the global page rows and the prefill's padding rows overwrote this request's own first block
+(prompt misread, tool calls looping on <|end_message|>, nondeterministic across runs). GlobalPages.set_row keeps only
+the request's own entries (tests/test_reuse_device.py STALE=1).
+
+## Prefix caching (vLLM prefix cache + state snapshots)
+
+vLLM pages the GLOBAL layers' KV: `tt/attention.GlobalPages` holds one block table shared by the 8 global applications;
+in vLLM mode a slot's row is its request's block table (prefix-cache hits share blocks), unallocated entries and every
+row of a free slot point at scratch blocks past vLLM's pool (padded prefill rows and idle decode rows never write into
+a block vLLM may have given to another request). The rest of a sequence's state at a cached position q is not in any
+KV block: the four short-conv states of all 48 applications and the sliding layers' last window (W / 64 = 16 blocks of
+each ring). `tt/prefix.PrefixStore` keeps them in device snapshot pools (the plugin's prefix_state slots; 168 MB per
+snapshot on one die, divided by the TP degree; 4 slots on one die, 16 on 2 / 4); save and restore are one block-copy
+program each (`tt/blkcopy.py`). The conv state at a snapshot inside a prefill chunk comes out of the conv kernels
+(snap_row); the window blocks are copied after that chunk (a ring holds window + chunk + block). Policy: one snapshot per
+prompt at its last 64-token boundary before the last token, prompts >= 512 tokens (I2M_PREFIX_MIN).
+
+Checks: resuming at a chunk boundary is bit-exact vs the whole prefill (tests/test_packed_device.py); the packed conv
+kernels' states and snapshot rows are exact (tests/test_pfseg_device.py). Served (p300x2, tools/prefix_serve.py): a 4.4K
+prompt cold TTFT 4.4 s, the same prompt again 0.54 s, the next chat turn 0.53 s, a new question on the same document
+0.53 s, 4 users on one shared document 1.17 s each.
+
+## Packed prefill (several requests per chunk)
+
+`prefill_forward` packs up to 8 requests (I2M_PREFILL_LANES) into each 1024-row chunk (64-row aligned segments; a long
+prompt continues in the next chunk next to others). Row-wise work runs on all rows at once (the MoE reads each expert
+once per chunk however many sequences it holds); per sequence: the conv states (one "lane" per segment), the KV writes
+and the SDPA rows. Every packed program depends on the chunk size only, never on the segment layout: programs first
+compiled after the decode trace capture can be overwritten by the replays (the widths hang). So: the segmented prefill
+conv kernel (`sconv_kernels/pfseg_reader.cpp`: per-segment state in / commit / snapshot rows), DynShortConv lags by
+block copy, ONE paged KV fill per chunk (a per-64-row-block page table) and ONE SDPA per chunk (per-item page rows),
+the last-row gather through row-major pages. Packed vs alone: identical first-token logits (KL 0 / 6e-9).
+
+Prefill is device-bound (tools/bench_prefill.py, op_prof PREFILL): a 1024-row chunk on 4 dies is ~900 ms of device
+time (sparse-matmul experts 30 %, attention 14 %, glue the rest); 128 rows ~290 ms (expert reads dominate, hence the
+packing).
+
+## Decode, this round (traced step, ms; tests/test_batched_device.py)
+
+| change | TP4 B=1 | TP4 B=4 | TP2 B=1 | TP1 B=1 |
+|---|---|---|---|---|
+| start of the round (served TPOT) | ~32 | 35.0 | ~34 | 41.1 |
+| LM head split over the vocab (2 / 4 dies; per-die top-k, global-max shift, host merge) | ~30.5 | | | |
+| block mix logits once per block (MixPlan; bit-identical), row-limited mix SFPU, async all-reduce | 26.9 | 32.1 | 29.8 | 37.2 |
+| gate kernel SFPU on the live rows only (bit-identical) | 26.0 | 31.2 | | |
+| post-attention section in one program (tt/post.py) | 23.9 | 30.4 | | |
+| pre-attention section in one program (tt/pre.py) | 22.7 | 30.0 | | |
+| message gate on the post / pre rounds scheme (tt/gate.py GateKernel2) | 20.9 | 29.1 | | |
+| + the MoE-input norm and the router logits in the MLP gate's program | 20.5 | 28.9 | | |
+| + the attention-side gates with their q / k / v norms | 20.1 | 28.7 | | |
+| packed all-reduce: the live rows in 3 / 9 / 18 tiles (tt/ccl.py, kernels/arpack.cpp; bit-identical sums) | 19.2 | 28.0 | | |
+| MoE output read by the all-reduce in place (no clone / slice) | 19.0 | 27.9 | | |
+| router logits in the post-attention program (applications without message gates; <= 4 rows) | 18.7 | 27.9 | | |
+| attention output gate in one program (tt/agate.py; bit-identical) | 17.9 | 27.1 | | |
+| post / pre read the packed all-reduce rows in place (no unpack program; bit-identical) | 17.7 | 26.9 | | |
+| global layers' dynamic conv taps: one matmul + one add (4 + 4 + 1 programs before) | 17.4 | 26.6 | | |
+| the three attention-side gates in one program on three core rectangles (GateKernel2.multi), rounds in parallel | 16.6 | 25.2 | | |
+
+| the MoE router's top-k split over 8 cores per row (QWEN35_ROUTE_SPLIT; bit-identical) | 16.1 | | | |
+| k / v cache rows written by the attention prep program (no paged_update_cache; bit-identical) | 15.7 | 24.3 | | |
+
+B = 8: 28.0 ms (286 tok/s) with 2 fabric links per packed all-reduce. B = 16: 47.7 ms (335 tok/s; the pre program's
+two rounds now share one gather buffer: at 16 rows its CBs reached 1.4 MB and clashed with L1 buffers); B = 32: 70.5 ms
+(454 tok/s). Decode eval B = 8: 0.9706 / 0.9970 / 0.0153; B = 16 (8 texts, 8 idle slots): 0.9671 / 0.9960 / 0.0185
+(message-gate programs off: 0.9684 / 0.9949 / 0.0178). tests/test_batched_device.py's per-slot pcc at 16 / 32 slots
+is below its bar with or without this round's changes (0.987 with them all off). Tried: fewer SDPA cores per kv head on the sliding
+layers (4 / 8 / 16 instead of 55): 16.1 -> 16.0 ms at these positions, dropped.
+
+B = 8 at this point: 31.4 ms (255 tok/s). B = 8 trace replays hung (timing-dependent; not with the watcher): the
+middle dies sat in a decode matmul on core (9, 0), the fabric sender core all_reduce_async places right of its output
+shard grid, while the outer dies ran ahead into the next all-reduce (tools/tt-triage.py dump_running_operations /
+dump_callstacks on the live hang). The decode matmuls now stay on columns 0..8 (tt/dmm.py). I2M_L1_CHECK=1 checks
+every generic_op's CBs against the lowest L1 buffer (no overlap; pre / fused MoE reach ~1 MB per core). The post
+router round is limited to 4 rows (set while chasing the hang; may be liftable).
+Tried and dropped: merging the message gate's first two rounds (the projections of the raw operands with the norm
+statistics): slower (18.1 / 27.8 / 33.4 ms at B = 1 / 4 / 8): the bigger round costs more than the round it saves. Tried and dropped:
+the attention projections streamed per DRAM bank (qwen36 DecodeLinear): no faster (compute-bound at one row).
+
+Decode quality after the packed all-reduce row (TP4, 8 x 736 teacher-forced): 0.9720 / 0.9970 / 0.0156 (0.9689 / 0.9962 /
+0.0156 before the gate rows). The packed all-reduce's pack reads a DRAM source through an aligned staging buffer: a
+DRAM read needs its L1 destination 64 B-aligned like the source (32 B chunk slots at 32 mod 64 corrupted face 1).
+
+Decode quality (TP4, 8 x 736 teacher-forced): 0.9711 / 0.9970 / 0.0151 (noise band; the all-reduce change moved it
+from 0.9677 / 0.9954 / 0.0212, the eval's noise). Tried and dropped: one fused-MoE call for 17..32 rows (works, pcc
+0.9998, but slower than two 16-row calls: the MoE is bandwidth-bound at these widths, and TP4's 288-column expert slices
+are stored padded to 384); the MoE rows kernels at one row (still route the sigb router wrongly).
+
+## Prefill, this round (TP4, one 1,024-token chunk, tools/bench_prefill.py wall time)
+
+| change | ms | tok/s |
+|---|---|---|
+| start | 870 | 1,177 |
+| grouped expert matmul over the whole grid (tt/gmm.py) + multi-core dispatch (qwen36 dispatch_mc) | 682 | 1,501 |
+| MoE activation + routing weights in one program (tt/moeact.py) | 642 | 1,596 |
+| down projection writes row-major rows (no untilize before the un-dispatch) | 640 | 1,600 |
+| attention prep for the chunk's rows (tt/aprep.py: q / r / sink, the K / V rows into L1 fill tensors) | 525 | 1,949 |
+| block mix over (row tile, H column block) cores, one softmax per row tile per core; the sources read in place | 477 | 2,148 |
+| short conv: the row shifts on the FPU (0/1 shift-matrix matmuls), not 3 shifted tiles per tile in the reader | 428 | 2,394 |
+| message gates: the fused gate tail over the chunk's tiles (tt/gatet.py) | 397 | 2,581 |
+| MoE row gather from an L1 row-major copy of x (chunks <= 2048 rows) | 384 | 2,666 |
+| grouped matmul: A multicast within each group slice (read from DRAM once, not once per column block) | 355 | 2,887 |
+| grouped matmul: padding groups skipped, the weight block double-buffered when it fits | 352 | 2,913 |
+| prefill SDPA: 4 items per work unit (their Q tiles stacked; each K / V chunk read once for the 4) | 346 | 2,958 |
+| grouped matmul: slices take contiguous expert ranges (each expert's weights read once per column block) | 344 | 2,976 |
+| SDPA writes whole [1, 1, T, NH * HD] tiles (4 items x 8 rows = one tile row; no reshape of the padded output) | 336 | 3,044 |
+| block mix logits once per block (MixPlan: one matmul per block against every later query; no duplicate block norm) | 324 | 3,165 |
+| the residual adds in the short-conv kernel (x + conv(attention out) fp32; bf16(resid + conv(MoE out))) | 312 | 3,278 |
+
+Served (p300x2, vLLM, 2048-row chunks, 32 slots x 1M, pool 1,897,344 tokens), tools/needle_serve.py, depths 0.1 / 0.5 /
+0.9 all found: 134,668 tokens 50 s (was 137 s at 126K), 538,715 tokens 286 s (was 842 s at 526K), 1,031,088 tokens
+760 s (1,350 tok/s over the whole prompt).
+
+Served decode (p300x2, 1M-context server, tools/bench_card.py 128 in): 1 user TPOT 23.9 -> 18.4 ms (54.4 tok/s) after the
+SDPA reads only the page-table entries it needs (a 1M row is 64 KB; every SDPA core read it whole each step: traced
+B=1 at max_seq_len 1M 21.1 ms vs 15.7 at 512, now 15.7 at both); per step (I2M_TIMING): inputs 0.7-1.1, device 16.1,
+readback 0.3, plugin + sampling 0.7 ms. 8 users TPOT 37.0 ms (27.0 tok/s/user; device 30-35 ms, width 8 throughout);
+32 users 84.8 ms (11.8 tok/s/user, 310 tok/s; device 78-82 vs 70.4 traced: the device top-k runs 8 rows per pass,
+~0.65 ms each). The 2048-row profile (617 ms device): gmm 91, rms_norm 55, SDPA 46, mix 35 + logit matmuls 34, message
+gates ~70 (gate tail 25, matmuls 27, casts 13), all-reduces 47, prep 23, the SDPA output reshape 18 (a [1, T, NH, HD]
+tile tensor: NH padded to 32 rows), row gather 18.
+Tried: the grouped matmul with double-buffered 6-tile weights and single-buffered A (1.1 MB of CBs) 346 -> 353 ms;
+balanced group slices snapped to expert boundaries 354 ms; LoFi barely faster (not FPU-bound). 8 items per SDPA unit
+with 128-position K chunks: 228 ms at 128K (32 units: compute-bound), 4 items with 128-position chunks 135 ms.
+
+Quality after this round (teacher_force.py prefill path, bfp8 experts, bf16 KV): TP4 2048-row chunks 0.9717 / 0.9970 /
+0.0153; TP2 1024-row 0.9697 / 0.9962 / 0.0160; TP1 256-row 0.9703 / 0.9966 / 0.0142; decode eval (TP4 B=8) 0.9711 /
+0.9955 / 0.0168. Prefill wall: TP2 442.6 ms per 1024 rows (2,314 tok/s), TP1 320 ms per 256 rows (800 tok/s).
+tests/test_packed_device.py on one die: packed vs alone KL 8.6e-4 / 1.8e-3 (bar 1e-4; TP4 / TP2 ~1e-9), argmax equal,
+the same at the round's first commit (d1a18d465da): pre-existing, row-count dependent matmul configs on the unsplit
+weights (not chased).
+
+At 128K positions (op_prof P0=131072, one 1024-row chunk, device): SDPA 377 -> 111 ms (2 items: 228; the stream bound:
+linear in items per unit), the chunk 709 -> 443 ms. 8 items: the CBs (1.56 MB) clash with L1; the tree reduction's
+code compiles only for one-item units (4 items overflowed the kernel config buffer by 320 bytes).
+
+2048-token chunks: 3,072 tok/s (4096: 2,912 before the gather change), at +1.29 GiB DRAM per die (the sliding rings
+hold the window + one chunk for 32 slots: 2,064,384 -> ~1,895,000 pool tokens); not switched on yet. The 1024-row
+profile (op_prof PACKED=1, 357 ms device): gmm 65, rms_norm 29, SDPA 22, mix 19 + its logit matmuls 19, q|k|v|g
+projections 15, the row gather 14, gate tail 13 + gate matmuls 15, all-reduces 25, prep 12, dispatch 10. The grouped
+matmul's CBs stay within ~800 KB: double-buffered 6-tile weight blocks (1.37 MB of CBs) clashed with the packed
+prefill's L1 buffers (from 1.34 MB; tests/test_packed_device.py threw, the bench did not).
+
+Decode eval after the attention prep: 0.9711 / 0.9955 / 0.0168 (noise band). The prep's outputs are 1-2 bf16 ulps from
+the op path (exact sums); tests/test_packed_device.py's prefix-resume KL (different chunk shapes) went 1.7e-3 ->
+1.1e-2 (its bar raised to 2e-2; the exact resume at a chunk boundary stays bitwise). Not straight into the DRAM caches:
+rows 2k / 2k + 1 share a 64-byte DRAM word.
+
+## One die decode (2026-11-23; traced step, tests/test_batched_device.py; tools/op_prof.py, tools/bench_moe.py)
+
+Floor: bfp8 attention ~30 MB + 8 experts ~68 MB per application x 48 + the LM head ~0.5 GB = ~5.2 GB/token, ~10 ms at
+512 GB/s. Start: 34.2 ms (B=1), 2,899 programs per step (~60 per application): the fused glue (MixPlan / pre / post /
+message gates) was off on one die (DRAM).
+
+| change | TP1 B=1 | TP1 B=4 | TP4 B=1 | TP4 B=4 |
+|---|---|---|---|---|
+| start | 34.2 | 52.5 | 15.7 | 24.2 |
+| fused glue on one die too (KV pool cap 7 x 8K tokens: 0.29 GiB free after the trace captures); 1,378 programs | 26.9 | 47.7 | | |
+| the three 384-column MoE sub-shards as virtual experts e * 3 + s (qwen36 union.py `subs`, kernels MOE_SUBS): one route + one gate/up + one down program per layer, the sub-shard sum in the down kernel's fp32 accumulation; prefill's grouped matmul reads the stacked weights by id * 3 + s (gmm wsub) | 25.8 | 46.5 | | |
+| QWEN35_MOE_GU_OFFROW=2 (MoE layer at 1 / 4 / 8 rows: 223 / 691 / 1215 -> 218 / 641 / 1110 us) | | 43.5 | 15.4 | 23.3 |
+| LM head streamed per DRAM bank with the softcap in the same program (tt/head.py: the qwen36 DecodeLinear placement + this port's FP32 / softcap kernels; one die, or each die's vocab slice; its weight copy replaces the interleaved one); one die: the MoE's shared output buffer and the o_proj output read in place by pre / post (no clone / slice / L1 moves) | 23.8 | 42.7 | 15.1 | 23.1 |
+
+TP2 at the end: B=1 18.6 ms (19.3 before the round), B=4 29.6 ms. Quality after these rows: TP1 prefill 0.9703 / 0.9966
+/ 0.0139, TP1 decode 0.9708 / 0.9959 / 0.0142, TP4 prefill (2048) 0.9720 / 0.9970 / 0.0151, TP4 decode 0.9711 / 0.9955
+/ 0.0165, TP2 prefill 0.9691 / 0.9962 / 0.0158 (all in band). One die at 8 x 8K (KV pool 57,344): 0.29 GiB free after
+the trace captures. Fixed here: the merged-MoE commit's prefill sub-shard map had one entry, so TP2's second sub-shard
+was skipped in prefill (TP2 decode test pcc 0.92; TP1 / TP4 unaffected).
+Served p150 (8 x 8K, bench_card): 1 user 28.2 -> 39.0 tok/s/u (TPOT 25.6 ms: device 24.5 incl. the sampler's top-k,
+host 1.2 = inputs 0.1 + readback 0.4 + plugin / sampling 0.7); 8 users 128/128 90.5 -> 97.3 total tok/s.
+
+One-die prefill: a 256-row chunk is 264 ms of kernels, 62 % MoE (the grouped matmul at ~bandwidth: 256 rows x 8 experts
+reach nearly every expert, so each chunk streams all 26 GB of experts). Chunk 256 / 512 / 1024: 825 / 1,397 / 1,841 tok/s
+(bench_prefill, one slot). The sliding rings held the window + one chunk per slot (1024-row rings do not fit beside 8
+slots); I2M_RING_CHUNK sizes them for 256 rows and runs those layers' KV writes + SDPA in 256-row sub-chunks inside a
+longer chunk (projections / convs / MoE on the whole chunk; packed test numbers identical, exact resume bitwise). Served
+p150 at 512-row chunks: TTFT 1K 1,465 -> 830 ms, 4K 5,515 -> 3,216 ms, 8 x 1K 10.1 -> 6.0 s; 8 x 4K and 2 x 7K ran
+clean. 1024-row chunks ran out of DRAM in a real request (the MoE dispatch buffers with real routing, ~56 MB each).
+Multi-die: the decode q | r | s | g, k and v projections in one program (tt/mstream.py: each weight streamed per DRAM
+bank by its own reader cores, each projection its own input; per-bank weight copies beside the interleaved ones, ~130 MB
+per die at 4 dies, 264 at 2, none on 1 die: no room). TP4 B=1 / 4: 15.1 / 23.1 -> 14.2 / 22.1 ms; TP2 18.7 / 29.7 ->
+17.7 / 28.5 ms. Outputs vs the interleaved matmuls (tests/test_mstream_device.py, real weights): k / v bitwise equal, q
+99.5 % bitwise, max rel 9e-8 (fp32 sum order). Decode eval TP4 0.9703 / 0.9956 / 0.0135 (0.9711 / 0.9955 / 0.0165 off),
+TP2 0.9679 / 0.9954 / 0.0169 (off: 0.9708 / 0.9960 / 0.0142): the eval's noise band between numerically equivalent
+variants. Memory at the served shapes: 4 dies 1.11 GiB free after the traces (pool cap 1,895,296 -> 1,878,912 keeps the
+prefill headroom), 2 dies 4.1 GiB. Side tests can run on dies 2 / 3 while a 2-die server uses 0 / 1 (TT_LOCK_HELD=1,
+TT_VISIBLE_DEVICES=2,3): fine for correctness / device time, but host load skews served timings (p300 prefix TTFT 0.94 ->
+1.32 s while one ran).
+Decode SDPA (tools/zones_sdpa.py: device zones per phase): at short context the time is the per-core chunk compute
+(~20 us for a 256-key chunk on 4 cores; reduction / finalize ~3 us each). Its softmax SFPU steps now run on the live Q
+rows only (VectorMode::R when MI x R x G <= 16: decode units hold 3 rows): one die B=1 / 4 23.8 / 42.7 -> 23.4 / 41.9 ms,
+decode eval identical to the last digit (0.9708 / 0.9959 / 0.0142, nll 1.7544). Rejected: 128-key decode chunks on the
+sliding layers (I2M_SDPA_K_CHUNK_SW): -0.8 ms on one die, op-level pcc unchanged, but the decode eval drops across 6 of
+8 texts (top-1 0.9708 -> 0.9635, KL 0.0142 -> 0.0167): more partitions, more bf16 roundings of the partial outputs in
+the cross-core reduction. Streamed q / k / v on one die (I2M_MSTREAM_1DIE): -1.2 ms, but its weight copies (~530 MB)
+need room: prefill through the streamed copies instead of the interleaved ones (I2M_MSTREAM_PREFILL, one call per
+32-row tile) costs 368 -> 423 ms per 512-row chunk (+15 %): not taken; a smaller one-die KV pool would be the way.
+The streamed q / k / v now read the model's own interleaved weights in place (kernels/ilstream_reader.cpp): with N a
+multiple of 8 tile columns every column sits in one bank (page k N + n in bank n mod 8, at a stride of N / 8 pages), so
+no per-bank copies (the q block zero-padded to a multiple of 8 tiles per die: +0.5 MB per layer). One die gets it too:
+B=1 / 4 23.4 / 41.9 -> 22.5 / 41.0 ms (0.28 GiB free at 8 x 8K, unchanged); TP2 17.7 / 28.6, TP4 14.3 / 22.1 ms (as the
+copies; the 4-die pool cap is back at 1,895,296). Outputs vs the interleaved matmuls: k / v bitwise, q max rel 1e-7.
+MoE gate|up readers 2 -> 3 per column group (with GU_OFFROW=2; 4 / 6 slower): MoE layer 1 / 4 rows 217 / 641 -> 202 / 555
+us; one die B=1 / 4 / 8 22.5 / 41.0 / - -> 21.9 / 38.1 / 52.1 ms; TP2 B=4 28.6 -> 28.0. A sliding layer's k and v convs in
+one program (tt/bconv.py bconv_pair): 21.9 -> 21.7 ms. Both bitwise neutral (decode eval with the streamed q / k / v off
+identical to the last digit). One-die decode eval with the streamed q / k / v: 0.9672 / 0.9957 / 0.0184 vs 0.9708 /
+0.9959 / 0.0142 off (code_mbpp KL 0.049 -> 0.085; KL lower on 4 of 8 texts): against the exact fp64 product of the same
+bf16 input and dequantized bfp8 weight, both paths have the SAME error (mean |err| 2.676e-3, max 2.844e-2, layer 0;
+tests/test_mstream_device.py), their difference ~1e-7: argmax noise of a last-bit change, kept.
+Measured, not kept: gate|up + down in one program (the down weights streamed during gate|up, qwen36 union.py fused
+rows): 1 / 4 / 8 rows 210 / 623 / 1073 -> 212 / 639 / 1037 us, one die 22.5 -> 22.8 ms: the MoE reads compete for the
+same bandwidth; down readers 1 / 9, chunk 4 / 8: no gain; the one-row MoE kernels (I2M_MOE_ROW1): equal.
+Attention projections at HiFi4 (I2M_ATTN_HIFI4, default 1; HiFi2 drops low activation mantissa bits): q vs the exact
+fp64 product mean |err| 2.7e-3 -> 2.1e-4 (max 2.8e-2 -> 3.5e-3), identical on the streamed and the interleaved paths.
+Prefill eval (1 die) 0.9703 / 0.9966 / 0.0139 / nll 2.0355 -> 0.9696 / 0.9970 / 0.0123 / nll 2.0218 (ref 2.0219); decode
+eval 1 die 0.9672 / 0.9957 / 0.0184 -> 0.9686 / 0.9964 / 0.0157, TP2 0.9679 / 0.9954 / 0.0169 -> 0.9684 / 0.9947 / 0.0186
+(noise band); worst-slot logits pcc TP4 0.99302 / 0.99334 -> 0.99459 / 0.99540. Cost: 1 die 21.7 -> 22.4 ms, TP2 17.7 ->
+18.1, TP4 14.2 / 21.0 -> 14.4 / 21.3 ms; prefill 368.8 -> 370.0 ms per 512 rows. Not taken: the LM head at HiFi4 (+0.7 ms,
+decode KL 0.0157 -> 0.0160); the MoE experts at HiFi4 (bitwise unchanged: their activations are rounded to 7 bits, the
+srcB width, and HiFi2 already reads the whole bfp8 weight); head readers 3 / 4 / 6 (noise); the SDPA read throttle (the
+stock barrier every 2 tiles at ~100 program cores: RD 4 / 8 / 16 changed nothing).
+Decode SDPA phases (tools/zones_sdpa.py, compute sub-zones S_C_BIAS / QK / SM / PV / COR, reader S_R_TBL / K / V; 256-key
+chunks, 4-die shape at position 300): the compute waited up to 16 us in the bias phase for the writer's mask tiles (a
+fully masked 2 KB tile written with 512 RISC stores, 6 of the 8 tiles of the newest chunk; every row of a partly masked
+tile). Now one fully masked tile per block is written and copied (L1 -> L1 NOC reads), partly masked tiles are zeroed
+(NOC) and only their live rows (R x G) written: bias wait 16 -> 4 us, SDPA 29 -> 26.5 us; model B=1 / 4 22.4 / 38.5 ->
+22.3 / 38.3 ms; outputs bitwise (logits, SDPA test 24 / 24, packed test with HiFi2 identical to before). The reader was
+then the limit: the stock read throttle (a NOC barrier every (512 / readers) x 1152 / tile bytes reads) assumes every
+program core reads at once (2 tiles per barrier at ~100 cores). A decode step with <= 16 active readers (min(chunks,
+cores per head) x kv heads) now assumes 16: K / V 6.8 -> 1.4 us per chunk, SDPA 26.5 -> 18.8 us (4-die shape, position
+300); long contexts keep the stock throttle (global layer at 60K: 385 us either way; a fixed looser throttle made the
+slowest core 385 -> 413 us), prefill too. One die 22.3 -> 21.9 ms, TP4 14.4 / 21.3 -> 14.0 / 20.9 ms (B=1 / 4); bitwise. Note: the device profiler writes one CSV in the shared generated mount:
+profile on one die at a time.
+Decode SDPA fixed latency (tools/zones_sdpa.py with B= users; one die, position 300, 256-key
+chunks): of ~21 us, ~4.5 us was the reader prologue (every program core read the same 64-byte cur_pos stick, then the
+busy ones the same Q / Rq / sink rows: tiny DRAM reads serialized at one bank, ~3 + ~2 us), the newest chunk computed /
+read whole though it held a few live tiles, and finalize / reduction ~6 us of 1-tile compute steps. Now (all bitwise,
+I2M_SDPA_* switches): program core 0 reads every item's position stick, a 512-byte page-table prefix and the Q / Rq /
+sink tiles in one round trip and multicasts them (semaphore 1; BCAST); a core's last chunk reads / computes only its
+live key tiles (TRIM; QK CB doubled so the smaller in-place block never wraps); the bias-table tiles are read by the
+writer beside the masks (its fully masked tile prebuilt while it waits for the positions); Q rows are not zero-filled
+for R = 1 (rows are independent and never written out); the reduction / finalize lose 3 tile copies; multi-user decode
+splits each (user, kv head) over grid / units cores when it has > 4 chunks (MU_SPLIT / MU_MIN: <= 4 stays on one core,
+bitwise). Kernel spans base -> new (us): TP1 B=1 sliding / global 300 21.2 / 21.2 -> 17.8 / 17.7, B=4 27.8 -> 24.2;
+TP2 B=1 / 4 19.9 / 24.6 -> 16.7 / 21.7; TP4 20.5 / 24.0 -> 17.0 / 21.5; TP1 global 4K B=1 / 4 68.9 / 131.0 -> 57.8 /
+121.5, 8K 87.7 / 243.9 -> 77.1 / 204.4, sliding 8K 38.0 -> 26.8, 32K 219.8 / 899.0 -> 210.3 / 732.3; TP2 / TP4 32K
+131.8 / 96.8 -> 122.8 / 88.2. Traced (test_batched, prefixes 64..200) one die B=1 / 4 20.7 / 35.6 -> 20.4 / 35.4 ms,
+TP2 15.7 / 24.6 -> 15.4 / 24.5; outputs and the decode eval identical (TP2 B=1 0.9639 / 0.9945 / 0.0121 to the last
+digit). Measured, off by default: BALANCE (one chunk per core: the live tiles split evenly, -2 us at 300) costs decode
+KL (TP2 B=1 0.0121 -> 0.0168), the 128-key lesson again; FIN2 (sink + normalization as O / (l + exp(s - m)), 4 compute
+steps instead of 9, -1.5 us) is equal at op level (mean 1 - pcc 5.50e-4 vs 5.54e-4) but its evals were mixed (TP2 B=1
+KL 0.0121 -> 0.0104, one die B=4 0.0123 -> 0.0171); the split at short contexts (always on) cost B=4 top-1 ~0.4 pt.
+Not taken: table / K / V reads in flight together (transaction ids): one core's reads do not get faster, K lands later;
+the throttle 2x / 4x looser at 4K B=4 / 32K B=1: 121 -> 115 / 210 -> 211 us. What is left at 300 positions: core 0's
+round trip + multicast 1.7 us, Q placement 0.6, the full first chunk on the critical core (~6 us), the reduction ~2.5
+and finalize ~3 us.
+Streamed q readers per bank: 2 on one die (3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies (TP2 17.6 -> 17.2, TP4 14.0 /
+20.9 -> 13.9 / 20.8 ms). Not kept: o_proj streamed the same way (K = 3072: one die 21.9 -> 22.3, TP2 17.2 -> 17.6 ms).
+Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).
+Tried and dropped: q | k | v in one matmul on the sliding layers with the k / v convs in one program reading their
+columns in place: only the 20 ungated sliding applications qualify (the loop passes' message gates give q / k / v
+different inputs), ~0.2-0.4 ms per token, and the merged weight did not fit beside 8 x 8K on one die.
+
+Quality: TP1 prefill 0.9703 / 0.9966 / 0.0142 (unchanged), TP1 decode (8 x 736) 0.9708 / 0.9959 / 0.0145, TP4 decode
+0.9711 / 0.9955 / 0.0168 (unchanged); merged vs per-sub-shard MoE pcc 0.999994 (tests/dbg_moe_merge.py).
+Measured, not taken: more gate/up readers per column group (3: +3 %, 4 / 6: +30 %), down readers 3 / 9 and chunk 4
+(no change); DecodeLinear for the attention projections (q|r|s|g 49.7 -> 42.8 us, k equal, o 23.0 -> 28.2 us;
+q|k|v in one matmul on the sliding layers 76 -> 65 us with dmm, 54 us streamed: ~0.5-0.9 ms per token, later).
+Per application now (TP1 B=1): MoE ~218 us (59 % of its floor), attention projections ~100 us, SDPA ~32 us, glue
+~140 us over ~20 programs; LM head + softcap ~2 ms per token.
+
+## Speculative decoding: DSpark (the checkpoint's mtp.safetensors)
+
+Not in transformers. vLLM serves it from 0.35 nightly (`"method": "dspark", "num_speculative_tokens": 7`), SGLang from
+PR #51926 (`--speculative-algorithm DSPARK`, 8 drafts verified). Reference code (SGLang PR head
+zcnrex/sglang@chunan/inkling-2-mini-day0) saved under ~/inkling2-work/ref/sglang: srt/models/dspark.py (RNNHead Markov
+head = markov_head_type rnn_hidden; context KV from the target's hidden states), srt/models/dflash.py (DFlash base),
+kernels/ops/speculative/dspark/markov_walk.py / markov_sample.py, srt/models/inkling2.py (taps at visits 5, 23, 41 +
+the final normed state, 48).
+
+DSpark acceptance (reference/dspark_ref.py, CPU, 8 held-out texts x 40 anchors; accepted drafts of 7 per pass):
+teacher-forced greedy 1.20 (base logits without the Markov head 0.70), sampled at temperature 1 (the checkpoint's
+default; expected acceptance sum_k prod alpha) 1.21; code / problems 1.6 - 2.1, human chat 0.4 - 0.6. Exact greedy
+(the target's own continuation) on math: 2.05 vs 1.30 teacher-forced.
+
+### Speculative decoding on device
+
+Served (vLLM, real text, 256 tokens, one user; tok/s = 1000 / TPOT). T=1 = the checkpoint's default sampling (the
+published profile):
+
+| Target | T=1 off | T=1 on | greedy off | greedy on |
+| --- | ---: | ---: | ---: | ---: |
+| p150 (I2M_KV_POOL_TOKENS=32768: the drafter needs the room) | 38.9 | 52.9 | 41.3 | 54.3 |
+| p300 | 49.0 | 64.1 | 49.8 | 70.4 |
+| p300x2 (pool 1.7M) | 64.5 | 83 | 64 | 85 |
+
+Per text on p300x2 (T=1): math 99, code 97 tok/s; chat accepts too little and falls back to plain decode.
+
+Pieces:
+* Verify rows (BatchedDecoder(verify=R)): R tokens of one sequence in one decode pass, bitwise the sequential decode at
+  the same width (R = 2, 4; one die, TP2, TP4; eager and traced; tests/test_verify_device.py). The short convs' readers
+  rebuild each row's conv state from the slot's committed row (a device tensor) and the earlier rows' inputs
+  (tt/kernels/seqshift.hpp); after a pass row j holds the state after row j (rewind = move_row j -> 0). R = 3 is not
+  bitwise (a width-3 row-position effect; never served).
+* Drafter (tt/drafter.py, the checkpoint's mtp.safetensors): traced ctrl + commit + draft, 3.1 ms at d = 3 on one die,
+  vocab-sharded on multi-die (2.6 ms TP2). Sampled drafts at the request's temperature: top-32 + host Gumbel noise.
+* Acceptance (tt/sampling.HostSampler.spec): min(1, p / q), residual max(p - q, 0) (exact; Monte Carlo checked).
+* Serving (tt/generator_vllm.py, I2M_SPEC=3): a request decoding alone in slot 0 with on-device sampling; a pass's
+  accepted tokens go to vLLM in one step (the M2.7 port's variable-width output shim; the scheduler reserves the
+  verify window's KV slots). Falls back to plain decode under the measured break-even (one die 1.7, TP2 1.5, TP4 1.6
+  tokens per pass, over >= 16 passes). Prefix-cache hits keep spec when the drafter's caches still hold the prefix
+  (multi-turn chat). A second request rewinds to what vLLM holds. tests/test_spec_generator.py, tools/spec_bench.py.
+
+Measured and not taken: the drafter's temperature at c x T (750 served T=1 passes, exact expected acceptance: c = 1 is
+best, 2.22 tokens per pass); d = 1 at T=1 (51 vs 56 tok/s one die); tree verification (two 4-row branches = an 8-row
+pass: the MoE expert union makes it 49 vs 37 ms one die for ~+12 % tokens). Verify pass cost (one die, 4 rows): MoE
+18.7 ms (the expert union of 4 consecutive tokens; at its bandwidth floor), the rest ~18 ms.
+
+Glue round (2026-11-24, all bitwise): aprep in 4-head groups (I2M_APREP_QG, 15.4 -> 10.6 us), the global layers'
+dynamic conv taps built in the conv program with k and v in one program (I2M_DYN_FUSED, 8 programs 54 us -> 31 us),
+all loop layers' message mixes in one program per pass (I2M_MSG_ALL), the TP2 MoE sub-shard sum without clone / slice
+(I2M_MOE_NOCLONE), the one-die MoE output read in place at any width (I2M_MOE_INPLACE). Traced one die B=1 20.4 -> 19.8,
+B=4 35.4 -> 34.7; TP2 B=1 15.3 -> 14.8, B=4 24.5 -> 24.1 ms.
+
+Later the same day (all bitwise): round signalling (flush + semaphore, linked multicasts; post T=1 21.2 -> 18.7 us);
+router weights pushed after round 1's inputs (I2M_RD_STAGED) and later rounds' gather rows zeroed lazily (I2M_RED_ZLAZY);
+streamed q|k|v with k|v on one reader per bank, 4-row tiles, 4-column blocks (I2M_MS_KV / MS_HMIN / MS_G; 64.5 -> 57 us,
+1 and 2 dies only); the short convs on live rows only (I2M_BCONV_LIVE: sliding pair 12.1 -> 7.7 us, global 16.2 -> 10.9)
+and lean aprep (I2M_APREP_LEAN: 10.6 -> 7.5 us). Traced B=1: one die 18.5 ms, TP2 14.0 (B=4 22.9). All-to-all
+multicast rounds measured ~155 us per round (concurrent multicasts into one rectangle serialize): rejected.
+
+Served at 929076d256e (2026-11-24, full profile env, real-text prompts, 1 user; TPOT ms / tok/s):
+
+| profile | spec T=1 | spec greedy | plain T=1 | TTFT 1K / 4K | 8 users x 128 total |
+|---|---|---|---|---|---|
+| p300x2 | 8.48-8.75 / ~116 | 8.64 / 116 | 10.96 / 91 | 0.59 / 1.43 s | ~198 tok/s |
+| p300 | 10.17 / 98 | 9.79 / 102 | 13.52 / 74 | 0.55 / 1.80 s | ~158 tok/s |
+| p150 | 15.51 / 64.5 | 14.89 / 67 | 18.84 / 53 | 1.01 / 3.35 s | ~105 tok/s |
+
+Spec gain is text-dependent (p300x2 math 6.1 ms, code 8.4, chat ~plain rate: few drafts accepted). Traced plain decode B=1:
+one die 18.0 ms (~57 % of the 512 GB/s floor), TP2 12.7 (~40 %), TP4 ~10.3 (~25 %); the multi-die gap is the
+per-die glue (pre / post / gates / route / SDPA, ~4.5-6 ms per step on every die). Measured, not kept: the decode
+all-reduce folded into post / pre (I2M_AR_MERGE, bitwise but TP2 12.75 -> 12.98 ms; the 96 AR programs cost only
+~0.4 ms in the trace).
+
+Decode MoE fixed costs (2026-11-24, all bitwise): I2M_MOE_GU_KCH=4 (gate|up reader pushes K-row chunks, the compute
+multiplies each as it lands, same MVMUL sequence), I2M_MOE_GU_OFFROW1 (one-bank groups on TP2 / TP4 whose bank shares
+its reader row: readers one row inward on NOC1), I2M_MOE_DN_SKIPPAD (TP4's zero down K pad row zeroed in L1, not read).
+One-die bench of the per-die shards, us gate|up / down (floor at 512 GB/s): TP2 1 row 63.0 / 28.1 -> 53.4 / 28.1
+(44 / 22), 4 rows 131.4 / 61.5 -> 119.7 / 61.5 (110 / 55); TP4 1 row 30.9 / 17.7 -> 29.4 / 16.8 (22 / 11), 4 rows
+67.8 / 36.4 -> 63.8 / 33.8 (55 / 27.5); TP1 unchanged. Traced TP2 B=1 12.7 -> 12.4 ms. Left: the route program
+(7.2 us x 48 = 0.35 ms/step), gate|up / down prologue + tail ~3 us each.
+
+## Next
+
+1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
+   the streamed q|k|v run at ~58 % of bandwidth (72 vs ~42 us, ~1.4 ms one die).
+2. Prefill: long-context SDPA past 4 items per stream (smaller CBs: single-buffered tables), 2048-token chunks in the served config (pool cap),
+   the block-mix logits once per block (MixPlan for prefill), the gate head (rms / concat / matmuls).
+3. DSpark speculative decoding (acceptance 1.2 per pass measured: low priority).

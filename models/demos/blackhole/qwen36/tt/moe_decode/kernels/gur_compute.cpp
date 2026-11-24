@@ -62,6 +62,32 @@ ALWI void round_rows(uint32_t idst) {
     MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, round_sig7, (kRowIters), idst, VectorMode::R));
 }
 
+#ifdef ACT_INKLING
+// Inkling-2's expert activation, act = 4 tanh(g / 4) * sigmoid(g) * 25 tanh(u / 25), evaluated as
+// (2 s(g / 2) - 1) * s(g) * (2 s(2 u') - 1) with s = sigmoid and tanh(x) = 2 s(2x) - 1: the port folds 1/25 into the up
+// weights (u' = u / 25) and the 100 into the down weights. Needs only silu_tile_init()'s sigmoid setup.
+#ifdef TRISC_MATH
+namespace ckernel::sfpu {
+template <int ITERATIONS>
+inline void inkling_act(const uint32_t ig, const uint32_t iu, const uint32_t io) {
+    constexpr uint32_t T = 32;  // DST tile stride (sfpi rows)
+    for (int d = 0; d < ITERATIONS; d++) {
+        const sfpi::vFloat g = sfpi::dst_reg[ig * T];
+        const sfpi::vFloat u = sfpi::dst_reg[iu * T];
+        const sfpi::vFloat a = _sfpu_sigmoid_<true>(g * 0.5f) * 2.0f - 1.0f;
+        const sfpi::vFloat s = _sfpu_sigmoid_<true>(g);
+        const sfpi::vFloat b = _sfpu_sigmoid_<true>(u * 2.0f) * 2.0f - 1.0f;
+        sfpi::dst_reg[io * T] = a * s * b;
+        sfpi::dst_reg++;
+    }
+}
+}  // namespace ckernel::sfpu
+#endif
+ALWI void inkling_rows(uint32_t ig, uint32_t iu, uint32_t io) {
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, inkling_act, (kRowIters), ig, iu, io, VectorMode::R)));
+}
+#endif
+
 void kernel_main() {
     constexpr uint32_t cb_x = get_compile_time_arg_val(0);
     constexpr uint32_t cb_w = get_compile_time_arg_val(1);
@@ -96,16 +122,38 @@ void kernel_main() {
     MATH(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
 
+#ifndef GU_KCH
+#define GU_KCH 1
+#endif
+    // GU_KCH: the reader pushes each block as GU_KCH K-row chunks; the first row group multiplies each as it lands
+    // (the same MVMUL sequence as one call: bitwise)
+    constexpr uint32_t kch = GU_KCH, kcu = kt / GU_KCH;
+    static_assert(kcu * kch == kt && kcu % 2 == 0, "even K chunks");
     cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
     for (uint32_t i = 0; i < n; ++i) {
-        cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
+        if constexpr (kch == 1) {
+            cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
+        }
         cb_wait_front(cb_sc, 2 * groups);
         for (uint32_t g = 0; g < groups; ++g) {
             tile_regs_acquire();
             gu_layout::static_for<nb>([&](auto h) {
                 constexpr uint32_t hb = decltype(h)::value;
-                custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+                if constexpr (kch == 1) {
+                    custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+                } else {
+                    for (uint32_t q = 0; q < kch; ++q) {
+                        if (g == 0) {
+                            cb_wait_front(cb_w, (hb * kch + q + 1) * kcu * m);
+                        }
+                        if (q + 1 < kch) {
+                            custom_mm_block<false>(cb_x, cb_w, g * kt + q * kcu, hb * kt * m + q * kcu * m, hb * m, kcu, m);
+                        } else {
+                            custom_mm_block<true>(cb_x, cb_w, g * kt + q * kcu, hb * kt * m + q * kcu * m, hb * m, kcu, m);
+                        }
+                    }
+                }
             });
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
@@ -130,6 +178,18 @@ void kernel_main() {
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
             continue;
 #endif
+#ifdef ACT_INKLING
+            silu_tile_init();  // (the sigmoid setup inkling_act uses)
+            gu_layout::static_for<np>([&](auto p) {
+                constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+                inkling_rows(u, gu_layout::gate_dst<m, banks>(u), u);  // GATE_FIRST: u holds the gate
+            });
+            mul_binary_tile_init();
+            gu_layout::static_for<np>([&](auto p) {
+                constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+                mul_rows(u, wdst, u);
+            });
+#else
             silu_tile_init();
             gu_layout::static_for<np>([&](auto p) {
                 constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
@@ -145,6 +205,7 @@ void kernel_main() {
                 mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
                 mul_rows(u, wdst, u);
             });
+#endif
             gu_layout::static_for<np>([&](auto p) { round_rows(gu_layout::up_dst<m, banks>(decltype(p)::value)); });
             tile_regs_commit();
 

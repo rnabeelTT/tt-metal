@@ -281,6 +281,25 @@ inline void sigmoid_weights(const uint32_t* f32, const uint32_t* ids, uint16_t* 
     }
 }
 
+// sigmoid_weights from the selection keys (ROUTE_KEYS): s_j = key_j - 2^28 - b_j is exactly the sigmoid_q23 the
+// selection computed, so the weights are the same bits without recomputing the k sigmoids.
+template <uint32_t topk>
+inline void sigmoid_weights_keys(const uint32_t* keys, const uint32_t* ids, const int32_t* bias, uint16_t* weights) {
+    uint64_t s[topk];
+    uint64_t sum = 0;
+    for (uint32_t j = 0; j < topk; ++j) {
+        s[j] = static_cast<uint32_t>(static_cast<int32_t>(keys[j]) - (1 << 28) - bias[ids[j]]);
+        sum += s[j];
+    }
+    if (sum == 0) {
+        sum = 1;
+    }
+    const uint64_t inv = (1ull << 59) / sum;
+    for (uint32_t j = 0; j < topk; ++j) {
+        weights[j] = fixed_to_bf16((s[j] * inv) >> 32, 27);
+    }
+}
+
 // The logits row as the routing kernels read it: one row of each [32, 32] TILE page, faces 0 and 1 back to back.
 #ifdef ROUTER_SIGB
 constexpr uint32_t LG_PAGE = 4096;   // FP32 tile
@@ -381,4 +400,24 @@ inline uint32_t route_union(const uint16_t* table, uint32_t rows, uint16_t* uni)
     }
     return u;
 }
+
+// MOE_SUBS = S > 1: every expert's columns are stored as S sub-shards, virtual expert e * S + s (the weight tensors
+// stacked [E * S, ...]); the union of U experts becomes U * S ascending virtual slots, expanded in place (uni must
+// hold rows * topk * S entries).
+template <uint32_t S>
+inline uint32_t expand_subs(uint16_t* uni, uint32_t U) {
+    if constexpr (S > 1) {
+        for (uint32_t i = U; i-- > 0;) {
+            const uint32_t e = uni[i];
+            for (uint32_t s = 0; s < S; ++s) {
+                uni[i * S + s] = static_cast<uint16_t>(e * S + s);
+            }
+        }
+    }
+    return U * S;
+}
 }  // namespace moe_topk
+
+#ifndef MOE_SUBS
+#define MOE_SUBS 1
+#endif

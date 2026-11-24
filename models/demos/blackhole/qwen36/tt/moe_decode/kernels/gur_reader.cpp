@@ -54,9 +54,6 @@ void kernel_main() {
     constexpr uint32_t nb = gu_layout::blocks<m>();
 #endif
     constexpr uint32_t blk_tiles = kt * m;  // one bank's [kt, m] run
-    constexpr uint32_t col_bytes = blk_tiles * tile_bytes;
-    constexpr uint32_t pages_per_col = col_bytes / page_bytes;
-    static_assert(pages_per_col * page_bytes == col_bytes, "page size must divide the block");
 
     // identity tile x 2 (custom_mm takes an even K)
     const auto s_id = TensorAccessor(id_args, id_addr, tile_bytes);
@@ -74,27 +71,78 @@ void kernel_main() {
     noc_async_read_barrier();
     cb_push_back(cb_id, 2);
     invalidate_l1_cache();
-    uint16_t uni[rows * topk];
+    uint16_t uni[rows * topk * MOE_SUBS];
 #ifdef EP_EXPERTS
     const uint32_t U = moe_topk::window_union(
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni),
         moe_topk::read_ep_offset(get_arg_val<uint32_t>(7), scr + 64 * rows), EP_EXPERTS);
 #else
-    const uint32_t U = moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni);
+    const uint32_t U = moe_topk::expand_subs<MOE_SUBS>(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni));
 #endif
 
-    constexpr uint32_t extra_in_flight = num_buffers - 2;
+#ifndef GU_KCH
+#define GU_KCH 1
+#endif
+    // GU_KCH: each block pushed as GU_KCH K-row chunks (the compute starts on a block's first rows while the rest lands)
+    constexpr uint32_t kch = GU_KCH;
+    constexpr uint32_t unit_tiles = blk_tiles / kch;
+    constexpr uint32_t unit_bytes = unit_tiles * tile_bytes;
+    constexpr uint32_t unit_pages = unit_bytes / page_bytes;
+    static_assert(unit_tiles * kch == blk_tiles && unit_pages * page_bytes == unit_bytes, "K chunks / page size");
+    constexpr uint32_t nu = num_buffers * kch;          // ring units
+    // read-ahead: the compute holds a slot's nb blocks until it is done (kch 1: num_buffers - 2 blocks, as before)
+    constexpr uint32_t extra_in_flight = kch == 1 ? num_buffers - 2 : nu - nb * kch;
+    constexpr uint32_t ntrid = nu < 15 ? nu : 15;
+    static_assert(extra_in_flight + 1 <= ntrid, "transaction ids in flight");
     reset_noc_trid_barrier_counter(NOC_CLEAR_OUTSTANDING_REQ_MASK, noc_index);
-    cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
+    cb_reserve_back(cb_w, unit_tiles * (extra_in_flight + 1));
     uint32_t l1_write = get_write_ptr(cb_w);
     const uint32_t cb_base = l1_write;
-    const uint32_t cb_end = cb_base + num_buffers * col_bytes;
-    uint32_t free_blocks = num_buffers;
+    const uint32_t cb_end = cb_base + nu * unit_bytes;
+    uint32_t free_units = nu;
     uint32_t trid = 1;
     uint32_t trid_to_wait = 1;
+    auto issued = [&]() {  // one unit's reads issued: push the oldest once the ring's read-ahead is full
+        if (free_units == nu - extra_in_flight) {
+            noc_async_read_barrier_with_trid(trid_to_wait);
+            cb_push_back(cb_w, unit_tiles);
+            trid_to_wait = trid_to_wait == ntrid ? 1 : trid_to_wait + 1;
+            cb_reserve_back(cb_w, unit_tiles * (extra_in_flight + 1));
+        } else {
+            free_units -= 1;
+        }
+        trid = trid == ntrid ? 1 : trid + 1;
+        if (l1_write >= cb_end) {
+            l1_write = cb_base;
+        }
+    };
     for (uint32_t s = slot0; s < U + 1; s += step) {
         const uint32_t base = s == 0 ? ws_addr : w_addr;
         const uint32_t e = s == 0 ? 0 : uni[s - 1];
+#ifdef GU_REM
+        // remainder pair `pair`: bank b holds its K tiles [b kc, (b + 1) kc) x (gate, up) as one contiguous run per
+        // expert ([1, E, R kt 2 / banks * 32, banks * 32] tensor, tile (t, b)): the banks' runs in order = the [kt, 2] block
+        constexpr uint32_t kc2 = kt / banks * 2;
+        constexpr uint32_t chunk_pages = kc2 * tile_bytes / page_bytes;
+        constexpr uint32_t bpu = banks / kch;  // banks per unit
+        static_assert(kt % banks == 0 && chunk_pages * page_bytes == kc2 * tile_bytes && bpu * kch == banks,
+                      "K chunk / page size");
+        for (uint32_t u = 0; u < kch; ++u) {
+            noc_async_read_set_trid(trid);
+            for (uint32_t b = u * bpu; b < (u + 1) * bpu; ++b) {
+                const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(b, base);
+                noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
+                uint32_t src = (e * GU_REM_PAIRS + pair) * kc2 * tile_bytes;
+                for (uint32_t p = 0; p < chunk_pages; ++p) {
+                    noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
+                    src += page_bytes;
+                    l1_write += page_bytes;
+                }
+            }
+            issued();
+        }
+#else
         for (uint32_t h = 0; h < nb; ++h) {
             uint32_t src = e * blk_tiles * tile_bytes;
 #ifdef SPLIT_PAIR
@@ -103,32 +151,24 @@ void kernel_main() {
             const uint64_t bank_noc = get_noc_addr_from_bank_id<true>(pair + h * (banks / 2), base);
 #endif
             noc_async_read_one_packet_set_state<true>(bank_noc, page_bytes, vc);
-            noc_async_read_set_trid(trid);
-            for (uint32_t p = 0; p < pages_per_col; ++p) {
-                noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
-                src += page_bytes;
-                l1_write += page_bytes;
-            }
-            if (free_blocks == num_buffers - extra_in_flight) {
-                noc_async_read_barrier_with_trid(trid_to_wait);
-                cb_push_back(cb_w, blk_tiles);
-                trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
-                cb_reserve_back(cb_w, blk_tiles * (extra_in_flight + 1));
-            } else {
-                free_blocks -= 1;
-            }
-            trid = trid == num_buffers ? 1 : trid + 1;
-            if (l1_write >= cb_end) {
-                l1_write = cb_base;
+            for (uint32_t u = 0; u < kch; ++u) {
+                noc_async_read_set_trid(trid);
+                for (uint32_t p = 0; p < unit_pages; ++p) {
+                    noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1_write, trid);
+                    src += page_bytes;
+                    l1_write += page_bytes;
+                }
+                issued();
             }
         }
+#endif
     }
-    // the columns still in flight: min(streamed, extra_in_flight)
-    const uint32_t pending = num_buffers - free_blocks;
+    // the units still in flight: min(streamed, extra_in_flight)
+    const uint32_t pending = nu - free_units;
     for (uint32_t i = 0; i < pending; ++i) {
         noc_async_read_barrier_with_trid(trid_to_wait);
-        cb_push_back(cb_w, blk_tiles);
-        trid_to_wait = trid_to_wait == num_buffers ? 1 : trid_to_wait + 1;
+        cb_push_back(cb_w, unit_tiles);
+        trid_to_wait = trid_to_wait == ntrid ? 1 : trid_to_wait + 1;
     }
     restore_read_cmd_buf();
 }

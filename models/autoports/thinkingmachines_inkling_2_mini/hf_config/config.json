@@ -1,0 +1,18 @@
+{
+  "architectures": ["TTInkling2LoopForConditionalGeneration"],
+  "model_type": "inkling2_loop_tt",
+  "auto_map": {"AutoConfig": "configuration_inkling2.Inkling2LoopTTConfig"},
+  "hidden_size": 2304,
+  "num_hidden_layers": 24,
+  "num_attention_heads": 24,
+  "num_key_value_heads": 8,
+  "head_dim": 128,
+  "intermediate_size": 1152,
+  "vocab_size": 201024,
+  "max_position_embeddings": 1048576,
+  "rms_norm_eps": 1e-06,
+  "torch_dtype": "bfloat16",
+  "eos_token_id": 200006,
+  "pad_token_id": 199999,
+  "tie_word_embeddings": false
+}

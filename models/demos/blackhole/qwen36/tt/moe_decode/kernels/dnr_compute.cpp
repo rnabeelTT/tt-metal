@@ -11,6 +11,9 @@
 #include "api/compute/common.h"
 #include "api/compute/experimental/custom_mm.h"
 #include "api/compute/pack.h"
+#ifdef DN_SPLIT
+#include "api/compute/eltwise_binary.h"
+#endif
 
 void kernel_main() {
     constexpr uint32_t cb_in0 = get_compile_time_arg_val(0);
@@ -42,6 +45,59 @@ void kernel_main() {
     }
 #endif
 
+#ifdef DN_SPLIT
+    // K rows [0, DN_SPLIT) and [DN_SPLIT, kt) of every slot as two accumulation chains (DST 0.. / gc..), each packed to
+    // BF16 and the two added (a two-sub-shard layout's numerics: two down programs + a BF16 add)
+    constexpr uint32_t ka = DN_SPLIT, kb = kt - DN_SPLIT, gc = groups * cols;
+    static_assert(ka % 2 == 0 && kb % 2 == 0 && 2 * gc <= 8, "even K segments, 8 DST tiles");
+    tile_regs_acquire();
+    for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
+        const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
+        cb_wait_front(cb_in0, groups * cs * kt);
+        cb_wait_front(cb_w, cs * kt * cols);
+        for (uint32_t g = 0; g < groups; ++g) {
+            for (uint32_t s = 0; s < cs; ++s) {
+                const uint32_t a = (g * cs + s) * kt, w = s * kt * cols;
+                if (s0 + s + 1 < slots) {
+                    custom_mm_block<false>(cb_in0, cb_w, a, w, g * cols, ka, cols);
+                    custom_mm_block<false>(cb_in0, cb_w, a + ka, w + ka * cols, gc + g * cols, kb, cols);
+                } else {
+                    custom_mm_block<true>(cb_in0, cb_w, a, w, g * cols, ka, cols);
+                    custom_mm_block<true>(cb_in0, cb_w, a + ka, w + ka * cols, gc + g * cols, kb, cols);
+                }
+            }
+        }
+        cb_pop_front(cb_w, cs * kt * cols);
+        cb_pop_front(cb_in0, groups * cs * kt);
+    }
+    tile_regs_commit();
+    cb_reserve_back(DN_TMP, 2 * gc);
+    tile_regs_wait();
+    for (uint32_t t = 0; t < 2 * gc; ++t) {
+        pack_tile(t, DN_TMP);
+    }
+    tile_regs_release();
+    cb_push_back(DN_TMP, 2 * gc);
+    custom_mm_block_uninit<dense_packing>();
+
+    binary_op_init_common(DN_TMP, DN_TMP, cb_out);
+    add_tiles_init(DN_TMP, DN_TMP);
+    cb_wait_front(DN_TMP, 2 * gc);
+    tile_regs_acquire();
+    for (uint32_t t = 0; t < gc; ++t) {
+        add_tiles(DN_TMP, DN_TMP, t, gc + t, t);
+    }
+    tile_regs_commit();
+    cb_reserve_back(cb_out, gc);
+    tile_regs_wait();
+    for (uint32_t t = 0; t < gc; ++t) {
+        pack_tile(t, cb_out);
+    }
+    tile_regs_release();
+    cb_push_back(cb_out, gc);
+    cb_pop_front(DN_TMP, 2 * gc);
+    return;
+#endif
     tile_regs_acquire();
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;

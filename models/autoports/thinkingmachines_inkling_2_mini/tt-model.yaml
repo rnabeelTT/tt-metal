@@ -1,0 +1,283 @@
+# tt-model container (v5.1) manifest for thinkingmachines/Inkling-2-Mini (26.4B looped MoE, 3.4B active per token, NVFP4 /
+# MXFP8 checkpoint) on Blackhole: 4 dies (p300x2 / p150x4), 2 dies (p300 / p150x2) or 1 die (p150), tensor parallel.
+# Build: tt-model package --container models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml
+# (source.tt_metal must be a FULL checkout of branch raahem/inkling-2-mini: the image builds tt-metal from it, and the
+# expert-sorted prefill needs this branch's moe_sorted_dispatch / moe_gather_rows / moe_gather_add_rows ops.)
+schema: "5.1"
+
+repo: raahemnabeel/inkling-2-mini
+name: inkling-2-mini
+# weights stay a pointer: the exact HF snapshot every check of this port ran against
+weights: {repo: thinkingmachines/Inkling-2-Mini, revision: ed40e7da625f594fc9c4990f5f66be24873c22d7}
+kind: vllm-plugin
+arch: blackhole
+
+image:
+  registry: hf
+
+source:
+  tt_metal: /home/raahem/inkling2-pkg   # full worktree of raahem/inkling-2-mini (rnabeelTT/tt-metal)
+  code:  # the port's import closure; runtime files only (no tests / tools / reference)
+    - models/autoports/thinkingmachines_inkling_2_mini/__init__.py
+    - models/autoports/thinkingmachines_inkling_2_mini/tt
+    - models/autoports/thinkingmachines_inkling_2_mini/hf_config
+    - models/autoports/thinkingmachines_inkling_2_mini/vllm_metadata.json
+    - models/autoports/thinkingmachines_inkling_2_mini/vllm_bundle
+    # shared kernels: the fused MoE decode kernels and the decode top-k sampler (qwen36), the expert-sorted prefill
+    # dispatch (the M2.7 port's moe_dispatch), tt_transformers' CCL helpers
+    - models/demos/blackhole/qwen36
+    - models/autoports/minimaxai_minimax_m2_7/__init__.py
+    - models/autoports/minimaxai_minimax_m2_7/tt
+    - models/tt_transformers
+    - models/common
+    - models/tttv2_validate_bh_required_capabilities.py
+  ubuntu: "22.04"
+  python: "3.12"
+
+runtime:
+  vllm: {version: "0.26.0"}
+  plugin: {path: /home/raahem/vllm-tt-plugin-inkling}   # inkling-mm (d53d9b3): the plugin every serving run of this port used
+  extra_models_dir: models/autoports/thinkingmachines_inkling_2_mini/vllm_bundle
+  overrides: ["torch==2.11.0+cpu", "torchvision==0.26.0+cpu", "transformers==5.12.1", "tokenizers==0.22.2",
+              "numpy==1.26.4"]
+
+serve:
+  port: 8000
+  block_size: 64
+  max_num_seqs: 32
+  max_model_len: 65536
+  capabilities:
+    tool_parser: inkling
+    reasoning_parser: inkling
+  # vLLM 0.26 / transformers 5.12 do not know the inkling2_loop architecture: the port ships an HF config shim
+  # (architecture TTInkling2LoopForConditionalGeneration) and the plugin serves it through the bundle's adapter
+  args: [--enable-auto-tool-choice, --trust-remote-code,
+         --hf-config-path, /opt/tt-metal/models/autoports/thinkingmachines_inkling_2_mini/hf_config]
+  additional_config:
+    tt:
+      trace_mode: all
+      sample_on_device_mode: decode_only
+      trace_region_size: 314572800
+      l1_small_size: 24576
+      fabric_config: FABRIC_1D
+  env:
+    ARCH_NAME: blackhole
+    HF_MODEL: thinkingmachines/Inkling-2-Mini
+    TT_METAL_LOGGER_LEVEL: Error
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    I2M_EXPERT_DT: bfp8        # routed experts at bfp8 (the checkpoint's NVFP4 / MXFP8 dequantized): quality at the
+    I2M_KV_DT: bf16            # fp32-vs-bf16 reference noise floor; bfp8 KV costs measurable KL
+    I2M_PREFILL_CHUNK: "1024"  # prefill rows per chunk (the sliding-window rings hold the window + one chunk)
+    I2M_PREFILL_PAD: "256"     # a prompt's last chunk padded to a multiple of 256: 4 prefill programs to warm up
+    # the dequantized bfp8 expert / attention images (built from the checkpoint on the first boot, ~3.5 min on 2 dies; tt-model's
+    # persistent weight cache: later boots load them in about a minute)
+    I2M_WCACHE: /weight-cache/wcache_inkling2_mini
+
+serve_profiles:
+  - name: p300x2
+    description: Two p300 boards (4 dies, tensor parallel 4), 32 sequences sharing a 1.7M-token KV pool, up to 1,048,576
+      tokens per request. The fastest profile.
+    hardware: p300x2
+    mesh_device: P300x2
+    max_model_len: 1048576
+    # 2048-row prefill chunks: +14% prefill; speculative decoding (DSpark drafter, 3 drafts per pass): the pool 2.06M ->
+    # 1.7M tokens
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
+  - name: p150x4
+    description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 boards (the identical (1,4) mesh).
+    hardware: p150x4
+    mesh_device: P150x4
+    max_model_len: 1048576
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
+  - name: p300
+    description: One p300 board (2 dies, tensor parallel 2), 16 sequences sharing a 491,520-token context.
+    hardware: p300
+    mesh_device: P300
+    max_num_seqs: 16
+    max_model_len: 491520
+    # fabric init needs every visible chip in the mesh; speculative decoding: the pool 647K -> 520K tokens
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
+  - name: p150x2
+    description: Two p150 boards (2 dies), same configuration as p300. Not run on p150 boards (the identical (1,2) mesh).
+    hardware: p150x2
+    mesh_device: P150x2
+    max_num_seqs: 16
+    max_model_len: 491520
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
+  - name: p150
+    description: One p150 (1 die), 8 sequences sharing a 32,768-token context, speculative decoding
+      for sequences under 8,192 tokens (the bfp8 experts take 27 of the die's 31.5 GiB). p150-long has a larger context, text only, without it.
+    hardware: p150
+    mesh_device: P150
+    max_num_seqs: 8
+    max_model_len: 32768
+    additional_config: {tt: {fabric_config: DISABLED}}
+    # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
+    # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
+    # Speculative decoding: the drafter needs ~0.5 GB, the KV pool 57K -> 32K tokens
+    # the drafter's caches cover 8K tokens (32K do not fit beside the vision tower)
+    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_SPEC: "3",
+          I2M_KV_POOL_TOKENS: "32768", I2M_SPEC_MAX_LEN: "8192"}
+  - name: p150-long
+    description: One p150 (1 die), 8 sequences sharing a 49,152-token context, text only, no
+      speculative decoding.
+    hardware: p150
+    mesh_device: P150
+    max_num_seqs: 8
+    max_model_len: 49152
+    additional_config: {tt: {fabric_config: DISABLED}}
+    # no vision tower and a 49K pool: the prefill's transients need the room
+    env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_VISION: "0",
+          I2M_KV_POOL_TOKENS: "49152"}
+default_profile: p300
+
+verify:
+  - "import models.autoports.thinkingmachines_inkling_2_mini.tt.generator_vllm as g; assert g.Inkling2ForCausalLM"
+  - "import models.autoports.thinkingmachines_inkling_2_mini.tt.sampling as s; assert s.DeviceTopK"
+
+card:
+  attribution: >
+    Serves [thinkingmachines/Inkling-2-Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini) by Thinking Machines
+    Lab, unmodified, with the checkpoint's own DSpark drafter (mtp.safetensors) for speculative decoding. See the original
+    model card for training and evaluation details.
+  description: >
+    Inkling-2-Mini, a 26.4B-parameter looped mixture-of-experts model (3.4B parameters active per token; 24 layers of
+    which 12 run three passes, 128 routed experts top-8, sliding-window and global attention with a relative position
+    bias), with image input. Served through vLLM with tensor-parallel attention and experts, speculative decoding with
+    the checkpoint's DSpark drafter (3 drafts per pass) for a user decoding alone, prefix caching, on-device sampling,
+    reasoning and tool calling.
+  intended_use: >
+    Chat, coding, reasoning and agent use (tool calls) over text and images (text only on `p150-long`), for up to 32
+    (4 dies), 16 (2 dies) or 8 (1 die) concurrent users.
+  quickstart: |
+    Inkling-2-Mini reasons before it answers by default: give requests a large `max_tokens`, or turn reasoning down per
+    request with `"chat_template_kwargs": {"reasoning_effort": "none"}`. The checkpoint's default sampling is
+    temperature 1.
+  usage: |
+    Images go in chat messages as `image_url` content parts (up to 4,095 image tokens per image, one token per 40 x 40
+    pixel patch); a larger image is rejected with HTTP 400. `p150-long` is text only.
+
+    Speculative decoding serves a request while it is the only one decoding; with more requests the server decodes
+    one token per step for all of them. Drafts are accepted with the standard min(1, p / q) rule, so sampled outputs
+    keep the target model's distribution.
+
+    Prefix caching: a prompt of 512 tokens or more leaves a snapshot at its last 64-token boundary, and a later request
+    that starts with the same tokens (the same prompt again, the next turn of a chat, another question about the same
+    document) resumes from it (16 snapshots kept on 2 and 4 dies, 1 on one die; least recently used first out).
+
+    Every profile: routed experts at bfp8 (dequantized from the checkpoint's NVFP4 / MXFP8), bf16 KV cache.
+  performance: |
+    Accuracy: teacher forcing against the Hugging Face model (transformers 5.24, CPU) on 8 held-out texts (chat in
+    three languages, code, docs, competitive programming); top-1 agreement / top-1 on confident tokens / KL over the
+    reference's top 32:
+
+    | path | top-1 | top-1 (confident) | KL |
+    | --- | ---: | ---: | ---: |
+    | reference noise floor: fp32 vs bf16 CPU model | 0.975 | 0.998 | 0.010 |
+    | prefill (1 die, 8 x 1000 tokens) | 0.970 | 0.997 | 0.014 |
+    | decode (1 die, 8 x 736 steps) | 0.971 | 0.996 | 0.014 |
+    | prefill (4 dies, 2048-token chunks) | 0.972 | 0.997 | 0.015 |
+    | prefill (2 dies, 1024-token chunks) | 0.969 | 0.996 | 0.016 |
+    | decode (4 dies, 8 x 736 steps) | 0.970 | 0.996 | 0.014 |
+    | decode (2 dies, 8 x 736 steps) | 0.968 | 0.995 | 0.017 |
+    | decode, 32-wide batch (4 dies, 8 x 256 steps) | 0.969 | 0.995 | 0.025 |
+
+    Per text, the decode KL is 0.002 - 0.012 on seven texts and 0.03 - 0.16 on code_mbpp. Long context: a passphrase
+    planted at 10 / 50 / 90 % depth of 135K, 539K and 1,031K-token prompts is retrieved on 4 dies.
+
+    Speed at the checkpoint's default sampling (temperature 1), one user: three held-out texts (math, code, chat) as
+    300-token prompts, 256 output tokens, streamed, decode tok/s = 1000 / TPOT; TTFT on 1,024 / 4,096-token text
+    prompts; 8 users each generating 128 tokens at temperature 1 at once (total output tok/s):
+
+    | Profile | Decode, temperature 1 (tok/s) | Without speculative decoding, temperature 1 (tok/s) | Decode, greedy (tok/s) | TTFT 1K / 4K (s) | 8 users x 128 tokens (total tok/s) |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 119.4 | 92.3 | 117.9 | 0.560 / 1.860 | 192.8 |
+    | p300 | 100.7 | 74.8 | 107.8 | 0.526 / 1.727 | 171.4 |
+    | p150 | 65.8 | 53.2 | 68.5 | 0.882 / 3.095 | 109.6 |
+    | p150-long (text only, no speculative decoding) | 53.2 | 53.2 | 53.1 | 0.780 / 2.968 | 109.8 |
+
+    The speculative gain depends on the text (at temperature 1: p300x2 math 160, code 124, chat 91 tok/s; p300 math 112,
+    code 110, chat 85; p150 math 75, code 74, chat 53).
+
+    Load benchmark (`tools/bench_card.py`): random-token prompts of exactly the input length (ISL), output pinned with
+    ignore_eos (OSL), greedy, streamed; every request a distinct prompt (no prefix-cache hits); `concurrency` users in
+    a closed loop, N requests in all; TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per
+    user, TPOT = (E2EL - TTFT) / (OSL - 1); total = output tokens / wall time. On random-token prompts the greedy
+    continuation is repetitive and drafts unusually well, so the one-user rows overstate what real text decodes at
+    (table above).
+
+    | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill (tok/s) | Decode (tok/s/u) | Total (tok/s) | E2EL (s) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | p300x2 | 128 | 128 | 1 | 2 | 487 | 263 | 123.0 | 84.2 | 1.52 |
+    | p300x2 | 1,024 | 256 | 1 | 2 | 555 | 1,845 | 120.8 | 96.0 | 2.67 |
+    | p300x2 | 4,096 | 256 | 1 | 2 | 2,009 | 2,039 | 204.2 | 78.5 | 3.26 |
+    | p300x2 | 16,384 | 256 | 1 | 2 | 7,848 | 2,088 | 177.2 | 27.6 | 9.29 |
+    | p300x2 | 128 | 128 | 2 | 4 | 923 | 139 | 80.9 | 102.7 | 2.49 |
+    | p300x2 | 128 | 128 | 4 | 8 | 1,048 | 122 | 63.1 | 167.3 | 3.06 |
+    | p300x2 | 128 | 128 | 8 | 16 | 1,439 | 89 | 48.1 | 250.8 | 4.08 |
+    | p300x2 | 128 | 128 | 16 | 32 | 2,821 | 45 | 32.5 | 304.2 | 6.73 |
+    | p300x2 | 1,024 | 256 | 2 | 4 | 1,013 | 1,011 | 79.6 | 121.4 | 4.22 |
+    | p300x2 | 1,024 | 256 | 4 | 8 | 2,145 | 477 | 67.4 | 172.7 | 5.93 |
+    | p300x2 | 1,024 | 256 | 8 | 16 | 4,204 | 244 | 53.4 | 228.0 | 8.98 |
+    | p300x2 | 1,024 | 256 | 16 | 32 | 8,574 | 119 | 35.9 | 261.2 | 15.68 |
+    | p300x2 | 128 | 128 | 32 | 64 | 5,202 | 25 | 16.5 | 317.2 | 12.91 |
+    | p300x2 | 1,024 | 256 | 32 | 64 | 17,019 | 60 | 17.8 | 261.5 | 31.33 |
+    | p300 | 128 | 128 | 1 | 2 | 421 | 304 | 170.7 | 109.8 | 1.17 |
+    | p300 | 1,024 | 256 | 1 | 2 | 511 | 2,004 | 167.5 | 125.9 | 2.03 |
+    | p300 | 4,096 | 256 | 1 | 2 | 1,749 | 2,342 | 159.2 | 76.4 | 3.35 |
+    | p300 | 16,384 | 256 | 1 | 2 | 6,800 | 2,409 | 145.6 | 29.9 | 8.55 |
+    | p300 | 128 | 128 | 2 | 4 | 734 | 174 | 62.8 | 92.8 | 2.76 |
+    | p300 | 128 | 128 | 4 | 8 | 918 | 139 | 51.0 | 150.2 | 3.41 |
+    | p300 | 128 | 128 | 8 | 16 | 1,240 | 103 | 34.7 | 209.1 | 4.90 |
+    | p300 | 128 | 128 | 16 | 32 | 2,214 | 58 | 19.4 | 233.4 | 8.78 |
+    | p300 | 1,024 | 256 | 2 | 4 | 939 | 1,091 | 61.5 | 100.6 | 5.09 |
+    | p300 | 1,024 | 256 | 4 | 8 | 1,871 | 547 | 52.5 | 152.3 | 6.72 |
+    | p300 | 1,024 | 256 | 8 | 16 | 3,745 | 273 | 39.4 | 200.4 | 10.22 |
+    | p300 | 1,024 | 256 | 16 | 32 | 7,434 | 138 | 20.7 | 207.1 | 19.78 |
+    | p150 | 128 | 128 | 1 | 2 | 361 | 355 | 55.6 | 48.4 | 2.64 |
+    | p150 | 1,024 | 256 | 1 | 2 | 856 | 1,196 | 113.6 | 82.5 | 3.10 |
+    | p150 | 4,096 | 256 | 1 | 2 | 2,824 | 1,450 | 104.6 | 48.6 | 5.26 |
+    | p150 | 128 | 128 | 2 | 4 | 679 | 189 | 43.7 | 71.5 | 3.58 |
+    | p150 | 128 | 128 | 4 | 8 | 938 | 136 | 32.4 | 105.3 | 4.86 |
+    | p150 | 128 | 128 | 8 | 16 | 1,568 | 82 | 22.5 | 142.1 | 7.20 |
+    | p150 | 1,024 | 256 | 2 | 4 | 1,443 | 710 | 40.1 | 65.7 | 7.80 |
+    | p150 | 1,024 | 256 | 4 | 8 | 2,907 | 352 | 32.9 | 96.1 | 10.66 |
+    | p150 | 1,024 | 256 | 8 | 16 | 5,795 | 177 | 26.0 | 131.2 | 15.60 |
+    | p150-long | 128 | 128 | 1 | 2 | 323 | 396 | 53.5 | 47.5 | 2.70 |
+    | p150-long | 1,024 | 256 | 1 | 2 | 709 | 1,444 | 51.8 | 45.4 | 5.64 |
+    | p150-long | 4,096 | 256 | 1 | 2 | 2,668 | 1,535 | 50.9 | 33.3 | 7.68 |
+    | p150-long | 128 | 128 | 2 | 4 | 549 | 233 | 40.5 | 69.5 | 3.68 |
+    | p150-long | 128 | 128 | 4 | 8 | 948 | 135 | 30.7 | 100.7 | 5.08 |
+    | p150-long | 128 | 128 | 8 | 16 | 1,653 | 77 | 21.5 | 135.3 | 7.57 |
+    | p150-long | 1,024 | 256 | 2 | 4 | 1,440 | 711 | 43.5 | 70.2 | 7.30 |
+    | p150-long | 1,024 | 256 | 4 | 8 | 2,912 | 352 | 35.0 | 100.3 | 10.21 |
+    | p150-long | 1,024 | 256 | 8 | 16 | 5,808 | 176 | 26.6 | 133.1 | 15.39 |
+
+    Prefix cache (`tools/prefix_serve.py`, greedy): a 4,438-token prompt (a document plus a question)
+    cold, then resent, then the next chat turn on it, then 4 users asking about the same document at once (TTFT, s):
+
+    | Profile | Cold | Resent | Next turn | 4 users, shared document (mean) |
+    | --- | ---: | ---: | ---: | ---: |
+    | p300x2 | 2.26 | 0.65 | 0.63 | 1.14 |
+    | p300 | 1.98 | 0.51 | 0.48 | 1.07 |
+    | p150 | 3.31 | 0.51 | 0.53 | 1.04 |
+    | p150-long | 3.27 | 0.39 | 0.41 | 0.95 |
+
+    Measured 2026-11-24 on one QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die profiles on a subset of it) through
+    vLLM 0.26 with this package's code and each profile's own settings.
+  limitations: |
+    - Prefill runs about 2,000-2,100 prompt tokens/s on 4 dies, 2,300-2,400 on 2 and 1,450 on 1 (4K and 16K-token
+      prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
+    - Speculative decoding applies only while one request is decoding and its sequence is under 32,768 tokens (8,192 on `p150`); with
+      several users, or past that length, every request decodes one token per step.
+    - A profile's sequences share its KV cache (1.7M tokens on 4 dies; the context on 2 and 1 die): one request may use
+      the whole context, and requests that do not fit beside the running ones wait.
+    - Sampling at temperature > 0 draws from the 32 most likely tokens; top_k above 32 acts as 32. Requests with
+      penalties or top_p < 1, and logprobs, are sampled on the host (slower).
+    - No video or audio input; no image input on `p150-long`. One image may take up to 4,095 image tokens.
+    - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
+    - Outputs are close to but not identical to the bf16 reference (bfp8 experts; see the accuracy table). Benchmark
+      evals (GPQA, LiveCodeBench, IFEval) were not run.
+    - Not for decisions where an unreviewed wrong answer causes harm (medical, legal, financial or safety-critical
+      use); like the original model, it can state wrong facts with confidence.
+  license: {id: apache-2.0}

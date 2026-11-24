@@ -460,6 +460,12 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
     ids_t = self._tiled(ids)
     sc_t = self._tiled(scores)
     op = getattr(ttnn, "moe_sorted_dispatch", None) or ttnn._ttnn.operations.experimental.moe_sorted_dispatch
+    if DISPATCH_MC:  # (opt-in: the multi-core drop-in, bit-identical outputs; qwen36 moe_prefill/dispatch_mc.py)
+        from models.demos.blackhole.qwen36.tt.moe_prefill.dispatch_mc import dispatch_mc, fits
+
+        if fits(T, E, k, Rd, gs):
+            op = lambda i, s, E_, k_, g_, R_, memory_config, pad_group_id: dispatch_mc(  # noqa: E731
+                i, s, E_, k_, g_, R_, pad_group_id=pad_group_id, memory_config=memory_config)
     src_tok, w_disp, group_ids, und = op(ids_t, sc_t, E, k, gs, Rd, memory_config=dram, pad_group_id=self.pad_group_id)
     for t in (ids_t, sc_t):
         if t is not ids and t is not scores:
@@ -494,6 +500,8 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
 
 
 SortedDispatch._build_kernel = _kernel_dispatch
+# QWEN35_DISPATCH_MC=1: the multi-core dispatch (qwen36 moe_prefill/dispatch_mc.py) where it fits in L1
+DISPATCH_MC = os.environ.get("QWEN35_DISPATCH_MC", "0") == "1"
 
 
 GATHER_KERNEL = os.environ.get("QWEN35_GATHER_KERNEL", "1") == "1" and hasattr(ttnn, "moe_gather_rows")

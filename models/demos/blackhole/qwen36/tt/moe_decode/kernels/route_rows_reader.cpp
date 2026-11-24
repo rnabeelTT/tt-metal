@@ -13,6 +13,8 @@
 // ROUTE_TILES (a port's own expert paths, moe_decode/topk.py RouteScores): the k ids / weights go to row `row` of
 // [1, 1, M, k] UINT16 / BF16 TILE outputs instead of the route table (the second tensor accessor = the ids).
 //
+// ROUTE_KEYS (sigb): the weights from the merged selection keys (s = key - 2^28 - b; the same bits).
+//
 // ROUTE_SPLIT = P (RouteRows split): P cores per row, part p = experts [p E / P, (p + 1) E / P) (this NCRISC the lower
 // half of it, the BRISC the upper); part p > 0 writes its merged top-k (k keys, k ids) into slot p of the part-0
 // core's cb_gather and increments its program semaphore 0; part 0 waits for the P - 1 parts, merges them in part order
@@ -115,7 +117,12 @@ void kernel_main() {
     }
 #endif
     uint16_t w[topk];
+#if defined(ROUTER_SIGB) && defined(ROUTE_KEYS)
+    moe_topk::sigmoid_weights_keys<topk>(keys, ids, bias, w);
+    const uint16_t w_shared = 0x3F80;
+#else
     const uint16_t w_shared = moe_topk::route_weights<topk, num_experts>(lg, ids, w);
+#endif
 
     volatile tt_l1_ptr uint16_t* r = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rec);
     for (uint32_t j = 0; j < 32; ++j) {

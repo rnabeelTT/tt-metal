@@ -46,15 +46,31 @@ void kernel_main() {
     for (uint32_t r = 0; r < rows; ++r) {
         noc_async_read(s_table.get_noc_addr(r), scr + 64 * r, 64);
     }
+#ifdef DN_PAD
+    // the last DN_PAD K rows of every slot are zero padding (an even K for custom_mm): never read from DRAM, zeroed once
+    // in every ring slot (only the last chunk is partial, so slots sit at whole-slot offsets of the ring)
+    {
+        const uint64_t zeros = get_noc_addr(MEM_ZEROS_BASE);
+        const uint32_t ring = get_write_ptr(cb_w);
+        for (uint32_t i = 0; i < 2 * chunk; ++i) {
+            const uint32_t a = ring + (i * kt + kt - DN_PAD) * cols * tile_bytes;
+            for (uint32_t off = 0; off < DN_PAD * cols * tile_bytes; off += MEM_ZEROS_SIZE) {
+                const uint32_t n = DN_PAD * cols * tile_bytes - off;
+                noc_async_read(zeros, a + off, n < MEM_ZEROS_SIZE ? n : MEM_ZEROS_SIZE);
+            }
+        }
+    }
+#endif
     noc_async_read_barrier();
     invalidate_l1_cache();
-    uint16_t uni[rows * topk];
+    uint16_t uni[rows * topk * MOE_SUBS];
 #ifdef EP_EXPERTS
     const uint32_t U = moe_topk::window_union(
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni),
         moe_topk::read_ep_offset(get_arg_val<uint32_t>(6), scr + 64 * rows), EP_EXPERTS);
 #else
-    const uint32_t U = moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni);
+    const uint32_t U = moe_topk::expand_subs<MOE_SUBS>(
+        uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni));
 #endif
 #ifdef NO_SHARED
     constexpr uint32_t S0 = 1;  // no shared expert: slots 1 .. (routed only)
@@ -72,6 +88,11 @@ void kernel_main() {
     const uint32_t cb_end = cb_base + 2 * chunk * slot_tiles * tile_bytes;
     uint32_t prev_tiles = 0;
     uint32_t trid = 1;
+#ifdef DN_PAD
+    constexpr uint32_t kr = kt - DN_PAD;
+#else
+    constexpr uint32_t kr = kt;
+#endif
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
         cb_reserve_back(cb_w, cs * slot_tiles + prev_tiles);
@@ -86,11 +107,12 @@ void kernel_main() {
             const uint32_t e = s == 0 ? 0 : uni[s - 1];
             noc_async_read_one_packet_set_state<true>(bank_noc, row_bytes, vc);
             uint32_t src = (e * kt * m + c0) * tile_bytes;
-            for (uint32_t k = 0; k < kt; ++k) {
+            for (uint32_t k = 0; k < kr; ++k) {
                 noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1, trid);
                 src += m * tile_bytes;
                 l1 += row_bytes;
             }
+            l1 += (kt - kr) * row_bytes;
         }
         if (prev_tiles) {
             noc_async_read_barrier_with_trid(trid == 1 ? 2 : 1);

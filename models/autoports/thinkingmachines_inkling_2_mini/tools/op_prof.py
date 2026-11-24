@@ -1,0 +1,140 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+"""Exact device time per op of one batched decode step (eager), keyed by the op's call site in this port's code (the
+Inkling-Small op_prof mechanism: each top-level ttnn op is followed by a device sync and a profiler read; die 0).
+Prints the device total, the top call sites, and the time per component (attention / convs / moe / mix / gates / ...).
+
+usage: DEV_ENV="-e TT_METAL_DEVICE_PROFILER=1 -e TT_METAL_PROFILER_MID_RUN_DUMP=1
+       -e TT_METAL_PROFILER_CPP_POST_PROCESS=1 -e B=4" tools/run_dev.sh python .../tools/op_prof.py
+"""
+
+import collections
+import os
+import traceback
+
+import torch
+
+import ttnn
+import ttnn._ttnn.profiler as P
+from ttnn import decorators as D
+
+from models.autoports.thinkingmachines_inkling_2_mini.tt.batched import BatchedDecoder
+from models.autoports.thinkingmachines_inkling_2_mini.tt.model import Inkling2Model
+
+REC = {"on": False, "mesh": None, "rows": []}
+PORT = "thinkingmachines_inkling_2_mini/"
+
+
+def _site():
+    for fr in reversed(traceback.extract_stack()[:-3]):
+        if PORT in fr.filename and "op_prof.py" not in fr.filename:
+            return f"{fr.filename.split(PORT)[-1]}:{fr.lineno} {fr.name}"
+    return "?"
+
+
+def _read():
+    ttnn.synchronize_device(REC["mesh"])
+    ttnn.ReadDeviceProfiler(REC["mesh"])
+    data = P.get_latest_programs_perf_data()
+    if not data:
+        return 0, 0.0
+    chip = sorted(data)[0]
+    n, us = 0, 0.0
+    for prog in data[chip]:
+        res = prog.program_analyses_results
+        k = "DEVICE FW DURATION [ns]" if "DEVICE FW DURATION [ns]" in res else next(iter(res))
+        us += res[k].duration / 1e3
+        n += 1
+    return n, us
+
+
+_orig = D.FastOperation.__call__
+
+
+def _call(self, *a, **k):
+    if not REC["on"] or D.OPERATION_CALL_STACK:
+        return _orig(self, *a, **k)
+    site = _site()
+    out = _orig(self, *a, **k)
+    n, us = _read()
+    REC["rows"].append((self.python_fully_qualified_name, site, n, us))
+    return out
+
+
+D.FastOperation.__call__ = _call
+_orig_generic = ttnn.generic_op
+
+
+def main():
+    B = int(os.environ.get("B", "4"))
+    N = int(os.environ.get("MESH", "1"))
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N))
+    REC["mesh"] = mesh
+    dt = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
+    P0 = int(os.environ.get("P0", "0"))  # (prefill: the chunk's first position; the earlier KV is not filled)
+    m = Inkling2Model(mesh, max_seq_len=max(1024, P0 + int(os.environ.get("PREFILL", "0")) + 64),
+                      expert_dtype=dt[os.environ.get("EXPERT_DT", "bfp8")],
+                      kv_dtype=dt[os.environ.get("KV_DT", "bf16")], prefill_chunk=int(os.environ.get("CHUNK", "256")), slots=B)
+    T = int(os.environ.get("PREFILL", "0"))
+    if T:  # one prefill chunk of T rows (slot 0) instead of a decode step
+        ids = torch.arange(1000, 1000 + T)
+        PK = os.environ.get("PACKED") == "1"  # (the served path: forward_packed, one segment)
+        run = (lambda: m.forward_packed(ids, [(0, T, P0, T, 0, 0)])) if PK else \
+            (lambda: m.forward(ids, P0, valid=T, slot=0, last_only=True))  # noqa: E731
+        for _ in range(2):
+            m.reset()
+            run()
+        m.reset()
+        _read()
+        REC["on"] = True
+        run()
+    else:
+        dp = int(os.environ.get("DPOS", "300"))  # (decode: the first slot's position)
+        toks = torch.arange(100, 100 + B)
+        if os.environ.get("VERIFY") == "1":  # (B speculative verify rows of one sequence, real text tokens)
+            dec = BatchedDecoder(m, B, shared=BatchedDecoder(m, B), verify=B)
+            toks = next(iter(torch.load("/cache/fixtures/dspark_taps.pt")["texts"].values()))["ids"][dp : dp + B]
+            toks = toks if len(toks) == B else torch.arange(100, 100 + B)
+        else:
+            dec = BatchedDecoder(m, B)
+        dec.set_inputs(toks, torch.arange(dp, dp + B))
+        dec.step()
+        dec.step()
+        _read()
+        REC["on"] = True
+        dec.step()
+    REC["on"] = False
+    rows = REC["rows"]
+    tot = sum(r[3] for r in rows)
+    print(f"== {'PREFILL T=' + str(T) if T else 'B=' + str(B)}: {len(rows)} top-level ops, {sum(r[2] for r in rows)} programs, device total {tot / 1e3:.2f} ms")
+    site_t = collections.defaultdict(lambda: [0.0, 0])
+    comp = collections.defaultdict(lambda: [0.0, 0])
+    for name, site, n, us in rows:
+        s = site_t[(site, name)]
+        s[0] += us
+        s[1] += 1
+        fn = site.split(" ")[-1] if site != "?" else "?"
+        f = site.split(":")[0]
+        key = f"{f}::{fn}"
+        comp[key][0] += us
+        comp[key][1] += 1
+    if os.environ.get("SEQ"):  # (the step's programs in order, rows a..b: "a,b")
+        a, b = (int(v) for v in os.environ["SEQ"].split(","))
+        print("-- sequence: #, programs, us, op, site")
+        for i, (name, site, n, us) in enumerate(rows[a:b], a):
+            if n:
+                print(f"{i:5d} {n:3d} {us:8.1f}  {name:28s} {site}")
+    print("-- by function (file::function): ms, ops")
+    for k, (us, c) in sorted(comp.items(), key=lambda kv: -kv[1][0])[:25]:
+        print(f"{us / 1e3:9.2f} ms {c:6d}  {k}")
+    print("-- top call sites: ms, calls, op")
+    for (site, name), (us, c) in sorted(site_t.items(), key=lambda kv: -kv[1][0])[: int(os.environ.get("TOP", "40"))]:
+        print(f"{us / 1e3:9.2f} ms {c:5d}  {name:40s} {site}")
+    ttnn.close_mesh_device(mesh)
+    print("== done")
+
+
+if __name__ == "__main__":
+    main()

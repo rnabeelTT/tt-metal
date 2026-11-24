@@ -72,6 +72,32 @@ ALWI void round_rows(uint32_t idst) {
     MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, round_sig7, (kRowIters), idst, VectorMode::R));
 }
 
+#ifdef ACT_INKLING
+// Inkling-2's expert activation, act = 4 tanh(g / 4) * sigmoid(g) * 25 tanh(u / 25), evaluated as
+// (2 s(g / 2) - 1) * s(g) * (2 s(2 u') - 1) with s = sigmoid and tanh(x) = 2 s(2x) - 1: the port folds 1/25 into the up
+// weights (u' = u / 25) and the 100 into the down weights. Needs only silu_tile_init()'s sigmoid setup.
+#ifdef TRISC_MATH
+namespace ckernel::sfpu {
+template <int ITERATIONS>
+inline void inkling_act(const uint32_t ig, const uint32_t iu, const uint32_t io) {
+    constexpr uint32_t T = 32;  // DST tile stride (sfpi rows)
+    for (int d = 0; d < ITERATIONS; d++) {
+        const sfpi::vFloat g = sfpi::dst_reg[ig * T];
+        const sfpi::vFloat u = sfpi::dst_reg[iu * T];
+        const sfpi::vFloat a = _sfpu_sigmoid_<true>(g * 0.5f) * 2.0f - 1.0f;
+        const sfpi::vFloat s = _sfpu_sigmoid_<true>(g);
+        const sfpi::vFloat b = _sfpu_sigmoid_<true>(u * 2.0f) * 2.0f - 1.0f;
+        sfpi::dst_reg[io * T] = a * s * b;
+        sfpi::dst_reg++;
+    }
+}
+}  // namespace ckernel::sfpu
+#endif
+ALWI void inkling_rows(uint32_t ig, uint32_t iu, uint32_t io) {
+    MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, inkling_act, (kRowIters), ig, iu, io, VectorMode::R)));
+}
+#endif
+
 void kernel_main() {
     constexpr uint32_t cb_x = get_compile_time_arg_val(0);
     constexpr uint32_t cb_w = get_compile_time_arg_val(1);
@@ -106,6 +132,13 @@ void kernel_main() {
             cb_pop_front(cb_w, kt * m);
         });
 
+#ifdef ACT_INKLING
+        silu_tile_init();  // (the sigmoid setup inkling_act uses)
+        gu_layout::static_for<np>([&](auto p) {
+            constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
+            inkling_rows(u, gu_layout::gate_dst<m, banks>(u), u);  // GATE_FIRST: u holds the gate
+        });
+#else
         silu_tile_init();
         gu_layout::static_for<np>([&](auto p) {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
@@ -120,6 +153,7 @@ void kernel_main() {
             constexpr uint32_t u = gu_layout::up_dst<m, banks>(decltype(p)::value);
             mul_rows(u, gu_layout::gate_dst<m, banks>(u), u);
         });
+#endif
         binop_with_scalar_tile_init();
         // the slot weight arrives once the router tail is done; the shared expert's matmuls run before that
         uint32_t score = 0;
