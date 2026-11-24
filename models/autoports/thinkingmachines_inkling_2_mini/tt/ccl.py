@@ -21,8 +21,9 @@ ASYNC = os.environ.get("I2M_AR_ASYNC", "1") == "1"
 PACK = os.environ.get("I2M_AR_PACK", "1") == "1"
 # I2M_AR_LINKS: fabric links per packed all-reduce (default 2 on 4 dies: B = 8 28.3 -> 28.0 ms, bit-identical; 1 else)
 LINKS = int(os.environ.get("I2M_AR_LINKS", "0"))
-# I2M_AR_FUSED: the packed all-reduce as one program (pack + fabric multicast + add: _Packed.fused)
-FUSED = os.environ.get("I2M_AR_FUSED", "0") == "1"
+# I2M_AR_FUSED: the packed all-reduce as one program (pack + fabric multicast + add: _Packed.fused). Default: on for
+# 2 dies (TP2: B=1 17.3 -> 16.8 ms, bitwise), off for 4 (a TP4 run hung: not yet understood)
+FUSED = os.environ.get("I2M_AR_FUSED")
 # I2M_AR_FUSED_TP: x tiles per packer core (default max(2, 8 // T): traced, 2 dies, 9 packers at T = 1 5.1 us vs 36
 # 6.4; T >= 2 2 or 4 tiles per packer the same)
 FUSED_TP = int(os.environ.get("I2M_AR_FUSED_TP", "0"))
@@ -198,7 +199,7 @@ class _Packed:
 
     def __call__(self, x, site, rows=None, packed_out=False):
         T, H = rows or int(x.shape[-2]), int(x.shape[-1])
-        if FUSED:
+        if (FUSED == "1") if FUSED is not None else self.mesh.get_num_devices() == 2:
             r = self.fused(x, site, T)
             if packed_out:
                 return r
