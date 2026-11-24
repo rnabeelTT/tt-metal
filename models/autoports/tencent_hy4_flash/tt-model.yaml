@@ -70,9 +70,8 @@ serve:
 serve_profiles:
   - name: p300x2
     description: >
-      Up to 8 concurrent users sharing one context pool: a single request can use up to 202,752 tokens, concurrent
-      requests split the pool (vLLM preempts and recomputes a request when the pool runs out); speculative decoding
-      (DFly2) at every user count (4 drafts for one user, 1-3 per user for 2-8 users); text, images and video.
+      Up to 8 concurrent users sharing one 202,752-token context pool: one request can use all of it, concurrent requests
+      split it. Text, images and video.
     hardware: p300x2
     mesh_device: P300x2
     max_num_seqs: 8
@@ -80,132 +79,120 @@ serve_profiles:
 default_profile: p300x2
 
 card:
-  attribution: >
-    Serves [tencent/Hy4-flash](https://huggingface.co/tencent/Hy4-flash) by Tencent (Tencent Hy License). Only the
-    official checkpoint is downloaded: the device tensor cache and the Engram FP8 store are built from it on the
-    first start.
-  description: >
-    Hy4-flash (Tencent Hunyuan): a 220B-parameter mixture-of-experts model with ~11.3B parameters active per token
-    (42 layers: 12 compressed-indexer sparse MLA and 30 sliding-window MLA attention layers, 41 latent-MoE layers of
-    512 experts top-16 plus a shared expert, 4 hyper-connection streams, a 63.5B-parameter Engram n-gram memory, a
-    27-layer vision encoder and the DFly2 speculative drafter), served with vLLM on one QB2. A reasoning model
-    (`reasoning_effort` high by default, `no_think` for direct answers) with text, image and video input, tool
-    calling, and up to 8 concurrent users sharing a 202,752-token context pool (one user can use all of it).
-  intended_use: >
-    Chat, reasoning, coding and tool use over text, images and short videos through an OpenAI-compatible API, for up
-    to 8 concurrent users on one QB2, or one user with long documents.
+  attribution: >-
+    Derived from [tencent/Hy4-flash](https://huggingface.co/tencent/Hy4-flash) by Tencent. The experts run in bfp4
+    and the Engram tables in FP8, converted from the official BF16 checkpoint on the first start. See the original
+    model card for training and evaluation details.
+  description: >-
+    Hy4-flash, a 220B-parameter mixture-of-experts model with about 11.3B parameters active per token: 42 layers of
+    sparse and sliding-window MLA attention, 512 routed experts (top-16) plus a shared expert, a 63.5B-parameter
+    Engram n-gram memory, a vision encoder and a speculative drafter, served with vLLM. A reasoning model with text,
+    image and video input and tool calling, for up to 8 concurrent users sharing a 202,752-token context pool (one
+    user can use all of it).
+  intended_use: >-
+    Chat, reasoning, coding and tool use over text, images and short videos, including long documents.
   prerequisites: |
-    - A QB2 (2 x p300, 4 Blackhole dies). Every expert lives in the dies' DRAM (bfp4).
-    - Free host RAM: ~17 GB to start; ~116 GB for the fast path, where the Engram tables (~65 GB of FP8 rows) are
-      copied into RAM (the copy needs a 48 GiB margin on top; the running server then uses ~63 GB). The server checks
-      this at startup against the RAM free right now (other jobs on the machine count): below the minimum it refuses
-      to start (env `HY4_RAM_CHECK=warn` starts anyway); between the two it starts and reads the Engram rows from
-      their memory map on disk (same output; threaded random-access reads, slower decode while the rows are not in
-      the page cache).
-    - Memory locking: `tt-model serve` does not raise the container's memlock limit (it has no ulimit setting), so the
-      Engram RAM copy is not locked (`engram: mlock failed (errno 12)` in the log, harmless) and heavy memory pressure
-      can swap it out. To lock it, give docker a default (`"default-ulimits": {"memlock": {"Name": "memlock",
-      "Soft": -1, "Hard": -1}}` in `/etc/docker/daemon.json`, then restart docker), or start the command
+    - About 116 GB of free host RAM for full decode speed (17 GB minimum). With less than 116 GB free the server
+      still starts but reads the Engram tables from disk and decodes more slowly. Below 17 GB it refuses to start
+      (set `HY4_RAM_CHECK=warn` to start anyway).
+    - About 610 GB of disk: the 440 GB checkpoint plus about 165 GB of caches built on the first start.
+    - Optional: to keep the Engram tables from being swapped out under memory pressure, run the command that
       `tt-model serve --print` prints with `--ulimit memlock=-1:-1` added after `docker run`.
-    - About 610 GB of disk: the BF16 checkpoint (440 GB) in the HF cache, and in the weight cache the device tensor
-      cache (~100 GB) and the Engram FP8 store (~65 GB) the first start writes.
   quickstart: |
-    ### Context pool
-
-    | profile | users | context per user | speculative decoding | decode, greedy | when to pick it |
-    | --- | ---: | ---: | --- | --- | --- |
-    | `p300x2` (only profile) | 1-8 | up to 202,752 per request, the pool shared | 4 drafts for 1 user, 1-3 per user for 2-8 | 1 user ~**TBD** tok/s, 8 users ~**TBD** tok/s total | chat, coding, long documents |
-
-    One profile: all requests share one context pool. A single request can be up to 202,752 tokens (prompt + output);
-    concurrent requests split the pool, and when it runs out vLLM pauses (preempts) a request and recomputes it later.
-
-    ### First start
-
-    After downloading the checkpoint (440 GB), the server builds the Engram FP8 store (~65 GB, 1-4 minutes per
-    table) and writes the device tensor cache (~100 GB) while it loads the model the first time: about **TBD**
-    minutes. An interrupted build resumes where it stopped. Later starts read the caches and are ready in about
-    **TBD** minutes (kernel warm-up and trace capture included).
+    The first start also builds about 165 GB of caches from the checkpoint (the bfp4 experts and the FP8 Engram
+    tables) before the server is ready. Later starts are ready in about 4 minutes.
   usage: |
-    Pass `"model": "tencent/Hy4-flash"` (`"hy4-flash"` also works).
+    `"hy4-flash"` also works as the model name.
 
-    Reasoning: `reasoning_effort` `high` (default, thinking on) or `no_think` (direct answers), per request as
-    `"chat_template_kwargs": {"reasoning_effort": "no_think"}`; the chat template rejects other values. Give thinking
-    requests a large `max_tokens`: when the budget runs out inside the reasoning, `content` is empty.
+    Reasoning is on by default (`reasoning_effort` `high`). For direct answers pass
+    `"chat_template_kwargs": {"reasoning_effort": "no_think"}`; other values are rejected. Give thinking requests a
+    large `max_tokens`: if the budget runs out inside the reasoning, `content` is empty.
 
-    Sampling: a request without sampling parameters uses the checkpoint's recommendation (temperature 0.9,
-    top_p 1.0). Greedy (temperature 0) is the fastest setting. Speculative decoding (DFly2) runs at every user count:
-    one request alone gets 4 drafts per verify pass; 2-8 live requests draft 1-3 tokens each and verify together in
-    one batched pass (2 users 3, 3 users 1, 4-5 users 2, 6-8 users 1). Exact speculative sampling for sampled requests;
-    greedy output is the same as without drafts. Requests that need vLLM's host sampler (logprobs, structured outputs,
-    logit_bias, penalties) are supported.
+    Requests without sampling parameters use temperature 0.9 and top_p 1.0. Greedy (temperature 0) is fastest.
+    Logprobs, structured outputs, logit_bias and penalties are supported.
 
-    Images: up to 4 per request (`image_url` parts), resized to at most 2048 x 2048 pixels. Video: one per request
-    (`video_url`), resampled to 2 fps, at most 64 frames.
+    Images: up to 4 per request (`image_url`), resized to at most 2048 x 2048. Video: one per request (`video_url`),
+    sampled at 2 fps, at most 64 frames.
 
-    Prefix reuse is on: a finished request's slot keeps its caches, and a new prompt that shares its first 2,048 or
-    more tokens with it (the next chat turn, the same document with a new question) resumes from the last shared
-    chunk boundary instead of prefilling it again; the output is identical to a fresh prefill. vLLM's own prefix
-    caching stays off (the engine keeps its own caches).
+    One serving profile, `p300x2`: all requests share one context pool. A single request can be up to 202,752 tokens
+    (prompt + output), and concurrent requests split the pool. When the pool runs out, vLLM pauses a request and
+    recomputes it later.
+
+    A new prompt that shares its first 2,048 or more tokens with a finished request (the next chat turn, or the same
+    document with a new question) reuses that request's cache. The output is the same as without reuse.
   performance: |
-    **Placeholders (TBD): this section is filled with the final measurements of this package.**
+    | eval | this package | SE | reference | prompts | setting |
+    | --- | ---: | ---: | ---: | ---: | --- |
+    | GSM8K (8-shot CoT, strict match) | 95.6% | 0.6 | — | 1,319 | no_think, greedy |
+    | IFEval (prompt-level strict) | 83.9% | 1.6 | — | 541 | no_think, greedy |
+    | HumanEval pass@1 | 97.0% | 1.3 | — | 164 | no_think, greedy |
+    | MBPP (3-shot) | 83.4% | 1.7 | — | 500 | no_think, greedy |
+    | GPQA-Diamond | 77.8% | 3.0 | — | 198 | no_think, greedy |
+    | MATH-500 | 95.6% | 0.9 | — | 500 | no_think, greedy |
+    | MMLU-Pro (fixed 1,000-question subset) | 73.3% | 1.4 | — | 1,000 | no_think, greedy |
+    | GPQA-Diamond, thinking | 87.4% | 2.4 | — | 198 | high, temperature 0.9, max_tokens 18,944 |
+    | Needle retrieval (2K-11K, alone and with 7 users) | 6/6 | — | — | 6 | no_think, greedy |
+    | Top-1 agreement / KL (top 32) with the BF16 reference, 8 users | 86.5% / 0.223 | — | — | 8 texts | teacher forced |
+    | Same, 3K-token text, prefill / decode | 82.7% / 0.293, 82.8% / 0.275 | — | — | 1 text | teacher forced |
 
-    ### Accuracy
+    Evals served through the OpenAI endpoint with 8 requests in flight (lm-evaluation-harness; seed 42).
+    SE = sqrt(p(1-p)/n). Tencent publishes no figures for these settings.
 
-    | eval | this package | SE | prompts | setting |
-    | --- | ---: | ---: | ---: | --- |
-    | GSM8K (8-shot CoT, strict match) | TBD | TBD | 1,319 | no_think, greedy |
-    | IFEval prompt-level strict | TBD | TBD | 541 | no_think, greedy |
-    | HumanEval pass@1 | TBD | TBD | 164 | no_think, greedy |
-    | MBPP (3-shot instruct) | TBD | TBD | 500 | no_think, greedy |
-    | GPQA-Diamond | TBD | TBD | 198 | no_think, greedy |
-    | MATH-500 | TBD | TBD | 500 | no_think, greedy |
-    | MMLU-Pro (1,000-question stratified subset) | TBD | TBD | 1,000 | no_think, greedy |
-    | GPQA-Diamond, thinking | TBD | TBD | 198 | high, temperature 0.9 |
-    | Long-context retrieval (needles at 2K-11K, alone and with 7 users) | TBD / 6 | — | 6 | no_think, greedy |
-
-    Served through the OpenAI endpoint (default profile, 8 requests in flight; lm-evaluation-harness, and a fixed
-    1,000-question MMLU-Pro subset; seed 42). Tencent publishes no reproducible text-benchmark scores for the
-    instruct model (its card reports agentic and internal suites), so the scores stand alone with their standard
-    error, SE = sqrt(p(1-p)/n).
-
-    Agreement with the BF16 reference (teacher forced; top-1 / KL over the top 32 tokens): 8 concurrent users
-    TBD / TBD; a 3K-token text TBD / TBD (prefill) and TBD / TBD (decode).
-
-    ### Performance
-
-    | profile | sampling | ISL | OSL | users | N | TTFT | prefill tok/s/u | decode tok/s/u | total tok/s | E2EL |
+    | profile | sampling | ISL | OSL | concurrency | N | TTFT (s) | prefill tok/s/u | decode tok/s/u | total tok/s | E2EL (s) |
     | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | greedy | ~30 | 256 | 1 | TBD | TBD | — | TBD | — | TBD |
-    | p300x2 | greedy | ~30 | 256 | 2 | TBD | TBD | — | TBD | TBD | TBD |
-    | p300x2 | greedy | ~30 | 256 | 4 | TBD | TBD | — | TBD | TBD | TBD |
-    | p300x2 | greedy | ~30 | 256 | 8 | TBD | TBD | — | TBD | TBD | TBD |
-    | p300x2 | T 0.9, top_p 1.0 | ~30 | 256 | 8 | TBD | TBD | — | TBD | TBD | TBD |
-    | p300x2 | greedy | 2,048 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
-    | p300x2 | greedy | 8,192 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
-    | p300x2 | greedy | 16,384 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
-    | p300x2 | greedy | 16,384 | 128 | 8 | TBD | TBD | TBD | TBD | TBD | TBD |
-    | p300x2 | greedy | 32,768 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
-    | p300x2 | greedy | 131,072 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
-    | p300x2 | greedy | ~218,000 | 128 | 1 | TBD | TBD | TBD | TBD | — | TBD |
+    | p300x2 | T 0.9 | ~30 | 256 | 1 | 8 | 0.22 | — | 66.2 | — | 4.07 |
+    | p300x2 | T 0.9 | ~30 | 256 | 2 | 8 | 0.23 | — | 59.4 | 108.2 | 4.52 |
+    | p300x2 | T 0.9 | ~30 | 256 | 3 | 12 | 0.23 | — | 45.5 | 129.3 | 5.87 |
+    | p300x2 | T 0.9 | ~30 | 256 | 4 | 16 | 0.23 | — | 43.7 | 157.2 | 6.11 |
+    | p300x2 | T 0.9 | ~30 | 256 | 5 | 20 | 0.23 | — | 40.0 | 182.0 | 6.61 |
+    | p300x2 | T 0.9 | ~30 | 256 | 6 | 24 | 0.25 | — | 34.6 | 197.5 | 7.69 |
+    | p300x2 | T 0.9 | ~30 | 256 | 7 | 28 | 0.24 | — | 33.3 | 214.9 | 7.99 |
+    | p300x2 | T 0.9 | ~30 | 256 | 8 | 32 | 0.24 | — | 30.2 | 234.5 | 8.70 |
+    | p300x2 | greedy | ~30 | 256 | 1 | 8 | 0.22 | — | 66.9 | — | 4.04 |
+    | p300x2 | greedy | ~30 | 256 | 2 | 8 | 0.23 | — | 58.0 | 104.1 | 4.74 |
+    | p300x2 | greedy | ~30 | 256 | 4 | 16 | 0.23 | — | 44.6 | 161.8 | 6.10 |
+    | p300x2 | greedy | ~30 | 256 | 8 | 32 | 0.24 | — | 30.7 | 235.6 | 8.58 |
+    | p300x2 | greedy | 131 | 64 | 1 | 3 | 0.23 | 572 | 64.7 | — | 1.20 |
+    | p300x2 | greedy | 516 | 64 | 1 | 3 | 0.36 | 1,439 | 61.7 | — | 1.38 |
+    | p300x2 | greedy | 1,028 | 64 | 1 | 3 | 0.51 | 2,001 | 67.1 | — | 1.45 |
+    | p300x2 | greedy | 2,052 | 128 | 1 | 3 | 0.68 | 3,027 | 64.3 | — | 2.66 |
+    | p300x2 | greedy | 4,100 | 128 | 1 | 3 | 1.24 | 3,313 | 67.4 | — | 3.12 |
+    | p300x2 | greedy | 8,196 | 128 | 1 | 3 | 2.36 | 3,478 | 62.3 | — | 4.40 |
+    | p300x2 | greedy | 16,388 | 128 | 1 | 3 | 4.59 | 3,568 | 65.6 | — | 6.53 |
+    | p300x2 | greedy | 2,052 | 128 | 8 | 8 | 5.32 | 385 | 16.5 | 77.0 | 12.72 |
+    | p300x2 | greedy | 8,196 | 128 | 8 | 8 | 18.67 | 439 | 31.1 | 42.3 | 22.88 |
+    | p300x2 | greedy | 16,388 | 128 | 8 | 8 | 36.55 | 448 | 34.9 | 25.4 | 40.19 |
+    | p300x2 | greedy | 32,772 | 128 | 1 | 2 | 9.12 | 3,595 | 70.1 | — | 10.93 |
+    | p300x2 | greedy | 131,075 | 128 | 1 | 1 | 37.00 | 3,543 | 66.3 | — | 38.91 |
+    | p300x2 | greedy | 200,004 | 128 | 1 | 1 | 58.63 | 3,412 | 64.4 | — | 60.60 |
+    | p300x2 | T 0.9 | 32,772 | 128 | 1 | 2 | 9.13 | 3,591 | 68.7 | — | 10.98 |
+    | p300x2 | T 0.9 | 131,076 | 128 | 1 | 1 | 37.00 | 3,543 | 61.0 | — | 39.08 |
 
-    Prefix reuse (greedy): a ~10K-token prompt resent, TTFT TBD -> TBD; a chat's second turn TBD. Images: TTFT TBD
-    (one 1024 x 1024 image, alone / with 7 text users). Video (64 frames): TTFT TBD alone, TBD with 7 users.
+    Prefix reuse: a 10K-token prompt has a TTFT of 3.27 s cold and 0.69 s when it is resent or continued as the next chat
+    turn. Images: one 1024 x 1024 image, TTFT 0.64 s alone and 1.34 s with 7 text users. Video (64 frames, 640 x 480):
+    TTFT 1.49 s alone and 2.13 s with 7 text users. Needle retrieval at 32K, 131K and 200K tokens (depths 10, 50 and
+    90%): 9 of 9 found.
 
-    Measured on one QB2 through the OpenAI endpoint with the package's `tt-model serve` launch command, warm caches,
-    TBD (date). Users are concurrent streamed requests; TTFT = time to the first streamed token; prefill tok/s =
-    prompt tokens / TTFT; decode tok/s/u = (output tokens - 1) / (E2EL - TTFT); total tok/s = all output tokens / the
-    row's wall time; medians over N requests, output pinned to OSL tokens. Single-user decode varies with the text
-    (speculative acceptance). Rows from `hy4_card_bench.py ISL:OSL:USERS:N`.
+    Medians over N requests, measured on one QB2 through the OpenAI endpoint with the package's launch command, warm
+    caches, 2026-11-24. Concurrency = streamed requests in flight; prefill tok/s/u = prompt tokens / TTFT; decode tok/s/u
+    = (output tokens - 1) / (E2EL - TTFT); total tok/s = all output tokens / wall time. "T 0.9" = temperature 0.9,
+    top_p 1.0, the model's default sampling. Single-user decode speed depends on the text (speculative decoding).
   limitations: |
-    - At most 8 concurrent users; their contexts together are bounded by the shared pool (~203K tokens).
-    - Fewer drafts per user as users are added (4 for one user, 1-3 for 2-8), so per-user decode speed drops with load.
-    - Outputs are close to but not identical to the BF16 reference (bfp4 experts; see Accuracy).
-    - Decode at long context is slower than at short context (see Performance).
-    - Without enough free host RAM for the Engram tables they are read from disk (slower decode; see Prerequisites).
-    - Needs 4 Blackhole dies (a QB2); other topologies are untested.
-  licensing: >
-    Hy4-flash is under the Tencent Hy License (see the weights repo's LICENSE for its terms, including where and how
-    the model may be used). The same terms apply to the caches built from it. The serving code is Apache-2.0.
+    - Not for decisions about people (medical, legal, financial, hiring) without human review; like any language
+      model it can state wrong facts with confidence.
+    - At most 8 concurrent users, and their contexts together cannot exceed the 202,752-token pool; a request that
+      does not fit waits until others finish.
+    - Per-user decode speed drops as users are added, and decode is slower at long context (see Performance).
+    - Several long prompts that arrive together are prefilled one after another, so the last one waits longer for its
+      first token.
+    - Outputs differ slightly from the BF16 reference (bfp4 experts, FP8 Engram tables; see the agreement rows).
+    - Weights are pinned to revision b2498eb of tencent/Hy4-flash. Later revisions are not supported.
+    - Runs only on a QB2 (4 Blackhole dies); other boards are not supported.
+  licensing: >-
+    Weights: Tencent Hy License 1.0 (Apache-2.0 based). Commercial use is allowed, but a model-as-a-service business
+    needs a separate license from Tencent if its revenue is above US$50 million a year or the product has more than
+    100 million monthly active users (internal-only use is exempt); see the LICENSE in the weights repo. The caches
+    built from the weights carry the same terms. Port and serving code: Apache-2.0.
   license: {id: other, name: tencent-hy-license, link: https://huggingface.co/tencent/Hy4-flash/blob/main/LICENSE}
   pipeline_tag: image-text-to-text
   base_model: [tencent/Hy4-flash]
