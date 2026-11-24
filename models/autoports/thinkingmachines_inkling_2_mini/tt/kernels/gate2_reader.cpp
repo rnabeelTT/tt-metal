@@ -13,11 +13,12 @@
 #include "api/dataflow/dataflow_api.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
-template <uint32_t T, uint32_t E>
+// rows 0 .. T-1 of a tile (faces 0 / 1) into a TH x 32 CB tile (faces min(TH, 16) x 16)
+template <uint32_t T, uint32_t E, uint32_t TH>
 inline void read_rows(uint64_t src, uint32_t dst) {
     constexpr uint32_t FACE = 256 * E;  // (rows 0 .. T-1 of a face are contiguous: one read per face)
     noc_async_read(src, dst, T * 16 * E);
-    noc_async_read(src + FACE, dst + FACE, T * 16 * E);
+    noc_async_read(src + FACE, dst + (TH < 16 ? TH : 16) * 16 * E, T * 16 * E);
 }
 
 void kernel_main() {
@@ -38,7 +39,8 @@ void kernel_main() {
     constexpr uint32_t ROUTER = get_compile_time_arg_val(14);
     constexpr uint32_t ET = get_compile_time_arg_val(15);
     constexpr uint32_t F32 = 4096, BF = 2048;
-    constexpr uint32_t T = G2_ROWS;
+    constexpr uint32_t T = G2_ROWS, TH = G2_TH;  // TH: the rows of the CB tiles of token rows (8 / 16 / 32)
+    constexpr uint32_t FT = TH * 128, BT = TH * 64;  // (a CB tile of token rows; weights / tensors: 32 x 32)
     constexpr auto x_args = TensorAccessorArgs<16>();
     constexpr auto w_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();
     auto ca = [](uint32_t i) { return get_common_arg_val<uint32_t>(i); };
@@ -60,8 +62,8 @@ void kernel_main() {
     cb_reserve_back(cb_h, PER);
     cb_reserve_back(cb_m, PER);
     for (uint32_t t = 0; t < PER; ++t) {
-        read_rows<T, 4>(ah.get_noc_addr(t0 + t), get_write_ptr(cb_h) + t * F32);
-        read_rows<T, 4>(am.get_noc_addr(t0 + t), get_write_ptr(cb_m) + t * F32);
+        read_rows<T, 4, TH>(ah.get_noc_addr(t0 + t), get_write_ptr(cb_h) + t * FT);
+        read_rows<T, 4, TH>(am.get_noc_addr(t0 + t), get_write_ptr(cb_m) + t * FT);
     }
     cb_reserve_back(cb_ones, 1);
     noc_async_read(aones.get_noc_addr(0), get_write_ptr(cb_ones), BF);
@@ -70,8 +72,12 @@ void kernel_main() {
     cb_push_back(cb_m, PER);
     cb_push_back(cb_ones, 1);
     cb_reserve_back(cb_sel, NSEL);
-    for (uint32_t k = 0; k < NSEL; ++k) {
-        noc_async_read(asel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF, BF);
+    for (uint32_t k = 0; k < NSEL; ++k) {  // (row 0 of the 0 / 1 tiles is the only nonzero row)
+        if constexpr (TH == 32) {
+            noc_async_read(asel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BT, BT);
+        } else {
+            read_rows<TH, 2, TH>(asel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BT);
+        }
     }
     cb_reserve_back(cb_wd, 2 * PER * R);
     const uint32_t w = get_write_ptr(cb_wd);
@@ -100,7 +106,7 @@ void kernel_main() {
         const auto anw = TensorAccessor(w_args, ca(6), F32);
         cb_reserve_back(cb_nw, PER);
         for (uint32_t t = 0; t < PER; ++t) {
-            read_rows<T, 4>(anw.get_noc_addr(t0 + t), get_write_ptr(cb_nw) + t * F32);
+            read_rows<T, 4, TH>(anw.get_noc_addr(t0 + t), get_write_ptr(cb_nw) + t * FT);
         }
         noc_async_read_barrier();
         cb_push_back(cb_nw, PER);

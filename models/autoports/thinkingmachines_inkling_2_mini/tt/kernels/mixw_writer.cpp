@@ -22,7 +22,13 @@ void kernel_main() {
             for (uint32_t q = 0; q < nq; ++q) {
                 const auto ao = TensorAccessor(o_args, get_arg_val<uint32_t>(5 + q), F32);
                 cb_wait_front(cb_out, 1);
-                noc_async_write(get_read_ptr(cb_out), ao.get_noc_addr(r * Ht + t0 + t), F32);
+                const uint64_t d = ao.get_noc_addr(r * Ht + t0 + t);
+#if defined(MIX_TH) && MIX_TH < 32  // (the live rows of faces 0 / 1 of a MIX_TH x 32 CB tile)
+                noc_async_write(get_read_ptr(cb_out), d, MIX_T * 64);
+                noc_async_write(get_read_ptr(cb_out) + MIX_TH * 64, d + 1024, MIX_T * 64);
+#else
+                noc_async_write(get_read_ptr(cb_out), d, F32);
+#endif
                 noc_async_writes_flushed();
                 cb_pop_front(cb_out, 1);
             }

@@ -96,19 +96,41 @@ ALWI void drain() {
     TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
 #endif
 }
+// The copy / pack configuration is redone only when the source / output kind changes (every copy source is an fp32
+// unpack-to-dest CB but att / x (bf16), every output an fp32 CB but the bf16 out / router input; all of one kind
+// share the format and tile shape), and a copy after a matmul re-inits.
+constexpr uint32_t CB_ATT = get_compile_time_arg_val(0), CB_X = get_compile_time_arg_val(1);
+constexpr uint32_t CB_OUT = get_compile_time_arg_val(22), OUT_BF = get_compile_time_arg_val(27);
+uint32_t cp_kind = 2, pk_kind = 2;
 ALWI void cp(uint32_t cb, uint32_t i, uint32_t d) {
     drain();
-    reconfig_data_format_srca(cb);
-    copy_init(cb);
+    const uint32_t k = cb == CB_ATT || cb == CB_X;
+    if (k != cp_kind) {
+        reconfig_full_operand_srca(cb);  // (token-row CBs: TH x 32 tiles; matmul in1: 32 x 32)
+        copy_init(cb);
+        cp_kind = k;
+    }
     copy_tile(cb, i, d);
 }
 ALWI void mm_begin(uint32_t in0, uint32_t in1) {
     drain();
-    reconfig_data_format(in1, in0);
+    reconfig_full_operand(in1, in0);  // srcA = in1 (32 x 32), srcB = in0 (TH x 32: 4 FPU passes at TH = 8)
     matmul_init(in0, in1, 0);
+    cp_kind = 2;
+}
+ALWI void pack_cfg(uint32_t cb) {
+#if POST_RT
+    const uint32_t k = (OUT_BF && cb == CB_OUT) || cb == POST_CB_XB;
+#else
+    const uint32_t k = OUT_BF && cb == CB_OUT;
+#endif
+    if (k != pk_kind) {
+        pack_reconfig_data_format(cb);
+        pk_kind = k;
+    }
 }
 ALWI void pack_to(uint32_t d, uint32_t cb) {
-    pack_reconfig_data_format(cb);
+    pack_cfg(cb);
     pack_tile(d, cb);
 }
 }  // namespace
@@ -153,7 +175,8 @@ void kernel_main() {
     constexpr uint32_t n = NB + 1;
     static_assert(n <= 6, "DST: max + n weights + sum");
 
-    compute_kernel_hw_startup(cb_s, cb_out);
+    // matmuls: in0 -> srcB, in1 -> srcA (each CB's tile shape: the token-row CBs hold TH x 32 tiles, POST_TH)
+    compute_kernel_hw_startup<SrcOrder::Reverse>(cb_sq, cb_ones, cb_so);
 
     {
     DeviceZoneScopedN("P_C_CONV");
@@ -350,7 +373,7 @@ void kernel_main() {
     tile_regs_commit();
     cb_reserve_back(cb_wt, n);
     tile_regs_wait();
-    pack_reconfig_data_format(cb_wt);
+    pack_cfg(cb_wt);
     for (uint32_t i = 0; i < n; ++i) {
         pack_tile(1 + i, cb_wt);
     }
@@ -514,7 +537,7 @@ void kernel_main() {
             tile_regs_commit();
             cb_reserve_back(cb_p3, 2 * ET);
             tile_regs_wait();
-            pack_reconfig_data_format(cb_p3);
+            pack_cfg(cb_p3);
             for (uint32_t e = 0; e < ET; ++e) {
                 pack_tile(e, cb_p3);
                 pack_tile(4 + e, cb_p3);
@@ -537,7 +560,7 @@ void kernel_main() {
                 tile_regs_commit();
                 cb_reserve_back(cb_t3, ET);
                 tile_regs_wait();
-                pack_reconfig_data_format(cb_t3);
+                pack_cfg(cb_t3);
                 for (uint32_t e = 0; e < ET; ++e) {
                     pack_tile(e, cb_t3);
                 }

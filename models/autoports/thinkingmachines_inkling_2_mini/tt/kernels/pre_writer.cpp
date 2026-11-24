@@ -13,11 +13,12 @@
 #include "api/dataflow/dataflow_api.h"
 #include "red.hpp"
 
-template <uint32_t T, uint32_t E>
+// rows 0 .. T-1 of a TH x 32 CB tile (faces min(TH, 16) x 16) into a 32 x 32 tensor tile
+template <uint32_t T, uint32_t E, uint32_t TH>
 inline void write_rows(uint32_t src, uint64_t dst) {
     constexpr uint32_t FACE = 256 * E;  // (rows 0 .. T-1 of a face are contiguous: one write per face)
     noc_async_write(src, dst, T * 16 * E);
-    noc_async_write(src + FACE, dst + FACE, T * 16 * E);
+    noc_async_write(src + (TH < 16 ? TH : 16) * 16 * E, dst + FACE, T * 16 * E);
 }
 
 void kernel_main() {
@@ -41,7 +42,8 @@ void kernel_main() {
     constexpr uint32_t BOUND = get_compile_time_arg_val(17);
     constexpr uint32_t NSEL = get_compile_time_arg_val(18);
     constexpr uint32_t T = PRE_ROWS;
-    constexpr uint32_t F32 = 4096;
+    constexpr uint32_t F32 = 4096;  // a tensor / gather tile
+    constexpr uint32_t TH = PRE_TH, FT = TH * 128, FO = (TH < 16 ? TH : 16) * 64;  // a CB tile of token rows (fp32)
     constexpr uint32_t OE = NORM ? 2 : 4;  // output element bytes
     constexpr uint32_t K1 = 1 + NQ;
     constexpr auto s_args = TensorAccessorArgs<19>();                                     // states
@@ -102,10 +104,10 @@ void kernel_main() {
             const uint32_t so = get_read_ptr(cb_so);
             for (uint32_t j = 0; j < 3; ++j) {
                 const auto as = TensorAccessor(s_args, ca(j), F32);
-                write_rows<T, 4>(so + j * F32, as.get_noc_addr(t));
+                write_rows<T, 4, TH>(so + j * FT, as.get_noc_addr(t));
             }
             cb_wait_front(cb_xo, 1);
-            write_rows<T, 2>(get_read_ptr(cb_xo), x_o.get_noc_addr(t));
+            write_rows<T, 2, TH>(get_read_ptr(cb_xo), x_o.get_noc_addr(t));
             noc_async_write_barrier();
             cb_pop_front(cb_so, 3);
             cb_pop_front(cb_xo, 1);
@@ -119,9 +121,9 @@ void kernel_main() {
         const uint32_t d = g + red_off<PRE_RK>(c);
         for (uint32_t t = 0; t < T; ++t) {
             for (uint32_t p = 0; p < parts; ++p) {
-                const uint32_t s = src + p * F32 + row_off(t);
+                const uint32_t s = src + p * FT + t * 64;  // (row t < 16 of a CB tile)
                 noc_async_write(s, rxy(t, d + p * NSEL * F32), 64);
-                noc_async_write(s + 1024, rxy(t, d + p * NSEL * F32 + 1024), 64);
+                noc_async_write(s + FO, rxy(t, d + p * NSEL * F32 + 1024), 64);
             }
         }
         noc_async_write_barrier();
@@ -138,14 +140,14 @@ void kernel_main() {
             const uint32_t ts = get_read_ptr(cb_tout);
             if constexpr (T == 1) {
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    noc_async_write_multicast_loopback_src(ts + k * F32, mc(tb + k * F32), 64, C);
-                    noc_async_write_multicast_loopback_src(ts + k * F32 + 1024, mc(tb + k * F32 + 1024), 64, C);
+                    noc_async_write_multicast_loopback_src(ts + k * FT, mc(tb + k * FT), 64, C);
+                    noc_async_write_multicast_loopback_src(ts + k * FT + FO, mc(tb + k * FT + FO), 64, C);
                 }
             } else {  // row 0 -> row c of core 0's totals
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    const uint32_t o = tb + k * F32 + row_off(c);
-                    noc_async_write(ts + k * F32, rxy(0, o), 64);
-                    noc_async_write(ts + k * F32 + 1024, rxy(0, o + 1024), 64);
+                    const uint32_t o = tb + k * FT + c * 64;
+                    noc_async_write(ts + k * FT, rxy(0, o), 64);
+                    noc_async_write(ts + k * FT + FO, rxy(0, o + FO), 64);
                 }
             }
             noc_async_write_barrier();
@@ -156,9 +158,9 @@ void kernel_main() {
                 } else {  // rows 0..T-1 (contiguous per face) -> everyone (one multicaster: concurrent ones serialize)
                     noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
                     for (uint32_t k = 0; k < ntot; ++k) {
-                        const uint32_t o = tb + k * F32;
+                        const uint32_t o = tb + k * FT;
                         noc_async_write_multicast(o, mc(o), T * 64, C - 1);
-                        noc_async_write_multicast(o + 1024, mc(o + 1024), T * 64, C - 1);
+                        noc_async_write_multicast(o + FO, mc(o + FO), T * 64, C - 1);
                     }
                     noc_async_write_barrier();
                 }
@@ -180,7 +182,7 @@ void kernel_main() {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);
             for (uint32_t i = 0; i < PER; ++i) {
                 cb_wait_front(cb_out, 1);
-                write_rows<T, OE>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
+                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
                 noc_async_write_barrier();
                 cb_pop_front(cb_out, 1);
             }
@@ -190,7 +192,7 @@ void kernel_main() {
         const auto xn = TensorAccessor(x_args, ca(4), F32);
         for (uint32_t i = 0; i < PER; ++i) {
             cb_wait_front(cb_xn, 1);
-            write_rows<T, 4>(get_read_ptr(cb_xn), xn.get_noc_addr(t0 + i));
+            write_rows<T, 4, TH>(get_read_ptr(cb_xn), xn.get_noc_addr(t0 + i));
             noc_async_write_barrier();
             cb_pop_front(cb_xn, 1);
         }
@@ -200,7 +202,7 @@ void kernel_main() {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);
             for (uint32_t i = 0; i < PER; ++i) {
                 cb_wait_front(cb_out, 1);
-                write_rows<T, OE>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
+                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
                 noc_async_write_barrier();
                 cb_pop_front(cb_out, 1);
             }

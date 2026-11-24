@@ -16,11 +16,12 @@
 #include "tools/profiler/kernel_profiler.hpp"
 #include "red.hpp"
 
-template <uint32_t T, uint32_t E>
+// rows 0 .. T-1 of a TH x 32 CB tile (faces min(TH, 16) x 16) into a 32 x 32 tensor tile
+template <uint32_t T, uint32_t E, uint32_t TH>
 inline void write_rows(uint32_t src, uint64_t dst) {
     constexpr uint32_t FACE = 256 * E;  // (rows 0 .. T-1 of a face are contiguous: one write per face)
     noc_async_write(src, dst, T * 16 * E);
-    noc_async_write(src + FACE, dst + FACE, T * 16 * E);
+    noc_async_write(src + (TH < 16 ? TH : 16) * 16 * E, dst + FACE, T * 16 * E);
 }
 
 void kernel_main() {
@@ -41,7 +42,8 @@ void kernel_main() {
     constexpr uint32_t cb_tot = get_compile_time_arg_val(14);   // every core: round 1's totals received
     constexpr uint32_t cb_tot2 = get_compile_time_arg_val(15);  // every core: round 2's totals received
     constexpr uint32_t cb_zero = get_compile_time_arg_val(16);
-    constexpr uint32_t F32 = 4096;
+    constexpr uint32_t F32 = 4096;  // a tensor / gather tile
+    constexpr uint32_t TH = POST_TH, FT = TH * 128, FO = (TH < 16 ? TH : 16) * 64;  // a CB tile of token rows (fp32)
     constexpr auto s_args = TensorAccessorArgs<17>();
     constexpr auto r_args = TensorAccessorArgs<s_args.next_compile_time_args_offset()>();
     constexpr auto o_args = TensorAccessorArgs<r_args.next_compile_time_args_offset()>();
@@ -64,7 +66,7 @@ void kernel_main() {
     const uint32_t s_done = get_semaphore(3), s_t = get_semaphore(4);
     auto sem = [](uint32_t a) { return reinterpret_cast<volatile tt_l1_ptr uint32_t*>(a); };
     auto mc = [&](uint32_t addr) { return get_noc_multicast_addr(mx0, my0, mx1, my1, addr); };
-    auto row_off = [](uint32_t i) { return (i < 16 ? 0u : 2048u) + (i % 16) * 64; };
+    auto row_off = [](uint32_t i) { return (i < 16 ? 0u : 2048u) + (i % 16) * 64; };  // (a 32 x 32 tile)
 
     // receive buffers (the same addresses on every core)
     cb_reserve_back(cb_tot, 2);
@@ -124,11 +126,11 @@ void kernel_main() {
         const uint32_t t = t0 + i;
         cb_wait_front(cb_so, 3);
         const uint32_t so = get_read_ptr(cb_so);
-        write_rows<T, 4>(so, s0.get_noc_addr(t));  // (live rows only: the other rows are other slots' / padding)
-        write_rows<T, 4>(so + F32, s1.get_noc_addr(t));
-        write_rows<T, 4>(so + 2 * F32, s2.get_noc_addr(t));
+        write_rows<T, 4, TH>(so, s0.get_noc_addr(t));  // (live rows only: the other rows are other slots' / padding)
+        write_rows<T, 4, TH>(so + FT, s1.get_noc_addr(t));
+        write_rows<T, 4, TH>(so + 2 * FT, s2.get_noc_addr(t));
         cb_wait_front(cb_rout, 1);
-        write_rows<T, 4>(get_read_ptr(cb_rout), ro.get_noc_addr(t));
+        write_rows<T, 4, TH>(get_read_ptr(cb_rout), ro.get_noc_addr(t));
         noc_async_write_barrier();
         cb_pop_front(cb_so, 3);
         cb_pop_front(cb_rout, 1);
@@ -139,9 +141,9 @@ void kernel_main() {
         const uint32_t d = g + red_off<POST_RK>(c);
         for (uint32_t t = 0; t < T; ++t) {
             for (uint32_t p = 0; p < parts; ++p) {
-                const uint32_t s = src + p * F32 + row_off(t);
+                const uint32_t s = src + p * FT + t * 64;  // (row t < 16 of a CB tile)
                 noc_async_write(s, rxy(t, d + p * NQ * F32), 64);
-                noc_async_write(s + 1024, rxy(t, d + p * NQ * F32 + 1024), 64);
+                noc_async_write(s + FO, rxy(t, d + p * NQ * F32 + 1024), 64);
             }
         }
         noc_async_write_barrier();
@@ -162,14 +164,14 @@ void kernel_main() {
             const uint32_t ts = get_read_ptr(cb_tout);
             if constexpr (T == 1) {
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    noc_async_write_multicast_loopback_src(ts + k * F32, mc(tb + k * F32), 64, C);
-                    noc_async_write_multicast_loopback_src(ts + k * F32 + 1024, mc(tb + k * F32 + 1024), 64, C);
+                    noc_async_write_multicast_loopback_src(ts + k * FT, mc(tb + k * FT), 64, C);
+                    noc_async_write_multicast_loopback_src(ts + k * FT + FO, mc(tb + k * FT + FO), 64, C);
                 }
             } else {  // row 0 -> row c of core 0's totals
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    const uint32_t o = tb + k * F32 + row_off(c);
-                    noc_async_write(ts + k * F32, rxy(0, o), 64);
-                    noc_async_write(ts + k * F32 + 1024, rxy(0, o + 1024), 64);
+                    const uint32_t o = tb + k * FT + c * 64;
+                    noc_async_write(ts + k * FT, rxy(0, o), 64);
+                    noc_async_write(ts + k * FT + FO, rxy(0, o + FO), 64);
                 }
             }
             noc_async_write_barrier();
@@ -180,9 +182,9 @@ void kernel_main() {
                 } else {  // rows 0..T-1 (contiguous per face) -> everyone
                     noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
                     for (uint32_t k = 0; k < ntot; ++k) {
-                        const uint32_t o = tb + k * F32;
+                        const uint32_t o = tb + k * FT;
                         noc_async_write_multicast(o, mc(o), T * 64, C - 1);
-                        noc_async_write_multicast(o + 1024, mc(o + 1024), T * 64, C - 1);
+                        noc_async_write_multicast(o + FO, mc(o + FO), T * 64, C - 1);
                     }
                     noc_async_write_barrier();
                 }
@@ -205,9 +207,9 @@ void kernel_main() {
 
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
-        write_rows<T, OUTB / 1024>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i));
+        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i));
 #if POST_DUP
-        write_rows<T, OUTB / 1024>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + 16 * (OUTB / 1024));
+        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + 16 * (OUTB / 1024));
 #endif
         noc_async_write_barrier();
         cb_pop_front(cb_out, 1);
@@ -228,9 +230,9 @@ void kernel_main() {
             const uint32_t ts = get_read_ptr(POST_CB_T3);
             for (uint32_t e = 0; e < ET; ++e) {
                 const uint64_t dl = al.get_noc_addr(e) + c * 64;
-                write_rows<1, 4>(ts + e * F32, dl);
+                write_rows<1, 4, TH>(ts + e * FT, dl);
 #if POST_DUP
-                write_rows<1, 4>(ts + e * F32, dl + 64);
+                write_rows<1, 4, TH>(ts + e * FT, dl + 64);
 #endif
             }
             noc_async_write_barrier();

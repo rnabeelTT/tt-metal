@@ -12,6 +12,22 @@
 
 #include "api/dataflow/dataflow_api.h"
 
+// MIX_TH < 32 (decode, MIX_T <= 16 live rows): the CB tiles are MIX_TH x 32 (faces MIX_TH x 16): rows 0 .. MIX_T - 1
+// of faces 0 / 1 move between them and the tensors' 32 x 32 tiles
+#ifndef MIX_TH
+#define MIX_TH 32
+#define MIX_T 32
+#endif
+constexpr uint32_t CT = MIX_TH * 128;  // a CB tile (fp32)
+inline void read_tile(uint64_t src, uint32_t dst) {
+    if constexpr (MIX_TH == 32) {
+        noc_async_read(src, dst, 4096);
+    } else {
+        noc_async_read(src, dst, MIX_T * 64);
+        noc_async_read(src + 1024, dst + MIX_TH * 64, MIX_T * 64);
+    }
+}
+
 void kernel_main() {
     const uint32_t t0 = get_arg_val<uint32_t>(0);
     const uint32_t nt = get_arg_val<uint32_t>(1);
@@ -30,7 +46,7 @@ void kernel_main() {
         const auto alg = TensorAccessor(lg_args, get_arg_val<uint32_t>(2 + 3 * i + 1), F32);
         const uint32_t off = get_arg_val<uint32_t>(2 + 3 * i + 2);
         for (uint32_t q = 0; q < nq; ++q) {
-            noc_async_read(alg.get_noc_addr(off + q), l + (i * nq + q) * F32, F32);
+            read_tile(alg.get_noc_addr(off + q), l + (i * nq + q) * CT);
         }
     }
     cb_reserve_back(cb_s, n * nt);
@@ -38,7 +54,7 @@ void kernel_main() {
     for (uint32_t i = 0; i < n; ++i) {
         const auto as = TensorAccessor(s_args, get_arg_val<uint32_t>(2 + 3 * i), F32);
         for (uint32_t t = 0; t < nt; ++t) {
-            noc_async_read(as.get_noc_addr(t0 + t), sp + (t * n + i) * F32, F32);
+            read_tile(as.get_noc_addr(t0 + t), sp + (t * n + i) * CT);
         }
     }
     noc_async_read_barrier();

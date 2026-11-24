@@ -35,6 +35,21 @@ def red_k(T):
     return int(_RK) if _RK else (2 if T > 1 else 8)
 
 ROUTER_ROWS = int(__import__("os").environ.get("I2M_POST_ROUTER_ROWS", "4"))
+# the token-row CB tiles 8 / 16 rows tall (T <= 8 / 16): the fp32 unpacks / packs and the matmul passes scale with the
+# rows; the cross-core gather tiles (a row per core) stay 32 x 32. I2M_TINY=0: whole tiles
+TINY = __import__("os").environ.get("I2M_TINY", "1") == "1"
+
+
+def tile_rows(T):
+    return (8 if T <= 8 else 16) if TINY and T <= 16 else 32
+
+
+def cbt(cores, index, dtype, tiles, th):
+    """A CB of `tiles` th x 32 tiles (th < 32: CBFormatDescriptor tile shape)."""
+    page = th * (128 if dtype == ttnn.float32 else 64)
+    fmt = ttnn.CBFormatDescriptor(buffer_index=index, data_format=dtype, page_size=page,
+                                  tile=ttnn.TileDescriptor(th, 32) if th < 32 else None)
+    return ttnn.CBDescriptor(total_size=page * tiles, core_ranges=cores, format_descriptors=[fmt])
 
 
 def red_sel(mesh, rep, C, K):
@@ -110,21 +125,22 @@ class PostKernel:
         (cb_att, cb_x, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_y16, cb_so, cb_res, cb_rmm, cb_rout, cb_sq,
          cb_part, cb_gath, cb_red, cb_wt, cb_mi, cb_part2, cb_gath2, cb_out, cb_sel, cb_tout, cb_tot, cb_tot2, cb_zero) = range(28)
         NQ, sel = self.red(T)
-        f32, bf, crs = ttnn.float32, ttnn.bfloat16, self.crs
-        cbs = [_cb(crs, cb_att, bf, BF, PER), _cb(crs, cb_x, bf, BF, PER), _cb(crs, cb_s, f32, F32, 3 * PER),
-               _cb(crs, cb_w, f32, F32, 4 * PER), _cb(crs, cb_q, f32, F32, PER), _cb(crs, cb_ones, bf, BF, 1),
-               _cb(crs, cb_d, f32, F32, NB), _cb(crs, cb_blk, f32, F32, NB * PER), _cb(crs, cb_nw, f32, F32, PER),
-               _cb(crs, cb_y16, bf, BF, 1), _cb(crs, cb_so, f32, F32, 3 * PER), _cb(crs, cb_res, f32, F32, PER),
-               _cb(crs, cb_rmm, f32, F32, PER), _cb(crs, cb_rout, f32, F32, PER), _cb(crs, cb_sq, f32, F32, 4 * PER),
-               _cb(crs, cb_part, f32, F32, 4), _cb(crs, cb_gath, f32, F32, 4 * NQ), _cb(crs, cb_red, f32, F32, 2),
-               _cb(crs, cb_wt, f32, F32, NB + 1), _cb(crs, cb_mi, f32, F32, PER), _cb(crs, cb_part2, f32, F32, 2),
-               _cb(crs, cb_gath2, f32, F32, 2 * NQ), _cb(crs, cb_out, odt, BF if norm else F32, 2),
-               _cb(crs, cb_sel, bf, BF, NQ), _cb(crs, cb_tout, f32, F32, 2), _cb(crs, cb_tot, f32, F32, 2),
-               _cb(crs, cb_tot2, f32, F32, 1), _cb(crs, cb_zero, bf, BF, 1)]
+        f32, bf, crs, th = ttnn.float32, ttnn.bfloat16, self.crs, tile_rows(T)
+        r = lambda i, dt, n: cbt(crs, i, dt, n, th)  # noqa: E731  (token rows: th x 32 tiles)
+        cbs = [r(cb_att, bf, PER), r(cb_x, bf, PER), r(cb_s, f32, 3 * PER),
+               r(cb_w, f32, 4 * PER), r(cb_q, f32, PER), _cb(crs, cb_ones, bf, BF, 1),
+               r(cb_d, f32, NB), r(cb_blk, f32, NB * PER), r(cb_nw, f32, PER),
+               r(cb_y16, bf, 1), r(cb_so, f32, 3 * PER), r(cb_res, f32, PER),
+               r(cb_rmm, f32, PER), r(cb_rout, f32, PER), r(cb_sq, f32, 4 * PER),
+               r(cb_part, f32, 4), _cb(crs, cb_gath, f32, F32, 4 * NQ), r(cb_red, f32, 2),
+               r(cb_wt, f32, NB + 1), r(cb_mi, f32, PER), r(cb_part2, f32, 2),
+               _cb(crs, cb_gath2, f32, F32, 2 * NQ), r(cb_out, odt, 2),
+               r(cb_sel, bf, NQ), r(cb_tout, f32, 2), r(cb_tot, f32, 2),
+               r(cb_tot2, f32, 1), _cb(crs, cb_zero, bf, BF, 1)]
         cb_rw, cb_xb, cb_p3, cb_g3, cb_t3 = range(28, 33)
         if rt:
-            cbs += [_cb(crs, cb_rw, bf, BF, 2 * PER * ET), _cb(crs, cb_xb, bf, BF, PER), _cb(crs, cb_p3, f32, F32, 2 * ET),
-                    _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), _cb(crs, cb_t3, f32, F32, ET)]
+            cbs += [_cb(crs, cb_rw, bf, BF, 2 * PER * ET), r(cb_xb, bf, PER), r(cb_p3, f32, 2 * ET),
+                    _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), r(cb_t3, f32, ET)]
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             self.mesh, out_mc) if rt else None
         rdefs = [("POST_RT", str(ET)), ("POST_DUP", str(int(dup))), ("POST_CB_RW", str(cb_rw)),
@@ -161,7 +177,8 @@ class PostKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("POST_RK", str(red_k(T))), ("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed)))] + rdefs + sdefs
+        defs = [("POST_RK", str(red_k(T))), ("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed))),
+                ("POST_TH", str(th))] + rdefs + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -178,7 +195,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, NB, add, norm, self.H, ET, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

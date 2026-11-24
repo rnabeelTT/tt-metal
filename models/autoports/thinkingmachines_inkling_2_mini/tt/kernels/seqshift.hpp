@@ -18,30 +18,40 @@
 // element offset of (row r, half h) in a 32 x 32 tile (faces of 16 x 16)
 inline uint32_t seq_off(uint32_t r, uint32_t h) { return ((r >> 4) * 2 + h) * 256 + (r & 15) * 16; }
 
+// the same in a TH x 32 tile (TH < 32: two faces of TH x 16)
+template <uint32_t TH>
+inline uint32_t seq_off_h(uint32_t r, uint32_t h) {
+    if constexpr (TH == 32) {
+        return seq_off(r, h);
+    } else {
+        return h * TH * 16 + r * 16;
+    }
+}
+
 // s: the 3 state tiles (fp32, consecutive); x: the input tile (XE bytes per element: 2 bf16, 4 fp32); scratch: one
-// fp32 tile (z rows); acc: the G accepted rows.
-template <uint32_t XE>
+// fp32 tile (z rows); acc: the G accepted rows. TH: the rows of the state / input tiles (8 / 16: TH x 32 CB tiles).
+template <uint32_t XE, uint32_t TH = 32>
 inline void seq_shift(uint32_t s, uint32_t x, uint32_t scratch, volatile tt_l1_ptr uint32_t* acc) {
-    constexpr uint32_t R = SEQ_R, G = SEQ_G, F32 = 4096;
-    static_assert(R + 2 <= 8 && G <= 4 && R * G <= 32, "verify rows");
+    constexpr uint32_t R = SEQ_R, G = SEQ_G, F32 = TH * 128;
+    static_assert(R + 2 <= 8 && G <= 4 && R * G <= TH, "verify rows");
     // z rows: the committed state (3 rows: local copies) and the first R - 1 inputs (converted to fp32 on this core)
     for (uint32_t g = 0; g < G; ++g) {
         const uint32_t ra = g * R + acc[g];
         for (uint32_t j = 0; j < 3; ++j) {
             for (uint32_t h = 0; h < 2; ++h) {
-                noc_async_read(get_noc_addr(s + j * F32 + seq_off(ra, h) * 4), scratch + seq_off(g * 8 + j, h) * 4, 64);
+                noc_async_read(get_noc_addr(s + j * F32 + seq_off_h<TH>(ra, h) * 4), scratch + seq_off(g * 8 + j, h) * 4, 64);
             }
         }
         for (uint32_t i = 0; i + 1 < R; ++i) {
             for (uint32_t h = 0; h < 2; ++h) {
                 auto dst = reinterpret_cast<tt_l1_ptr uint32_t*>(scratch + seq_off(g * 8 + 3 + i, h) * 4);
                 if constexpr (XE == 4) {
-                    auto src = reinterpret_cast<tt_l1_ptr uint32_t*>(x + seq_off(g * R + i, h) * 4);
+                    auto src = reinterpret_cast<tt_l1_ptr uint32_t*>(x + seq_off_h<TH>(g * R + i, h) * 4);
                     for (uint32_t e = 0; e < 16; ++e) {
                         dst[e] = src[e];
                     }
                 } else {
-                    auto src = reinterpret_cast<tt_l1_ptr uint16_t*>(x + seq_off(g * R + i, h) * 2);
+                    auto src = reinterpret_cast<tt_l1_ptr uint16_t*>(x + seq_off_h<TH>(g * R + i, h) * 2);
                     for (uint32_t e = 0; e < 16; ++e) {
                         dst[e] = (uint32_t)src[e] << 16;
                     }
@@ -56,7 +66,7 @@ inline void seq_shift(uint32_t s, uint32_t x, uint32_t scratch, volatile tt_l1_p
             for (uint32_t r = 0; r < R; ++r) {
                 for (uint32_t h = 0; h < 2; ++h) {
                     noc_async_read(get_noc_addr(scratch + seq_off(g * 8 + r + j, h) * 4),
-                                   s + j * F32 + seq_off(g * R + r, h) * 4, 64);
+                                   s + j * F32 + seq_off_h<TH>(g * R + r, h) * 4, 64);
                 }
             }
         }

@@ -95,19 +95,37 @@ ALWI void drain() {
     TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
 #endif
 }
+// The copy / pack configuration is redone only when needed: every copy source is an fp32 unpack-to-dest CB of token
+// rows (one format and tile shape), so a copy re-inits only after a matmul; a pack reconfigures when the output kind
+// (fp32 / bf16 token-row tiles) changes.
+constexpr uint32_t CB_HN = get_compile_time_arg_val(13), CB_G = get_compile_time_arg_val(16);
+constexpr uint32_t CB_OUT = get_compile_time_arg_val(18), OUT_BF = get_compile_time_arg_val(25);
+constexpr uint32_t CB_XB = get_compile_time_arg_val(31);
+uint32_t cp_kind = 2, pk_kind = 2;
 ALWI void cp(uint32_t cb, uint32_t i, uint32_t d) {
     drain();
-    reconfig_data_format_srca(cb);
-    copy_init(cb);
+    if (cp_kind != 0) {
+        reconfig_full_operand_srca(cb);  // (token-row CBs: TH x 32 tiles; matmul in1: 32 x 32)
+        copy_init(cb);
+        cp_kind = 0;
+    }
     copy_tile(cb, i, d);
 }
 ALWI void mm_begin(uint32_t in0, uint32_t in1) {
     drain();
-    reconfig_data_format(in1, in0);
+    reconfig_full_operand(in1, in0);  // srcA = in1 (32 x 32), srcB = in0 (TH x 32: 4 FPU passes at TH = 8)
     matmul_init(in0, in1, 0);
+    cp_kind = 2;
+}
+ALWI void pack_cfg(uint32_t cb) {
+    const uint32_t k = cb == CB_HN || cb == CB_G || cb == CB_XB || (OUT_BF && cb == CB_OUT);
+    if (k != pk_kind) {
+        pack_reconfig_data_format(cb);
+        pk_kind = k;
+    }
 }
 ALWI void pack_to(uint32_t d, uint32_t cb) {
-    pack_reconfig_data_format(cb);
+    pack_cfg(cb);
     pack_tile(d, cb);
 }
 // rsqrt(total / H + eps) in DST d
@@ -164,7 +182,8 @@ void kernel_main() {
     static_assert(R == 2, "rank tiles");
     const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
 
-    compute_kernel_hw_startup(cb_h, cb_out);
+    // matmuls: in0 -> srcB, in1 -> srcA (each CB's tile shape: the token-row CBs hold TH x 32 tiles, G2_TH)
+    compute_kernel_hw_startup<SrcOrder::Reverse>(cb_sq, cb_ones, cb_part);
     DeviceZoneScopedN("G2_C_ALL");
     cb_wait_front(cb_h, PER);
     cb_wait_front(cb_m, PER);
@@ -347,7 +366,7 @@ void kernel_main() {
     }
     tile_regs_commit();
     tile_regs_wait();
-    pack_reconfig_data_format(cb_fa);
+    pack_cfg(cb_fa);
     for (uint32_t t = 0; t < PER; ++t) {
         pack_tile(t, cb_fa);
     }
@@ -493,7 +512,7 @@ void kernel_main() {
             tile_regs_commit();
             cb_reserve_back(cb_part, 2 * ET);
             tile_regs_wait();
-            pack_reconfig_data_format(cb_part);
+            pack_cfg(cb_part);
             for (uint32_t e = 0; e < ET; ++e) {
                 pack_tile(e, cb_part);
                 pack_tile(4 + e, cb_part);
@@ -515,7 +534,7 @@ void kernel_main() {
                 tile_regs_commit();
                 cb_reserve_back(cb_tout, ET);
                 tile_regs_wait();
-                pack_reconfig_data_format(cb_tout);
+                pack_cfg(cb_tout);
                 for (uint32_t e = 0; e < ET; ++e) {
                     pack_tile(e, cb_tout);
                 }

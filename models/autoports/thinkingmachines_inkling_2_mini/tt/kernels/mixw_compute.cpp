@@ -86,6 +86,7 @@ void kernel_main() {
     const uint32_t RT = get_arg_val<uint32_t>(1);
 
     compute_kernel_hw_startup(cb_lg, cb_out);
+    pack_reconfig_data_format(cb_w);
     for (uint32_t r = 0; r < RT; ++r) {
     cb_wait_front(cb_lg, n * nq);
     // ---- softmax weights over the n sources, every query (cb_w: query q's n weights at q * n ..)
@@ -131,7 +132,6 @@ void kernel_main() {
         }
         tile_regs_commit();
         tile_regs_wait();
-        pack_reconfig_data_format(cb_w);
         for (uint32_t i = 0; i < n; ++i) {
             pack_tile(1 + i, cb_w);  // (in order: q * n + i)
         }
@@ -141,22 +141,19 @@ void kernel_main() {
     cb_pop_front(cb_lg, n * nq);
     cb_wait_front(cb_w, n * nq);
     // ---- weighted sums over this core's H tiles (the n source tiles of column t arrive together)
+    copy_init(cb_s);  // (cb_s / cb_w: the same format and tile shape; the SFPU inits leave the copy config alone)
     for (uint32_t t = 0; t < nt; ++t) {
         cb_wait_front(cb_s, n);
         for (uint32_t q = 0; q < nq; ++q) {
             tile_regs_acquire();
-            copy_init(cb_s);
-            copy_tile(cb_s, 0, 0);
-            copy_init(cb_w);
-            copy_tile(cb_w, q * n, 1);
+                        copy_tile(cb_s, 0, 0);
+                        copy_tile(cb_w, q * n, 1);
             init_mul();
             op_mul(0, 1, 0);
             for (uint32_t i = 1; i < n; ++i) {
                 if constexpr (ROWS) { sfpu_drain(); }
-                copy_init(cb_s);
-                copy_tile(cb_s, i, 1);
-                copy_init(cb_w);
-                copy_tile(cb_w, q * n + i, 2);
+                                copy_tile(cb_s, i, 1);
+                                copy_tile(cb_w, q * n + i, 2);
                 init_mul();
                 op_mul(1, 2, 1);
                 init_add();
@@ -165,7 +162,6 @@ void kernel_main() {
             tile_regs_commit();
             cb_reserve_back(cb_out, 1);
             tile_regs_wait();
-            pack_reconfig_data_format(cb_out);
             pack_tile(0, cb_out);
             tile_regs_release();
             cb_push_back(cb_out, 1);

@@ -155,20 +155,23 @@ class GateKernel2:
         GP = 2 * ET if rt else 4
         (cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
          cb_tot2, cb_g, cb_fa, cb_out, cb_zero, cb_o32, cb_tot3, cb_nw, cb_xb, cb_rw) = range(24)
-        f32, bf = ttnn.float32, ttnn.bfloat16
+        from .post import cbt, tile_rows
+
+        f32, bf, th = ttnn.float32, ttnn.bfloat16, tile_rows(T)
+        r = lambda i, dt, n: cbt(crs, i, dt, n, th)  # noqa: E731  (token rows: th x 32 tiles)
         nparts = 8 + (2 if norm else 0) + (2 * ET if rt else 0)  # (every round's parts contiguous: no wrap inside one)
         ntout = 4 + (1 if norm else 0) + (ET if rt else 0)
-        cbs = [_cb(crs, cb_h, f32, F32, PER), _cb(crs, cb_m, f32, F32, PER), _cb(crs, cb_wd, bf, BF, 2 * PER * R),
+        cbs = [r(cb_h, f32, PER), r(cb_m, f32, PER), _cb(crs, cb_wd, bf, BF, 2 * PER * R),
                _cb(crs, cb_wf, bf, BF, R * PER), _cb(crs, cb_wg, bf, BF, R * PER), _cb(crs, cb_ones, bf, BF, 1),
-               _cb(crs, cb_sel, bf, BF, NSEL), _cb(crs, cb_sq, f32, F32, 4 * PER), _cb(crs, cb_part, f32, F32, nparts),
-               _cb(crs, cb_gath, f32, F32, GP * NSEL), _cb(crs, cb_tout, f32, F32, ntout),
-               _cb(crs, cb_tot, f32, F32, 2), _cb(crs, cb_r, f32, F32, 2), _cb(crs, cb_hn, bf, BF, 2 * PER),
-               _cb(crs, cb_tot2, f32, F32, 2), _cb(crs, cb_g, bf, BF, R), _cb(crs, cb_fa, f32, F32, 2 * PER),
-               _cb(crs, cb_out, odt, BF if norm else F32, 2), _cb(crs, cb_zero, bf, BF, 1)]
+               r(cb_sel, bf, NSEL), r(cb_sq, f32, 4 * PER), r(cb_part, f32, nparts),
+               _cb(crs, cb_gath, f32, F32, GP * NSEL), r(cb_tout, f32, ntout),
+               r(cb_tot, f32, 2), r(cb_r, f32, 2), r(cb_hn, bf, 2 * PER),
+               r(cb_tot2, f32, 2), r(cb_g, bf, R), r(cb_fa, f32, 2 * PER),
+               r(cb_out, odt, 2), _cb(crs, cb_zero, bf, BF, 1)]
         if norm:
-            cbs += [_cb(crs, cb_o32, f32, F32, PER), _cb(crs, cb_tot3, f32, F32, 1), _cb(crs, cb_nw, f32, F32, PER)]
+            cbs += [r(cb_o32, f32, PER), r(cb_tot3, f32, 1), r(cb_nw, f32, PER)]
         if rt:
-            cbs += [_cb(crs, cb_xb, bf, BF, PER), _cb(crs, cb_rw, bf, BF, 2 * PER * ET)]
+            cbs += [r(cb_xb, bf, PER), _cb(crs, cb_rw, bf, BF, 2 * PER * ET)]
         rhi, rlo = router if rt else (wd, wd)
         rd_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, PER, R, self.Ht, NSEL, cb_nw, cb_rw, int(norm), int(rt),
                  ET] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
@@ -191,7 +194,8 @@ class GateKernel2:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0))]
+        defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
+                ("G2_TH", str(th))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -206,7 +210,7 @@ class GateKernel2:
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T))]),
         ]
-        key = (T, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup,
+        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup,
                tuple(repr(t.memory_config()) for t in (h, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

@@ -12,7 +12,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, _bits, red_k
+from .post import BF, CX, CY, C, F32, _bits, cbt, red_k, tile_rows
 
 
 class PreKernel:
@@ -46,19 +46,20 @@ class PreKernel:
         K1 = 1 + NQ
         (cb_in, cb_rp, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_sel, cb_so, cb_xo, cb_x, cb_sq, cb_sum, cb_part,
          cb_gath, cb_tout, cb_tot, cb_red, cb_wt, cb_h, cb_xn, cb_part2, cb_gath2, cb_tot2, cb_out, cb_zero) = range(28)
-        f32, bf, crs = ttnn.float32, ttnn.bfloat16, pk.crs
+        f32, bf, crs, th = ttnn.float32, ttnn.bfloat16, pk.crs, tile_rows(T)
+        r = lambda i, dt, n: cbt(crs, i, dt, n, th)  # noqa: E731  (token rows: th x 32 tiles)
         n = NB + 1
-        cbs = [_cb(crs, cb_in, bf, BF, PER), _cb(crs, cb_rp, f32, F32, PER), _cb(crs, cb_s, f32, F32, 3 * PER),
-               _cb(crs, cb_w, f32, F32, 4 * PER), _cb(crs, cb_q, f32, F32, NQ * PER), _cb(crs, cb_ones, bf, BF, 1),
-               _cb(crs, cb_d, f32, F32, NB * NQ), _cb(crs, cb_blk, f32, F32, NB * PER),
-               _cb(crs, cb_nw, f32, F32, max(1, NQ * PER)), _cb(crs, cb_sel, bf, BF, NSEL),
-               _cb(crs, cb_so, f32, F32, 3 * PER), _cb(crs, cb_xo, bf, BF, PER), _cb(crs, cb_x, f32, F32, PER),
-               _cb(crs, cb_sq, f32, F32, 2 * PER), _cb(crs, cb_sum, f32, F32, 1), _cb(crs, cb_part, f32, F32, 2 * K1),
-               _cb(crs, cb_gath, f32, F32, 2 * K1 * NSEL), _cb(crs, cb_tout, f32, F32, K1),
-               _cb(crs, cb_tot, f32, F32, K1), _cb(crs, cb_red, f32, F32, K1), _cb(crs, cb_wt, f32, F32, NQ * n),
-               _cb(crs, cb_h, f32, F32, NQ * PER), _cb(crs, cb_xn, f32, F32, PER),
-               _cb(crs, cb_part2, f32, F32, 2 * NQ),  # (round 2 gathers into cb_gath too)
-               _cb(crs, cb_tot2, f32, F32, NQ), _cb(crs, cb_out, odt, BF if norm else F32, 2),
+        cbs = [r(cb_in, bf, PER), r(cb_rp, f32, PER), r(cb_s, f32, 3 * PER),
+               r(cb_w, f32, 4 * PER), r(cb_q, f32, NQ * PER), _cb(crs, cb_ones, bf, BF, 1),
+               r(cb_d, f32, NB * NQ), r(cb_blk, f32, NB * PER),
+               r(cb_nw, f32, max(1, NQ * PER)), r(cb_sel, bf, NSEL),
+               r(cb_so, f32, 3 * PER), r(cb_xo, bf, PER), r(cb_x, f32, PER),
+               r(cb_sq, f32, 2 * PER), r(cb_sum, f32, 1), r(cb_part, f32, 2 * K1),
+               _cb(crs, cb_gath, f32, F32, 2 * K1 * NSEL), r(cb_tout, f32, K1),
+               r(cb_tot, f32, K1), r(cb_red, f32, K1), r(cb_wt, f32, NQ * n),
+               r(cb_h, f32, NQ * PER), r(cb_xn, f32, PER),
+               r(cb_part2, f32, 2 * NQ),  # (round 2 gathers into cb_gath too)
+               r(cb_tot2, f32, NQ), r(cb_out, odt, 2),
                _cb(crs, cb_zero, bf, BF, 1)]
         mo, resid, conv = tail if tail is not None else (x, x, None)
         if conv is not None:
@@ -94,7 +95,8 @@ class PreKernel:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed)))] + sdefs
+        defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed))),
+                ("PRE_TH", str(th))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -111,7 +113,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
+        key = ("i2m_pre", T, th, NB, NQ, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

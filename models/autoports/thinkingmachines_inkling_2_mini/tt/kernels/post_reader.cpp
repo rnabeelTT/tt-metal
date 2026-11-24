@@ -14,12 +14,12 @@
 #include "seqshift.hpp"
 #endif
 
-// rows 0 .. T-1 of a tile (T <= 16: faces 0 / 1; e = element bytes)
-template <uint32_t T, uint32_t E>
+// rows 0 .. T-1 of a tile (T <= 16: faces 0 / 1; e = element bytes) into a TH x 32 CB tile (faces min(TH, 16) x 16)
+template <uint32_t T, uint32_t E, uint32_t TH>
 inline void read_rows(uint64_t src, uint32_t dst) {
     constexpr uint32_t FACE = 256 * E;  // (rows 0 .. T-1 of a face are contiguous: one read per face)
     noc_async_read(src, dst, T * 16 * E);
-    noc_async_read(src + FACE, dst + FACE, T * 16 * E);
+    noc_async_read(src + FACE, dst + (TH < 16 ? TH : 16) * 16 * E, T * 16 * E);
 }
 
 void kernel_main() {
@@ -38,10 +38,10 @@ void kernel_main() {
     constexpr uint32_t NORM = get_compile_time_arg_val(12);
     constexpr uint32_t cb_sel = get_compile_time_arg_val(13);
     constexpr uint32_t NQ = get_compile_time_arg_val(14);
-    constexpr uint32_t F32 = 4096, BF = 2048;
-    constexpr uint32_t T = POST_ROWS;
-    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4>(src, dst); };
-    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2>(src, dst); };
+    constexpr uint32_t T = POST_ROWS, TH = POST_TH;  // TH: the rows of the CB tiles of token rows (8 / 16 / 32)
+    constexpr uint32_t F32 = TH * 128, BF = TH * 64;  // (a CB tile of token rows; tensor tiles are 32 x 32)
+    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src, dst); };
+    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src, dst); };
     constexpr auto a_args = TensorAccessorArgs<15>();  // att
     constexpr auto x_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();  // x
     constexpr auto s_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();  // states
@@ -53,19 +53,19 @@ void kernel_main() {
     const uint32_t t0 = c * PER;
     uint32_t a = 0;
     auto arg = [&]() { return get_common_arg_val<uint32_t>(a++); };
-    const auto att = TensorAccessor(a_args, arg(), BF);
-    const auto xx = TensorAccessor(x_args, arg(), BF);
-    const auto s0 = TensorAccessor(s_args, arg(), F32);
-    const auto s1 = TensorAccessor(s_args, arg(), F32);
-    const auto s2 = TensorAccessor(s_args, arg(), F32);
-    const auto w0 = TensorAccessor(w_args, arg(), F32);
-    const auto w1 = TensorAccessor(w_args, arg(), F32);
-    const auto w2 = TensorAccessor(w_args, arg(), F32);
-    const auto wc = TensorAccessor(w_args, arg(), F32);
-    const auto q = TensorAccessor(w_args, arg(), F32);
-    const auto ones = TensorAccessor(w_args, arg(), BF);
-    const auto nw = TensorAccessor(w_args, arg(), F32);
-    const auto sel = TensorAccessor(w_args, arg(), BF);
+    const auto att = TensorAccessor(a_args, arg(), 2048);
+    const auto xx = TensorAccessor(x_args, arg(), 2048);
+    const auto s0 = TensorAccessor(s_args, arg(), 4096);
+    const auto s1 = TensorAccessor(s_args, arg(), 4096);
+    const auto s2 = TensorAccessor(s_args, arg(), 4096);
+    const auto w0 = TensorAccessor(w_args, arg(), 4096);
+    const auto w1 = TensorAccessor(w_args, arg(), 4096);
+    const auto w2 = TensorAccessor(w_args, arg(), 4096);
+    const auto wc = TensorAccessor(w_args, arg(), 4096);
+    const auto q = TensorAccessor(w_args, arg(), 4096);
+    const auto ones = TensorAccessor(w_args, arg(), 2048);
+    const auto nw = TensorAccessor(w_args, arg(), 4096);
+    const auto sel = TensorAccessor(w_args, arg(), 2048);
 
 #ifdef SEQ_R  // speculative verify rows (seqshift.hpp)
     const auto seq_a = TensorAccessor(TensorAccessorArgs<SEQ_CT>(), get_common_arg_val<uint32_t>(SEQ_ARG), 128);
@@ -85,7 +85,7 @@ void kernel_main() {
 #if POST_ATT_PACKED
         for (uint32_t f = 0; f < 2; ++f) {  // chunks (t, f, rows 0 .. T-1) of the packed all-reduce result (tt/ccl.py)
             const uint32_t ch = (t * 2 + f) * T, n = 64 - (ch & 63) < T ? 64 - (ch & 63) : T;  // (a run may cross a page)
-            const uint32_t d = get_write_ptr(cb_att) + i * BF + f * 512;
+            const uint32_t d = get_write_ptr(cb_att) + i * BF + f * (TH < 16 ? TH : 16) * 32;
             noc_async_read(att.get_noc_addr(ch >> 6) + (ch & 63) * 32, d, n * 32);
             if (n < T) {
                 noc_async_read(att.get_noc_addr((ch >> 6) + 1), d + n * 32, (T - n) * 32);
@@ -110,7 +110,7 @@ void kernel_main() {
     noc_async_read_barrier();
 #ifdef SEQ_R
     for (uint32_t i = 0; i < PER; ++i) {
-        seq_shift<2>(get_write_ptr(cb_s) + i * 3 * F32, get_write_ptr(cb_att) + i * BF, seq_scr, seq_acc_rows);
+        seq_shift<2, TH>(get_write_ptr(cb_s) + i * 3 * F32, get_write_ptr(cb_att) + i * BF, seq_scr, seq_acc_rows);
     }
 #endif
     for (uint32_t i = 0; i < PER; ++i) {
@@ -126,17 +126,21 @@ void kernel_main() {
         rf(q.get_noc_addr(t0 + i), get_write_ptr(cb_q) + i * F32);
     }
     cb_reserve_back(cb_ones, 1);
-    noc_async_read(ones.get_noc_addr(0), get_write_ptr(cb_ones), BF);
+    noc_async_read(ones.get_noc_addr(0), get_write_ptr(cb_ones), 2048);
     cb_reserve_back(cb_sel, NQ);
-    for (uint32_t k = 0; k < NQ; ++k) {
-        noc_async_read(sel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF, BF);
+    for (uint32_t k = 0; k < NQ; ++k) {  // (row 0 of the 0 / 1 tiles is the only nonzero row: TH rows of them)
+        if constexpr (TH == 32) {
+            noc_async_read(sel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF, BF);
+        } else {
+            read_rows<TH, 2, TH>(sel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF);
+        }
     }
     cb_reserve_back(cb_d, NB);
     cb_reserve_back(cb_blk, NB * PER);
     const uint32_t a_blk = a;
     for (uint32_t b = 0; b < NB; ++b) {
-        const auto bt = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b), F32);
-        const auto dl = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b + 1), F32);
+        const auto bt = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b), 4096);
+        const auto dl = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b + 1), 4096);
         rf(dl.get_noc_addr(get_common_arg_val<uint32_t>(a_blk + 3 * b + 2)), get_write_ptr(cb_d) + b * F32);
         for (uint32_t i = 0; i < PER; ++i) {
             rf(bt.get_noc_addr(t0 + i), get_write_ptr(cb_blk) + (b * PER + i) * F32);
@@ -154,10 +158,10 @@ void kernel_main() {
         cb_reserve_back(POST_CB_RW, 2 * PER * ET);
         const uint32_t rw = get_write_ptr(POST_CB_RW);
         for (uint32_t half = 0; half < 2; ++half) {
-            const auto ar = TensorAccessor(w_args, get_common_arg_val<uint32_t>(a_blk + 3 * NB + half), BF);
+            const auto ar = TensorAccessor(w_args, get_common_arg_val<uint32_t>(a_blk + 3 * NB + half), 2048);
             for (uint32_t i = 0; i < PER; ++i) {
                 for (uint32_t e = 0; e < ET; ++e) {
-                    noc_async_read(ar.get_noc_addr((t0 + i) * ET + e), rw + ((half * PER + i) * ET + e) * BF, BF);
+                    noc_async_read(ar.get_noc_addr((t0 + i) * ET + e), rw + ((half * PER + i) * ET + e) * 2048, 2048);
                 }
             }
         }
