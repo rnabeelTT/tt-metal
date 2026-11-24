@@ -31,7 +31,7 @@ WW = __import__("os").environ.get("I2M_GMM_WW", "auto")
 D3 = __import__("os").environ.get("I2M_GMM_D3", "1") == "1"
 # I2M_GMM_BAL = R (0: off): the group slices' expert ranges split on device by cost (R per expert with groups + 1 per
 # group, tt/kernels/gmm_bal.hpp) instead of equal expert counts, when the experts average >= 3 groups (one die: 2048-row
-# chunks gmm 264 -> 241 ms; 1024: 180 -> 201, so off there); bitwise
+# chunks gmm 264 -> 241 ms; 1024: 180 -> 201, so off there); one die only (TP4 2048-row chunk 640 -> 880 ms); bitwise
 BAL = int(__import__("os").environ.get("I2M_GMM_BAL", "5"))
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
@@ -92,7 +92,7 @@ class GroupedMM:
         h_ = NB // w_
         per_row = self.gx // w_
         S = max(1, min(E, per_row * (gy // h_)))  # slices: contiguous expert ranges (each expert's weights read once)
-        bal = BAL if G >= 3 * E else 0
+        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 else 0
         bounds = [(s, S) if bal else (E * s // S, E * (s + 1) // S) for s in range(S)]
         cores, rt = [], []
         for s in range(S):
@@ -164,7 +164,7 @@ class GroupedMM:
         ww = _ww(True)
         w_, h_, per_row, gy = self._slices(NB)
         S = max(1, min(E, per_row * (gy // h_)))
-        bal = BAL if G >= 3 * E else 0
+        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 else 0
         bounds = [(s, S) if bal else (E * s // S, E * (s + 1) // S) for s in range(S)]
         cores, rt, wrt = [], [], []
         for s in range(S):
