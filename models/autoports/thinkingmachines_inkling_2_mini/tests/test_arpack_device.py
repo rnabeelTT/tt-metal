@@ -44,30 +44,31 @@ def main():
                             memory_config=ttnn.DRAM_MEMORY_CONFIG if os.environ.get("DRAM", "1") == "1" else
                             ttnn.L1_MEMORY_CONFIG,
                             mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=3))
-        modes = {"fused": (True, True), "packed": (True, False), "async": (False, False)}
-        outs = {}
-        for m, (pk, fu) in modes.items():
-            ccl.PACK, ccl.FUSED = pk, fu
+        allm = {"async": (False, False), "fused": (True, True), "packed": (True, False)}
+        modes = {m: allm[m] for m in ["async"] + [m for m in os.environ.get("MODES", "fused,packed").split(",") if m]}
+        outs, msg, agree = {}, [], True
+        for m, (pk, fu) in modes.items():  # (async first: the reference; each mode's check printed as it lands)
+            ccl.PACK, ccl.FUSED = pk, "1" if fu else "0"
             res = []
             for site in ("mixer", "mlp", "mixer", "mlp"):
                 r = ccl.all_reduce(x, mesh, site=site)
                 res.append([ttnn.to_torch(t).float()[0, 0, :T] for t in ttnn.get_device_tensors(r)])
                 ttnn.deallocate(r)
             outs[m] = [v for rr in res for v in rr]
-        ref = outs["async"]
-        exact = torch.allclose(ref[0], parts.sum(0).float(), rtol=0.02, atol=0.1)
-        msg = []
-        for m in ("fused", "packed"):
+            if m == "async":
+                ref = outs["async"]
+                exact = torch.allclose(ref[0], parts.sum(0).float(), rtol=0.02, atol=0.1)
+                continue
             same = all(torch.equal(a, b) for a, b in zip(outs[m], ref))
-            if not same:
-                print(f"  {m}: per call max|{m} - async|:", [round((a - b).abs().max().item(), 3) for a, b in zip(outs[m], ref)])
+            agree &= all(torch.equal(outs[m][0], o) for o in outs[m])
+            print(f"  T={T} {m} == async {same}" + ("" if same else " max|diff| per call " + str(
+                [round((a - b).abs().max().item(), 3) for a, b in zip(outs[m], ref)])), flush=True)
             ok &= same
             msg.append(f"{m} == async {same}")
-        agree = all(torch.equal(ref[0], o) for o in outs["fused"])
         ok &= agree and exact
         us = {}
         for m, (pk, fu) in modes.items():
-            ccl.PACK, ccl.FUSED = pk, fu
+            ccl.PACK, ccl.FUSED = pk, "1" if fu else "0"
             us[m] = timed(lambda site: (lambda r: r.t if isinstance(r, ccl.PackedAR) else r)(
                 ccl.all_reduce(x, mesh, site=site, packed_out=pk)))
         print(f"T={T:2d}: {', '.join(msg)}, dies agree {agree}, ~sum {exact}; "
