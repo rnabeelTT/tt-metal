@@ -65,6 +65,11 @@ the next step's token input, and the step returns before the device finishes (th
 with reload_inputs False take their positions from the adapter (vLLM's are a step stale). Other rows: the host sampler,
 as before. Served p150 plain TPOT 21.9 -> 19.3 ms (T=1), 22.1 -> 19.35 (greedy); greedy streams identical; device draws
 == host Gumbel-max bitwise, chi-square vs the exact softmax z -0.1 / +0.5 over 20K draws (tests/test_device_sampler_device.py).
+Vocab-sharded head (TP2 / TP4): the kernel merges the dies' all-gathered candidates like DeviceTopK.host (top 32 by
+logit, ties: lowest id) on every die (I2M_DEV_SAMPLE_SHARDED=0: host sampling). TP2 (MESH=2): 2,600 / 2,600 draws equal
+the host's, z +1.5 / +1.2 over 10K; served p300 plain TPOT 15.1 -> 13.8 ms (T=1), 15.0 -> 13.7 (greedy), greedy streams
+identical; spec unchanged (10.5-11.0 / 9.9-10.3 ms, run-to-run noise; streams identical). On 2+ dies the per-step input
+writes block behind the running trace (~9 ms of decode_forward) but the device stays busy.
 
 ## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
 

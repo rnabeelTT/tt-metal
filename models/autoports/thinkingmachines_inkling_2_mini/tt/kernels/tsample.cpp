@@ -28,7 +28,7 @@ void kernel_main() {
     constexpr auto t_args = TensorAccessorArgs<g_args.next_compile_time_args_offset()>();
 
     const uint32_t l1 = get_write_ptr(cb);
-    const uint32_t li = l1, lv = li + NT * 4096, lg = lv + NT * 2048, lt = lg + ROWS * 128;
+    const uint32_t li = l1, lv = li + NT * 4096, lg = lv + NT * 2048, lt = lg + ROWS * 128, lc = lt + 128;
     const auto s_i = TensorAccessor(i_args, get_arg_val<uint32_t>(0), 4096);
     const auto s_v = TensorAccessor(v_args, get_arg_val<uint32_t>(1), 2048);
     const auto s_g = TensorAccessor(g_args, get_arg_val<uint32_t>(2), 128);
@@ -51,8 +51,9 @@ void kernel_main() {
         float f;
     } cv;
     for (uint32_t r = 0; r < ROWS; ++r) {
-        uint32_t cid[NT * K];
-        float clg[NT * K];
+        // (the merged candidates in L1 scratch, not on the small kernel stack)
+        volatile tt_l1_ptr uint32_t* cid = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(lc);
+        volatile tt_l1_ptr float* clg = reinterpret_cast<volatile tt_l1_ptr float*>(lc + NT * K * 4);
         for (uint32_t t = 0; t < NT; ++t) {
             for (uint32_t c = 0; c < K; ++c) {
                 const uint32_t e = ((r >> 4) * 2 + (c >> 4)) * 256 + (r & 15) * 16 + (c & 15);

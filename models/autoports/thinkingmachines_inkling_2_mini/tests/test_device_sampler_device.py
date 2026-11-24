@@ -5,7 +5,9 @@
      greedy (zero noise; rows with exact ties and padded vocab columns on top) and T * Gumbel noise, widths 1 / 4 / 8;
   2. distribution at T = 1 (and 0.7): DRAWS device draws vs the exact softmax over the candidates (HostSampler.dist) and
      vs DRAWS host-sampler draws: total variation and a chi-square test.
-env: DRAWS (20000)"""
+MESH > 1: the vocab-sharded head (each die its slice's top 32, all-gathered; the kernel merges them on every die, and
+every die's token must agree).
+env: DRAWS (20000), MESH (1)"""
 
 import math
 import os
@@ -15,7 +17,8 @@ import torch
 import ttnn
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import K, DeviceSampler, DeviceTopK, HostSampler
 
-VP = 201024
+N = int(os.environ.get("MESH", "1"))
+VP = (201024 + 32 * N - 1) // (32 * N) * (32 * N)
 V = VP - 64  # (the last 64 columns: padded vocab, never sampled)
 
 
@@ -24,10 +27,21 @@ def gumbel(n, gen):
     return -torch.log(-torch.log(u.clamp(1e-300, 1.0 - 1e-16)))
 
 
+def read(toks):
+    """-> every die's tokens (they must agree)."""
+    ts = [ttnn.to_torch(t).reshape(-1).long() for t in (ttnn.get_device_tensors(toks) if N > 1 else [toks])]
+    assert all(torch.equal(t, ts[0]) for t in ts), ts
+    return ts[0]
+
+
 def main():
     draws = int(os.environ.get("DRAWS", "20000"))
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1))
-    tk = DeviceTopK(mesh, VP, V)
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N))
+    rep = ttnn.ReplicateTensorToMesh(mesh) if N > 1 else None
+    shard = ttnn.ShardTensorToMesh(mesh, dim=3) if N > 1 else None
+    tk = DeviceTopK(mesh, VP // N, V, sharded=N > 1)
     ds = DeviceSampler(tk)
     hs = HostSampler(V)
     gen = torch.Generator()
@@ -39,11 +53,13 @@ def main():
         lg[0, 0, 0, V + 3] = 100.0  # padded column on top of row 0
         if W > 1:  # an exact tie for the max in row 1
             lg[0, 0, 1, 77] = lg[0, 0, 1, 99] = 60.0
+            if N > 1:  # (and across dies)
+                lg[0, 0, 1, VP // N + 5] = 60.0
         if W > 2:  # a near-flat row
             lg[0, 0, 2] = torch.randn(VP, generator=gen) * 0.01
-        x = ttnn.from_torch(lg, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+        x = ttnn.from_torch(lg, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=shard)
         toks = ttnn.from_torch(torch.zeros(1, W, dtype=torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
-                               device=mesh)
+                               device=mesh, mesh_mapper=rep)
         parts = tk.device(x, W)
         idx, vals = tk.host(parts)
         n_ok = 0
@@ -52,7 +68,7 @@ def main():
             tg = (T * gumbel(W, gen)).float()
             ds.set_noise(tg)
             ds.device(parts, toks, W)
-            got = ttnn.to_torch(toks).reshape(-1)[:W].long()
+            got = read(toks)[:W]
             for r in range(W):
                 ok = idx[r] < V
                 s = vals[r].float() + tg[r]
@@ -73,9 +89,9 @@ def main():
     # distribution: one row with a spread of candidate probabilities
     lg = torch.full((1, 1, 1, VP), -20.0)
     lg[0, 0, 0, torch.randperm(V, generator=gen)[:40]] = torch.linspace(3.0, -1.0, 40)
-    x = ttnn.from_torch(lg, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh)
+    x = ttnn.from_torch(lg, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=shard)
     toks = ttnn.from_torch(torch.zeros(1, 1, dtype=torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
-                           device=mesh)
+                           device=mesh, mesh_mapper=rep)
     parts = tk.device(x, 1)
     idx, vals = tk.host(parts)
     for T in (1.0, 0.7):
@@ -86,7 +102,7 @@ def main():
         for _ in range(draws):
             ds.set_noise((T * gumbel(1, gen)).float())
             ds.device(parts, toks, 1)
-            dev[pos[int(ttnn.to_torch(toks).reshape(-1)[0])]] += 1
+            dev[pos[int(read(toks)[0])]] += 1
             host[pos[hs.sample(idx, vals, [(0, 0)], sp(T))[0]]] += 1
         e = p * draws
         m = e >= 5

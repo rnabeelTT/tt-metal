@@ -125,7 +125,7 @@ class DeviceSampler:
                 compile_time_args=ct, runtime_args=rt,
                 config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                          noc=ttnn.NOC.NOC_0))
-            nb = self.nt * 6144 + 8 * 128 + 128
+            nb = self.nt * 6144 + 8 * 128 + 128 + self.nt * K * 8
             fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
             prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[
                 ttnn.CBDescriptor(total_size=nb, core_ranges=self.crs, format_descriptors=[fmt])])

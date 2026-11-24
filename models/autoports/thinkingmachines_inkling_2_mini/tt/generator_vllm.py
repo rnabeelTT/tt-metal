@@ -230,9 +230,12 @@ class Inkling2ForCausalLM:
         from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceSampler, DeviceTopK, HostSampler
 
         self.topk = DeviceTopK(mesh, model.Vs, model.V, sharded=model.head_shard)
-        # (a vocab-sharded head's merge in the kernel is untested: I2M_DEV_SAMPLE_SHARDED=1)
-        self.ds = DeviceSampler(self.topk) if ASYNC and (not self.topk.sharded or os.environ.get(
-            "I2M_DEV_SAMPLE_SHARDED", "0") == "1") else None
+        # a vocab-sharded head: the kernel merges the dies' all-gathered candidates (I2M_TOPK_GATHER) like
+        # DeviceTopK.host; I2M_DEV_SAMPLE_SHARDED=0: host sampling there (default on for 2 dies; 4 not yet checked)
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import GATHER
+
+        self.ds = DeviceSampler(self.topk) if ASYNC and (not self.topk.sharded or (GATHER and os.environ.get(
+            "I2M_DEV_SAMPLE_SHARDED", "1" if mesh.get_num_devices() <= 2 else "0") == "1")) else None
         self._next = {}  # slot -> (its next input token, None: on device; its next position) after a decode step
         self._last_w = None
         self.hs = HostSampler(model.V)
