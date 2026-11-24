@@ -11,7 +11,7 @@
 // row landed.
 //
 // runtime args: b, e0, e1, sender x / y, multicast x0 y0 x1 y1 (NOC 0), G, s, c0
-// common args: a, w, ids, ws, wo, wkt, k0, koff, rw
+// common args: a, w, ids, ws, wo, wkt, k0, koff, rw, (GMM_W2) w2
 // (expert e's weights are w's expert e * ws + wo + s: a sub-shard of experts stacked as virtual experts,
 // tt/moe_fused.py; this core's weight columns start at c0; A's columns at tile koff of its KA-tile rows)
 // GMM_ACT: the block's nb = 2h columns are the gate columns [c0, c0 + h) and the up columns Wt + [c0, c0 + h), and
@@ -33,6 +33,12 @@
 #endif
 #ifndef GMM_BAL
 #define GMM_BAL 0
+#endif
+#ifndef GMM_GS
+#define GMM_GS 0
+#endif
+#ifndef GMM_W2
+#define GMM_W2 0
 #endif
 
 void kernel_main() {
@@ -88,9 +94,18 @@ void kernel_main() {
 #if GMM_BAL
     gmm_bal([&](uint32_t g) -> uint32_t { return ids[g]; }, G, E, e0, e1, GMM_BAL, e0, e1);
 #endif
+    uint32_t g_lo = 0, g_hi = G;
+#if GMM_GS
+    gmm_gs([&](uint32_t g) -> uint32_t { return ids[g]; }, G, E, e0, e1, g_lo, g_hi);
+    e0 = 0;
+    e1 = E;
+#endif
+#if GMM_W2
+    const auto aw2 = TensorAccessor(w_args, get_common_arg_val<uint32_t>(9), w_page);
+#endif
 
     uint32_t prev = 0xFFFFFFFF;
-    for (uint32_t g = 0; g < G; ++g) {
+    for (uint32_t g = g_lo; g < g_hi; ++g) {
         const uint32_t e = ids[g];
         if (e < e0) {
             continue;
@@ -104,6 +119,13 @@ void kernel_main() {
             for (uint32_t st = 0; st < KT; ++st) {
                 const uint32_t s = st / Kt, kt = st % Kt;
                 for (uint32_t j = 0; j < nb; ++j) {
+#if GMM_W2
+                    bool second;
+                    const uint32_t col = gmm_w2_col<Wt, GMM_W2, nb / 2>(c0, j, second);
+                    const uint32_t row = (e * ws + wo + s) * wkt + k0 + kt;
+                    noc_async_read(second ? aw2.get_noc_addr(row * 2 * GMM_W2 + col) : aw.get_noc_addr(row * Nt + col),
+                                   wl + (st * nb + j) * w_page, w_page);
+#else
 #if GMM_ACT
                     const uint32_t col = j < nb / 2 ? c0 + j : Wt + c0 + j - nb / 2;
 #else
@@ -111,6 +133,7 @@ void kernel_main() {
 #endif
                     noc_async_read(aw.get_noc_addr(((e * ws + wo + s) * wkt + k0 + kt) * Nt + col),
                                    wl + (st * nb + j) * w_page, w_page);
+#endif
                 }
             }
             noc_async_read_barrier();

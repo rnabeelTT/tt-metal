@@ -10,7 +10,7 @@
 // GMM_NS: each row tile's NS output blocks go to C_0 .. C_{NS-1} (the sub-shards' products).
 //
 // runtime args: b, e0, e1 (this core's experts), ..., G (index 9), the first output column n0, (GMM_WW) s, c0
-// common args: (GMM_WW) w, ws, wo, wkt, k0; c_0 .. c_{NS-1}
+// common args: (GMM_WW) w, ws, wo, wkt, k0; c_0 .. c_{NS-1}; (GMM_W2, act: NS = 1) w2
 
 #include <stdint.h>
 
@@ -25,6 +25,12 @@
 #endif
 #ifndef GMM_BAL
 #define GMM_BAL 0
+#endif
+#ifndef GMM_GS
+#define GMM_GS 0
+#endif
+#ifndef GMM_W2
+#define GMM_W2 0
 #endif
 
 void kernel_main() {
@@ -48,18 +54,24 @@ void kernel_main() {
 #if GMM_BAL
     gmm_bal([&](uint32_t g) -> uint32_t { return ids[g]; }, G, E, e0, e1, GMM_BAL, e0, e1);
 #endif
-    auto next_group = [&](uint32_t g) {  // this core's first group >= g, or G (sorted; padding ids >= E >= e1)
-        for (; g < G && ids[g] < e1; ++g) {
+    uint32_t g_lo = 0, g_hi = G;
+#if GMM_GS
+    gmm_gs([&](uint32_t g) -> uint32_t { return ids[g]; }, G, E, e0, e1, g_lo, g_hi);
+    e0 = 0;
+    e1 = E;
+#endif
+    auto next_group = [&](uint32_t g) {  // this core's first group >= g, or g_hi (sorted; padding ids >= E >= e1)
+        for (; g < g_hi && ids[g] < e1; ++g) {
             if (ids[g] >= e0) {
                 return g;
             }
         }
-        return G;
+        return g_hi;
     };
-    uint32_t og = next_group(0), omi = 0, os = 0;  // (the next output block: group, row tile, sub-shard)
+    uint32_t og = next_group(g_lo), omi = 0, os = 0;  // (the next output block: group, row tile, sub-shard)
     // writes the next output block (block: waits for it; else only if the compute has it ready); false when all done
     auto drain = [&](bool block) {
-        if (og >= G) {
+        if (og >= g_hi) {
             return false;
         }
         if (!block && !cb_pages_available_at_front(cb_out, nb)) {
@@ -107,8 +119,11 @@ void kernel_main() {
     const uint32_t ws = get_common_arg_val<uint32_t>(1), wo = get_common_arg_val<uint32_t>(2) + get_arg_val<uint32_t>(11);
     const uint32_t wkt = get_common_arg_val<uint32_t>(3), k0 = get_common_arg_val<uint32_t>(4);
     const uint32_t c0 = get_arg_val<uint32_t>(12);
+#if GMM_W2
+    const auto aw2 = TensorAccessor(w_args, get_common_arg_val<uint32_t>(6), w_page);
+#endif
     uint32_t prev = 0xFFFFFFFF;
-    for (uint32_t g = next_group(0); g < G; g = next_group(g + 1)) {
+    for (uint32_t g = next_group(g_lo); g < g_hi; g = next_group(g + 1)) {
         const uint32_t e = ids[g];
         if (e == prev) {
             continue;
@@ -121,6 +136,13 @@ void kernel_main() {
         for (uint32_t st = 0; st < KT; ++st) {
             const uint32_t s = st / Kt, kt = st % Kt;
             for (uint32_t j = 0; j < WB; ++j) {
+#if GMM_W2
+                bool second;
+                const uint32_t col = gmm_w2_col<Wt, GMM_W2, WB / 2>(c0, j, second);
+                const uint32_t row = (e * ws + wo + s) * wkt + k0 + kt;
+                noc_async_read(second ? aw2.get_noc_addr(row * 2 * GMM_W2 + col) : aw.get_noc_addr(row * Nw + col),
+                               wl + (st * WB + j) * w_page, w_page);
+#else
 #if GMM_ACT
                 const uint32_t col = j < WB / 2 ? c0 + j : Wt + c0 + j - WB / 2;
 #else
@@ -128,6 +150,7 @@ void kernel_main() {
 #endif
                 noc_async_read(aw.get_noc_addr(((e * ws + wo + s) * wkt + k0 + kt) * Nw + col),
                                wl + (st * WB + j) * w_page, w_page);
+#endif
             }
             if ((st & 7) == 7) {
                 drain(false);

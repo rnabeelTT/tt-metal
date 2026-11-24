@@ -3,7 +3,7 @@
 //
 // Merged MoE un-dispatch (tt/undisp.py), compute: per item and sub-shard s the K gathered blocks tilized and added in
 // slot order 0..K-1 (as ttnn.moe_gather_add_rows), then the sub-shard sums added in order 0..S-1 (as the ttnn.add
-// calls it replaces). The last add packs into the writer's buffer.
+// calls it replaces). The last add packs into the writer's buffer (S = 1: the slot sum alone, as moe_gather_add_rows).
 
 #include <cstdint>
 
@@ -54,7 +54,7 @@ void kernel_main() {
     constexpr uint32_t cb_tot_b = get_compile_time_arg_val(8);
     constexpr uint32_t cb_out = get_compile_time_arg_val(9);
     const uint32_t item_count = get_arg_val<uint32_t>(0);
-    static_assert(K > 1 && S > 1, "merged un-dispatch: several slots and sub-shards");
+    static_assert(K > 1, "merged un-dispatch: several slots");
 
     compute_kernel_hw_startup(cb_in, cb_til, cb_acc_a);
     for (uint32_t it = 0; it < item_count; ++it) {
@@ -64,8 +64,8 @@ void kernel_main() {
             compute_kernel_lib::tilize<Wt_c, cb_in, cb_acc_a>(1);
             uint32_t cur = cb_acc_a, nxt = cb_acc_b;
             for (uint32_t j = 1; j < K; ++j) {
-                // sub-shard 0's sum lands in the running total
-                const uint32_t dst = (j == K - 1 && s == 0) ? tot : nxt;
+                // sub-shard 0's sum lands in the running total (one sub-shard: the output)
+                const uint32_t dst = (j == K - 1 && s == 0) ? (S == 1 ? cb_out : tot) : nxt;
                 compute_kernel_lib::tilize<Wt_c, cb_in, cb_til>(1);
                 add_blocks<Wt_c>(cur, cb_til, dst);
                 const uint32_t t = cur;

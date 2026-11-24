@@ -33,6 +33,12 @@ D3 = __import__("os").environ.get("I2M_GMM_D3", "1") == "1"
 # group, tt/kernels/gmm_bal.hpp) instead of equal expert counts, when the experts average >= 3 groups (one die: 2048-row
 # chunks gmm 264 -> 241 ms; 1024: 180 -> 201, so off there); one die only (TP4 2048-row chunk 640 -> 880 ms); bitwise
 BAL = int(__import__("os").environ.get("I2M_GMM_BAL", "5"))
+# I2M_GMM_GS (act: default): group slices take equal counts of the real groups (tt/kernels/gmm_bal.hpp gmm_gs; an
+# expert's groups may span slices, each loads its weight block) instead of contiguous expert ranges: a hot expert (a
+# random-token 2048-row chunk routes up to 64 groups to one expert) no longer stalls its slice. act: the gate|up calls
+# (bench, gate|up per application: TP4 2048 rows 1.27 -> 0.96 + rem 0.52 -> 0.41 ms, one die 3.78 -> 3.51 ms vs BAL);
+# 1: the downs too (measured 3-7 % slower); 0: off. Replaces BAL; bitwise (the same per-group products)
+GS = __import__("os").environ.get("I2M_GMM_GS", "act")
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
 
@@ -56,7 +62,8 @@ class GroupedMM:
         g = mesh.compute_with_storage_grid_size()
         self.gx, self.ncores = g.x, max_cores or g.x * g.y  # (whole rows of the grid)
 
-    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0, act=None, nsub=1, koff=0, K=None, ocol=0):
+    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0, act=None, nsub=1, koff=0, K=None, ocol=0,
+                 w2=None):
         """a [1, G, gs, K] bf16, w [1, E, K, N] (bfp8 / bf16 tiles), ids [1, G] uint16 ROW_MAJOR, out [1, G, gs, N].
         wsub (S, s): w holds S sub-shards per expert as virtual experts e * S + s ([1, E * S, K, N]); this call's s.
         k0: w's experts have more K rows than a ([1, E, Kw, N]): rows [k0, k0 + K) of each.
@@ -64,7 +71,9 @@ class GroupedMM:
         act (the dispatched rows' routing weights [1, 1, Rd, 1] bf16): w is a gate|up weight ([g | u], W columns
         each) and C = bf16(bf16(tanh(g / 4) sigmoid(g) tanh(u)) w) [1, G, gs, nsub * W] (tt/moeact.py's math, bitwise),
         sub-shards s .. s + nsub - 1 of wsub side by side, from out's column tile ocol.
-        out a list (no act): the products of sub-shards wsub[1] + i (out[i]) of a's columns koff + i K, one program."""
+        out a list (no act): the products of sub-shards wsub[1] + i (out[i]) of a's columns koff + i K, one program.
+        w2 (act, one sub-shard): a second gate|up weight [1, E, K, 2 W2] whose W2 column pairs follow w's in the output
+        (the REM layout's remainder pairs: one program for the die's whole slice, no padding)."""
         G, gs, KA = int(a.shape[1]), int(a.shape[2]), int(a.shape[3])
         K = KA if K is None else K
         N = int(w.shape[-1])
@@ -74,7 +83,7 @@ class GroupedMM:
         NS = len(outs)
         rm = outs[0].layout == ttnn.ROW_MAJOR_LAYOUT  # (row-major C: untilized blocks of <= 4 tiles with FP32 DST)
         if act is not None:
-            return self._act(a, w, ids, out, E, act, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol)
+            return self._act(a, w, ids, out, E, act, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol, w2)
         # the column block (DST: 8 FP32 tiles, Nt % nb == 0) and the weight blocks in the CB (2: the next expert's loads
         # during the compute): the weight and A CBs within ~800 KB of L1 (the packed prefill keeps L1 buffers above
         # ~1.3 MB); the widest block first (fewer A multicast receivers)
@@ -92,8 +101,9 @@ class GroupedMM:
         h_ = NB // w_
         per_row = self.gx // w_
         S = max(1, min(E, per_row * (gy // h_)))  # slices: contiguous expert ranges (each expert's weights read once)
-        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 else 0
-        bounds = [(s, S) if bal else (E * s // S, E * (s + 1) // S) for s in range(S)]
+        gs_ = GS == "1"
+        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 and not gs_ else 0
+        bounds = [(s, S) if bal or gs_ else (E * s // S, E * (s + 1) // S) for s in range(S)]
         cores, rt = [], []
         for s in range(S):
             x0, y0 = (s % per_row) * w_, (s // per_row) * h_
@@ -108,7 +118,8 @@ class GroupedMM:
         cbs = [_cb(crs, cb_a, ttnn.bfloat16, 2048, 2 * NS * Kt), _cb(crs, cb_w, w.dtype, w_page, nbuf * NS * Kt * nb),
                _cb(crs, cb_ids, ttnn.uint16, ids_bytes, 1), _cb(crs, cb_out, ttnn.bfloat16, 2048, 2 * nb)]
         dm = ttnn.DataMovementConfigDescriptor
-        defs = [("GMM_RM", str(int(rm))), ("GMM_WW", str(int(ww))), ("GMM_NS", str(NS)), ("GMM_BAL", str(bal))]
+        defs = [("GMM_RM", str(int(rm))), ("GMM_WW", str(int(ww))), ("GMM_NS", str(NS)), ("GMM_BAL", str(bal)),
+                ("GMM_GS", str(int(gs_)))]
         rd = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page, KA // 32, 0, 0, NB]
@@ -148,24 +159,35 @@ class GroupedMM:
         per_row = self.gx // w_
         return w_, h_, per_row, gy
 
-    def _act(self, a, w, ids, out, E, wts, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol=0):
+    def _act(self, a, w, ids, out, E, wts, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol=0, w2=None):
         """gate|up + the activation and routing weights (see __call__): column block b of the output = sub-shard
-        s = b // (Wt / h), its columns [c0, c0 + h); the weight block holds the h gate and the h up columns."""
+        s = b // (Wt / h), its columns [c0, c0 + h); the weight block holds the h gate and the h up columns.
+        w2: pairs Wt .. Wt + W2 - 1 come from w2 (nsub 1)."""
         Wt = Nt // 2
+        W2 = 0
+        if w2 is not None:
+            assert nsub == 1 and wsub == (1, 0) and w2.dtype == w.dtype and int(w2.shape[-2]) == int(w.shape[-2])
+            assert repr(w2.memory_config()) == repr(w.memory_config())
+            assert w.memory_config().buffer_type == ttnn.BufferType.DRAM  # (interleaved: one accessor's args for both)
+            W2 = int(w2.shape[-1]) // 64
+        P = Wt + W2  # (the output's column pairs per sub-shard)
         # (DST: 2h products + the weights + a scratch tile <= 8). I2M_GMM_DB: the widest h whose weight block fits
         # twice in ACT_KB of CBs (the next expert's weights load during the compute)
-        hs = [d for d in (3, 2, 1) if Wt % d == 0]
+        # (auto: not narrower than half the widest h: TP4's 9 pairs ran faster at h = 3 single-buffered than at h = 1
+        # double-buffered)
+        hs = [d for d in (3, 2, 1) if P % d == 0]
         fits = lambda h_, k, kb: Kt * (k * 2 * h_ * w_page + 2 * 2048) <= kb * 1024  # noqa: E731
         db = ACT_DB == "1" or (ACT_DB == "auto" and G >= 3 * E)
-        h = next((d for d in hs if fits(d, 2, ACT_KB)), hs[0]) if db else hs[0]
+        h = next((d for d in hs if fits(d, 2, ACT_KB) and (ACT_DB == "1" or 2 * d >= hs[0])), hs[0]) if db else hs[0]
         nb = 2 * h
         nbuf = 2 if fits(h, 2, ACT_KB if db else 800) else 1
-        NB = nsub * Wt // h
+        NB = nsub * P // h
         ww = _ww(True)
         w_, h_, per_row, gy = self._slices(NB)
         S = max(1, min(E, per_row * (gy // h_)))
-        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 else 0
-        bounds = [(s, S) if bal else (E * s // S, E * (s + 1) // S) for s in range(S)]
+        gs_ = GS in ("1", "act")
+        bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 and not gs_ else 0
+        bounds = [(s, S) if bal or gs_ else (E * s // S, E * (s + 1) // S) for s in range(S)]
         cores, rt, wrt = [], [], []
         for s in range(S):
             x0, y0 = (s % per_row) * w_, (s // per_row) * h_
@@ -173,9 +195,9 @@ class GroupedMM:
             hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
             for b in range(NB):
                 cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
-                sub, c0 = b // (Wt // h), (b % (Wt // h)) * h
+                sub, c0 = b // (P // h), (b % (P // h)) * h
                 rt.append([b, *bounds[s], snoc.x, snoc.y] + mc(snoc, hi, ww) + [G, sub, c0])
-                wrt.append([b, *bounds[s], 0, 0, 0, 0, 0, 0, G, ocol + sub * Wt + c0, sub, c0])
+                wrt.append([b, *bounds[s], 0, 0, 0, 0, 0, 0, G, ocol + sub * P + c0, sub, c0])
         crs = _range_set(cores)
         cb_a, cb_w, cb_ids, cb_out, cb_rw = 0, 1, 2, 3, 4
         ids_bytes = (G * 2 + 63) // 64 * 64
@@ -184,7 +206,8 @@ class GroupedMM:
                _cb(crs, cb_ids, ttnn.uint16, ids_bytes, 1), _cb(crs, cb_out, bf, 2048, 2 * h),
                _cb(crs, cb_rw, bf, 2048, 2)]
         dm = ttnn.DataMovementConfigDescriptor
-        defs = [("GMM_RM", "0"), ("GMM_ACT", "1"), ("GMM_WW", str(int(ww))), ("GMM_BAL", str(bal))]
+        defs = [("GMM_RM", "0"), ("GMM_ACT", "1"), ("GMM_WW", str(int(ww))), ("GMM_BAL", str(bal)),
+                ("GMM_GS", str(int(gs_))), ("GMM_W2", str(W2))]
         KA = int(a.shape[3]) // 32
         rd = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs, defines=defs,
@@ -192,15 +215,17 @@ class GroupedMM:
             + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
             + ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(wts).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=_nocs(ww)[0]))
+        w2a = [w2.buffer_address()] if w2 is not None else []
         rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
-                                  int(w.shape[-2]) // 32, 0, 0, wts.buffer_address()]
+                                  int(w.shape[-2]) // 32, 0, 0, wts.buffer_address()] + w2a
         No = int(out.shape[-1]) // 32
         wr = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, No, h, mt, cb_ids, E] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
             + [cb_w, Kt, Nt, w_page, Wt] + ttnn.TensorAccessorArgs(w).get_compile_time_args(),
             runtime_args=_rt(cores, wrt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=_nocs(ww)[1]))
-        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, 0, out.buffer_address()]
+        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, 0,
+                                  out.buffer_address()] + w2a
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
                                            math_approx_mode=False)
         quarter = struct.unpack("<I", struct.pack("<f", 0.25))[0]
@@ -210,7 +235,7 @@ class GroupedMM:
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
         key = ("i2m_gmm_act1", tuple(defs), G, gs, Kt, KA, Nt, No, E, h, nbuf, S, nsub, str(w.dtype), self.fid,
-               tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)))
+               tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)), W2)
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([a, w, ids, out, wts], prog)
+        ttnn.generic_op([a, w, ids, out, wts] + ([w2] if w2 is not None else []), prog)
         return out

@@ -30,6 +30,9 @@
 #ifndef GMM_BAL
 #define GMM_BAL 0
 #endif
+#ifndef GMM_GS
+#define GMM_GS 0
+#endif
 #if GMM_ACT
 #include "api/compute/common.h"
 #include "api/compute/eltwise_binary_sfpu.h"
@@ -104,8 +107,15 @@ void kernel_main() {
     gmm_bal([&](uint32_t g) -> uint32_t { return (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF; }, G, E,
             e0, e1, GMM_BAL, e0, e1);
 #endif
+    uint32_t g_lo = 0, g_hi = G;
+#if GMM_GS
+    gmm_gs([&](uint32_t g) -> uint32_t { return (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF; }, G, E,
+           e0, e1, g_lo, g_hi);
+    e0 = 0;
+    e1 = E;
+#endif
     uint32_t prev = 0xFFFFFFFF;
-    for (uint32_t g = 0; g < G; ++g) {
+    for (uint32_t g = g_lo; g < g_hi; ++g) {
         const uint32_t e = (read_tile_value(cb_ids, 0, g >> 1) >> ((g & 1) * 16)) & 0xFFFF;
         if (e < e0) {
             continue;

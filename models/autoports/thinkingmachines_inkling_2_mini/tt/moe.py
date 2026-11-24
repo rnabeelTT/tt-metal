@@ -51,6 +51,13 @@ ACT_KERNEL = os.environ.get("I2M_MOE_ACT_KERNEL", "1") == "1"  # the sorted pref
 GMM_ACT = os.environ.get("I2M_GMM_ACT", "1") == "1"
 # I2M_UNDISP (default 1): the sub-shards' un-dispatches and their sums in one program (tt/undisp.py; bitwise)
 UNDISP = os.environ.get("I2M_UNDISP", "1") == "1"
+# I2M_GMM_REM1 (default 1): the REM layout's (TP2 / TP4) prefill gate|up as one program (the remainder pairs read from
+# their own tensor inside it: gmm w2) writing the die's unpadded slice; the downs read K = the slice (TP4's zero pad
+# K rows of the down weights skipped: their products are exact zeros); bitwise
+REM1 = os.environ.get("I2M_GMM_REM1", "1") == "1"
+# I2M_UNDISP_REM (default 1): the REM downs' un-dispatch (TP2: both K segments' un-dispatches and their sum) as one
+# tt/undisp.py program instead of moe_gather_add_rows per segment (+ add); bitwise
+UNDISP_REM = os.environ.get("I2M_UNDISP_REM", "1") == "1"
 _GMM = __import__("types").SimpleNamespace()
 assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
@@ -328,15 +335,33 @@ class MoE:
 
         if self.fe.rem is not None:  # (REM: main + remainder gate|up side by side in one din, the down over its K)
             dn, Wd = self.rem_dn
-            din = (ttnn.zeros([1, G, gs, Wd], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,
-                              memory_config=DRAM)
-                   if Wd > sum(W for _, _, W, _, _ in self.subs) else alloc(Wd))
-            col = 0
-            for (ug, _, W, _, _), ws in zip(self.subs, self.wsub):
-                self._gmm(x_disp, ug, m["group_ids"], din, E, ws, act=m["weights"], ocol=col)
-                col += W // TILE
+            Wl = sum(W for _, _, W, _, _ in self.subs)
+            if REM1:  # (one program; din unpadded, the downs over K = Wl)
+                Wd = Wl
+                din = alloc(Wl)
+                self._gmm(x_disp, self.subs[0][0], m["group_ids"], din, E, self.wsub[0], act=m["weights"],
+                          w2=self.subs[1][0])
+            else:
+                din = (ttnn.zeros([1, G, gs, Wd], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                                  memory_config=DRAM) if Wd > Wl else alloc(Wd))
+                col = 0
+                for (ug, _, W, _, _), ws in zip(self.subs, self.wsub):
+                    self._gmm(x_disp, ug, m["group_ids"], din, E, ws, act=m["weights"], ocol=col)
+                    col += W // TILE
             split = getattr(self.fe.subs[0][0], "down_split", None)
             segs = ((0, 32 * split), (32 * split, Wd)) if split else ((0, Wd),)
+            if UNDISP_REM and m.get("undispatch_rm") is not None:  # (the segments' un-dispatches + sum: one program)
+                ds = [self._gmm(din, dn, m["group_ids"], alloc(H, ttnn.ROW_MAJOR_LAYOUT), E, self.wsub[0], k0=a // TILE,
+                                koff=a, K=b - a) for a, b in segs]
+                ttnn.deallocate(din)
+                if getattr(_GMM, "undisp", None) is None:
+                    from .undisp import Undispatch
+
+                    _GMM.undisp = Undispatch(self.mesh)
+                out = _GMM.undisp(ds, m["undispatch_rm"], T, k)
+                for d in ds:
+                    ttnn.deallocate(d)
+                return out
             for a, b in segs:  # (split: each K segment's down alone, the outputs added in bf16)
                 down(din, dn, self.wsub[0], a, b - a, k0=a // TILE)
             ttnn.deallocate(din)
