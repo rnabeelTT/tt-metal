@@ -26,6 +26,11 @@ def _bits(x: float) -> int:
     return struct.unpack("<I", struct.pack("<f", float(x)))[0]
 
 
+# the 3-gate program: each core's reader fills the ones tile and only the roots read the 0 / 1 selection tiles (90
+# cores reading one DRAM page beside the three gates' weight reads). I2M_LOCAL_ONES
+LOCAL_ONES = __import__("os").environ.get("I2M_LOCAL_ONES", "1") == "1"
+
+
 class GateKernel:
     """Shared by every gate (one core set); the per-gate weights are passed per call."""
 
@@ -135,7 +140,7 @@ class GateKernel2:
         if CX == 9 and CY == 4 and g.y >= 10:
             self.rects += [_Rect(post, 0, 4, 9, 4), _Rect(post, 0, 8, 9, 2)]
 
-    def _parts(self, rc, h, m, wd, wfg, nw, router, dup, out_mc):
+    def _parts(self, rc, h, m, wd, wfg, nw, router, dup, out_mc, lo=False):
         pk = self.pk
         h, m = (ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t for t in (h, m))
         T = int(h.shape[-2])
@@ -194,7 +199,8 @@ class GateKernel2:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
-                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit)))]
+                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))),
+                ("LOCAL_ONES", str(int(lo and LOCAL_ONES)))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -209,7 +215,7 @@ class GateKernel2:
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit)))]),
         ]
-        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit,
+        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, lo,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])
@@ -243,6 +249,6 @@ class GateKernel2:
         """gates: up to len(self.rects) (h, m, wd, wfg, nw) -> their outputs ((x, None) with nw), one program."""
         assert len(gates) <= len(self.rects)
         rects = self.rects[: len(gates)]
-        parts = [self._parts(rc, h, m, wd, wfg, nw, None, False, out_mc) for rc, (h, m, wd, wfg, nw) in zip(rects, gates)]
+        parts = [self._parts(rc, h, m, wd, wfg, nw, None, False, out_mc, lo=True) for rc, (h, m, wd, wfg, nw) in zip(rects, gates)]
         crs = _range_set([c for rc in rects for c in rc.cores])
         return self._run(parts, crs)

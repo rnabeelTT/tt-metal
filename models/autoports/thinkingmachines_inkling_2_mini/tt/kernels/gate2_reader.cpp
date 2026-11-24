@@ -67,13 +67,20 @@ void kernel_main() {
         read_rows<T, 4, TH>(am.get_noc_addr(t0 + t), get_write_ptr(cb_m) + t * FT);
     }
     cb_reserve_back(cb_ones, 1);
-    noc_async_read(aones.get_noc_addr(0), get_write_ptr(cb_ones), BF);
+    if constexpr (LOCAL_ONES) {  // (the bf16 ones tile written here: ~90 cores reading one DRAM page is a hotspot)
+        volatile tt_l1_ptr uint32_t* o = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_write_ptr(cb_ones));
+        for (uint32_t w = 0; w < 512; ++w) {
+            o[w] = 0x3F803F80u;
+        }
+    } else {
+        noc_async_read(aones.get_noc_addr(0), get_write_ptr(cb_ones), BF);
+    }
     noc_async_read_barrier();
     cb_push_back(cb_h, PER);
     cb_push_back(cb_m, PER);
     cb_push_back(cb_ones, 1);
     cb_reserve_back(cb_sel, NSEL);
-    for (uint32_t k = 0; k < NSEL; ++k) {  // (row 0 of the 0 / 1 tiles is the only nonzero row)
+    for (uint32_t k = 0; k < ((LOCAL_ONES && c >= T) ? 0u : NSEL); ++k) {  // (roots only with LOCAL_ONES; row 0 of the 0 / 1 tiles is the only nonzero row)
         if constexpr (TH == 32) {
             noc_async_read(asel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BT, BT);
         } else {
