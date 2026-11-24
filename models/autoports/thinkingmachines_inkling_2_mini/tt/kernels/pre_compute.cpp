@@ -185,7 +185,8 @@ void kernel_main() {
     constexpr uint32_t n = NB + 1;
     constexpr uint32_t K1 = 1 + NQ;  // round 1 quantities: sum x^2, x . q_j
     static_assert(n <= 6 && NQ <= 3, "DST budget");
-    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
+    // core t: the root of row t (PRE_PACK: core 0 of every row, the selection tile's row t picking row t's partials)
+    const bool root = PRE_PACK ? get_arg_val<uint32_t>(0) == 0 : get_arg_val<uint32_t>(0) < ROWS;
     const uint32_t ci = get_arg_val<uint32_t>(0);
     bool sw = false;  // (waited for the selection tiles: pops them at the end)
     // a round's totals of npair hi / lo pairs: all on root t (NP = 1) or pair j on core t NP + j (the same matmuls)

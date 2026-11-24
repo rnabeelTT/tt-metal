@@ -58,7 +58,9 @@ void kernel_main() {
     // this core's slot in its rectangle (origin G2_X0, G2_Y0; GateKernel2.multi runs several rectangles)
     const uint32_t c = ((uint32_t)get_absolute_logical_y() - G2_Y0) * G2_CX + (uint32_t)get_absolute_logical_x() - G2_X0;
     const uint32_t t0 = c * PER;
-    const bool root = c < T;  // root of row c
+    // root of row c (G2_PACK: core 0 reduces every row, red.hpp; never with the router round)
+    const bool root = G2_PACK ? c == 0 : c < T;
+    constexpr uint32_t TR = G2_PACK ? T : 1;
     auto ca = [](uint32_t i) { return get_common_arg_val<uint32_t>(i); };
     const auto ao = TensorAccessor(o_args, ca(0), 1024 * OE);
     const uint32_t mx0 = ca(2), my0 = ca(3), mx1 = ca(4), my1 = ca(5);
@@ -98,7 +100,7 @@ void kernel_main() {
     auto zero_parts = [&](uint32_t p0, uint32_t p1) {
         for (uint32_t p = p0; p < p1; ++p) {
             if (!(zdone >> p & 1)) {
-                red_zero<G2_RK, C, NSEL>(z, g + p * NSEL * F32);
+                red_zero<G2_RK, C, NSEL, TR>(z, g + p * NSEL * F32);
                 zdone |= 1u << p;
             }
         }
@@ -129,9 +131,11 @@ void kernel_main() {
     auto round = [&](uint32_t parts, uint32_t cb_t, uint32_t tb, uint32_t k, bool bcast, uint32_t np) {
         cb_wait_front(cb_part, parts);
         const uint32_t src = get_read_ptr(cb_part);
-        const uint32_t d = g + red_off<G2_RK>(c);
-        for (uint32_t t = 0; t < T; ++t) {  // (row t < 16 of a CB tile)
-            if (np > 1) {
+        const uint32_t d = g + red_off<G2_RK, TR>(c);
+        for (uint32_t t = 0; t < (G2_PACK ? 1 : T); ++t) {  // (row t < 16 of a CB tile)
+            if (G2_PACK) {  // (rows 0 .. T - 1 in one write per face)
+                red_send<NSEL, FT, FO, T * 64>(src, rxy(0, d), d, 0, parts);
+            } else if (np > 1) {
                 for (uint32_t j = 0; j < np; ++j) {
                     red_send<NSEL, FT, FO>(src + t * 64, rxy(t * np + j, d), d, 2 * j, 2 * j + 2);
                 }
@@ -140,11 +144,11 @@ void kernel_main() {
             }
         }
         noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
-        for (uint32_t r = 0; r < T * np; ++r) {
+        for (uint32_t r = 0; r < (G2_PACK ? 1 : T * np); ++r) {
             noc_semaphore_inc(rxy(r, s_g), 1);
         }
         cb_pop_front(cb_part, parts);
-        const bool isr = c < T * np;
+        const bool isr = G2_PACK ? c == 0 : c < T * np;
         if (isr) {
             gcnt += C;
             cb_reserve_back(cb_gath, GT);
@@ -160,17 +164,17 @@ void kernel_main() {
             const uint32_t ts = get_read_ptr(cb_tout);
             // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
             // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
-            if constexpr (T == 1) {
+            if constexpr (T == 1 || G2_PACK) {  // (rows 0 .. T - 1)
                 for (uint32_t j = 0; j < ntot; ++j) {
-                    noc_async_write_multicast(ts + j * FT, mc(tb + j * FT), 64, C - 1, true);
-                    noc_async_write_multicast(ts + j * FT + FO, mc(tb + j * FT + FO), 64, C - 1, true);
+                    noc_async_write_multicast(ts + j * FT, mc(tb + j * FT), T * 64, C - 1, true);
+                    noc_async_write_multicast(ts + j * FT + FO, mc(tb + j * FT + FO), T * 64, C - 1, true);
                 }
                 noc_async_writes_flushed();
                 *sem(s_done) = k;
                 noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
                 for (uint32_t j = 0; j < ntot; ++j) {
-                    noc_async_write(ts + j * FT, get_noc_addr(tb + j * FT), 64);
-                    noc_async_write(ts + j * FT + FO, get_noc_addr(tb + j * FT + FO), 64);
+                    noc_async_write(ts + j * FT, get_noc_addr(tb + j * FT), T * 64);
+                    noc_async_write(ts + j * FT + FO, get_noc_addr(tb + j * FT + FO), T * 64);
                 }
                 noc_async_write_barrier();
             } else {  // row 0 -> row `row` of core 0's totals

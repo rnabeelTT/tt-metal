@@ -16,7 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import MR, RSPLIT, WS, ZLAZY, red_k, red_sel
+from .post import MR, RSPLIT, WS, ZLAZY, red_k, red_pack, red_sel
 
 F32, BF = 4096, 2048
 ROWS = __import__("os").environ.get("I2M_GATE_ROWS", "1") == "1"  # SFPU passes on the live rows only (<= 16 rows)
@@ -113,11 +113,11 @@ class _Rect:
         self.roots = [v for cc in self.cores[:16] for w in [pk.mesh.worker_core_from_logical_core(cc)] for v in (w.x, w.y)]
         self.reds = {}
 
-    def red(self, T):
-        K = red_k(T)
-        if K not in self.reds:
-            self.reds[K] = red_sel(self.pk.mesh, self.pk.rep, self.C, K)
-        return self.reds[K]
+    def red(self, T, pack=False):
+        K, TR = red_k(T), T if pack else 1
+        if (K, TR) not in self.reds:
+            self.reds[(K, TR)] = red_sel(self.pk.mesh, self.pk.rep, self.C, K, TR)
+        return self.reds[(K, TR)]
 
 
 class GateKernel2:
@@ -153,9 +153,10 @@ class GateKernel2:
         ET = int(router[0].shape[-1]) // 32 if rt else 4
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             pk.mesh, out_mc) if rt else None
-        NSEL, sel = rc.red(T)  # (a root per row)
+        pack = not rt and red_pack(T, "gate")
+        NSEL, sel = rc.red(T, pack)  # (a root per row; pack: core 0)
         rsplit = RSPLIT and rt and T * ET <= 16
-        mr = ("multi" if lo else "gate2") in MR and 1 < T <= 8  # (2 T roots among the first 16 cores)
+        mr = ("multi" if lo else "gate2") in MR and 1 < T <= 8 and not pack  # (2 T roots among the first 16 cores)
         PER, R, C, crs = rc.PER, self.R, rc.C, rc.crs
         GP = 2 * ET if rt else 4
         (cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
@@ -200,7 +201,7 @@ class GateKernel2:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
-                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))), ("RED_WS", str(int(WS))),
+                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))), ("RED_WS", str(int(WS))), ("G2_PACK", str(int(pack))),
                 ("LOCAL_ONES", str(int(lo and LOCAL_ONES)))]
 
         def dm(src, ct, common, riscv, noc):
@@ -214,9 +215,10 @@ class GateKernel2:
             dm("gate2_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
-                                  defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr)))]),
+                                  defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))),
+                                           ("G2_PACK", str(int(pack)))]),
         ]
-        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, WS, lo,
+        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, lo,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

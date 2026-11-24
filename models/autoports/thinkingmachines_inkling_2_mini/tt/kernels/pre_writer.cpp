@@ -85,17 +85,19 @@ void kernel_main() {
     noc_semaphore_wait(sem(s_go), 1);
     // the unused gather rows -> 0 (red.hpp): a round's root zeroes the parts it reduces (zdone: those zeroed so far)
     constexpr uint32_t NP1 = PRE_NP1, NP2 = PRE_NP2;
+    constexpr uint32_t TR = PRE_PACK ? T : 1;  // (PRE_PACK: core 0 reduces every row, red.hpp)
+    auto isroot = [&](uint32_t np) { return PRE_PACK ? c == 0 : c < T * np; };
     uint32_t z = 0, zdone = 0;
     auto zero_parts = [&](uint32_t p0, uint32_t p1) {
         for (uint32_t p = p0; p < p1; ++p) {
             if (!(zdone >> p & 1)) {
-                red_zero<PRE_RK, C, NSEL>(z, g1 + p * NSEL * F32);
+                red_zero<PRE_RK, C, NSEL, TR>(z, g1 + p * NSEL * F32);
                 zdone |= 1u << p;
             }
         }
         noc_async_write_barrier();
     };
-    if (c < T * NP1 || (NORM && c < T * NP2)) {
+    if (isroot(NP1) || (NORM && isroot(NP2))) {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
@@ -103,7 +105,7 @@ void kernel_main() {
     }
     if (NP1 > 1 && c < T * NP1) {
         zero_parts(2 * (c % NP1), 2 * (c % NP1) + 2);
-    } else if (root) {
+    } else if (isroot(1)) {
         zero_parts(0, 2 * K1);
     }
 
@@ -131,9 +133,11 @@ void kernel_main() {
                      uint32_t done_val, uint32_t np) {
         cb_wait_front(cb_p, parts);
         const uint32_t src = get_read_ptr(cb_p);
-        const uint32_t d = g + red_off<PRE_RK>(c);
-        for (uint32_t t = 0; t < T; ++t) {  // (row t < 16 of a CB tile)
-            if (np > 1) {
+        const uint32_t d = g + red_off<PRE_RK, TR>(c);
+        for (uint32_t t = 0; t < (PRE_PACK ? 1 : T); ++t) {  // (row t < 16 of a CB tile)
+            if (PRE_PACK) {  // (rows 0 .. T - 1 in one write per face)
+                red_send<NSEL, FT, FO, T * 64>(src, rxy(0, d), d, 0, parts);
+            } else if (np > 1) {
                 for (uint32_t j = 0; j < np; ++j) {
                     red_send<NSEL, FT, FO>(src + t * 64, rxy(t * np + j, d), d, 2 * j, 2 * j + 2);
                 }
@@ -142,12 +146,12 @@ void kernel_main() {
             }
         }
         noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
-        for (uint32_t r = 0; r < T * np; ++r) {
+        for (uint32_t r = 0; r < (PRE_PACK ? 1 : T * np); ++r) {
             noc_semaphore_inc(rxy(r, s_g), 1);
         }
         cb_pop_front(cb_p, parts);
         const uint32_t ntot = parts / 2, nt = ntot / np, jp = c % np, row = c / np;  // (this root's: tiles jp ..)
-        if (c < T * np) {
+        if (isroot(np)) {
             gcnt += C;
             cb_reserve_back(cb_g, GT);
             noc_semaphore_wait(sem(s_g), gcnt);
@@ -156,17 +160,17 @@ void kernel_main() {
             const uint32_t ts = get_read_ptr(cb_tout);
             // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
             // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
-            if constexpr (T == 1) {
+            if constexpr (T == 1 || PRE_PACK) {  // (rows 0 .. T - 1)
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    noc_async_write_multicast(ts + k * FT, mc(tb + k * FT), 64, C - 1, true);
-                    noc_async_write_multicast(ts + k * FT + FO, mc(tb + k * FT + FO), 64, C - 1, true);
+                    noc_async_write_multicast(ts + k * FT, mc(tb + k * FT), T * 64, C - 1, true);
+                    noc_async_write_multicast(ts + k * FT + FO, mc(tb + k * FT + FO), T * 64, C - 1, true);
                 }
                 noc_async_writes_flushed();
                 *sem(s_done) = done_val;
                 noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
                 for (uint32_t k = 0; k < ntot; ++k) {
-                    noc_async_write(ts + k * FT, get_noc_addr(tb + k * FT), 64);
-                    noc_async_write(ts + k * FT + FO, get_noc_addr(tb + k * FT + FO), 64);
+                    noc_async_write(ts + k * FT, get_noc_addr(tb + k * FT), T * 64);
+                    noc_async_write(ts + k * FT + FO, get_noc_addr(tb + k * FT + FO), T * 64);
                 }
                 noc_async_write_barrier();
             } else {  // row 0 -> row `row` of core 0's totals
@@ -200,7 +204,7 @@ void kernel_main() {
     round(cb_part, 2 * K1, cb_gath, g1, cb_tot, tot, 1, NP1);
 
     if constexpr (NORM) {
-        if (c < T * NP2) {  // (round 2's parts)
+        if (isroot(NP2)) {  // (round 2's parts)
             zero_parts(NP2 > 1 ? 2 * (c % NP2) : 0, NP2 > 1 ? 2 * (c % NP2) + 2 : 2 * NQ);
         }
         round(cb_part2, 2 * NQ, cb_gath, g1, cb_tot2, tot2, 2, NP2);

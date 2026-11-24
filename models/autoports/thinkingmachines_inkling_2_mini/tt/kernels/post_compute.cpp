@@ -180,7 +180,8 @@ void kernel_main() {
     constexpr uint32_t cb_tout = get_compile_time_arg_val(32);  // root: totals -> writer
     constexpr uint32_t cb_tot = get_compile_time_arg_val(33);   // round 1 totals (received)
     constexpr uint32_t cb_tot2 = get_compile_time_arg_val(34);  // round 2 totals (received)
-    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
+    // core t: the root of row t (POST_PACK: core 0 of every row, the selection tile's row t picking row t's partials)
+    const bool root = POST_PACK ? get_arg_val<uint32_t>(0) == 0 : get_arg_val<uint32_t>(0) < ROWS;
     bool sw = false;  // (waited for the selection tiles: pops them at the end)
     auto wsel = [&]() {
         cb_wait_front(cb_sel, NQ);

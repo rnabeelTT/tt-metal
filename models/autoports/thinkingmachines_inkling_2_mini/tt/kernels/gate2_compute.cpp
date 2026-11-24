@@ -188,7 +188,8 @@ void kernel_main() {
     constexpr uint32_t GT = GP * NSEL;
     static_assert(ET <= 4, "router tiles");
     static_assert(R == 2, "rank tiles");
-    const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
+    // core t: the root of row t (G2_PACK: core 0 of every row, the selection tile's row t picking row t's partials)
+    const bool root = G2_PACK ? get_arg_val<uint32_t>(0) == 0 : get_arg_val<uint32_t>(0) < ROWS;
     // G2_MR (ROWS > 1): rounds 1 / 2 pair j of row t reduced on core 2 t + j (the same matmuls as DST j of the root's)
     const uint32_t ci = get_arg_val<uint32_t>(0);
     const bool mr = G2_MR && ROWS > 1, mroot = mr ? ci < 2 * ROWS : root;

@@ -12,7 +12,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, MR, WS, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, tile_rows
+from .post import BF, CX, CY, C, F32, MR, WS, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, red_pack, tile_rows
 
 
 RN1 = __import__("os").environ.get("I2M_PRE_RN1", "1") == "1"  # each norm's rsqrt once, not per tile
@@ -39,7 +39,8 @@ class PreKernel:
         NB, NQ = len(blocks), len(qrows)
         norm = nws is not None
         assert T <= 16 and 1 <= NB and NQ <= 3 and len(logits) == NB
-        NSEL, sel = pk.red(T)
+        pack = red_pack(T, "pre")
+        NSEL, sel = pk.red(T, pack)
         shape = ttnn.Shape([1, 1, T, self.H])
         alloc = lambda dt: ttnn.allocate_tensor_on_device(shape, dt, ttnn.TILE_LAYOUT, self.mesh, out_mc)  # noqa: E731
         xo = alloc(ttnn.bfloat16) if tail is not None else x
@@ -48,7 +49,7 @@ class PreKernel:
         outs = [alloc(odt) for _ in range(NQ)]
         K1 = 1 + NQ
         # roots per row of rounds 1 / 2 (MR: one per hi / lo pair while T NP <= 16, the first 16 cores)
-        np1, np2 = ((K1 if T * K1 <= 16 else 1), (NQ if T * NQ <= 16 else 1)) if "pre" in MR and T > 1 else (1, 1)
+        np1, np2 = ((K1 if T * K1 <= 16 else 1), (NQ if T * NQ <= 16 else 1)) if "pre" in MR and T > 1 and not pack else (1, 1)
         (cb_in, cb_rp, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_sel, cb_so, cb_xo, cb_x, cb_sq, cb_sum, cb_part,
          cb_gath, cb_tout, cb_tot, cb_red, cb_wt, cb_h, cb_xn, cb_part2, cb_gath2, cb_tot2, cb_out, cb_zero) = range(28)
         f32, bf, crs, th = ttnn.float32, ttnn.bfloat16, pk.crs, tile_rows(T)
@@ -101,7 +102,7 @@ class PreKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed))),
-                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS)))] + sdefs
+                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("PRE_PACK", str(int(pack)))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
@@ -115,11 +116,11 @@ class PreKernel:
             ttnn.KernelDescriptor(kernel_source=str(KDIR / "pre_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("PRE_RN1", str(int(RN1))), ("SOFT_BATCH", str(int(SOFT_BATCH))),
-                                           ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2))]),
+                                           ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("PRE_PACK", str(int(pack)))]),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, RN1, SOFT_BATCH, np1, np2, WS, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
+        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, RN1, SOFT_BATCH, np1, np2, WS, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
