@@ -23,6 +23,9 @@ _os.environ.setdefault("QWEN35_MOE_GU_OFFROW", "2")
 _os.environ.setdefault("QWEN35_ROUTE_SPLIT", "8")
 # the sigb routing weights from the merged selection keys (no second sigmoid pass on the leader; bitwise)
 _os.environ.setdefault("QWEN35_ROUTE_KEYS", "1")
+# I2M_ROUTE_FAST: the route program's sigmoid on 32-bit operands, the leader's merges as register-resident threshold
+# inserts, the weights' 2^59 / sum in 32-bit divisions (bitwise; route 6.9 / 7.3 -> 5.6 / 6.0 us at 2 / 4 rows, one die)
+_os.environ.setdefault("QWEN35_ROUTE_FAST", _os.environ.get("I2M_ROUTE_FAST", "1"))
 # the prefill MoE dispatch over many cores (qwen36 dispatch_mc; bit-identical to moe_sorted_dispatch)
 _os.environ.setdefault("QWEN35_DISPATCH_MC", "1")
 # decode MoE fixed costs (one-die bench of the per-die shards, eager us gate|up / down, all bitwise):

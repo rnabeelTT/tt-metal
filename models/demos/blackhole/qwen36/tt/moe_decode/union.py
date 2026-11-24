@@ -168,6 +168,8 @@ class RouteRows:
         defines += [("ROUTE_SPLIT", str(P))] if P > 1 else []
         # QWEN35_ROUTE_KEYS=1 (sigb): the routing weights from the selection keys, no second sigmoid pass (bitwise)
         defines += [("ROUTE_KEYS", "1")] if self.router == "sigb" and os.environ.get("QWEN35_ROUTE_KEYS") == "1" else []
+        # QWEN35_ROUTE_FAST=1: the same selection and weights with cheaper leader / sigmoid code (router_topk.hpp; bitwise)
+        defines += [("ROUTE_FAST", "1")] if os.environ.get("QWEN35_ROUTE_FAST") == "1" else []
         kernels = [
             ttnn.KernelDescriptor(
                 kernel_source=str(KERNEL_DIR / "route_rows_reader.cpp"),

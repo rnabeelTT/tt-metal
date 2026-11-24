@@ -15,6 +15,9 @@
 //
 // ROUTE_KEYS (sigb): the weights from the merged selection keys (s = key - 2^28 - b; the same bits).
 //
+// ROUTE_FAST: the same bits with cheaper code (router_topk.hpp): 32-bit sigmoid, merges as threshold inserts with the
+// running top-k in registers, the weights' division in 32-bit steps.
+//
 // ROUTE_SPLIT = P (RouteRows split): P cores per row, part p = experts [p E / P, (p + 1) E / P) (this NCRISC the lower
 // half of it, the BRISC the upper); part p > 0 writes its merged top-k (k keys, k ids) into slot p of the part-0
 // core's cb_gather and increments its program semaphore 0; part 0 waits for the P - 1 parts, merges them in part order
@@ -88,7 +91,11 @@ void kernel_main() {
     cb_wait_front(cb_part, 1);
     invalidate_l1_cache();
     const uint32_t* part = reinterpret_cast<const uint32_t*>(get_read_ptr(cb_part));
+#ifdef ROUTE_FAST
+    moe_topk::merge_into<topk>(keys, ids, part, part + topk);
+#else
     moe_topk::merge<topk>(keys, ids, part, part + topk);
+#endif
     cb_pop_front(cb_part, 1);
 #ifdef ROUTE_SPLIT
     {
@@ -110,14 +117,21 @@ void kernel_main() {
         }
         noc_semaphore_wait_min(sem, ROUTE_SPLIT - 1);
         invalidate_l1_cache();
+#ifdef ROUTE_FAST
+        moe_topk::merge_parts<topk, 1, ROUTE_SPLIT>(keys, ids, gather);
+#else
         for (uint32_t p = 1; p < ROUTE_SPLIT; ++p) {
             const uint32_t* g = reinterpret_cast<const uint32_t*>(gather + p * 8 * topk);
             moe_topk::merge<topk>(keys, ids, g, g + topk);
         }
+#endif
     }
 #endif
     uint16_t w[topk];
-#if defined(ROUTER_SIGB) && defined(ROUTE_KEYS)
+#if defined(ROUTER_SIGB) && defined(ROUTE_KEYS) && defined(ROUTE_FAST)
+    moe_topk::sigmoid_weights_keys_fast<topk>(keys, ids, bias, w);
+    const uint16_t w_shared = 0x3F80;
+#elif defined(ROUTER_SIGB) && defined(ROUTE_KEYS)
     moe_topk::sigmoid_weights_keys<topk>(keys, ids, bias, w);
     const uint16_t w_shared = 0x3F80;
 #else

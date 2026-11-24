@@ -147,6 +147,31 @@ inline void merge(uint32_t* keys, uint32_t* ids, const uint32_t* keys2, const ui
     }
 }
 
+// keys / ids (sorted, the top-k so far) <- the top-k of them and the sorted list (keys2, ids2) of higher ids: the same
+// result as merge() (equal keys keep the earlier entry first); the list stops at its first key not above the k-th
+template <uint32_t topk>
+inline void merge_into(uint32_t* keys, uint32_t* ids, const uint32_t* keys2, const uint32_t* ids2) {
+#pragma GCC unroll 1
+    for (uint32_t j = 0; j < topk; ++j) {
+        const uint32_t key = keys2[j];
+        if (key <= keys[topk - 1]) {
+            break;
+        }
+        keys[topk - 1] = key;
+        ids[topk - 1] = ids2[j];
+#pragma GCC unroll 16
+        for (uint32_t i = topk - 1; i > 0; --i) {
+            if (keys[i] > keys[i - 1]) {
+                const uint32_t tk = keys[i], ti = ids[i];
+                keys[i] = keys[i - 1];
+                ids[i] = ids[i - 1];
+                keys[i - 1] = tk;
+                ids[i - 1] = ti;
+            }
+        }
+    }
+}
+
 template <uint32_t topk, uint32_t n>
 inline void topk_select(const uint32_t* words, uint32_t* ids) {
     uint32_t keys[topk];
@@ -196,6 +221,38 @@ inline int32_t f32_to_q24(uint32_t b) {
     return (b & 0x80000000u) ? -v : v;
 }
 
+#ifdef ROUTE_FAST
+// ROUTE_FAST: the same fixed-point steps on 32-bit operands (every operand < 2^32, so each 32 x 32 -> 64 product is the
+// 64-bit one: one mul + mulhu instead of a 64 x 64 multiply; equal on all 2^32 inputs, checked exhaustively on the host)
+inline uint64_t mul32(uint32_t a, uint32_t b) { return static_cast<uint64_t>(a) * b; }
+inline uint32_t sigmoid_q23(uint32_t b) {
+    const int32_t v = f32_to_q24(b);
+    const uint32_t a = static_cast<uint32_t>(mul32(static_cast<uint32_t>(v < 0 ? -v : v), 1549082005u) >> 30);  // -t
+    const int32_t n = -static_cast<int32_t>((a + 0xFFFFFFu) >> 24);  // floor(t / 2^24)
+    const uint32_t f = ((0u - a) & 0xFFFFFFu) << 6;                 // frac(t), Q30
+    uint32_t p = 1419u;
+    p = 16377u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 165394u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 1431680u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 10327387u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 59597083u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 257941248u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 744261118u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    p = 1073741824u + static_cast<uint32_t>(mul32(p, f) >> 30);
+    const uint32_t e30 = n < -31 ? 0 : p >> (-n);
+    const uint32_t h = ((1u << 30) + e30) >> 1;
+    uint32_t x = 3031741621u - static_cast<uint32_t>(mul32(2021161081u, h) >> 30);
+    for (int i = 0; i < 3; ++i) {
+        const uint32_t hx = static_cast<uint32_t>(mul32(h, x) >> 30);
+        x = static_cast<uint32_t>(mul32(x, (2u << 30) - hx) >> 30);
+    }
+    uint32_t r = x >> 1;
+    if (r > (1u << 30)) {
+        r = 1u << 30;
+    }
+    return (v >= 0 ? r : (1u << 30) - r) >> 7;
+}
+#else
 // sigmoid of an FP32 logit in Q23 (~1e-7): e = exp(-|x|) = 2^n 2^f (f in [0, 1): Taylor degree 8 in Q30), then
 // 1 / (1 + e) by Newton.
 inline uint32_t sigmoid_q23(uint32_t b) {
@@ -226,6 +283,7 @@ inline uint32_t sigmoid_q23(uint32_t b) {
     }
     return (v >= 0 ? r : (1u << 30) - r) >> 7;
 }
+#endif
 
 // Top-k (sorted descending, ties to the lower id) of the selection keys s + b of experts [i0, i1): f32 = the FP32
 // logits row (expert i at f32[i]), bias = Q23 int32 per expert. keys_out: order keys (s + b + 2^28 > 0).
@@ -299,6 +357,80 @@ inline void sigmoid_weights_keys(const uint32_t* keys, const uint32_t* ids, cons
         weights[j] = fixed_to_bf16((s[j] * inv) >> 32, 27);
     }
 }
+
+#ifdef ROUTE_FAST
+// floor(2^59 / S) for 0 < S <= 2^26 (8 sigmoids in Q23) with 32-bit divisions: 2^27 / S, then 32 more quotient bits
+// 6 at a time (r < S, so r << 6 < 2^32); equal to the 64-bit division on every S (checked on the host)
+inline uint64_t div59(uint32_t S) {
+    uint32_t q = (1u << 27) / S;
+    uint32_t r = (1u << 27) - q * S;
+    uint64_t Q = q;
+#pragma GCC unroll 6
+    for (uint32_t i = 0; i < 6; ++i) {
+        const uint32_t d = i < 5 ? 6 : 2;
+        const uint32_t n = r << d;
+        const uint32_t t = n / S;
+        r = n - t * S;
+        Q = (Q << d) | t;
+    }
+    return Q;
+}
+// fixed_to_bf16 of a value below 2^32
+inline uint16_t fixed32_to_bf16(uint32_t w, int32_t frac) {
+    if (w == 0) {
+        return 0;
+    }
+    int32_t msb = 31 - __builtin_clz(w);
+    const int32_t shift = msb - 7;
+    uint32_t m = shift > 0 ? (w + (1u << (shift - 1))) >> shift : w << -shift;
+    if (m >= 0x100) {
+        m >>= 1;
+        msb += 1;
+    }
+    return static_cast<uint16_t>(((127 + msb - frac) << 7) | (m & 0x7F));
+}
+// sigmoid_weights_keys in 32-bit arithmetic (s_j <= sum <= 2^26: (s_j inv) >> 32 = s_j ih + hi(s_j il)); the same bits
+template <uint32_t topk>
+inline void sigmoid_weights_keys_fast(const uint32_t* keys, const uint32_t* ids, const int32_t* bias, uint16_t* weights) {
+    uint32_t s[topk];
+    uint32_t sum = 0;
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        s[j] = static_cast<uint32_t>(static_cast<int32_t>(keys[j]) - (1 << 28) - bias[ids[j]]);
+        sum += s[j];
+    }
+    if (sum == 0) {
+        sum = 1;
+    }
+    const uint64_t inv = div59(sum);
+    const uint32_t ih = static_cast<uint32_t>(inv >> 32), il = static_cast<uint32_t>(inv);
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        weights[j] = fixed32_to_bf16(s[j] * ih + static_cast<uint32_t>(mul32(s[j], il) >> 32), 27);
+    }
+}
+// keys / ids <- merged with the parts' lists p0 .. p1 - 1 in order (slot p at lists + p * 8 topk bytes: k keys, k ids),
+// the running top-k in registers (merge_into on local copies)
+template <uint32_t topk, uint32_t p0, uint32_t p1>
+inline void merge_parts(uint32_t* keys, uint32_t* ids, uint32_t lists) {
+    uint32_t lk[topk], li[topk];
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        lk[j] = keys[j];
+        li[j] = ids[j];
+    }
+#pragma GCC unroll 1
+    for (uint32_t p = p0; p < p1; ++p) {
+        const uint32_t* g = reinterpret_cast<const uint32_t*>(lists + p * 8 * topk);
+        merge_into<topk>(lk, li, g, g + topk);
+    }
+#pragma GCC unroll 16
+    for (uint32_t j = 0; j < topk; ++j) {
+        keys[j] = lk[j];
+        ids[j] = li[j];
+    }
+}
+#endif
 
 // The logits row as the routing kernels read it: one row of each [32, 32] TILE page, faces 0 and 1 back to back.
 #ifdef ROUTER_SIGB
