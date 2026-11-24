@@ -75,6 +75,8 @@ PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 VISION = os.environ.get("I2M_VISION", "1") == "1"
 # I2M_HOST_PROF=1: each decode step's host timeline (plain / speculative), mean ms per segment every 100 steps
 HOST_PROF = os.environ.get("I2M_HOST_PROF", "0") == "1"
+# I2M_PREFILL_PROF=1: each prefill's timeline (device synchronized after every piece: slower; attribution only)
+PREFILL_PROF = os.environ.get("I2M_PREFILL_PROF", "0") == "1"
 # I2M_ASYNC (default 1): the plugin's async decode (decode_input_update_contract 1). A decode step whose rows all sample
 # exactly on device (tt/sampling.device_ok: the published T = 1, greedy, ...) samples inside the trace into the next
 # step's token input and returns before the device finishes; the plugin reads the tokens later, so vLLM's scheduling of
@@ -469,6 +471,11 @@ class Inkling2ForCausalLM:
         start_pos > 0 restores the snapshot its directive names (the plugin's prefix_state) and prefills from there; a
         directive's saves snapshot the state at their positions."""
         N = int(tokens.shape[0])
+        if PREFILL_PROF:
+            ttnn.synchronize_device(self.mesh)
+            t = time.perf_counter()
+            self._pp_acc = {"outside": t - _Prof.last if _Prof.last is not None else 0.0}
+            self._pp_t, self._pp_wall = t, time.time()
         if self.spec is not None:  # (another request: the speculative one goes back to plain decode first)
             self._spec_exit()
         start_pos = kwargs.get("start_pos")
@@ -496,13 +503,30 @@ class Inkling2ForCausalLM:
             reqs.append(dict(u=u, slot=slot, ids=ids, P=plens[u], b0=starts[u], restore=d.get("restore"),
                              saves=sorted((int(q), int(k)) for q, k in (d.get("saves") or ())), images=images,
                              key=self._content_key(ids, images)))
+        self._pmark("setup")
         L = self.m.lanes
         for g in range(0, N, L):
             self._prefill_group(reqs[g : g + L], out)
+        if PREFILL_PROF:
+            self._pmark("tail")
+            a = self._pp_acc
+            _Prof.last = self._pp_t
+            logger.info(f"prefill timeline ({sum(r['P'] - r['b0'] for r in reqs)} new tokens, wall {self._pp_wall:.3f}"
+                        f" -> {time.time():.3f}): " + "  ".join(f"{k} {v * 1e3:.1f}" for k, v in a.items())
+                        + f"  total (w/o outside) {(sum(a.values()) - a['outside']) * 1e3:.1f} ms")
         if N > 1 or TIMING:
             logger.info(f"prefill of {N} requests ({sum(r['P'] - r['b0'] for r in reqs)} new tokens) in "
                         f"{time.time() - t0:.2f}s")
         return out
+
+    def _pmark(self, k):
+        """I2M_PREFILL_PROF: the time since the previous mark (device synchronized) -> piece k."""
+        if not PREFILL_PROF:
+            return
+        ttnn.synchronize_device(self.mesh)
+        t = time.perf_counter()
+        self._pp_acc[k] = self._pp_acc.get(k, 0.0) + t - self._pp_t
+        self._pp_t = t
 
     def _prefill_group(self, reqs, out):
         """Up to LANES requests, one prefill lane each, packed into shared chunks until every prompt is done."""
@@ -513,6 +537,7 @@ class Inkling2ForCausalLM:
                 and (not b0 or self.dr_seen[:b0] == reqs[0]["key"][:b0]))
         if spec:
             self.dr.reset()
+            self._pmark("dr_reset")
         for lane, r in enumerate(reqs):
             r["lane"] = lane
             self.m.reset(lane)
@@ -530,6 +555,7 @@ class Inkling2ForCausalLM:
             r["p"] = b0
             r["saves"] = [(q, k) for q, k in r["saves"] if q > b0]
             r["mm"] = self._encode(r["images"], b0)
+        self._pmark("lane_setup")
         live = list(reqs)
         while live:
             segs, ids, armed, used, mrows, memb = [], [], [], 0, [], []
@@ -567,13 +593,17 @@ class Inkling2ForCausalLM:
                 used += extra
             taps = [] if spec else None
             mm = (torch.cat(mrows), torch.cat(memb)) if mrows else None
+            self._pmark("chunk_inputs")
             lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs], taps=taps, mm=mm)
+            self._pmark("forward")
             if spec:  # (one segment: the drafter's context of its rows)
                 _, R0, p0, n0, _, _ = segs[0]
                 self._dr_commit(ttnn.slice(taps[0], [0, 0, 0, 0], [1, 4, R0, self.m.H]), p0, n0)
+                self._pmark("dr_commit")
             for r, (q, k) in armed:
                 self.store.save(k, r["slot"], q, r["lane"])
                 self.px_stats["saves"] += 1
+            self._pmark("snapshot")
             done = []
             for i, (_, R, p0, n, slot, lane) in enumerate(segs):
                 r = next(x for x in live if x["lane"] == lane)
@@ -582,8 +612,10 @@ class Inkling2ForCausalLM:
                     done.append((i, r))
             if done:
                 lgh = self._host_logits(lg, len(segs))
+                self._pmark("logits_read")
                 for i, r in done:
                     self.dec.load_slot(r["slot"], r["lane"])
+                    self._pmark("load_slot")
                     if spec:
                         self.ver.set_accept([0])
                         self.dr_seen = r["key"]
