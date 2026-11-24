@@ -4,7 +4,8 @@
 // Decode sampling on device (tt/sampling.DeviceSampler): one group of <= 8 rows of the top-K candidates (tt/sampling.py
 // DeviceTopK: indices uint32 TILE, logits - row max bf16 TILE, NT tiles per row: one per die of a vocab-sharded head)
 // -> each row's token = argmax_j (logit_j + tg[row, j]) over the candidates with id < V, first j on ties, into
-// tokens[G0 + row] (uint32 [1, W] ROW_MAJOR: the next step's token input). tg = T * Gumbel noise written by the host
+// tokens[G0 + row] (uint32 [1, W] ROW_MAJOR: the next step's token input). Indices uint32 or (a slice of <= 65536
+// columns) uint16: IB bytes. tg = T * Gumbel noise written by the host
 // (zeros: greedy). NT > 1: the dies' candidates merged first like DeviceTopK.host (top K by logit, ties: lowest id).
 //
 // runtime args: idx_addr, val_addr, tg_addr, tok_addr
@@ -21,20 +22,21 @@ void kernel_main() {
     constexpr uint32_t NT = get_compile_time_arg_val(4);
     constexpr uint32_t VP = get_compile_time_arg_val(5);
     constexpr uint32_t V = get_compile_time_arg_val(6);
+    constexpr uint32_t IB = get_compile_time_arg_val(7);
     constexpr uint32_t K = 32;
-    constexpr auto i_args = TensorAccessorArgs<7>();
+    constexpr auto i_args = TensorAccessorArgs<8>();
     constexpr auto v_args = TensorAccessorArgs<i_args.next_compile_time_args_offset()>();
     constexpr auto g_args = TensorAccessorArgs<v_args.next_compile_time_args_offset()>();
     constexpr auto t_args = TensorAccessorArgs<g_args.next_compile_time_args_offset()>();
 
     const uint32_t l1 = get_write_ptr(cb);
-    const uint32_t li = l1, lv = li + NT * 4096, lg = lv + NT * 2048, lt = lg + ROWS * 128, lc = lt + 128;
-    const auto s_i = TensorAccessor(i_args, get_arg_val<uint32_t>(0), 4096);
+    const uint32_t li = l1, lv = li + NT * 1024 * IB, lg = lv + NT * 2048, lt = lg + ROWS * 128, lc = lt + 128;
+    const auto s_i = TensorAccessor(i_args, get_arg_val<uint32_t>(0), 1024 * IB);
     const auto s_v = TensorAccessor(v_args, get_arg_val<uint32_t>(1), 2048);
     const auto s_g = TensorAccessor(g_args, get_arg_val<uint32_t>(2), 128);
     const auto s_t = TensorAccessor(t_args, get_arg_val<uint32_t>(3), 4 * W);
     for (uint32_t t = 0; t < NT; ++t) {
-        noc_async_read(s_i.get_noc_addr(t), li + t * 4096, 4096);
+        noc_async_read(s_i.get_noc_addr(t), li + t * 1024 * IB, 1024 * IB);
         noc_async_read(s_v.get_noc_addr(t), lv + t * 2048, 2048);
     }
     for (uint32_t r = 0; r < ROWS; ++r) {
@@ -43,6 +45,7 @@ void kernel_main() {
     noc_async_read(s_t.get_noc_addr(0), lt, 4 * W);
     noc_async_read_barrier();
     volatile tt_l1_ptr uint32_t* ids = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(li);
+    volatile tt_l1_ptr uint16_t* ids16 = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(li);
     volatile tt_l1_ptr uint16_t* vals = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(lv);
     volatile tt_l1_ptr float* tg = reinterpret_cast<volatile tt_l1_ptr float*>(lg);
     volatile tt_l1_ptr uint32_t* tok = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(lt);
@@ -57,7 +60,7 @@ void kernel_main() {
         for (uint32_t t = 0; t < NT; ++t) {
             for (uint32_t c = 0; c < K; ++c) {
                 const uint32_t e = ((r >> 4) * 2 + (c >> 4)) * 256 + (r & 15) * 16 + (c & 15);
-                cid[t * K + c] = ids[t * 1024 + e] + t * VP;
+                cid[t * K + c] = (IB == 4 ? ids[t * 1024 + e] : static_cast<uint32_t>(ids16[t * 1024 + e])) + t * VP;
                 cv.u = static_cast<uint32_t>(vals[t * 2048 / 2 + e]) << 16;
                 clg[t * K + c] = cv.f;
             }

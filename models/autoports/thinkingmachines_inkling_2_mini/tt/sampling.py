@@ -20,6 +20,10 @@ K = 32
 GROUP = 8  # RowsTopK's live-row limit
 # I2M_TOPK_GATHER (default 1): a sharded head's per-die candidates all-gathered on device (one die read back)
 GATHER = __import__("os").environ.get("I2M_TOPK_GATHER", "1") == "1"
+# I2M_TOPK_DRAM (default 1): the candidates the decode traces keep live in DRAM: as one-page L1 interleaved tensors each
+# reserved its 2 KB on every core, and with every width's trace their region reached the prefill SDPA's static CBs at
+# 2048-row chunks (p300x2: "CBs clash with L1 buffers")
+TOPK_DRAM = __import__("os").environ.get("I2M_TOPK_DRAM", "1") == "1"
 
 
 class DeviceTopK:
@@ -58,6 +62,11 @@ class DeviceTopK:
             if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
                 i2 = ttnn.all_gather(i2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N K]
                 v2 = ttnn.all_gather(v2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
+            if TOPK_DRAM:
+                i2d, v2d = ttnn.to_memory_config(i2, ttnn.DRAM_MEMORY_CONFIG), ttnn.to_memory_config(v2, ttnn.DRAM_MEMORY_CONFIG)
+                ttnn.deallocate(i2)
+                ttnn.deallocate(v2)
+                i2, v2 = i2d, v2d
             parts.append((i2, v2, rows))
         return parts
 
@@ -115,7 +124,8 @@ class DeviceSampler:
         g0 = 0
         for i2, v2, rows in parts:
             io = [i2, v2, self.tg, tokens]
-            ct = [0, rows, g0, W, self.nt, self.tk.Vp if self.nt > 1 else 0, self.tk.V]
+            ct = [0, rows, g0, W, self.nt, self.tk.Vp if self.nt > 1 else 0, self.tk.V,
+                  4 if i2.dtype == ttnn.uint32 else 2]
             for t in io:
                 ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
             rt = ttnn.RuntimeArgs()

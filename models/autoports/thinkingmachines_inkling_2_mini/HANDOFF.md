@@ -70,6 +70,13 @@ logit, ties: lowest id) on every die (I2M_DEV_SAMPLE_SHARDED=0: host sampling). 
 the host's, z +1.5 / +1.2 over 10K; served p300 plain TPOT 15.1 -> 13.8 ms (T=1), 15.0 -> 13.7 (greedy), greedy streams
 identical; spec unchanged (10.5-11.0 / 9.9-10.3 ms, run-to-run noise; streams identical). On 2+ dies the per-step input
 writes block behind the running trace (~9 ms of decode_forward) but the device stays busy.
+TP4 (p300x2, 2048-row chunks): device sampling on by default too (a die's 50,272-column slice gives uint16 candidate
+indices: the kernel reads either width). MESH=4: 2,600 / 2,600 draws equal the host's, z +1.4 / +1.1; served TPOT plain
+12.8 -> 11.0 ms (T=1), 12.7 -> 11.0 (greedy), spec 9.2 -> 8.7 / 9.1 -> 8.7 (chat falls back to plain decode); greedy
+streams identical. p300x2 crashed on its first prefill at HEAD ("CBs clash with L1 buffers": the decode traces' one-page
+L1 top-k candidates, each reserving 2 KB on every core, reached the 2048-row prefill SDPA's static CB region): they now
+live in DRAM (I2M_TOPK_DRAM). Lowest persistent L1 after the captures (die 0, tools/l1_probe.py): p300x2 spec 1,290,432
+vs the CB region's end 1,281,600 (thin), p300 1,353,408.
 
 ## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
 
