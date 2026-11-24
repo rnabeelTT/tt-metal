@@ -520,6 +520,14 @@ per-die glue (pre / post / gates / route / SDPA, ~4.5-6 ms per step on every die
 all-reduce folded into post / pre (I2M_AR_MERGE, bitwise but TP2 12.75 -> 12.98 ms; the 96 AR programs cost only
 ~0.4 ms in the trace).
 
+Decode MoE fixed costs (2026-11-24, all bitwise): I2M_MOE_GU_KCH=4 (gate|up reader pushes K-row chunks, the compute
+multiplies each as it lands, same MVMUL sequence), I2M_MOE_GU_OFFROW1 (one-bank groups on TP2 / TP4 whose bank shares
+its reader row: readers one row inward on NOC1), I2M_MOE_DN_SKIPPAD (TP4's zero down K pad row zeroed in L1, not read).
+One-die bench of the per-die shards, us gate|up / down (floor at 512 GB/s): TP2 1 row 63.0 / 28.1 -> 53.4 / 28.1
+(44 / 22), 4 rows 131.4 / 61.5 -> 119.7 / 61.5 (110 / 55); TP4 1 row 30.9 / 17.7 -> 29.4 / 16.8 (22 / 11), 4 rows
+67.8 / 36.4 -> 63.8 / 33.8 (55 / 27.5); TP1 unchanged. Traced TP2 B=1 12.7 -> 12.4 ms. Left: the route program
+(7.2 us x 48 = 0.35 ms/step), gate|up / down prologue + tail ~3 us each.
+
 ## Next
 
 1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
