@@ -117,6 +117,7 @@ def inkling_sdpa_decode(
     pt_per_item=False,
     mi=1,
     table2=None,
+    one_min=0,
 ):
     """-> [1, n_items * R, NH, HD] bf16, or [1, 1, n_items * R, NH * HD] when mi * R == 32 (freshly allocated; the
     caller frees it). window: 0 (global) or the sliding window; extent: rel_extent E (the table must be
@@ -134,6 +135,7 @@ def inkling_sdpa_decode(
     stream, not the compute, bounds the one-item units).
     ``table2`` (prefill, mi > 1): relbias.build_pair_tables of the table: rows 2p / 2p + 1 of an item (consecutive
     positions) share one Rq tile and one table tile (half the bias matmuls and table reads; bitwise).
+    ``one_min`` (one item): a kv head with at most this many chunks runs on one core (as SDPA_MU_MIN).
     """
     n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
     R = int(cur_pos.shape[-1])
@@ -266,6 +268,7 @@ def inkling_sdpa_decode(
         sink=sink,
         pt_per_item=pt_per_item,
         mi=mi,
+        one_min=one_min,
     )
     if tbl_l1 is not None:
         ttnn.deallocate(tbl_l1)
@@ -299,6 +302,7 @@ def _build_and_run(
     sink=None,
     pt_per_item=False,
     mi=1,
+    one_min=0,
 ):
     """The program for one call (static_only: its static parts, no launch; _pf_static)."""
     grid = mesh.compute_with_storage_grid_size()
@@ -309,6 +313,7 @@ def _build_and_run(
         if cpk < 1:
             raise ValueError(f"rows_sdpa_decode: {NKV} kv heads on a {grid.x}x{grid.y} grid")
         n_groups = NKV
+        mu_min = one_min
     elif MU_SPLIT and pt_per_item and mi == 1 and 2 * n_units <= grid.x * grid.y:
         # multi-user decode with room for >= 2 cores per (user, kv head): split each unit's K span as for one item
         cpk = min((grid.x * grid.y) // n_units, 1 << MAX_TREE_ROUNDS)

@@ -96,6 +96,7 @@ def main():
         if os.environ.get("VERIFY") == "1":  # (B speculative verify rows of one sequence, real text tokens)
             dec = BatchedDecoder(m, B, shared=BatchedDecoder(m, B), verify=B)
             toks = next(iter(torch.load("/cache/fixtures/dspark_taps.pt")["texts"].values()))["ids"][dp : dp + B]
+            toks = toks if len(toks) == B else torch.arange(100, 100 + B)
         else:
             dec = BatchedDecoder(m, B)
         dec.set_inputs(toks, torch.arange(dp, dp + B))

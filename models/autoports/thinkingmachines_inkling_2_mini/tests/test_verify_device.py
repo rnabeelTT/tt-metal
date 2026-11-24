@@ -3,14 +3,14 @@
 """Speculative verify rows: R consecutive tokens of one sequence in one pass (BatchedDecoder verify=R) must give the
 logits of R sequential decode steps. Pass 1 from the prefill (accepted row 0), pass 2 after accepting A + 1 rows of
 pass 1 (its state from row A); eager and traced.
-env: MESH (1), R (4), A (1)"""
+env: MESH (1), R (4), A (1), P (100: prefix length)"""
 
 import os
 
 import torch
 
 import ttnn
-from models.autoports.thinkingmachines_inkling_2_mini.tt.batched import BatchedDecoder, TracedDecoder
+from models.autoports.thinkingmachines_inkling_2_mini.tt.batched import VROWS, BatchedDecoder, TracedDecoder
 from models.autoports.thinkingmachines_inkling_2_mini.tt.model import Inkling2Model
 
 
@@ -20,22 +20,26 @@ def pcc(a, b):
 
 
 def main():
-    g = torch.load("/cache/fixtures/golden_t256.pt")
-    ids = g["ids"]
-    P, R, A = 100, int(os.environ.get("R", "4")), int(os.environ.get("A", "1"))
+    P, R, A = int(os.environ.get("P", "100")), int(os.environ.get("R", "4")), int(os.environ.get("A", "1"))
+    ids = torch.load("/cache/fixtures/golden_t256.pt")["ids"]
+    if P + A + 1 + 2 * R > len(ids):  # (longer prefixes: the held-out texts concatenated, repeated as needed)
+        ids = torch.cat([v["ids"].long() for v in torch.load("/cache/fixtures/ref_bf16.pt").values()])
+        ids = ids.repeat(-(-(P + A + 1 + 2 * R) // len(ids)))
     N = int(os.environ.get("MESH", "1"))
     if N > 1:
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=400 << 20)
-    m = Inkling2Model(mesh, max_seq_len=512, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16, prefill_chunk=256,
-                      slots=R)
+    m = Inkling2Model(mesh, max_seq_len=max(512, -(-(P + 64) // 512) * 512), expert_dtype=ttnn.bfloat8_b,
+                      kv_dtype=ttnn.bfloat16, prefill_chunk=256, slots=R)
     full = BatchedDecoder(m, R)
     one = BatchedDecoder(m, 1, shared=full)
     ver = BatchedDecoder(m, R, shared=full, verify=R)
 
     def prefill():
         m.reset()
-        m.forward(torch.cat([ids[:P], torch.zeros((-P) % 64, dtype=ids.dtype)]), 0, valid=P, slot=0)
+        x = torch.cat([ids[:P], torch.zeros((-P) % 64, dtype=ids.dtype)])
+        for p0 in range(0, P, 256):  # (prefill chunks of <= 256 rows)
+            m.forward(x[p0 : p0 + 256], p0, valid=min(256, P - p0), slot=0)
         full.load_slot(0)
 
     # sequential reference: A + 1 + R steps from position P
@@ -77,6 +81,8 @@ def main():
             d.capture()
         a, b = two_passes(d)
         dump[name] = (a, b)
+        for tag, got, ref in (("pass 1", a, seq[:R]), (f"pass 2 (accept {A + 1})", b, seq[A + 1 :])):
+            print(f"  {name} {tag} vs 1-wide per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
         for tag, got, ref in (("pass 1", a, seqw[:R]), (f"pass 2 (accept {A + 1})", b, seqw[A + 1 :])):
             print(f"  {name} {tag} per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
             p = min(pcc(got[r], ref[r]) for r in range(R))
@@ -106,7 +112,9 @@ def main():
             print(f"tap {j}: min row pcc vs HF {p:.5f}", flush=True)
             ok = ok and p > 0.97  # (the device model vs HF: ~0.98 on the final state)
     ttnn.close_mesh_device(mesh)
-    print(f"{'PASS' if worst > 0.9999 and ok else 'FAIL'}: worst pcc {worst:.6f}")
+    # (I2M_SDPA_VROWS: past one chunk (1: 256 keys, 2: 1024) the verify SDPA splits K / V over cores as one-row decode,
+    # not as the width-R decode: not bitwise there)
+    print(f"{'PASS' if worst > (0.995 if VROWS else 0.9999) and ok else 'FAIL'}: worst pcc {worst:.6f}")
 
 
 if __name__ == "__main__":

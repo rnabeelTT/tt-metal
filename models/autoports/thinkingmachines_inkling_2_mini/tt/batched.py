@@ -23,7 +23,7 @@ import ttnn
 
 from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2clip, _rms_unweighted, proj
-from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
+from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import MU_MIN, inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import PackedAR, all_reduce, unpacked
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
 
@@ -57,6 +57,9 @@ MSG_PASS = __import__("os").environ.get("I2M_MSG_PASS", "1") == "1"
 # per layer, DRAM outputs) instead of one mix program per layer
 MSG_ALL = __import__("os").environ.get("I2M_MSG_ALL", "1") == "1"
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
+# a one-slot verify pass's R rows as one SDPA item: K / V read once per kv head, not once per row (I2M_SDPA_VROWS=1:
+# split over cores as one-row decode; 2: a kv head with <= I2M_SDPA_MU_MIN chunks on one core, as the per-row items)
+VROWS = int(__import__("os").environ.get("I2M_SDPA_VROWS", "2"))
 
 
 class Tail:
@@ -401,9 +404,11 @@ _AGATE = {}
 
 def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, packed_out=False):
     NH, HD, N = w.NH, w.HD, w.N
+    one = MU_MIN if VROWS == 2 and int(pos_sdpa.shape[0]) == 1 and int(pos_sdpa.shape[-1]) > 1 else 0  # (VROWS)
     if pq is not None:  # the output gate in one program (tt/agate.py): SDPA output in L1
         o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
-                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=L1)
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=L1,
+                                one_min=one)
         key = (id(w.mesh), NH, HD)
         if key not in _AGATE:
             from .agate import AttnGate
@@ -414,7 +419,8 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
         o = og
     else:
         o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, pos_sdpa, ba.read_table, rq, w.table, w.scale, w.W, w.E,
-                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=DRAM)
+                                sink=sk, pt_per_item=True, k_chunk_size=SDPA_K_CHUNK_SW if w.sliding else SDPA_K_CHUNK, out_memory_config=DRAM,
+                                one_min=one)
         o = ttnn.reshape(o, (1, 1, B, NH * HD))
         o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
     out = proj(w, "o", o)
@@ -462,7 +468,8 @@ class BatchedDecoder:
                                       layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, mesh_mapper=self.rep)
         i32 = lambda t: ttnn.from_torch(t, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,  # noqa
                                         mesh_mapper=self.rep)
-        self.pos_sdpa = i32(torch.full((B, 1), -1, dtype=torch.int32))  # -1: idle slot (skipped by the SDPA)
+        self.ps_shape = (1, B) if verify and VROWS and B == verify else (B, 1)
+        self.pos_sdpa = i32(torch.full(self.ps_shape, -1, dtype=torch.int32))  # -1: idle slot (skipped by the SDPA)
         self.pos_w = i32(torch.zeros(B, dtype=torch.int32))  # global-layer KV write position (idle: 0)
         self.pos_wr = i32(torch.zeros(B, dtype=torch.int32))  # sliding-layer write slot (pos mod ring period)
         self.tau = ttnn.from_torch(torch.ones(1, B, 1, 1), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
@@ -538,7 +545,7 @@ class BatchedDecoder:
         pos = positions.to(torch.int64)
         pw = pos.clamp(min=0)  # idle slots write at position 0 of their own slot (a slot is prefilled before use)
         host += [
-            (pos.reshape(-1, 1).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
+            (pos.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
             (pw.to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_w),
             ((pw % self.ring_period).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_wr),
             (tau_of(pw, self.n_floor, self.alpha).reshape(1, -1, 1, 1), ttnn.float32, ttnn.TILE_LAYOUT, self.tau),

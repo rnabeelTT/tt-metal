@@ -6,7 +6,8 @@ B slots: B texts decode together), and every step's logits are scored against th
 tools/teacher_force.py (top1, top1_conf, kl32, nll).
 
 usage: tools/run_dev.sh python .../tools/teacher_force_decode.py      env: B (4), P (256), D (256), EXPERT_DT (bfp8),
-       KV_DT (bf16), MESH (1), REF (/cache/fixtures/ref_bf16.pt), TRACE (1)
+       KV_DT (bf16), MESH (1), REF (/cache/fixtures/ref_bf16.pt), TRACE (1), VERIFY (0; R: one text at a time through
+       the speculative verify pass, R teacher-forced rows per pass, all accepted)
 """
 
 import json
@@ -28,17 +29,23 @@ def main():
     names = list(ref)
     B, P, D = int(os.environ.get("B", "4")), int(os.environ.get("P", "256")), int(os.environ.get("D", "256"))
     N = int(os.environ.get("MESH", "1"))
+    V = int(os.environ.get("VERIFY", "0"))
+    if V:
+        B = V
     if N > 1:
         ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=400 << 20)
     m = Inkling2Model(mesh, max_seq_len=P + D + 64, expert_dtype=DT[os.environ.get("EXPERT_DT", "bfp8")],
                       kv_dtype=DT[os.environ.get("KV_DT", "bf16")], prefill_chunk=256, slots=B)
     dec = BatchedDecoder(m, B)
+    if V:
+        dec = BatchedDecoder(m, V, shared=dec, verify=V)
+    G = 1 if V else B  # (texts per group)
     d0 = (lambda t: ttnn.get_device_tensors(t)[0]) if N > 1 else (lambda t: t)
     tr = None
     results = {}
-    for g0 in range(0, len(names), B):
-        group = names[g0 : g0 + B]
+    for g0 in range(0, len(names), G):
+        group = names[g0 : g0 + G]
         for b, name in enumerate(group):
             ids = ref[name]["ids"]
             m.reset()
@@ -65,7 +72,15 @@ def main():
         d = tr or dec
         lps = [[] for _ in group]
         t0 = time.time()
-        for t in range(D):
+        if V:
+            dec.set_accept([0])
+        for t in range(0, D, V) if V else []:
+            ids = ref[group[0]]["ids"]
+            d.set_inputs(ids[P + t : P + t + V], torch.arange(P + t, P + t + V))
+            lg = m.logits_host(d.step(), V)
+            dec.set_accept([V - 1])
+            lps[0] += [torch.log_softmax(lg[r], -1) for r in range(V)]
+        for t in range(0 if V else D):
             tok = torch.tensor([ref[n_]["ids"][P + t] for n_ in group] + [0] * (B - len(group)))
             pos = torch.tensor([P + t] * len(group) + [-1] * (B - len(group)))
             d.set_inputs(tok, pos)
