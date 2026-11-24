@@ -80,8 +80,8 @@ default_profile: p300x2
 
 card:
   attribution: >-
-    Derived from [tencent/Hy4-flash](https://huggingface.co/tencent/Hy4-flash) by Tencent. The experts run in bfp4
-    and the Engram tables in FP8, converted from the official BF16 checkpoint on the first start. See the original
+    Derived from [tencent/Hy4-flash](https://huggingface.co/tencent/Hy4-flash) by Tencent, converted from the official
+    BF16 checkpoint on the first start (precisions under Expected performance). See the original
     model card for training and evaluation details.
   description: >-
     Hy4-flash, a 220B-parameter mixture-of-experts model with about 11.3B parameters active per token: 42 layers of
@@ -138,6 +138,22 @@ card:
     Evals served through the OpenAI endpoint with 8 requests in flight (lm-evaluation-harness; seed 42).
     SE = sqrt(p(1-p)/n). Tencent publishes no figures for these settings.
 
+    Precision (the checkpoint is BF16):
+
+    | weights | precision |
+    | --- | --- |
+    | routed experts (41 layers x 512, gate/up/down) | bfp4 |
+    | attention q_b, output gate and o_proj; dense layer-0 MLP; drafter MLP and attention q_b/gate/o | bfp8 |
+    | latent MoE projections, shared expert, other attention projections, indexer, embeddings, lm_head, vision encoder | bf16 |
+    | router, expert bias, hyper-connection parameters, indexer pooling, attention sinks, Engram norms | fp32 |
+    | KV cache (MLA latent rows, sliding-window rings) | bf16 |
+    | Engram tables (63.4B parameters) | FP8 e4m3, one bf16 scale per 96-value row, in host RAM |
+
+    The Engram tables (65 GB) stay in host RAM. Each step the host hashes the token's 2- and 3-gram windows to table
+    rows as the reference does, decodes those rows to bf16 and sends them to the device, which runs the Engram
+    projections. This matches the reference exactly: with `engram_fp8_embedding` on, the reference applies the same
+    per-row FP8 round trip to every row it reads. Logits are computed in fp32.
+
     | profile | sampling | ISL | OSL | concurrency | N | TTFT (s) | prefill tok/s/u | decode tok/s/u | total tok/s | E2EL (s) |
     | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
     | p300x2 | T 0.9 | ~30 | 256 | 1 | 8 | 0.21 | — | 65.9 | — | 4.09 |
@@ -189,7 +205,8 @@ card:
       first token; a long prompt's TTFT is also longer while other users are decoding.
     - Rarely, a combination of request shapes the warm-up did not cover makes the server recompile once, pausing all
       users for a few seconds.
-    - Outputs differ slightly from the BF16 reference (bfp4 experts, FP8 Engram tables; see the agreement rows).
+    - Outputs differ slightly from the BF16 reference (bfp4 experts, bfp8 attention and dense projections; see the
+      agreement rows). The FP8 Engram tables match the reference exactly.
     - Weights are pinned to revision b2498eb of tencent/Hy4-flash. Later revisions are not supported.
     - Runs only on a QB2 (4 Blackhole dies); other boards are not supported.
   licensing: >-
