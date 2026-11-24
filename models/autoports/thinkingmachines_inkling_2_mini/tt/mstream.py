@@ -19,6 +19,8 @@ from .head import KDIR
 
 OB = {ttnn.float32: 4096, ttnn.bfloat16: 2048}
 TINY = __import__("os").environ.get("I2M_MS_TINY", "1") == "1"
+TP4 = __import__("os").environ.get("I2M_MS_TP4", "1") == "1"
+GRETUNE = __import__("os").environ.get("I2M_MS_GRETUNE", "1") == "1"
 
 
 def knobs(ndev, kt):
@@ -26,10 +28,13 @@ def knobs(ndev, kt):
     activation / output CB tile (4 rows: bitwise, a little less math than 8); g: columns per group (one matmul_block per
     k for the group: one activation unpack for g weight tiles); kb: k rows per pushed block; nblk: ring blocks (nblk - 1
     in flight). <= 2 dies: 4 / 4 / 8 / 7 (one die 64.5 -> 57.0 us per call with the k | v group, TP2 42.6 -> 37.3); 4
-    dies (not measured here): the previous kernels' 8 / 1 / kt / 3."""
+    dies (I2M_MS_TP4, default 1; 0: the previous kernels' 8 / 1 / kt / 3) the same. I2M_MS_GRETUNE (default 1;
+    0: g = 4): g = 3 on one die, 1 on 2 and 4 dies (traced per call on one die at each mesh's per-die
+    shapes, tools/bench_mstream.py: one die 55.3 -> 51.8 us, TP2 29.0 -> 26.7, TP4 16.2 -> 15.3; bitwise)."""
     env = lambda k, d: int(__import__("os").environ.get(f"I2M_MS_{k}", d))  # noqa: E731
-    tuned = ndev <= 2
-    return (env("HMIN", 4 if tuned else 8), env("G", 4 if tuned else 1), env("KB", 8 if tuned else kt),
+    tuned = ndev <= 2 or TP4
+    g = (3 if ndev == 1 else 1) if GRETUNE and tuned else 4 if tuned else 1
+    return (env("HMIN", 4 if tuned else 8), env("G", g), env("KB", 8 if tuned else kt),
             env("NBLK", 7 if tuned else 3))
 
 

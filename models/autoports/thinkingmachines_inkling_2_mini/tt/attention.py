@@ -135,17 +135,20 @@ class AttnWeights:
             self.w_o = up(wo.T.reshape(1, 1, wo.shape[1], -1), wdtype, shard_r)
         self.ms = None
         if MSTREAM and not DRAM_SHARDED:  # (the interleaved weights themselves, streamed per bank: no copies)
+            from .mstream import TP4 as MS_TP4
             from .mstream import MultiStream
 
             K, fqp = wq.shape[1], self.fq + (-self.fq) % 256
             # q readers per bank: 2 on one die (28 q columns per bank; 3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies
             # (TP2 17.6 -> 17.2 ms, TP4 14.0 -> 13.9)
             qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "4" if N > 1 else "2"))
-            # I2M_MS_KV (default 1 on <= 2 dies): k and v on one core per bank (one die: 2 q cores of 13 columns + one k | v
-            # core of 8 per bank, 64.5 -> 57.0 us per call with tt/mstream.py knobs(); TP2: 3 q + 1 k | v, 42.6 -> 37.3)
-            kv = __import__("os").environ.get("I2M_MS_KV", "1" if N <= 2 else "0") == "1"
+            # I2M_MS_KV (default 1): k and v on one core per bank (one die: 2 q cores of 13 columns + one k | v core of 8
+            # per bank, 64.5 -> 57.0 us per call with tt/mstream.py knobs(); TP2: 3 q + 1 k | v, 42.6 -> 37.3; TP4 (with
+            # I2M_MS_TP4): 4 q cores of 2 / 2 / 2 / 1 columns + one k | v core of 2, traced one die at TP4's shapes 28.0 ->
+            # 15.3 us: the separate k and v parts' extra kernels cost ~9 us of program launch per call)
+            kv = __import__("os").environ.get("I2M_MS_KV", "1" if N <= 2 or MS_TP4 else "0") == "1"
             if kv:
-                qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "2" if N == 1 else "3"))
+                qr = int(__import__("os").environ.get("I2M_MS_QREADERS", "2" if N == 1 else "3" if N == 2 else "4"))
             self.ms = MultiStream(mesh, K, [(fqp, ttnn.float32, qr), (self.kd, ttnn.bfloat16, 1),
                                             (self.kd, ttnn.bfloat16, 1)], wdtype, interleaved=True,
                                   fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2,
