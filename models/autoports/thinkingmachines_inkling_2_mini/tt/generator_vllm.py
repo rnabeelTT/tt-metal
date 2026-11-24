@@ -43,7 +43,8 @@ TIMING = os.environ.get("I2M_TIMING", "0") == "1"
 # decode width buckets: one decoder + trace per width (sharing the full width's state); a step runs the narrowest
 # width covering the highest live slot (new requests take the lowest free slot)
 WIDTHS = [int(w) for w in os.environ.get("I2M_DECODE_WIDTHS", "1,2,4,8,16,32").split(",")]  # per-100-step decode timing breakdown in the server log
-# I2M_PREFIX (default 1): vLLM's prefix cache. vLLM pages the global layers' KV (tt/attention.GlobalPages) and keeps the
+# I2M_PREFIX (default 1): vLLM's prefix cache. vLLM pages the global layers' KV (tt/attention.GlobalPages; with or without
+# the prefix cache: the pool is sized for vLLM's blocks, not one full context per slot) and keeps the
 # cached prefixes; the rest of a sequence's state at a cached prefix's end (conv states, sliding-window KV) lives in the
 # plugin's prefix-state slots: one snapshot per prompt at its last 64-token boundary (tt/prefix.py, device pools).
 # I2M_PREFIX_SLOTS: snapshots kept (LRU; default 1 on one die, 16 on 2 / 4 dies: ~168 MB / dies each),
@@ -315,10 +316,9 @@ class Inkling2ForCausalLM:
 
     def allocate_kv_cache(self, kv_cache_shape, dtype, num_layers):
         nb = int(kv_cache_shape[0])
-        if PREFIX:
-            self.m.pages.enable_vllm(nb)
+        self.m.pages.enable_vllm(nb)
         logger.info(f"KV: vLLM asked for {num_layers} x {tuple(kv_cache_shape)}; the engine keeps its own caches"
-                    + (f" (the global layers' KV through vLLM's {nb} block ids)" if PREFIX else ""))
+                    f" (the global layers' KV through vLLM's {nb} block ids)")
         return [(None, None)] * int(num_layers)
 
     def allocate_kv_cache_per_layer(self, per_layer_specs):
@@ -483,7 +483,7 @@ class Inkling2ForCausalLM:
         if any(starts) and not PREFIX:
             raise NotImplementedError("prefix caching is off (start_pos must be 0)")
         pt = None
-        if PREFIX and page_table is not None:
+        if page_table is not None:
             pt = page_table if isinstance(page_table, torch.Tensor) else torch.as_tensor(page_table)
         directives = kwargs.get("prefix_state") or [None] * N
         mm_items = kwargs.get("mm_items") or [None] * N

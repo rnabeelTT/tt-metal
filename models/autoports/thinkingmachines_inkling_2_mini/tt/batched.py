@@ -543,11 +543,13 @@ class BatchedDecoder:
         host = [] if tokens is None else [
             (tokens.reshape(1, -1).to(torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT, self.tokens)]
         pos = positions.to(torch.int64)
-        pw = pos.clamp(min=0)  # idle slots write at position 0 of their own slot (a slot is prefilled before use)
+        pw = pos.clamp(min=0)  # idle slots: position 0 (global layers: a free slot's row maps it to the idle block)
         host += [
             (pos.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
             (pw.to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_w),
-            ((pw % self.ring_period).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_wr),
+            # (idle rows: the ring's scratch block, see AttnCache)
+            (torch.where(pos < 0, self.ring_period, pw % self.ring_period).to(torch.int32), ttnn.int32,
+             ttnn.ROW_MAJOR_LAYOUT, self.pos_wr),
             (tau_of(pw, self.n_floor, self.alpha).reshape(1, -1, 1, 1), ttnn.float32, ttnn.TILE_LAYOUT, self.tau),
         ]
         for t, dt, lay, dst in host:

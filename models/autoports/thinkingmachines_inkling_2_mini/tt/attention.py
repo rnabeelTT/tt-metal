@@ -202,7 +202,9 @@ class GlobalPages:
     Engine-owned (default): slot b owns blocks [b * mb, (b + 1) * mb). vLLM-paged serving (``set_row``): a slot's row
     is its request's vLLM block table (vLLM's prefix cache then shares the prompt blocks between requests); entries
     vLLM has not allocated (0) and every row of a free slot map to scratch blocks past vLLM's pool, so padded prefill
-    rows and idle decode rows never write into a block vLLM may have handed to another request."""
+    rows and idle decode rows never write into a block vLLM may have handed to another request. Idle decode rows
+    (position 0 of a free slot's row) write into their own block past the scratch blocks: their K / V are junk (inf)
+    and the scratch blocks are read (masked) past a request's allocated blocks."""
 
     def __init__(self, mesh, B: int, mb: int, scratch: int = 8, pool_blocks: int = None):
         """pool_blocks: the KV pool (vLLM's block budget, shared by the slots; default B * mb, every slot a full
@@ -210,7 +212,8 @@ class GlobalPages:
         self.mesh, self.B, self.mb, self.scratch = mesh, B, mb, scratch
         pool = int(pool_blocks) if pool_blocks else B * mb
         self.scratch_base = pool
-        self.n_blocks = pool + scratch
+        self.idle_block = pool + scratch
+        self.n_blocks = pool + scratch + 1
         self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
         j = torch.arange(mb)
         if pool >= B * mb:
@@ -259,7 +262,9 @@ class GlobalPages:
 
     def free(self, b: int):
         if self.paged:
-            self._put(b, self._scratch_row())
+            m = self._scratch_row()
+            m[0] = self.idle_block
+            self._put(b, m)
 
     def _put(self, b, m) -> bool:
         if torch.equal(self.host[b], m):
@@ -308,7 +313,8 @@ class AttnCache:
             self.v_conv = DynShortConv(mesh, w.v_static, w.v_wproj, kv_shard, C, w.NKV, w.ckc)
             per = mb
         self.per_slot = per
-        nblk = per * slots if self.pages is None else self.pages.n_blocks
+        # (sliding: + one scratch block, where idle decode rows write: see the write table below)
+        nblk = per * slots + int(w.sliding) if self.pages is None else self.pages.n_blocks
         z = torch.zeros(nblk, w.NKV * N, block, w.HD)
         mk = lambda: ttnn.from_torch(z, dtype=kv_dtype, layout=ttnn.TILE_LAYOUT, device=mesh,  # noqa: E731
                                      memory_config=DRAM,
@@ -319,7 +325,11 @@ class AttnCache:
         if w.sliding:
             self.ring_period = self.n_ring * block
             read = torch.stack([b * per + j % per for b in range(slots)])  # [B, mb]
-            write = torch.stack([b * per + torch.arange(per) for b in range(slots)])  # [B, n_ring]
+            # [B, n_ring + 1]: column n_ring is the scratch block, the write position of an idle decode row
+            # (position ring_period): its K / V are junk (inf from the loop passes) and must not reach a slot's ring,
+            # which a prefix-cache restore does not rewrite outside the window
+            write = torch.stack([torch.cat([b * per + torch.arange(per), torch.tensor([per * slots])])
+                                 for b in range(slots)])
         else:
             read = write = torch.stack([b * per + j for b in range(slots)])
         if self.pages is not None:  # the shared global tables (updated in place)

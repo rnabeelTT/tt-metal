@@ -194,6 +194,14 @@ program each (`tt/blkcopy.py`). The conv state at a snapshot inside a prefill ch
 (snap_row); the window blocks are copied after that chunk (a ring holds window + chunk + block). Policy: one snapshot per
 prompt at its last 64-token boundary before the last token, prompts >= 512 tokens (I2M_PREFIX_MIN).
 
+Idle decode rows (position -1) compute junk (inf from the loop passes) and write it as K / V: they write into a
+scratch block of their own (sliding: write-table column n_ring at position ring_period; global: a free slot's row
+entry 0 -> GlobalPages.idle_block), never into a slot's ring. Before, they wrote ring block 0 of their slot; a resume
+restores only the window, and the prefill SDPA's first key chunk reads (masked) below the window: inf * 0 poisoned
+every resume whose window started inside the first 256 keys or left the junk block in a chunk (tests/test_resume_device.py:
+the resume vs the fresh prefill, bitwise with the same chunk shapes). The global KV is paged through vLLM's block tables
+with the prefix cache off too (I2M_PREFIX=0 had left every slot on the 8 scratch blocks: positions 512 apart aliased).
+
 Checks: resuming at a chunk boundary is bit-exact vs the whole prefill (tests/test_packed_device.py); the packed conv
 kernels' states and snapshot rows are exact (tests/test_pfseg_device.py). Served (p300x2, tools/prefix_serve.py): a 4.4K
 prompt cold TTFT 4.4 s, the same prompt again 0.54 s, the next chat turn 0.53 s, a new question on the same document
