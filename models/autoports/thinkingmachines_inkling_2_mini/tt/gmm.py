@@ -19,7 +19,7 @@ from .bconv import KDIR, _cb, _range_set, _rt
 # I2M_GMM_DB (act mode; auto: when the experts average >= 3 groups, i.e. the compute per weight block is long): the
 # weight block double-buffered (h = 2 columns: 922 KB of CBs at K 2304) so the next expert's weights load during the
 # compute; 0 / 1: never / always
-ACT_DB = __import__("os").environ.get("I2M_GMM_DB", "auto")
+ACT_DB = __import__("os").environ.get("I2M_GMM_DB", "0")
 ACT_KB = 960
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
