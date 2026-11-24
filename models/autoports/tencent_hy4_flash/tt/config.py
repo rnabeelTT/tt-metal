@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 HF_MODEL_ID = "tencent/Hy4-flash"
 
 
+HF_REVISION = os.environ.get("HY4_CKPT_REVISION", "b2498eba6a1a3f9bbcab4190bc1313a3c7010c2f")  # tt-model.yaml weights.revision
+
+
 def checkpoint_dir(repo: str = HF_MODEL_ID) -> str:
     """The local snapshot directory of the checkpoint (HF cache, offline)."""
     env = os.environ.get("HY4_CKPT_DIR")
@@ -22,7 +25,9 @@ def checkpoint_dir(repo: str = HF_MODEL_ID) -> str:
         return env
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo, local_files_only=True)
+    # the pinned revision, never refs/main: a newer upstream revision in the HF cache (refs/main moved by a later
+    # download or `tt-model serve --refresh`) must not change which snapshot the server loads
+    return snapshot_download(repo, revision=HF_REVISION, local_files_only=True)
 
 
 @dataclass
