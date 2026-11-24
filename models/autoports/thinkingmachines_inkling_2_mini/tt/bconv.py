@@ -23,6 +23,9 @@ ROWS = __import__("os").environ.get("I2M_BCONV_ROWS", "1") == "1"
 # I2M_BCONV_LIVE (with ROWS): x / states / taps read and y / states written on the live rows only (faces 0 / 1), not
 # whole fp32 tiles: the conv pair moved ~2.8 MB per application, DRAM-bound
 LIVE = __import__("os").environ.get("I2M_BCONV_LIVE", "1") == "1"
+# I2M_BCONV_ONE: bconv_pair's two convs as one kernel group (their kernels are identical): the cores started ~2 us after
+# their firmware with two groups
+ONE_GROUP = __import__("os").environ.get("I2M_BCONV_ONE", "1") == "1"
 TILE = 32
 # speculative verify rows (tt/kernels/seqshift.hpp): (R, G, acc) while a verify pass runs / is captured, else None.
 # acc: uint32 [1, 32] row-major, group g's accepted row of the previous pass.
@@ -138,25 +141,32 @@ class BConvKernel:
         cfg.unpack_to_dest_mode = u2d
         live = ROWS and LIVE and int(x.shape[-2]) <= 16
         ldefs = [("BCONV_LIVE", str(int(x.shape[-2])))] if live else []
-        dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
-            defines=([("BCONV_TAP_STRIDE", str(stride))] if stride else []) + sdefs + ddefs + ldefs,
-            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
-        kernels = [
-            dm("bconv_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
-            dm("bconv_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "bconv_compute.cpp"), core_ranges=crs,
-                                  compile_time_args=[cb_x, cb_s, cb_w, cb_y, cb_o0, cb_o1, cb_o2],
-                                  runtime_args=_rt(cores, [[self.per]] * len(cores)), config=cfg,
-                                  defines=([("BCONV_ROWS", str(int(x.shape[-2])))] if ROWS and int(x.shape[-2]) <= 16
-                                           else []) + ddefs),
-        ]
+        dmdefs = ([("BCONV_TAP_STRIDE", str(stride))] if stride else []) + sdefs + ddefs + ldefs
+        cpdefs = ([("BCONV_ROWS", str(int(x.shape[-2])))] if ROWS and int(x.shape[-2]) <= 16 else []) + ddefs
+        # (the pieces, so that bconv_pair can put two identical convs in one kernel group)
+        self.spec = {"cores": list(cores), "cfg": cfg, "k": [
+            ("bconv_reader.cpp", rd_ct, rd_rt, dmdefs, (ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)),
+            ("bconv_writer.cpp", wr_ct, wr_rt, dmdefs, (ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)),
+            ("bconv_compute.cpp", [cb_x, cb_s, cb_w, cb_y, cb_o0, cb_o1, cb_o2], [[self.per]] * len(cores), cpdefs, None)],
+            "sig": (str(x.dtype), dyn is None, tuple(c.total_size for c in cbs))}
+        kernels = _kernels(self.spec)
         key = ("i2m_bconv", self.C, len(cores), cores[0].x, cores[0].y, str(x.dtype), int(x.shape[-2]), stride,
                repr(x.memory_config()), repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()),
                SEQ[:2] if SEQ else None, live, None if dyn is None else (repr(dyn[0].memory_config()), repr(dyn[1].memory_config()),
                                                                     repr(dyn[2].memory_config())))
         io = list({id(t): t for t in [x] + list(s) + list(w_taps) + [wc, y] + ([acc] if acc else [])}.values())
         return kernels, cbs, io, key, y
+
+
+def _kernels(spec):
+    cores = spec["cores"]
+    crs = _range_set(cores)
+    out = []
+    for src, ct, rt, defs, dmc in spec["k"]:
+        cfg = spec["cfg"] if dmc is None else ttnn.DataMovementConfigDescriptor(processor=dmc[0], noc=dmc[1])
+        out.append(ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+                                         runtime_args=_rt(cores, rt), defines=defs, config=cfg))
+    return out
 
 
 def _hash(key):
@@ -171,8 +181,20 @@ def bconv_pair(ka: "BConvKernel", xa, sa, kb: "BConvKernel", xb, sb, out_mc=ttnn
     assert n + len(kb.cores) <= grid.x * grid.y
     cb_ = [ttnn.CoreCoord((n + i) % grid.x, (n + i) // grid.x) for i in range(len(kb.cores))]
     k1, c1, io1, key1, ya = ka.parts(xa, sa, out_mc, dyn=dyn[0])
+    sa_ = ka.spec
     k2, c2, io2, key2, yb = kb.parts(xb, sb, out_mc, cores=cb_, dyn=dyn[1])
-    prog = ttnn.ProgramDescriptor(kernels=k1 + k2, semaphores=[], cbs=c1 + c2)
-    prog.custom_program_hash = _hash(("i2m_bconv_pair", key1, key2))
+    sb_ = kb.spec
+    one = ONE_GROUP and all((x[0], list(x[1]), list(x[3])) == (y[0], list(y[1]), list(y[3]))
+                            for x, y in zip(sa_["k"], sb_["k"])) and sa_["sig"] == sb_["sig"]
+    if one:  # (identical kernels: one kernel group over both convs' cores, per-core arguments)
+        merged = {"cores": sa_["cores"] + sb_["cores"], "cfg": sa_["cfg"],
+                  "k": [(x[0], x[1], x[2] + y[2], x[3], x[4]) for x, y in zip(sa_["k"], sb_["k"])]}
+        allc = _range_set(merged["cores"])
+        cbs = [ttnn.CBDescriptor(total_size=c.total_size, core_ranges=allc, format_descriptors=c.format_descriptors)
+               for c in c1]
+        prog = ttnn.ProgramDescriptor(kernels=_kernels(merged), semaphores=[], cbs=cbs)
+    else:
+        prog = ttnn.ProgramDescriptor(kernels=k1 + k2, semaphores=[], cbs=c1 + c2)
+    prog.custom_program_hash = _hash(("i2m_bconv_pair", key1, key2, one))
     ttnn.generic_op(list({id(t): t for t in io1 + io2}.values()), prog)
     return ya, yb
