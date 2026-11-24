@@ -90,11 +90,11 @@ serve_profiles:
     max_model_len: 1048576
     env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
   - name: p300
-    description: One p300 board (2 dies, tensor parallel 2), 16 sequences, 32768-token context.
+    description: One p300 board (2 dies, tensor parallel 2), 16 sequences sharing a 491,520-token context.
     hardware: p300
     mesh_device: P300
     max_num_seqs: 16
-    max_model_len: 32768
+    max_model_len: 491520
     # fabric init needs every visible chip in the mesh; speculative decoding: the pool 647K -> 520K tokens
     env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
   - name: p150x2
@@ -102,28 +102,29 @@ serve_profiles:
     hardware: p150x2
     mesh_device: P150x2
     max_num_seqs: 16
-    max_model_len: 32768
+    max_model_len: 491520
     env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
   - name: p150
-    description: One p150 (1 die), 8 sequences, 8192-token context, speculative decoding (a 32K-token KV pool shared by
-      the sequences; the bfp8 experts take 27 of the die's 31.5 GiB). p150-long keeps a larger pool, text only, without it.
+    description: One p150 (1 die), 8 sequences sharing a 32,768-token context, speculative decoding
+      for sequences under 8,192 tokens (the bfp8 experts take 27 of the die's 31.5 GiB). p150-long has a larger context, text only, without it.
     hardware: p150
     mesh_device: P150
     max_num_seqs: 8
-    max_model_len: 8192
+    max_model_len: 32768
     additional_config: {tt: {fabric_config: DISABLED}}
     # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
     # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
     # Speculative decoding: the drafter needs ~0.5 GB, the KV pool 57K -> 32K tokens
+    # the drafter's caches cover 8K tokens (32K do not fit beside the vision tower)
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_SPEC: "3",
-          I2M_KV_POOL_TOKENS: "32768"}
+          I2M_KV_POOL_TOKENS: "32768", I2M_SPEC_MAX_LEN: "8192"}
   - name: p150-long
-    description: One p150 (1 die), 8 sequences, 8192-token context, text only, a larger KV pool (49K tokens shared by
-      the sequences), no speculative decoding.
+    description: One p150 (1 die), 8 sequences sharing a 49,152-token context, text only, no
+      speculative decoding.
     hardware: p150
     mesh_device: P150
     max_num_seqs: 8
-    max_model_len: 8192
+    max_model_len: 49152
     additional_config: {tt: {fabric_config: DISABLED}}
     # no vision tower and a 49K pool: the prefill's transients need the room
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_VISION: "0",
@@ -267,8 +268,10 @@ card:
   limitations: |
     - Prefill runs about 2,000-2,100 prompt tokens/s on 4 dies, 2,300-2,400 on 2 and 1,450 on 1 (4K and 16K-token
       prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
-    - Speculative decoding applies only while one request is decoding; with several users every request decodes one
-      token per step.
+    - Speculative decoding applies only while one request is decoding and its sequence is under 32,768 tokens (8,192 on `p150`); with
+      several users, or past that length, every request decodes one token per step.
+    - A profile's sequences share its KV cache (1.7M tokens on 4 dies; the context on 2 and 1 die): one request may use
+      the whole context, and requests that do not fit beside the running ones wait.
     - Sampling at temperature > 0 draws from the 32 most likely tokens; top_k above 32 acts as 32. Requests with
       penalties or top_p < 1, and logprobs, are sampled on the host (slower).
     - No video or audio input; no image input on `p150-long`. One image may take up to 4,095 image tokens.
