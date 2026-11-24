@@ -75,6 +75,12 @@ PREFIX_MIN = int(os.environ.get("I2M_PREFIX_MIN", "512"))
 VISION = os.environ.get("I2M_VISION", "1") == "1"
 # I2M_HOST_PROF=1: each decode step's host timeline (plain / speculative), mean ms per segment every 100 steps
 HOST_PROF = os.environ.get("I2M_HOST_PROF", "0") == "1"
+# I2M_ASYNC (default 1): the plugin's async decode (decode_input_update_contract 1). A decode step whose rows all sample
+# exactly on device (tt/sampling.device_ok: the published T = 1, greedy, ...) samples inside the trace into the next
+# step's token input and returns before the device finishes; the plugin reads the tokens later, so vLLM's scheduling of
+# the next step overlaps this one. Other rows: host sampling as before (the step waits for its candidates).
+ASYNC = os.environ.get("I2M_ASYNC", "1") == "1"
+ASYNC_DEBUG = os.environ.get("I2M_ASYNC_DEBUG", "0") == "1"
 
 
 class _Prof:
@@ -111,6 +117,28 @@ class _Prof:
             logger.info(f"host timeline {self.name} (ms/step over 100): "
                         + "  ".join(f"{k} {v * 10:.2f}" for k, v in self.acc.items()) + f"  total {tot * 10:.2f}")
             self.acc = {}
+
+
+class _Pending:
+    """A device-sampled decode step's output: its token input tensor (uint32 [1, W]) holds the tokens by slot."""
+
+    def __init__(self, dev, rows, R, mesh):
+        self.dev, self.rows, self.R, self.mesh, self.host = dev, rows, R, mesh, None
+
+    def read(self):
+        self.host = self.dev.cpu(blocking=False)
+        return ttnn.record_event(self.mesh, 0)
+
+    def result(self):
+        """-> [R, 1] int32 by vLLM row (the plugin synchronized read()'s event; else a blocking read)."""
+        h = self.host if self.host is not None else self.dev.cpu()
+        if self.mesh.get_num_devices() > 1:
+            h = ttnn.get_device_tensors(h)[0]
+        t = ttnn.to_torch(h).reshape(-1)
+        out = torch.zeros((self.R, 1), dtype=torch.int32)
+        for r, s in self.rows:
+            out[r, 0] = int(t[s])
+        return out
 
 
 def _prefix_slots():
@@ -179,11 +207,14 @@ class Inkling2ForCausalLM:
         "supports_prefix_caching": PREFIX,
         **({"prefix_state_cache": {"slots": PREFIX_SLOTS, "segment": 0, "min_tokens": PREFIX_MIN, "prompt_end": True,
                                    "prompt_end_before_last": True}} if PREFIX else {}),
-        "supports_async_decode": False,
+        "supports_async_decode": ASYNC,
         "supports_sample_on_device": True,  # decode: device top-32 + host draw (tt/sampling.py)
         "supports_chunked_prefill": False,
         **({"max_output_tokens_per_step": SPEC + 1} if SPEC else {}),
     }
+
+    # (plugin async_decode.py: reload_inputs False = the device holds this step's tokens; positions: ours, see _next)
+    decode_input_update_contract = 1 if ASYNC else 0
 
     def __init__(self, model: Inkling2Model = None, mesh=None, B: int = 1, max_seq_len: int = 0, vllm_config=None,
                  prefix: str = ""):
@@ -196,9 +227,14 @@ class Inkling2ForCausalLM:
         self.trs = {w: TracedDecoder(d) for w, d in self.decs.items()} if TRACE else {}
         self.tr = self.trs.get(B)
         self.row2slot = {}  # live vLLM row -> physical slot (slots stay put; new requests take the lowest free one)
-        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceTopK, HostSampler
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceSampler, DeviceTopK, HostSampler
 
         self.topk = DeviceTopK(mesh, model.Vs, model.V, sharded=model.head_shard)
+        # (a vocab-sharded head's merge in the kernel is untested: I2M_DEV_SAMPLE_SHARDED=1)
+        self.ds = DeviceSampler(self.topk) if ASYNC and (not self.topk.sharded or os.environ.get(
+            "I2M_DEV_SAMPLE_SHARDED", "0") == "1") else None
+        self._next = {}  # slot -> (its next input token, None: on device; its next position) after a decode step
+        self._last_w = None
         self.hs = HostSampler(model.V)
         self.V = model.V
         self.vocab = int(model.cfg.vocab_size)
@@ -352,7 +388,10 @@ class Inkling2ForCausalLM:
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
                 out = self.decs[w].step()
                 self._host_logits(out, w)  # (the readback untilize is a program too)
-                self.topk(out, w)  # the device-sampling programs of this width
+                parts = self.topk.device(out, w)  # the device-sampling programs of this width
+                if self.ds is not None:
+                    self.ds.device(parts, self.decs[w].tokens, w)
+                self.topk.host(parts)
             if self.dr is not None:
                 self._spec_warm()
             ttnn.synchronize_device(self.mesh)
@@ -364,7 +403,7 @@ class Inkling2ForCausalLM:
                 self.dr.capture(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
-                tr.capture(compile=False, post=lambda lg, w=w: self.topk.device(lg, w))
+                tr.capture(compile=False, post=lambda lg, w=w: self._post(lg, w))
             self._captured = True
             logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
             if self.vt is not None:  # the largest image a request may hold must fit in what the captures left
@@ -377,6 +416,13 @@ class Inkling2ForCausalLM:
                     raise RuntimeError(f"the vision tower does not fit beside the KV pool for {n}-token images; lower "
                                        f"I2M_VISION_MAX_TOKENS (or I2M_KV_POOL_TOKENS), or I2M_VISION=0: {e}") from e
                 logger.info(f"vision: images up to {n} tokens fit after the trace captures")
+
+    def _post(self, lg, w):
+        """The decode trace's tail: top-32 candidates (-> the host sampler) and the device sampler's token."""
+        parts = self.topk.device(lg, w)
+        if self.ds is not None:
+            self.ds.device(parts, self.decs[w].tokens, w)
+        return parts
 
     # ------------------------------------------------------------------ helpers
     def _host_logits(self, t, rows):
@@ -594,6 +640,9 @@ class Inkling2ForCausalLM:
         t_in = time.perf_counter() if HOST_PROF else 0.0
         tokens = kwargs.get("tokens", args[0] if args else None)
         start_pos = kwargs.get("start_pos", args[1] if len(args) > 1 else None)
+        # reload_inputs False (async decode, contract 1): vLLM's tokens / positions are a step stale; the last step's
+        # sampled tokens are on device (or in _next) and its positions + 1 are this step's
+        reload = bool(kwargs.get("reload_inputs", True))
         self._apply_remap(kwargs.get("slot_remap"))
         tok = torch.as_tensor(tokens).reshape(-1).to(torch.long)
         pos = torch.as_tensor(start_pos).reshape(-1).to(torch.long)
@@ -603,6 +652,18 @@ class Inkling2ForCausalLM:
             if r >= R or int(pos[r]) < 0:
                 self.m.pages.free(self.row2slot.pop(r))  # (its blocks may go to another request: scratch rows)
         live = [r for r in range(R) if int(pos[r]) >= 0 and r in self.row2slot]
+        nxt = {} if reload else self._next
+        if not reload and any(self.row2slot[r] not in nxt for r in live):
+            logger.warning("async decode: a live row without a device-resident token: using vLLM's inputs")
+            nxt = {}
+        if ASYNC_DEBUG and nxt:
+            logger.info(f"async decode: vLLM pos {[int(pos[r]) for r in live]} tok {[int(tok[r]) for r in live]}, "
+                        f"ours {[nxt[self.row2slot[r]] for r in live]}")
+        for r in live:
+            if self.row2slot[r] in nxt:
+                t, p = nxt[self.row2slot[r]]
+                pos[r] = p
+                tok[r] = -1 if t is None else t
         if self.spec is not None:
             s = self.spec
             if s["row"] not in live:  # (finished)
@@ -617,9 +678,9 @@ class Inkling2ForCausalLM:
         pf.start(t_in)
         top = max((self.row2slot[r] for r in live), default=0)
         W = next(w for w in self.widths if w > top)
-        if TIMING and W != getattr(self, "_last_w", None):
+        if TIMING and W != getattr(self, "_last_w_log", None):
             logger.info(f"decode width {W} ({len(live)} live rows, top slot {top})")
-            self._last_w = W
+            self._last_w_log = W
         tok_s = torch.zeros(W, dtype=torch.long)
         pos_s = torch.full((W,), -1, dtype=torch.long)
         pt = kwargs.get("page_table", args[2] if len(args) > 2 else None)
@@ -629,22 +690,54 @@ class Inkling2ForCausalLM:
             s = self.row2slot[r]
             tok_s[s], pos_s[s] = tok[r], pos[r]
             if pt is not None and self.m.pages.paged:  # (the blocks up to the one written this step)
+                if ASYNC_DEBUG and int(pt[r].reshape(-1)[int(pos[r]) // 64]) <= 0:
+                    logger.warning(f"async decode: no block for position {int(pos[r])} in row {r}'s table")
                 self.m.pages.set_row(s, pt[r], int(pos[r]) // 64 + 1)
+        on_dev = bool(live) and bool((tok_s[[self.row2slot[r] for r in live]] < 0).any())
+        if on_dev and W != self._last_w:  # (another width's token input holds them: read it)
+            old = self.decs[self._last_w].tokens
+            prev = (ttnn.to_torch(ttnn.get_device_tensors(old)[0]) if self.N > 1 else ttnn.to_torch(old)).reshape(-1)
+            for r in live:
+                s = self.row2slot[r]
+                if tok_s[s] < 0:
+                    tok_s[s] = int(prev[s])
+            on_dev = False
         self.m.pages.sync(W)
         d = self.trs[W] if (self.trs and self._captured) else self.decs[W]
+        sp = kwargs.get("sampling_params")
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import K, device_ok
+
+        dev_sample = self.ds is not None and sp is not None and bool(live) and all(device_ok(sp, r) for r in live)
+        if dev_sample:  # T * Gumbel noise per live slot (zeros: greedy)
+            tg = torch.zeros(W, K)
+            for r in live:
+                temp = float(_param(sp, "temperature", r, 0.0))
+                if temp > 0.0 and int(_param(sp, "top_k", r, -1)) != 1:
+                    u = torch.rand(K, generator=self.hs._gen(r, _param(sp, "seed", r, None)), dtype=torch.float64)
+                    tg[self.row2slot[r]] = (temp * -torch.log(-torch.log(u.clamp(1e-300, 1.0 - 1e-16)))).float()
+            self.ds.set_noise(tg)
+            pf.mark("noise")
         t0 = time.perf_counter()
-        d.set_inputs(tok_s, pos_s)
+        d.set_inputs(None if on_dev else tok_s.clamp(min=0), pos_s)
         t1 = time.perf_counter()
         pf.mark("inputs")
         dev = d.step()
+        extra = getattr(d, "extra", None) if d is not self.decs[W] else None
+        if extra is None and sp is not None:  # (eager: the trace's tail by hand)
+            extra = self._post(dev, W)
         pf.mark("enqueue")
+        self._last_w = W
+        if dev_sample:
+            self._next = {self.row2slot[r]: (None, int(pos[r]) + 1) for r in live}
+            out = _Pending(self.decs[W].tokens, [(r, self.row2slot[r]) for r in live], R, self.mesh)
+            self._decode_steps += 1
+            pf.end("tail")
+            return out if kwargs.get("read_from_device", True) is False else out.result()
         if TIMING:
             ttnn.synchronize_device(self.mesh)
         t2 = time.perf_counter()
-        sp = kwargs.get("sampling_params")
         if sp is not None:  # [W, 32] candidates by physical slot (the traced step computed them too)
-            extra = getattr(d, "extra", None)
-            idx, vals = self.topk.host(extra) if extra is not None else self.topk(dev, W)
+            idx, vals = self.topk.host(extra)
         else:
             lg = self._host_logits(dev, W)  # [W, V] by physical slot
         t3 = time.perf_counter()
@@ -657,10 +750,12 @@ class Inkling2ForCausalLM:
             pf.mark("sample")
             for r, t in toks.items():
                 out[r, 0] = t
+            self._next = {self.row2slot[r]: (t, int(pos[r]) + 1) for r, t in toks.items()}
         else:
             out = torch.full((R, 1, self.vocab), float("-inf"))
             for r in live:
                 out[r, 0, : self.V] = lg[self.row2slot[r]]
+            self._next = {}  # (vLLM's host sampler: the next step reloads)
         t4 = time.perf_counter()
         self._decode_steps += 1
         if TIMING:
@@ -758,6 +853,7 @@ class Inkling2ForCausalLM:
         if SPEC_DEBUG:
             logger.info(f"spec pass p={p} t={t} commit={commit} drafts={drafts} emitted={em}")
         s.update(n=p, k=k, em=em, rows=[t] + drafts)
+        self._next = {0: (em[-1], p + k + 1)}  # (async decode: the next step's input, vLLM's may be a step stale)
         s["np"], s["nt"] = s.get("np", 0) + 1, s.get("nt", 0) + len(em)
         smin = float(os.environ.get("I2M_SPEC_MIN", SPEC_MIN_DEFAULT.get(self.N, 2.0)))
         if s["np"] >= 16 and s["nt"] / s["np"] < smin:  # (not paying off for this request: plain decode from here)
@@ -792,10 +888,15 @@ class Inkling2ForCausalLM:
         self.ver.set_accept([0])
 
     def read_decode_output(self, tt_out, async_read=False, **kwargs):
+        """A device-sampled step's tokens: the host copy enqueued now (before the next step's trace), not waited for."""
+        if isinstance(tt_out, _Pending):
+            if not async_read:
+                return tt_out.result()
+            return tt_out, [tt_out.read()]
         return (tt_out, []) if async_read else tt_out
 
     def process_decode_output_host(self, tt_out, is_tokens=False, **kwargs):
-        return tt_out
+        return tt_out.result() if isinstance(tt_out, _Pending) else tt_out
 
 
 __all__ = ["Inkling2ForCausalLM", "HF_MODEL"]

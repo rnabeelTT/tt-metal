@@ -90,6 +90,73 @@ class DeviceTopK:
         return self.host(self.device(lg, W))
 
 
+class DeviceSampler:
+    """The token on device from DeviceTopK.device's candidates (tt/kernels/tsample.cpp, one core per row group): argmax_j
+    (logit_j + tg_j) over the candidates with id < V, tg = T * Gumbel noise from the host (zeros: greedy, the host
+    sampler's first-max tie rule). Exactly the host sampler's softmax(logits / T) over the same candidates when the
+    request has no penalties / top-k < 32 / top-p (eligible). Written straight into the decode's token input."""
+
+    def __init__(self, topk: DeviceTopK):
+        self.tk = topk
+        self.nt = topk.N if (topk.sharded and GATHER) else 1
+        mesh = topk.mesh
+        rep = ttnn.ReplicateTensorToMesh(mesh) if topk.N > 1 else None
+        self.rep = rep
+        self.tg = ttnn.from_torch(torch.zeros(32, K), dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,
+                                  memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=rep)
+        core = ttnn.CoreCoord(0, 0)
+        self.crs = ttnn.CoreRangeSet([ttnn.CoreRange(core, core)])
+
+    def device(self, parts, tokens, W: int):
+        """parts: DeviceTopK.device(lg, W); tokens: uint32 [1, W] ROW_MAJOR (traceable)."""
+        import hashlib
+        from pathlib import Path
+
+        g0 = 0
+        for i2, v2, rows in parts:
+            io = [i2, v2, self.tg, tokens]
+            ct = [0, rows, g0, W, self.nt, self.tk.Vp if self.nt > 1 else 0, self.tk.V]
+            for t in io:
+                ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+            rt = ttnn.RuntimeArgs()
+            rt[0][0] = [t.buffer_address() for t in io]
+            k = ttnn.KernelDescriptor(
+                kernel_source=str(Path(__file__).parent / "kernels" / "tsample.cpp"), core_ranges=self.crs,
+                compile_time_args=ct, runtime_args=rt,
+                config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                         noc=ttnn.NOC.NOC_0))
+            nb = self.nt * 6144 + 8 * 128 + 128
+            fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
+            prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[
+                ttnn.CBDescriptor(total_size=nb, core_ranges=self.crs, format_descriptors=[fmt])])
+            key = ("i2m_tsample", tuple(ct))
+            prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & (
+                (1 << 63) - 1)
+            ttnn.generic_op(io, prog)
+            g0 += rows
+        return tokens
+
+    def set_noise(self, tg):
+        """tg: torch [W <= 32, K] (T * Gumbel; zeros = greedy), by physical slot."""
+        x = torch.zeros(32, K)
+        x[: tg.shape[0]] = tg.float()
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(x, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                                        mesh_mapper=self.rep), self.tg)
+
+
+def device_ok(sp, r) -> bool:
+    """Row r's sampling is exactly DeviceSampler's: no penalties, no top-k truncation below the candidates (top-k 1 =
+    greedy), no top-p."""
+    if float(_param(sp, "repetition_penalty", r, 1.0)) != 1.0 or float(_param(sp, "frequency_penalty", r, 0.0)) != 0.0 \
+            or float(_param(sp, "presence_penalty", r, 0.0)) != 0.0:
+        return False
+    tk = int(_param(sp, "top_k", r, -1))
+    tp = float(_param(sp, "top_p", r, 1.0))
+    if tk == 1:
+        return True
+    return (tk <= 0 or tk >= K) and not (0.0 < tp < 1.0)
+
+
 def _param(sp, name, r, default):
     v = getattr(sp, name, None)
     if v is None:

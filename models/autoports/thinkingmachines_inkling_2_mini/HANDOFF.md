@@ -58,6 +58,14 @@ inkling2_loop; the shim's arch is `TTInkling2LoopForConditionalGeneration`), `--
 --tool-call-parser inkling` (same message tokens as Inkling v1; tool calls parse). `tt/generator_vllm.py`: engine-owned
 slot caches, a row -> slot map for the plugin's condense remaps, host sampling (v0). `tools/smoke_serve.py`.
 
+Async decode (I2M_ASYNC, default 1; plugin decode_input_update_contract 1): when every live row samples exactly on device
+(no penalties, top-k >= 32 or 1, no top-p: the published T = 1 and greedy), the decode trace samples its token
+(tt/kernels/tsample.cpp: Gumbel-max over the top-32 candidates, T * Gumbel noise from the host, greedy = first max) into
+the next step's token input, and the step returns before the device finishes (the plugin reads the tokens later); steps
+with reload_inputs False take their positions from the adapter (vLLM's are a step stale). Other rows: the host sampler,
+as before. Served p150 plain TPOT 21.9 -> 19.3 ms (T=1), 22.1 -> 19.35 (greedy); greedy streams identical; device draws
+== host Gumbel-max bitwise, chi-square vs the exact softmax z -0.1 / +0.5 over 20K draws (tests/test_device_sampler_device.py).
+
 ## Decode performance (P150, one die, bfp8 experts, bf16 KV; device time per traced step)
 
 | change | B=1 | B=4 | quality (prefill path) |
