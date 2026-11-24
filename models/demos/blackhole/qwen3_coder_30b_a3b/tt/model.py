@@ -89,6 +89,9 @@ from .multichip_decoder import (
     build_local_sparsity,
     decode_residual_norm,
     decoder_layer_decode_multichip,
+    decoder_layer_decode_fabric,
+    fabric_boundary_for,
+    fabric_decode_usable,
     decoder_layer_prefill_multichip,
     fallback_audit,
     mesh_context,
@@ -1492,6 +1495,14 @@ class Qwen3CoderModel:
             raise ValueError(f"kv_cache has {len(caches)} layers, expected {self.num_layers}")
         hidden = self.embed_decode(tokens)
         cos, sin = self.rope_decode_tables(rotary_position)
+        if fabric_decode_usable(self.layers[0], self.ctx, self.decode_width):
+            # QWEN3_FABRIC_BOUNDARY=1, one row: the returned row is already final-normed (decode_terminal skips it)
+            out = self._decode_layers_fabric(hidden, cos, sin, current_pos, caches)
+            ttnn.deallocate(cos, True)
+            ttnn.deallocate(sin, True)
+            self._hidden_normed = True
+            return out
+        self._hidden_normed = False
         # Computed once per decode step and shared by all 48 layers.
         active_mask = self._decode_active_mask(current_pos)
         for layer_idx in range(self.num_layers):
@@ -1515,6 +1526,35 @@ class Qwen3CoderModel:
             ttnn.deallocate(active_mask, True)
         return hidden
 
+    def _decode_layers_fabric(self, hidden, cos, sin, current_pos, caches):
+        """The 48 layers of one decode row on the fabric boundaries (multichip_decoder.decoder_layer_decode_fabric):
+        the entry boundary applies layer 0's input norm to the embedding row, every layer ends with the boundary into
+        the next layer's input norm, the last one into the final norm (the row lands in DRAM for the LM head)."""
+        fb = fabric_boundary_for(self.mesh_device, self.hidden_size, self.rms_norm_eps)
+        if getattr(self, "_fb_gammas", None) is None:  # flat norm weights: host uploads on the first (eager) step
+            self._fb_gammas = (
+                [fb.gamma(l.input_layernorm_rm) for l in self.layers],
+                [fb.gamma(l.post_attention_layernorm_rm) for l in self.layers],
+                fb.gamma(self.final_norm_rm),
+            )
+        g_in, g_post, g_final = self._fb_gammas
+        # the entry boundary gathers row 0 of each tile in 32-byte pieces at face offsets: an L1 source (a DRAM source
+        # loses face 1 of every tile to the DRAM read alignment)
+        hidden_l1 = ttnn.to_memory_config(hidden, ttnn.L1_MEMORY_CONFIG)
+        ttnn.deallocate(hidden)
+        res, x = fb(hidden_l1, None, g_in[0])
+        ttnn.deallocate(hidden_l1)
+        n = self.num_layers
+        for i in range(n):
+            last = i == n - 1
+            res, x = decoder_layer_decode_fabric(
+                fb, res, x, self.layers[i], self.config, cos, sin, caches[i], current_pos,
+                g_post[i], g_final if last else g_in[i + 1], rope=self._rope_decode, precision=self.precision,
+                last=last,
+            )
+        ttnn.deallocate(res)
+        return x
+
     def decode_terminal(self, hidden: ttnn.Tensor) -> ttnn.Tensor:
         """Final norm + column-parallel ``lm_head``, sampler-ready local logits.
 
@@ -1522,9 +1562,13 @@ class Qwen3CoderModel:
         it emits is exactly the width-sharded L1 config the projections read, so
         crossing into the head costs one sharded-to-interleaved.
         """
-        normed_sharded = decode_residual_norm(hidden, self.final_norm_rm, self.rms_norm_eps, self.precision)
-        normed = ttnn.sharded_to_interleaved(normed_sharded, ttnn.DRAM_MEMORY_CONFIG)
-        ttnn.deallocate(normed_sharded, True)
+        if getattr(self, "_hidden_normed", False):  # the fabric boundary applied the final norm (DRAM row)
+            self._hidden_normed = False
+            normed = hidden
+        else:
+            normed_sharded = decode_residual_norm(hidden, self.final_norm_rm, self.rms_norm_eps, self.precision)
+            normed = ttnn.sharded_to_interleaved(normed_sharded, ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(normed_sharded, True)
         # ``ttnn.sampling`` addresses 32 fixed user slots, and it compares the
         # *logical* shapes of its values and indices, so the logits handed to it
         # must be logically 32 rows and not ``batch`` rows padded to a tile.

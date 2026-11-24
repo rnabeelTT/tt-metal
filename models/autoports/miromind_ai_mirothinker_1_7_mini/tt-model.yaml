@@ -25,6 +25,8 @@ source:
     - models/demos/blackhole/qwen36/tt/__init__.py
     - models/demos/blackhole/qwen36/tt/tp_common.py
     - models/demos/blackhole/qwen36/tt/moe_decode
+    # the one-row decode layer boundary (QWEN3_FABRIC_BOUNDARY, on by default on the 4-die mesh)
+    - models/demos/blackhole/qwen36/tt/fabric_boundary
   ubuntu: "22.04"
   python: "3.12"
 

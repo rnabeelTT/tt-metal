@@ -606,6 +606,7 @@ def attention_decode_optimized(
     sdpa_program_config=None,
     rope=None,
     precision: PrecisionConfig = DEFAULT_PRECISION,
+    out_memory_config=ttnn.DRAM_MEMORY_CONFIG,
 ) -> ttnn.Tensor:
     """``attention_decode`` with the two projections run DRAM-sharded.
 
@@ -680,10 +681,10 @@ def attention_decode_optimized(
     # *sharded* update tensor, so remember the split's layout and restore it.
     kv_sharded_mem = k.memory_config()
     q = _per_head_rms_norm(
-        ttnn.to_memory_config(q, ttnn.DRAM_MEMORY_CONFIG), weights.attention.q_norm, config.rms_norm_eps
+        ttnn.to_memory_config(q, ttnn.DRAM_MEMORY_CONFIG), weights.attention.q_norm, config.rms_norm_eps, decode=True
     )
     k = _per_head_rms_norm(
-        ttnn.to_memory_config(k, ttnn.DRAM_MEMORY_CONFIG), weights.attention.k_norm, config.rms_norm_eps
+        ttnn.to_memory_config(k, ttnn.DRAM_MEMORY_CONFIG), weights.attention.k_norm, config.rms_norm_eps, decode=True
     )
     # ``rope`` defaults to ``None`` and therefore to ``_apply_rope``, which is
     # what every caller uses -- including the shipped multichip decode path --
@@ -743,7 +744,8 @@ def attention_decode_optimized(
         compute_kernel_config=attn_compute_config,
     )
     ttnn.deallocate(attn)
-    return ttnn.to_memory_config(out, ttnn.DRAM_MEMORY_CONFIG)
+    # out_memory_config: DRAM (the RS + AG all-reduce input) or L1 interleaved (the fabric boundary's partial)
+    return ttnn.to_memory_config(out, out_memory_config)
 
 
 def _experts_chunk_packed(
