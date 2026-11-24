@@ -89,6 +89,9 @@ void kernel_main() {
         RD(as0.get_noc_addr(t), s, F32);
         RD(as1.get_noc_addr(t), s + F32, F32);
         RD(as2.get_noc_addr(t), s + 2 * F32, F32);
+#if defined(SEQ_R) && SEQ_ONE
+        seq_pre(as0.get_noc_addr(t), as1.get_noc_addr(t), as2.get_noc_addr(t), 0, seq_scr, seq_acc_rows);
+#endif
 #ifdef BCONV_DYN
         const uint32_t e = get_write_ptr(cb_e), sc = get_write_ptr(cb_sc);
         const auto ae = TensorAccessor(w_args, w0_addr, 2048);
@@ -121,7 +124,11 @@ void kernel_main() {
         noc_async_read_barrier();
 #endif
 #ifdef SEQ_R
+#if SEQ_ONE
+        seq_fin<x_bytes == 4096 ? 4 : 2, 32, 1>(s, 0, get_write_ptr(cb_x), 0, seq_scr);
+#else
         seq_shift<x_bytes == 4096 ? 4 : 2>(s, get_write_ptr(cb_x), seq_scr, seq_acc_rows);
+#endif
 #endif
         cb_push_back(cb_x, 1);
         cb_push_back(cb_s, 3);

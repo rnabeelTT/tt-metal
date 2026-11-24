@@ -30,6 +30,8 @@ TILE = 32
 # speculative verify rows (tt/kernels/seqshift.hpp): (R, G, acc) while a verify pass runs / is captured, else None.
 # acc: uint32 [1, 32] row-major, group g's accepted row of the previous pass.
 SEQ = None
+# the post / pre readers' verify rows for all their tiles with one barrier (seqshift.hpp seq_pre / seq_fin). I2M_SEQ_ONE
+SEQ_ONE = __import__("os").environ.get("I2M_SEQ_ONE", "1") == "1"
 
 
 def seq_parts(ct, nargs, cb, crs):
@@ -39,7 +41,7 @@ def seq_parts(ct, nargs, cb, crs):
         return [], [], None
     R, G, acc = SEQ
     defs = [("SEQ_R", str(R)), ("SEQ_G", str(G)), ("SEQ_CT", str(len(ct))), ("SEQ_ARG", str(nargs)),
-            ("SEQ_CB", str(cb))]
+            ("SEQ_CB", str(cb)), ("SEQ_ONE", str(int(SEQ_ONE)))]
     ct += ttnn.TensorAccessorArgs(acc).get_compile_time_args()
     return defs, [_cb(crs, cb, ttnn.float32, 4096, 1)], acc
 
@@ -152,7 +154,7 @@ class BConvKernel:
         kernels = _kernels(self.spec)
         key = ("i2m_bconv", self.C, len(cores), cores[0].x, cores[0].y, str(x.dtype), int(x.shape[-2]), stride,
                repr(x.memory_config()), repr(out_mc), repr(s[0].memory_config()), repr(w_taps[0].memory_config()),
-               SEQ[:2] if SEQ else None, live, None if dyn is None else (repr(dyn[0].memory_config()), repr(dyn[1].memory_config()),
+               SEQ[:2] + (SEQ_ONE,) if SEQ else None, live, None if dyn is None else (repr(dyn[0].memory_config()), repr(dyn[1].memory_config()),
                                                                     repr(dyn[2].memory_config())))
         io = list({id(t): t for t in [x] + list(s) + list(w_taps) + [wc, y] + ([acc] if acc else [])}.values())
         return kernels, cbs, io, key, y

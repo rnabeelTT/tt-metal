@@ -106,11 +106,20 @@ void kernel_main() {
         rf(w1.get_noc_addr(t), w + F32);
         rf(w2.get_noc_addr(t), w + 2 * F32);
         rf(wc.get_noc_addr(t), w + 3 * F32);
+#if defined(SEQ_R) && SEQ_ONE
+        if constexpr (seq_fits<PER>()) {
+            seq_pre(s0.get_noc_addr(t), s1.get_noc_addr(t), s2.get_noc_addr(t), i, seq_scr, seq_acc_rows);
+        }
+#endif
     }
     noc_async_read_barrier();
 #ifdef SEQ_R
-    for (uint32_t i = 0; i < PER; ++i) {
-        seq_shift<2, TH>(get_write_ptr(cb_s) + i * 3 * F32, get_write_ptr(cb_att) + i * BF, seq_scr, seq_acc_rows);
+    if constexpr (SEQ_ONE && seq_fits<PER>()) {
+        seq_fin<2, TH, PER>(get_write_ptr(cb_s), 3 * F32, get_write_ptr(cb_att), BF, seq_scr);
+    } else {
+        for (uint32_t i = 0; i < PER; ++i) {
+            seq_shift<2, TH>(get_write_ptr(cb_s) + i * 3 * F32, get_write_ptr(cb_att) + i * BF, seq_scr, seq_acc_rows);
+        }
     }
 #endif
     for (uint32_t i = 0; i < PER; ++i) {

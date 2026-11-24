@@ -44,6 +44,13 @@ ZLAZY = __import__("os").environ.get("I2M_RED_ZLAZY", "1") == "1"
 SOFT_BATCH = __import__("os").environ.get("I2M_SOFT_BATCH", "1") == "1"
 # the router round reduced by core t E / 32 + e for logit tile e of row t, not all by root t (post / gate2). I2M_ROUTER_SPLIT
 RSPLIT = __import__("os").environ.get("I2M_ROUTER_SPLIT", "1") == "1"
+# at T > 1 rows, a round's hi / lo pairs of row t reduced by their own roots (core t P + j for pair j; the same matmuls,
+# so the same sums) instead of all by root t. I2M_RED_MR: the programs using it (post, pre, gate2, multi; 1 all, 0 none;
+# default pre: T = 4 pre NQ = 3 43.5 -> 41.8 us; post / gate2 no gain, multi 32.6 -> 35.6)
+_MR = __import__("os").environ.get("I2M_RED_MR", "pre")
+MR = {"post", "pre", "gate2", "multi"} if _MR == "1" else set() if _MR == "0" else set(_MR.split(","))
+# the rounds' gather zeroing and partial sends as stateful one-packet NOC writes (red.hpp; post / pre / gate2). I2M_RED_WS
+WS = __import__("os").environ.get("I2M_RED_WS", "1") == "1"
 # the token-row CB tiles 8 / 16 rows tall (T <= 8 / 16): the fp32 unpacks / packs and the matmul passes scale with the
 # rows; the cross-core gather tiles (a row per core) stay 32 x 32. I2M_TINY=0: whole tiles
 TINY = __import__("os").environ.get("I2M_TINY", "1") == "1"
@@ -127,6 +134,7 @@ class PostKernel:
         rt = router is not None and norm and T <= ROUTER_ROWS
         dup = dup and T == 1 and norm
         ET = int(router[0].shape[-1]) // 32 if rt else 0
+        mr = "post" in MR and 1 < T <= 8  # (2 T roots among the first 16 cores)
         assert not (rt and RSPLIT) or T * ET <= 16, (T, ET)
         resid = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                                out_mc)
@@ -153,7 +161,7 @@ class PostKernel:
                     _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), r(cb_t3, f32, ET)]
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             self.mesh, out_mc) if rt else None
-        rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_RSPLIT", str(int(RSPLIT and rt))), ("POST_DUP", str(int(dup))), ("POST_CB_RW", str(cb_rw)),
+        rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_RSPLIT", str(int(RSPLIT and rt))), ("POST_DUP", str(int(dup))), ("POST_MR", str(int(mr))), ("RED_WS", str(int(WS))), ("POST_CB_RW", str(cb_rw)),
                  ("POST_CB_XB", str(cb_xb)), ("POST_CB_P3", str(cb_p3)), ("POST_CB_G3", str(cb_g3)),
                  ("POST_CB_T3", str(cb_t3))]
         k = conv.kernel
@@ -178,7 +186,7 @@ class PostKernel:
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_common = [s.buffer_address() for s in conv.s] + [resid.buffer_address(), out.buffer_address()] + self.mc \
             + [self.zeros.buffer_address(), lg.buffer_address() if rt else 0] \
-            + self.roots[:2 * (T * ET if RSPLIT and rt else T)]
+            + self.roots[:2 * max(T * ET if RSPLIT and rt else T, 2 * T if mr else T)]
         cp_ct = [cb_att, cb_x, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_y16, cb_so, cb_res, cb_rmm, cb_rout,
                  cb_sq, cb_part, cb_gath, cb_red, cb_wt, cb_mi, cb_part2, cb_gath2, cb_out, PER, NB, C, int(add),
                  int(norm), _bits(1.0 / self.H), _bits(self.eps), cb_sel, NQ, cb_tout, cb_tot, cb_tot2]
@@ -206,7 +214,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, dup, packed, bconv.SEQ[:2] if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, WS, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

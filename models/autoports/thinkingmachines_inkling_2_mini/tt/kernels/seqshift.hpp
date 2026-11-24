@@ -82,3 +82,77 @@ inline volatile tt_l1_ptr uint32_t* seq_acc(const A& acc, uint32_t scratch) {
     noc_async_read_barrier();
     return reinterpret_cast<volatile tt_l1_ptr uint32_t*>(scratch + 3968);
 }
+
+// The same in two steps for N tiles with one barrier (I2M_SEQ_ONE; scratch slot n G + g for tile n's group g):
+// seq_pre issues the committed rows' reads straight from the state tensor tiles (NOC addresses s0..s2 of tile n),
+// beside the caller's own reads; after the caller's barrier, seq_fin stages the inputs and rewrites the N tiles' states.
+template <uint32_t N>
+constexpr bool seq_fits() {
+    return 8 * (N * SEQ_G - 1) + SEQ_R + 1 < 30;  // (rows 30 / 31: the accepted rows)
+}
+
+inline void seq_pre(uint64_t s0, uint64_t s1, uint64_t s2, uint32_t n, uint32_t scratch,
+                    volatile tt_l1_ptr uint32_t* acc) {
+    constexpr uint32_t R = SEQ_R, G = SEQ_G;
+    for (uint32_t g = 0; g < G; ++g) {
+        const uint32_t ra = g * R + acc[g], z = (n * G + g) * 8;
+        for (uint32_t h = 0; h < 2; ++h) {
+            noc_async_read(s0 + seq_off(ra, h) * 4, scratch + seq_off(z, h) * 4, 64);
+            noc_async_read(s1 + seq_off(ra, h) * 4, scratch + seq_off(z + 1, h) * 4, 64);
+            noc_async_read(s2 + seq_off(ra, h) * 4, scratch + seq_off(z + 2, h) * 4, 64);
+        }
+    }
+}
+
+// s / x: tile 0's 3 state tiles / input tile, tile n's at + n s_step / x_step
+template <uint32_t XE, uint32_t TH, uint32_t N>
+inline void seq_fin(uint32_t s, uint32_t s_step, uint32_t x, uint32_t x_step, uint32_t scratch) {
+    constexpr uint32_t R = SEQ_R, G = SEQ_G, F32 = TH * 128;
+    static_assert(R + 2 <= 8 && G <= 4 && R * G <= TH && seq_fits<N>(), "verify rows");
+    for (uint32_t n = 0; n < N; ++n) {
+        for (uint32_t g = 0; g < G; ++g) {
+            const uint32_t z = (n * G + g) * 8;
+            for (uint32_t i = 0; i + 1 < R; ++i) {
+                for (uint32_t h = 0; h < 2; ++h) {
+                    auto dst = reinterpret_cast<tt_l1_ptr uint32_t*>(scratch + seq_off(z + 3 + i, h) * 4);
+                    if constexpr (XE == 4) {
+                        auto src = reinterpret_cast<tt_l1_ptr uint32_t*>(x + n * x_step + seq_off_h<TH>(g * R + i, h) * 4);
+                        for (uint32_t e = 0; e < 16; ++e) {
+                            dst[e] = src[e];
+                        }
+                    } else {  // (two bf16 per load: element 2 e in the low half)
+                        auto src = reinterpret_cast<tt_l1_ptr uint32_t*>(x + n * x_step + seq_off_h<TH>(g * R + i, h) * 2);
+                        for (uint32_t e = 0; e < 8; ++e) {
+                            const uint32_t v = src[e];
+                            dst[2 * e] = v << 16;
+                            dst[2 * e + 1] = v & 0xFFFF0000u;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // state j rows g R .. g R + R - 1 = z rows j .. j + R - 1: one read per half (the rows of a face are contiguous; a
+    // slot's 8 z rows sit in one face)
+    for (uint32_t n = 0; n < N; ++n) {
+        for (uint32_t g = 0; g < G; ++g) {
+            const uint32_t z = (n * G + g) * 8;
+            const bool one = TH < 32 || (g * R) >> 4 == (g * R + R - 1) >> 4;
+            for (uint32_t j = 0; j < 3; ++j) {
+                for (uint32_t h = 0; h < 2; ++h) {
+                    const uint32_t d = s + n * s_step + j * F32;
+                    if (one) {
+                        noc_async_read(get_noc_addr(scratch + seq_off(z + j, h) * 4), d + seq_off_h<TH>(g * R, h) * 4,
+                                       R * 64);
+                    } else {
+                        for (uint32_t r = 0; r < R; ++r) {
+                            noc_async_read(get_noc_addr(scratch + seq_off(z + r + j, h) * 4),
+                                           d + seq_off_h<TH>(g * R + r, h) * 4, 64);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    noc_async_read_barrier();
+}

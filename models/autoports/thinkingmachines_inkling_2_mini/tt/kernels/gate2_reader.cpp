@@ -80,7 +80,7 @@ void kernel_main() {
     cb_push_back(cb_m, PER);
     cb_push_back(cb_ones, 1);
     cb_reserve_back(cb_sel, NSEL);
-    for (uint32_t k = 0; k < ((LOCAL_ONES && c >= T) ? 0u : NSEL); ++k) {  // (roots only with LOCAL_ONES; row 0 of the 0 / 1 tiles is the only nonzero row)
+    for (uint32_t k = 0; k < ((LOCAL_ONES && c >= (G2_MR ? 2 * T : T)) ? 0u : NSEL); ++k) {  // (roots only with LOCAL_ONES; row 0 of the 0 / 1 tiles is the only nonzero row)
         if constexpr (TH == 32) {
             noc_async_read(asel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BT, BT);
         } else {

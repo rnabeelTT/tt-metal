@@ -4,7 +4,7 @@
 // Fused decode pre-attention section (tt/pre.py), writer: the conv's states and x (TAIL), the two cross-core rounds
 // (the post-attention writer's scheme: a root per row, core t: row t of the partials -> row c of root t's gather
 // tiles, root t's totals (row 0) -> row t of core 0's, multicast by core 0), xn (BOUNDARY) and the NQ outputs. Live
-// rows only.
+// rows only. PRE_NP1 / PRE_NP2 > 1 (T > 1): a round's hi / lo pair j of row t reduced by core t NP + j.
 //
 // common args: s0, s1, s2, x_out, xn, out[NQ], mcast x0, y0, x1, y1, zeros, root t x, y (t < T)
 
@@ -83,17 +83,28 @@ void kernel_main() {
         noc_semaphore_set_multicast(s_go, mc(s_go), C - 1);
     }
     noc_semaphore_wait(sem(s_go), 1);
-    if (root) {  // the unused gather rows -> 0 (red.hpp)
-        {
-            cb_reserve_back(cb_zero, 1);
-            const uint32_t z = get_write_ptr(cb_zero);
-            noc_async_read(zz.get_noc_addr(0), z, 2048);
-            noc_async_read_barrier();
-            for (uint32_t p = 0; p < 2 * K1; ++p) {
+    // the unused gather rows -> 0 (red.hpp): a round's root zeroes the parts it reduces (zdone: those zeroed so far)
+    constexpr uint32_t NP1 = PRE_NP1, NP2 = PRE_NP2;
+    uint32_t z = 0, zdone = 0;
+    auto zero_parts = [&](uint32_t p0, uint32_t p1) {
+        for (uint32_t p = p0; p < p1; ++p) {
+            if (!(zdone >> p & 1)) {
                 red_zero<PRE_RK, C, NSEL>(z, g1 + p * NSEL * F32);
+                zdone |= 1u << p;
             }
-            noc_async_write_barrier();
         }
+        noc_async_write_barrier();
+    };
+    if (c < T * NP1 || (NORM && c < T * NP2)) {
+        cb_reserve_back(cb_zero, 1);
+        z = get_write_ptr(cb_zero);
+        noc_async_read(zz.get_noc_addr(0), z, 2048);
+        noc_async_read_barrier();
+    }
+    if (NP1 > 1 && c < T * NP1) {
+        zero_parts(2 * (c % NP1), 2 * (c % NP1) + 2);
+    } else if (root) {
+        zero_parts(0, 2 * K1);
     }
 
     if constexpr (TAIL) {
@@ -114,29 +125,34 @@ void kernel_main() {
         }
     }
 
+    uint32_t gcnt = 0, tcnt = 0;  // (this core's s_g / s_t targets so far)
+    // np roots per row (1 or every pair): pair p / 2 of row t -> core t np + p / 2
     auto round = [&](uint32_t cb_p, uint32_t parts, uint32_t cb_g, uint32_t g, uint32_t cb_t, uint32_t tb,
-                     uint32_t done_val) {
+                     uint32_t done_val, uint32_t np) {
         cb_wait_front(cb_p, parts);
         const uint32_t src = get_read_ptr(cb_p);
         const uint32_t d = g + red_off<PRE_RK>(c);
-        for (uint32_t t = 0; t < T; ++t) {
-            for (uint32_t p = 0; p < parts; ++p) {
-                const uint32_t s = src + p * FT + t * 64;  // (row t < 16 of a CB tile)
-                noc_async_write(s, rxy(t, d + p * NSEL * F32), 64);
-                noc_async_write(s + FO, rxy(t, d + p * NSEL * F32 + 1024), 64);
+        for (uint32_t t = 0; t < T; ++t) {  // (row t < 16 of a CB tile)
+            if (np > 1) {
+                for (uint32_t j = 0; j < np; ++j) {
+                    red_send<NSEL, FT, FO>(src + t * 64, rxy(t * np + j, d), d, 2 * j, 2 * j + 2);
+                }
+            } else {
+                red_send<NSEL, FT, FO>(src + t * 64, rxy(t, d), d, 0, parts);
             }
         }
         noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
-        for (uint32_t t = 0; t < T; ++t) {
-            noc_semaphore_inc(rxy(t, s_g), 1);
+        for (uint32_t r = 0; r < T * np; ++r) {
+            noc_semaphore_inc(rxy(r, s_g), 1);
         }
         cb_pop_front(cb_p, parts);
-        const uint32_t ntot = parts / 2;
-        if (root) {
+        const uint32_t ntot = parts / 2, nt = ntot / np, jp = c % np, row = c / np;  // (this root's: tiles jp ..)
+        if (c < T * np) {
+            gcnt += C;
             cb_reserve_back(cb_g, GT);
-            noc_semaphore_wait(sem(s_g), C * done_val);
+            noc_semaphore_wait(sem(s_g), gcnt);
             cb_push_back(cb_g, GT);
-            cb_wait_front(cb_tout, ntot);
+            cb_wait_front(cb_tout, nt);
             const uint32_t ts = get_read_ptr(cb_tout);
             // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
             // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
@@ -153,9 +169,9 @@ void kernel_main() {
                     noc_async_write(ts + k * FT + FO, get_noc_addr(tb + k * FT + FO), 64);
                 }
                 noc_async_write_barrier();
-            } else {  // row 0 -> row c of core 0's totals
-                for (uint32_t k = 0; k < ntot; ++k) {
-                    const uint32_t o = tb + k * FT + c * 64;
+            } else {  // row 0 -> row `row` of core 0's totals
+                for (uint32_t k = 0; k < nt; ++k) {
+                    const uint32_t o = tb + (jp + k) * FT + row * 64;
                     noc_async_write(ts + k * FT, rxy(0, o), 64);
                     noc_async_write(ts + k * FT + FO, rxy(0, o + FO), 64);
                 }
@@ -164,7 +180,8 @@ void kernel_main() {
                     noc_semaphore_inc(rxy(0, s_t), 1);
                 } else {  // rows 0..T-1 (contiguous per face) -> everyone (one multicaster: concurrent ones serialize)
                     noc_async_write_barrier();
-                    noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
+                    tcnt += T * np - 1;
+                    noc_semaphore_wait(sem(s_t), tcnt);
                     for (uint32_t k = 0; k < ntot; ++k) {
                         const uint32_t o = tb + k * FT;
                         noc_async_write_multicast(o, mc(o), T * 64, C - 1, true);
@@ -175,15 +192,18 @@ void kernel_main() {
                     noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
                 }
             }
-            cb_pop_front(cb_tout, ntot);
+            cb_pop_front(cb_tout, nt);
         }
         noc_semaphore_wait(sem(s_done), done_val);
         cb_push_back(cb_t, ntot);
     };
-    round(cb_part, 2 * K1, cb_gath, g1, cb_tot, tot, 1);
+    round(cb_part, 2 * K1, cb_gath, g1, cb_tot, tot, 1, NP1);
 
     if constexpr (NORM) {
-        round(cb_part2, 2 * NQ, cb_gath, g1, cb_tot2, tot2, 2);
+        if (c < T * NP2) {  // (round 2's parts)
+            zero_parts(NP2 > 1 ? 2 * (c % NP2) : 0, NP2 > 1 ? 2 * (c % NP2) + 2 : 2 * NQ);
+        }
+        round(cb_part2, 2 * NQ, cb_gath, g1, cb_tot2, tot2, 2, NP2);
     } else {
         for (uint32_t q = 0; q < NQ; ++q) {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);

@@ -7,6 +7,7 @@
 // matrices) into its totals (row 0), which root t writes into row t of core 0's totals buffer; core 0 multicasts the T
 // rows (one multicast per face: concurrent multicasts from several roots serialize) to every core's, then sets
 // every core's done semaphore. Start: every core tells core 0 it is running; its go releases the writes.
+// POST_MR (T > 1): round 1's two hi / lo pairs of row t reduced by cores 2 t and 2 t + 1 (the same matmuls, half each).
 // Signals without round trips: a sender flushes its writes (not a barrier) before the semaphore increments behind
 // them (same route, same VC: in order); the totals' multicasts are linked, the done value set by a multicast behind
 // them (the matmul in0 sender's scheme); every write is acknowledged before the kernel ends. (An all-to-all of the
@@ -80,20 +81,10 @@ void kernel_main() {
         cb_reserve_back(cb_tot2, 1);
         tot2 = get_write_ptr(cb_tot2);
     }
-    uint32_t g1 = 0, g2 = 0;
-    if (root) {
-        cb_reserve_back(cb_gath, 4 * NQ);
-        g1 = get_write_ptr(cb_gath);
-        if constexpr (NORM) {
-            cb_reserve_back(cb_gath2, 2 * NQ);
-            g2 = get_write_ptr(cb_gath2);
-        }
-    } else {
-        g1 = get_write_ptr(cb_gath);  // (the root's buffer address: same CB layout)
-        if constexpr (NORM) {
-            g2 = get_write_ptr(cb_gath2);
-        }
-    }
+    // (every core: the roots' buffer addresses, same CB layout; a round's roots reserve and push their gather)
+    const uint32_t g1 = get_write_ptr(cb_gath);
+    const uint32_t g2 = NORM ? get_write_ptr(cb_gath2) : 0;
+    constexpr uint32_t NP1 = POST_MR && T > 1 ? 2 : 1;  // round 1's roots per row
     {
         DeviceZoneScopedN("P_W_HS");
         noc_semaphore_inc(rxy(0, s_ready), 1);
@@ -114,11 +105,14 @@ void kernel_main() {
     const uint32_t g3 = 0;
 #endif
     constexpr uint32_t PALL = 4 + (NORM ? 2 : 0) + P3;
-    uint32_t z = 0;
+    uint32_t z = 0, zdone = 0;  // (zdone: the parts zeroed so far)
     auto zero_parts = [&](uint32_t p0, uint32_t p1) {
         for (uint32_t p = p0; p < p1; ++p) {
-            red_zero<POST_RK, C, NQ>(z, p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
-                                                                : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32);
+            if (!(zdone >> p & 1)) {
+                red_zero<POST_RK, C, NQ>(z, p < 4 ? g1 + p * NQ * F32 : p < 4 + (NORM ? 2 : 0) ? g2 + (p - 4) * NQ * F32
+                                                                    : g3 + (p - 4 - (NORM ? 2 : 0)) * NQ * F32);
+                zdone |= 1u << p;
+            }
         }
         noc_async_write_barrier();
     };
@@ -130,13 +124,15 @@ void kernel_main() {
     constexpr uint32_t PROW = PALL;
     constexpr bool rr = false;
 #endif
-    if (root || rr) {
+    if (root || rr || c < T * NP1) {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
         noc_async_read_barrier();
     }
-    if (root) {
+    if (NP1 > 1 && c < T * NP1) {  // (its pair's two parts)
+        zero_parts(2 * (c % NP1), 2 * (c % NP1) + 2);
+    } else if (root) {
         zero_parts(0, POST_ZLAZY ? 4 : PROW);
     }
 
@@ -155,30 +151,37 @@ void kernel_main() {
     }
 
     // parts' row t -> row c of root t's gather (rho = c), then root t's semaphore
-    auto send = [&](uint32_t src, uint32_t parts, uint32_t g) {
+    // np roots per row: pair p / 2 of row t -> core t np + p / 2
+    auto send = [&](uint32_t src, uint32_t parts, uint32_t g, uint32_t np) {
         const uint32_t d = g + red_off<POST_RK>(c);
-        for (uint32_t t = 0; t < T; ++t) {
-            for (uint32_t p = 0; p < parts; ++p) {
-                const uint32_t s = src + p * FT + t * 64;  // (row t < 16 of a CB tile)
-                noc_async_write(s, rxy(t, d + p * NQ * F32), 64);
-                noc_async_write(s + FO, rxy(t, d + p * NQ * F32 + 1024), 64);
+        for (uint32_t t = 0; t < T; ++t) {  // (row t < 16 of a CB tile)
+            if (np > 1) {
+                for (uint32_t j = 0; j < np; ++j) {
+                    red_send<NQ, FT, FO>(src + t * 64, rxy(t * np + j, d), d, 2 * j, 2 * j + 2);
+                }
+            } else {
+                red_send<NQ, FT, FO>(src + t * 64, rxy(t, d), d, 0, parts);
             }
         }
         noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
-        for (uint32_t t = 0; t < T; ++t) {
-            noc_semaphore_inc(rxy(t, s_g), 1);
+        for (uint32_t r = 0; r < T * np; ++r) {
+            noc_semaphore_inc(rxy(r, s_g), 1);
         }
     };
+    uint32_t gcnt = 0, tcnt = 0;  // (this core's s_g / s_t targets so far)
     // one round: parts -> the roots, root t's totals (ntot tiles, row 0) -> row t of everyone's
     auto round = [&](uint32_t cb_p, uint32_t parts, uint32_t cb_g, uint32_t g, uint32_t cb_t, uint32_t tb,
-                     uint32_t ntot, uint32_t done_val) {
+                     uint32_t ntot, uint32_t done_val, uint32_t np) {
         cb_wait_front(cb_p, parts);
-        send(get_read_ptr(cb_p), parts, g);
+        send(get_read_ptr(cb_p), parts, g, np);
         cb_pop_front(cb_p, parts);
-        if (root) {
-            noc_semaphore_wait(sem(s_g), C * done_val);
+        if (c < T * np) {
+            const uint32_t nt = ntot / np, jp = c % np, row = c / np;  // (this root's totals: tiles jp .. jp + nt - 1)
+            gcnt += C;
+            cb_reserve_back(cb_g, parts * NQ);
+            noc_semaphore_wait(sem(s_g), gcnt);
             cb_push_back(cb_g, parts * NQ);
-            cb_wait_front(cb_tout, ntot);
+            cb_wait_front(cb_tout, nt);
             const uint32_t ts = get_read_ptr(cb_tout);
             // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
             // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
@@ -195,9 +198,9 @@ void kernel_main() {
                     noc_async_write(ts + k * FT + FO, get_noc_addr(tb + k * FT + FO), 64);
                 }
                 noc_async_write_barrier();
-            } else {  // row 0 -> row c of core 0's totals
-                for (uint32_t k = 0; k < ntot; ++k) {
-                    const uint32_t o = tb + k * FT + c * 64;
+            } else {  // row 0 -> row `row` of core 0's totals
+                for (uint32_t k = 0; k < nt; ++k) {
+                    const uint32_t o = tb + (jp + k) * FT + row * 64;
                     noc_async_write(ts + k * FT, rxy(0, o), 64);
                     noc_async_write(ts + k * FT + FO, rxy(0, o + FO), 64);
                 }
@@ -206,7 +209,8 @@ void kernel_main() {
                     noc_semaphore_inc(rxy(0, s_t), 1);
                 } else {  // rows 0..T-1 (contiguous per face) -> everyone
                     noc_async_write_barrier();
-                    noc_semaphore_wait(sem(s_t), (T - 1) * done_val);
+                    tcnt += T * np - 1;
+                    noc_semaphore_wait(sem(s_t), tcnt);
                     for (uint32_t k = 0; k < ntot; ++k) {
                         const uint32_t o = tb + k * FT;
                         noc_async_write_multicast(o, mc(o), T * 64, C - 1, true);
@@ -217,16 +221,16 @@ void kernel_main() {
                     noc_semaphore_set_multicast(s_done, mc(s_done), C - 1);
                 }
             }
-            cb_pop_front(cb_tout, ntot);
+            cb_pop_front(cb_tout, nt);
         }
         noc_semaphore_wait(sem(s_done), done_val);
         cb_push_back(cb_t, ntot);
     };
     {
         DeviceZoneScopedN("P_W_R1");
-        round(cb_part, 4, cb_gath, g1, cb_tot, tot, 2, 1);
+        round(cb_part, 4, cb_gath, g1, cb_tot, tot, 2, 1, NP1);
     }
-    if (POST_ZLAZY && root) {
+    if ((POST_ZLAZY || NP1 > 1) && root) {
         zero_parts(4, PROW);
     }
 #if POST_RT && POST_RSPLIT
@@ -235,7 +239,7 @@ void kernel_main() {
     }
 #endif
     if constexpr (NORM) {
-        round(cb_part2, 2, cb_gath2, g2, cb_tot2, tot2, 1, 2);
+        round(cb_part2, 2, cb_gath2, g2, cb_tot2, tot2, 1, 2, 1);
     }
 
     for (uint32_t i = 0; i < PER; ++i) {
@@ -270,7 +274,7 @@ void kernel_main() {
         cb_pop_front(POST_CB_P3, parts);
         if (rr) {
             cb_reserve_back(POST_CB_G3, parts * NQ);
-            noc_semaphore_wait(sem(s_g), C * ((root ? (NORM ? 2 : 1) : 0) + 1));
+            noc_semaphore_wait(sem(s_g), gcnt + C);
             cb_push_back(POST_CB_G3, parts * NQ);
             const auto al = TensorAccessor(l_args, ca(10), F32);
             cb_wait_front(POST_CB_T3, 1);
@@ -283,11 +287,11 @@ void kernel_main() {
             cb_pop_front(POST_CB_T3, 1);
         }
 #else
-        send(get_read_ptr(POST_CB_P3), parts, get_write_ptr(POST_CB_G3));
+        send(get_read_ptr(POST_CB_P3), parts, get_write_ptr(POST_CB_G3), 1);
         cb_pop_front(POST_CB_P3, parts);
         if (root) {
             cb_reserve_back(POST_CB_G3, parts * NQ);
-            noc_semaphore_wait(sem(s_g), C * (NORM ? 3 : 2));
+            noc_semaphore_wait(sem(s_g), gcnt + C);
             cb_push_back(POST_CB_G3, parts * NQ);
             const auto al = TensorAccessor(l_args, ca(10), F32);
             cb_wait_front(POST_CB_T3, ET);

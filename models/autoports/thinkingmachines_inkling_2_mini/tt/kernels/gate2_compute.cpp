@@ -189,6 +189,38 @@ void kernel_main() {
     static_assert(ET <= 4, "router tiles");
     static_assert(R == 2, "rank tiles");
     const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
+    // G2_MR (ROWS > 1): rounds 1 / 2 pair j of row t reduced on core 2 t + j (the same matmuls as DST j of the root's)
+    const uint32_t ci = get_arg_val<uint32_t>(0);
+    const bool mr = G2_MR && ROWS > 1, mroot = mr ? ci < 2 * ROWS : root;
+    bool sw = false;  // (waited for the selection tiles: pops them at the end)
+    auto wsel = [&]() {
+        cb_wait_front(cb_sel, NSEL);
+        sw = true;
+    };
+    // a pair round's totals: every pair (root) or this core's pair j (mr)
+    auto pairs = [&](uint32_t np) {
+        wsel();
+        tile_regs_acquire();
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, GT);
+        const uint32_t k0 = mr ? ci % 2 : 0, nk = mr ? 1 : np;
+        for (uint32_t k = k0; k < k0 + nk; ++k) {
+            for (uint32_t s = 0; s < NSEL; ++s) {
+                matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k - k0);
+                matmul_tiles(cb_sel, cb_gath, s, (2 * k + 1) * NSEL + s, k - k0);
+            }
+        }
+        tile_regs_commit();
+        cb_reserve_back(cb_tout, nk);
+        tile_regs_wait();
+        pack_to(0, cb_tout);
+        if (nk > 1) {
+            pack_tile(1, cb_tout);
+        }
+        tile_regs_release();
+        cb_push_back(cb_tout, nk);
+        cb_pop_front(cb_gath, GT);
+    };
 
     // matmuls: in0 -> srcB, in1 -> srcA (each CB's tile shape: the token-row CBs hold TH x 32 tiles, G2_TH)
     compute_kernel_hw_startup<SrcOrder::Reverse>(cb_sq, cb_ones, cb_part);
@@ -240,25 +272,8 @@ void kernel_main() {
     cb_push_back(cb_part, 4);
     cb_pop_front(cb_sq, 4 * PER);
 
-    if (root) {  // totals [sum h^2, sum m^2] from the gathered parts
-        cb_wait_front(cb_sel, NSEL);
-        tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
-        cb_wait_front(cb_gath, GT);
-        for (uint32_t k = 0; k < 2; ++k) {
-            for (uint32_t s = 0; s < NSEL; ++s) {
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k + 1) * NSEL + s, k);
-            }
-        }
-        tile_regs_commit();
-        cb_reserve_back(cb_tout, 2);
-        tile_regs_wait();
-        pack_to(0, cb_tout);
-        pack_tile(1, cb_tout);
-        tile_regs_release();
-        cb_push_back(cb_tout, 2);
-        cb_pop_front(cb_gath, GT);
+    if (mroot) {  // totals [sum h^2, sum m^2] from the gathered parts
+        pairs(2);
     }
     tile_regs_acquire();
     cp_prep(cb_tot);  // (configured before the totals arrive)
@@ -321,24 +336,8 @@ void kernel_main() {
     cb_pop_front(cb_hn, 2 * PER);
     cb_pop_front(cb_wd, 2 * PER * R);
 
-    if (root) {
-        tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
-        cb_wait_front(cb_gath, GT);
-        for (uint32_t k = 0; k < R; ++k) {
-            for (uint32_t s = 0; s < NSEL; ++s) {
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k + 1) * NSEL + s, k);
-            }
-        }
-        tile_regs_commit();
-        cb_reserve_back(cb_tout, R);
-        tile_regs_wait();
-        pack_to(0, cb_tout);
-        pack_tile(1, cb_tout);
-        tile_regs_release();
-        cb_push_back(cb_tout, R);
-        cb_pop_front(cb_gath, GT);
+    if (mroot) {
+        pairs(R);
     }
     // g = bf16(sum) (the Linear's bf16 output) via the packer
     tile_regs_acquire();
@@ -533,10 +532,9 @@ void kernel_main() {
             cb_pop_front(cb_xb, PER);
             cb_pop_front(cb_rw, 2 * PER * ET);
 #if G2_RSPLIT  // (core t ET + e reduces logit tile e of row t)
-            const uint32_t ci = get_arg_val<uint32_t>(0);
             if (ci < ROWS * ET) {
                 const uint32_t e = ci % ET;
-                cb_wait_front(cb_sel, NSEL);
+                wsel();
                 tile_regs_acquire();
                 mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
                 cb_wait_front(cb_gath, GT);
@@ -552,9 +550,6 @@ void kernel_main() {
                 tile_regs_release();
                 cb_push_back(cb_tout, 1);
                 cb_pop_front(cb_gath, GT);
-                if (!root) {
-                    cb_pop_front(cb_sel, NSEL);
-                }
             }
             if (false) {
 #else
@@ -583,7 +578,7 @@ void kernel_main() {
         }
     }
     cb_pop_front(cb_ones, 1);
-    if (root) {
+    if (sw) {
         cb_pop_front(cb_sel, NSEL);
     }
 }

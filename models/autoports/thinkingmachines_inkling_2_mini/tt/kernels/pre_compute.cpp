@@ -186,6 +186,36 @@ void kernel_main() {
     constexpr uint32_t K1 = 1 + NQ;  // round 1 quantities: sum x^2, x . q_j
     static_assert(n <= 6 && NQ <= 3, "DST budget");
     const bool root = get_arg_val<uint32_t>(0) < ROWS;  // core t: the root of row t
+    const uint32_t ci = get_arg_val<uint32_t>(0);
+    bool sw = false;  // (waited for the selection tiles: pops them at the end)
+    // a round's totals of npair hi / lo pairs: all on root t (NP = 1) or pair j on core t NP + j (the same matmuls)
+    auto pairs = [&](uint32_t npair, uint32_t NP) {
+        if (!(NP > 1 ? ci < ROWS * NP : root)) {
+            return;
+        }
+        cb_wait_front(cb_sel, NSEL);
+        sw = true;
+        tile_regs_acquire();
+        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
+        cb_wait_front(cb_gath, 2 * K1 * NSEL);  // (the shared gather buffer, pushed whole)
+        const uint32_t k0 = NP > 1 ? ci % NP : 0, nk = NP > 1 ? 1 : npair;
+        for (uint32_t k = k0; k < k0 + nk; ++k) {
+            for (uint32_t s = 0; s < NSEL; ++s) {
+                matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k - k0);
+                matmul_tiles(cb_sel, cb_gath, s, (2 * k + 1) * NSEL + s, k - k0);
+            }
+        }
+        tile_regs_commit();
+        cb_reserve_back(cb_tout, nk);
+        tile_regs_wait();
+        pack_cfg(cb_tout);
+        for (uint32_t k = 0; k < nk; ++k) {
+            pack_tile(k, cb_tout);
+        }
+        tile_regs_release();
+        cb_push_back(cb_tout, nk);
+        cb_pop_front(cb_gath, 2 * K1 * NSEL);
+    };
 
     // matmuls: in0 -> srcB, in1 -> srcA (each CB's tile shape: the token-row CBs hold TH x 32 tiles, PRE_TH)
     compute_kernel_hw_startup<SrcOrder::Reverse>(cb_sq, cb_ones, cb_so);
@@ -291,28 +321,7 @@ void kernel_main() {
     cb_pop_front(cb_q, NQ * PER);
 
     // ---- root: totals of round 1 (gather tiles [quantity][hi, lo][NSEL])
-    if (root) {
-        cb_wait_front(cb_sel, NSEL);
-        tile_regs_acquire();
-        mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
-        cb_wait_front(cb_gath, 2 * K1 * NSEL);
-        for (uint32_t k = 0; k < K1; ++k) {
-            for (uint32_t s = 0; s < NSEL; ++s) {
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k) * NSEL + s, k);
-                matmul_tiles(cb_sel, cb_gath, s, (2 * k + 1) * NSEL + s, k);
-            }
-        }
-        tile_regs_commit();
-        cb_reserve_back(cb_tout, K1);
-        tile_regs_wait();
-        pack_cfg(cb_tout);
-        for (uint32_t k = 0; k < K1; ++k) {
-            pack_tile(k, cb_tout);
-        }
-        tile_regs_release();
-        cb_push_back(cb_tout, K1);
-        cb_pop_front(cb_gath, 2 * K1 * NSEL);
-    }
+    pairs(K1, PRE_NP1);
     // ---- r, lg_j
     tile_regs_acquire();
     cp_prep(cb_tot);  // (configured before the totals arrive)
@@ -504,27 +513,7 @@ void kernel_main() {
             cb_push_back(cb_part2, 2);
             cb_pop_front(cb_sq, 2 * PER);
         }
-        if (root) {
-            tile_regs_acquire();
-            mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
-            cb_wait_front(cb_gath, 2 * K1 * NSEL);  // (the shared gather buffer, pushed whole)
-            for (uint32_t q = 0; q < NQ; ++q) {
-                for (uint32_t s = 0; s < NSEL; ++s) {
-                    matmul_tiles(cb_sel, cb_gath, s, (2 * q) * NSEL + s, q);
-                    matmul_tiles(cb_sel, cb_gath, s, (2 * q + 1) * NSEL + s, q);
-                }
-            }
-            tile_regs_commit();
-            cb_reserve_back(cb_tout, NQ);
-            tile_regs_wait();
-            pack_cfg(cb_tout);
-            for (uint32_t q = 0; q < NQ; ++q) {
-                pack_tile(q, cb_tout);
-            }
-            tile_regs_release();
-            cb_push_back(cb_tout, NQ);
-            cb_pop_front(cb_gath, 2 * K1 * NSEL);
-        }
+        pairs(NQ, PRE_NP2);
 #if PRE_RN1  // (each query's rsqrt once, through cb_red: free again after the mixes)
         tile_regs_acquire();
         cp_prep(cb_tot2);
@@ -577,7 +566,7 @@ void kernel_main() {
         cb_pop_front(cb_h, NQ * PER);
     }
     cb_pop_front(cb_ones, 1);
-    if (root) {
+    if (sw) {
         cb_pop_front(cb_sel, NSEL);
     }
 }
