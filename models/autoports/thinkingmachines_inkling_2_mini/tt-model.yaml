@@ -69,6 +69,7 @@ serve:
     I2M_KV_DT: bf16            # fp32-vs-bf16 reference noise floor; bfp8 KV costs measurable KL
     I2M_PREFILL_CHUNK: "1024"  # prefill rows per chunk (the sliding-window rings hold the window + one chunk)
     I2M_PREFILL_PAD: "256"     # a prompt's last chunk padded to a multiple of 256: 4 prefill programs to warm up
+    I2M_PREFIX: "0"            # vLLM's prefix cache off
     # the dequantized bfp8 expert / attention images (built from the checkpoint on the first boot, ~3.5 min on 2 dies; tt-model's
     # persistent weight cache: later boots load them in about a minute)
     I2M_WCACHE: /weight-cache/wcache_inkling2_mini
@@ -144,7 +145,7 @@ card:
     Inkling-2-Mini, a 26.4B-parameter looped mixture-of-experts model (3.4B parameters active per token; 24 layers of
     which 12 run three passes, 128 routed experts top-8, sliding-window and global attention with a relative position
     bias), with image input. Served through vLLM with tensor-parallel attention and experts, speculative decoding with
-    the checkpoint's DSpark drafter (3 drafts per pass) for a user decoding alone, prefix caching, on-device sampling,
+    the checkpoint's DSpark drafter (3 drafts per pass) for a user decoding alone, on-device sampling,
     reasoning and tool calling.
   intended_use: >
     Chat, coding, reasoning and agent use (tool calls) over text and images (text only on `p150-long`), for up to 32
@@ -160,10 +161,6 @@ card:
     Speculative decoding serves a request while it is the only one decoding; with more requests the server decodes
     one token per step for all of them. Drafts are accepted with the standard min(1, p / q) rule, so sampled outputs
     keep the target model's distribution.
-
-    Prefix caching: a prompt of 512 tokens or more leaves a snapshot at its last 64-token boundary, and a later request
-    that starts with the same tokens (the same prompt again, the next turn of a chat, another question about the same
-    document) resumes from it (16 snapshots kept on 2 and 4 dies, 1 on one die; least recently used first out).
 
     Every profile: routed experts at bfp8 (dequantized from the checkpoint's NVFP4 / MXFP8), bf16 KV cache.
   performance: |
@@ -200,7 +197,7 @@ card:
     code 110, chat 85; p150 math 75, code 74, chat 53).
 
     Load benchmark (`tools/bench_card.py`): random-token prompts of exactly the input length (ISL), output pinned with
-    ignore_eos (OSL), greedy, streamed; every request a distinct prompt (no prefix-cache hits); `concurrency` users in
+    ignore_eos (OSL), greedy, streamed; every request a distinct prompt; `concurrency` users in
     a closed loop, N requests in all; TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per
     user, TPOT = (E2EL - TTFT) / (OSL - 1); total = output tokens / wall time. On random-token prompts the greedy
     continuation is repetitive and drafts unusually well, so the one-user rows overstate what real text decodes at
@@ -253,16 +250,6 @@ card:
     | p150-long | 1,024 | 256 | 4 | 8 | 2,912 | 352 | 35.0 | 100.3 | 10.21 |
     | p150-long | 1,024 | 256 | 8 | 16 | 5,808 | 176 | 26.6 | 133.1 | 15.39 |
 
-    Prefix cache (`tools/prefix_serve.py`, greedy): a 4,438-token prompt (a document plus a question)
-    cold, then resent, then the next chat turn on it, then 4 users asking about the same document at once (TTFT, s):
-
-    | Profile | Cold | Resent | Next turn | 4 users, shared document (mean) |
-    | --- | ---: | ---: | ---: | ---: |
-    | p300x2 | 2.26 | 0.65 | 0.63 | 1.14 |
-    | p300 | 1.98 | 0.51 | 0.48 | 1.07 |
-    | p150 | 3.31 | 0.51 | 0.53 | 1.04 |
-    | p150-long | 3.27 | 0.39 | 0.41 | 0.95 |
-
     Measured 2026-11-24 on one QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die profiles on a subset of it) through
     vLLM 0.26 with this package's code and each profile's own settings.
   limitations: |
@@ -274,6 +261,8 @@ card:
       the whole context, and requests that do not fit beside the running ones wait.
     - Sampling at temperature > 0 draws from the 32 most likely tokens; top_k above 32 acts as 32. Requests with
       penalties or top_p < 1, and logprobs, are sampled on the host (slower).
+    - Prefix caching is off in this release: every request prefills its whole prompt, including repeated prompts and
+      later turns of a chat.
     - No video or audio input; no image input on `p150-long`. One image may take up to 4,095 image tokens.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
     - Outputs are close to but not identical to the bf16 reference (bfp8 experts; see the accuracy table). Benchmark
