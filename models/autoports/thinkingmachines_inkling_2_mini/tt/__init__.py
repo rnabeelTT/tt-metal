@@ -25,6 +25,15 @@ _os.environ.setdefault("QWEN35_ROUTE_SPLIT", "8")
 _os.environ.setdefault("QWEN35_ROUTE_KEYS", "1")
 # the prefill MoE dispatch over many cores (qwen36 dispatch_mc; bit-identical to moe_sorted_dispatch)
 _os.environ.setdefault("QWEN35_DISPATCH_MC", "1")
+# decode MoE fixed costs (one-die bench of the per-die shards, eager us gate|up / down, all bitwise):
+# I2M_MOE_GU_KCH: gate|up blocks pushed as K-row chunks, the compute starts on a block's first rows (TP2 B=1 63 -> 54)
+_os.environ.setdefault("QWEN35_MOE_GU_KCH", _os.environ.get("I2M_MOE_GU_KCH", "4"))
+_os.environ.setdefault("QWEN35_MOE_REM_KCH", _os.environ.get("I2M_MOE_REM_KCH", "2"))
+# I2M_MOE_GU_OFFROW1: one-bank gate|up groups (TP2 / TP4) whose bank shares its reader row with another bank's: readers
+# on the next row inward reading on NOC1 (TP2 4-row verify 128 -> 120 with KCH)
+_os.environ.setdefault("QWEN35_MOE_GU_OFFROW1", _os.environ.get("I2M_MOE_GU_OFFROW1", "1"))
+# I2M_MOE_DN_SKIPPAD: TP4's zero down K pad row not read from DRAM (TP4 down 17.7 / 36.4 -> 16.8 / 34.0 at 1 / 4 rows)
+_os.environ.setdefault("QWEN35_MOE_DN_SKIPPAD", _os.environ.get("I2M_MOE_DN_SKIPPAD", "1"))
 
 # I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
 # allocated L1 address (fast runtime mode does not check CB / L1-buffer clashes: an overlap hangs or corrupts)

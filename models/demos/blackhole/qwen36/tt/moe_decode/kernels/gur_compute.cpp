@@ -122,16 +122,38 @@ void kernel_main() {
     MATH(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
 
+#ifndef GU_KCH
+#define GU_KCH 1
+#endif
+    // GU_KCH: the reader pushes each block as GU_KCH K-row chunks; the first row group multiplies each as it lands
+    // (the same MVMUL sequence as one call: bitwise)
+    constexpr uint32_t kch = GU_KCH, kcu = kt / GU_KCH;
+    static_assert(kcu * kch == kt && kcu % 2 == 0, "even K chunks");
     cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
     for (uint32_t i = 0; i < n; ++i) {
-        cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
+        if constexpr (kch == 1) {
+            cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
+        }
         cb_wait_front(cb_sc, 2 * groups);
         for (uint32_t g = 0; g < groups; ++g) {
             tile_regs_acquire();
             gu_layout::static_for<nb>([&](auto h) {
                 constexpr uint32_t hb = decltype(h)::value;
-                custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+                if constexpr (kch == 1) {
+                    custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
+                } else {
+                    for (uint32_t q = 0; q < kch; ++q) {
+                        if (g == 0) {
+                            cb_wait_front(cb_w, (hb * kch + q + 1) * kcu * m);
+                        }
+                        if (q + 1 < kch) {
+                            custom_mm_block<false>(cb_x, cb_w, g * kt + q * kcu, hb * kt * m + q * kcu * m, hb * m, kcu, m);
+                        } else {
+                            custom_mm_block<true>(cb_x, cb_w, g * kt + q * kcu, hb * kt * m + q * kcu * m, hb * m, kcu, m);
+                        }
+                    }
+                }
             });
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights

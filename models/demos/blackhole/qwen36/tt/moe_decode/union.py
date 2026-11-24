@@ -282,6 +282,13 @@ def upload_selection_bias(mesh_device, bias):
     )
 
 
+def _kch(v, kt, ring, banks=None):
+    """K-row chunks per pushed block: the largest n <= v with kt / n even (custom_mm), the reads in flight within the
+    transaction ids, and (banks: the remainder pairs' K-split blocks) whole banks per chunk."""
+    return max(n for n in range(1, int(v) + 1)
+               if kt % n == 0 and (kt // n) % 2 == 0 and ring * n - n <= 14 and (banks is None or banks % n == 0))
+
+
 class ExpertGateUpRows:
     """(x, table, identity, up_gate, shared_up_gate, act) -> act. readers: cores per column group (experts.gu_layout);
     union slot s goes to core s % readers."""
@@ -350,7 +357,9 @@ class ExpertGateUpRows:
         self.weight_dtype = weight_dtype
         # nb = 2 (odd m: a slot is two consecutive ring blocks the compute indexes together): an even ring
         self.buffers = gu_ring(self.kt, self.m, self.nb, self.tile_bytes, buffers, even=True)
-        self.page_bytes = _page_bytes(self.kt * self.m, self.tile_bytes)
+        # QWEN35_MOE_GU_KCH: blocks pushed as this many K-row chunks (the compute starts on a block's first rows; bitwise)
+        self.kch = 1 if self.split else _kch(os.environ.get("QWEN35_MOE_GU_KCH", "1"), self.kt, self.buffers)
+        self.page_bytes = _page_bytes(self.kt * self.m // self.kch, self.tile_bytes)
         self.dst_full = self.m * self.nb + 1 > 4  # the matmul tiles + the weight tile; FP32 DST: 4 half-sync, 8 full
         assert self.m * self.nb + 1 <= 8, f"{self.m} up|gate columns per bank: more than 8 DST tiles"
         if self.split:
@@ -400,6 +409,10 @@ class ExpertGateUpRows:
             used = set()
             placed = {}
             mode = os.environ.get("QWEN35_MOE_GU_OFFROW", "0")
+            # QWEN35_MOE_GU_OFFROW1=1: one-bank groups (nb = 1) whose bank's reader row is an earlier bank's (banks 0 / 4)
+            # on the next row inward, reading on NOC1 (the down's DN_OFFROW placement)
+            if self.nb == 1 and os.environ.get("QWEN35_MOE_GU_OFFROW1", "0") == "1":
+                placed, self.offrow = place_banks_offrow(mesh_device, {q: readers for q in range(self.ngroups)}, used=used)
             if self.nb == 2 and mode in ("1", "2"):
                 workers = bank_workers(mesh_device)
                 grid = mesh_device.compute_with_storage_grid_size()
@@ -454,6 +467,9 @@ class ExpertGateUpRows:
             self.rem_readers = rr
             self.rem_assign = [(ttnn.CoreCoord(*cand[p * rr + j]), p, j) for p in range(rem) for j in range(rr)]
             self.rem_buffers = gu_ring(self.kt, 2, 1, self.tile_bytes, buffers, even=True)
+            # QWEN35_MOE_REM_KCH: the remainder blocks pushed as this many chunks of banks (K-row chunks)
+            self.rem_kch = _kch(os.environ.get("QWEN35_MOE_REM_KCH", "1"), self.kt, self.rem_buffers,
+                                banks=self.banks)
         self.cores = _range_set([c for c, _, _ in self.assign])
 
     def __call__(self, x, table, identity, up_gate, shared_up_gate, act, ep_offset=None, rem_w=None):
@@ -524,6 +540,7 @@ class ExpertGateUpRows:
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, self.m, self.banks]
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
         defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
+        kch = [("GU_KCH", str(self.kch))] if self.kch > 1 else []
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -572,7 +589,7 @@ class ExpertGateUpRows:
                     (rd_ct, {k: v for k, v in rd_rt.items() if k in keys}),
                     (wr_ct, {k: v for k, v in wr_rt.items() if k in keys}),
                     (cp_ct, None),
-                    defines,
+                    defines + kch,
                     dst_full=self.dst_full,
                     reader_noc=ttnn.NOC.NOC_1 if noc1 else None,
                 )
@@ -615,7 +632,8 @@ class ExpertGateUpRows:
         wr_ct[7] = rr  # step
         wr_ct[13] = 2  # m
         cp_ct = [cb_x, cb_w, cb_act, cb_sc, cb_id, self.kt, g, 2, self.banks]
-        d = list(defines) + [("GU_REM", str(self.pairs)), ("GU_REM_PAIRS", str(self.rem)),
+        d = list(defines) + [("GU_KCH", str(self.rem_kch))] * (self.rem_kch > 1) + [
+                             ("GU_REM", str(self.pairs)), ("GU_REM_PAIRS", str(self.rem)),
                              ("GU_REM_PAD", str(self.pairs_total - self.pairs - self.rem))]
         return _kernels(cores, "gur", (rd_ct, rd_rt), (wr_ct, wr_rt), (cp_ct, None), d, dst_full=False)
 
@@ -639,9 +657,12 @@ class ExpertDownRows:
         ep_experts=None,
         subs=1,
         split=None,
+        pad=0,
     ):
         """shared False: routed experts only (shared_down is not read). ep_experts: as ExpertDown. split: K tiles of the
-        first of two accumulation chains per slot, each packed to BF16 and the two added (two sub-shards' numerics)."""
+        first of two accumulation chains per slot, each packed to BF16 and the two added (two sub-shards' numerics).
+        pad: the last `pad` K tiles of every slot are zero weights (an even K): not read, zeroed in L1 once."""
+        self.pad = pad
         assert not ep_experts or not shared
         self.shared, self.ep_experts = shared, ep_experts
         self.banks = len(bank_workers(mesh_device))
@@ -749,6 +770,7 @@ class ExpertDownRows:
         defines = [("ROWS", str(self.trows))] + ([("DST_FULL", "1")] if self.dst_full else [])
         defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
         defines += [("DN_SPLIT", str(self.split)), ("DN_TMP", "6")] if self.split else []
+        defines += [("DN_PAD", str(self.pad))] if self.pad else []
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

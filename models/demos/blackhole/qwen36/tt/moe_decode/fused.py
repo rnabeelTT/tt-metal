@@ -17,6 +17,8 @@ fidelity).
 
 from __future__ import annotations
 
+import os
+
 import torch
 
 import ttnn
@@ -163,7 +165,9 @@ class FusedMoEDecode:
                 ExpertGateUpRows(self._mesh, H, Il, E, k, dtype, rows, shared=shared, gate_first=gate_first, **ep, **S,
                                  **R),
                 ExpertDownRows(self._mesh, H, self.inter_total, E, k, down_dtype, rows, shared=shared, **ep, **S,
-                               **({"split": self.down_split} if self.down_split else {})),
+                               **({"split": self.down_split} if self.down_split else {}),
+                               # QWEN35_MOE_DN_SKIPPAD=1: the zero K pad rows (rem_pad) not read from DRAM
+                               pad=self.rem_pad if os.environ.get("QWEN35_MOE_DN_SKIPPAD", "0") == "1" else 0),
                 RowsBuffers(self._mesh, H, Il, E, k, rows, dtype),
             )
         return self._cache[key]
