@@ -356,6 +356,7 @@ class Hy4Model:
         self._swa = [l.attn for l in self.layers if l.attn.kind == "swa" and getattr(l.attn, "split", False)]
         self._pf_own = None
         self._swa_snap = {}
+        self._swa_hold = set()  # slots whose prompt is prefilled in parts (_swa_yield)
         logger.info(f"Hy4Model ready: {len(self.layers)} layers in {time.time() - t0:.0f} s; {self.dram_report()}; "
                     f"{fastload.summary()}")
         store = getattr(self.engram, "store", None)
@@ -495,6 +496,7 @@ class Hy4Model:
             return
         own = self._pf_own
         if own is not None and own["slot"] != self.slot:
+            self._swa_yield()
             self.swa_flush()
             own = self._pf_own = None
         if own is not None and not own["pending"] and p0 != own["hi"]:  # (not a continuation of what the ring holds)
@@ -534,7 +536,10 @@ class Hy4Model:
     def swa_snapshot(self, r: int):
         """Split SWA: the active slot's window before position r (in the prefill ring: its prefill just ran) -> host
         (prefix reuse from r after the ring was taken over: rewind). One per slot; r <= 0: none."""
-        u = self.slot
+        self._swa_save(self.slot, r)
+
+    def _swa_save(self, u: int, r: int):
+        """swa_snapshot of slot u (the prefill ring holds the window of the ring owner only)."""
         if not self._swa or r < self.cfg.window or self._swa_snap.get(u, (None,))[0] == r:
             return
         if not self._swa_ring_has(u, r):
@@ -547,6 +552,25 @@ class Hy4Model:
             a.ring_copy(buf, k, r, save=True)
         self._swa_snap[u] = (r, to_torch0(buf))
         ttnn.deallocate(buf)
+
+    def _swa_yield(self):
+        """Before another slot takes the prefill ring: a slot whose prompt is prefilled in parts (tt/engine_batch.py
+        prefill_part; _swa_hold) keeps the window before its next part's start as a host snapshot (swa_resume)."""
+        own = self._pf_own
+        if own is not None and own["slot"] != self.slot and own["slot"] in self._swa_hold:
+            self._swa_save(own["slot"], own["hi"])
+
+    def swa_resume(self, r: int):
+        """The active slot's prompt continues at position r after a part (prefill_part): the window before r in the
+        prefill ring (still there, or restored from the snapshot _swa_yield took when another slot's prefill took the
+        ring: the same rows)."""
+        if self._swa:
+            if not self._swa_ring_has(self.slot, r):
+                self._swa_yield()
+            if not self._swa_ring_has(self.slot, r) and self._swa_snap.get(self.slot, (None,))[0] != r:
+                raise RuntimeError(f"Hy4 slot {self.slot}: the SWA window before {r} is neither in the prefill ring nor "
+                                   f"in its snapshot")
+            self._swa_rewind(r)
 
     def swa_drop(self, u: int):
         self._swa_snap.pop(u, None)
@@ -563,6 +587,7 @@ class Hy4Model:
             self._pf_own["hi"] = r
             return
         if self._pf_own is not None:
+            self._swa_yield()
             self.swa_flush()
         self._pf_own = {"slot": u, "lo": r, "hi": r, "top": r, "pending": False}
         snap = self._swa_snap.get(u)
@@ -717,12 +742,13 @@ class Hy4Model:
             return self._engram_rows(ids, p0, Tp, split)
         return _LazyEngramRows(self, ids, p0, Tp, split)
 
-    def prefill(self, ids: torch.Tensor, chunk: int | None = None) -> torch.Tensor:
+    def prefill(self, ids: torch.Tensor, chunk: int | None = None, head: bool = True) -> torch.Tensor:
         """A whole prompt (continuing the sequence) -> the last row's logits. Chunks: up to the 2048-token dense regime
         boundary first (so every later chunk selects with device-built index lists), then HY4_PREFILL_CHUNK tokens
-        (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary."""
+        (default: the model's chunk), each a multiple of 128 so the next chunk starts on a 32-group boundary.
+        head=False (a part of a prompt, tt/engine_batch.py prefill_part): no head, returns None."""
         ids = ids.reshape(-1)
-        if (self.pos == 0 and os.environ.get("HY4_PF_TRACE", "0") == "1" and self.N > 1
+        if (head and self.pos == 0 and os.environ.get("HY4_PF_TRACE", "0") == "1" and self.N > 1
                 and 0 < ids.numel() <= self.cfg.idx_candidate_topk and self.engram_keep_all(ids) and rkey() is None):
             return self._prefill_traced(ids)
         big = min(int(chunk or os.environ.get("HY4_PREFILL_CHUNK", self.chunk)), self.chunk)  # the SWA ring holds self.chunk
@@ -742,7 +768,8 @@ class Hy4Model:
             # the host prepares and enqueues the next chunk (token upload, RoPE tables, Engram host lookups) while the
             # device still runs this one (HY4_PF_NOSYNC=0: every chunk's last-row logits, the old path)
             lg = self.forward(ids[i : i + n], min_rows=rows,
-                              logits_rows="last" if last or os.environ.get("HY4_PF_NOSYNC", "1") != "1" else "none")
+                              logits_rows="last" if head and (last or os.environ.get("HY4_PF_NOSYNC", "1") != "1")
+                              else "none")
             i += n
         self.swa_flush()
         return lg

@@ -126,6 +126,44 @@ BUDGET_MULTI_GIB = 0.0  # (calibrated below from the 8-slot run)
 
 # HY4_POOL=1 (default): 2..8 users share one context pool (tt/pool.py): one user can take nearly all of it
 POOL = os.environ.get("HY4_POOL", "1") == "1"
+# HY4_CHUNKED_PREFILL=1 (default): vLLM chunked prefill. A long prompt arrives in parts of HY4_CP_TOKENS (default 2048)
+# tokens, one prefill step per part with the other users' decode steps in between (serving/sitecustomize.py: the
+# scheduler alternates; the runner passes which rows are intermediate parts). The engine computes each part exactly as
+# its whole-prompt prefill would (tt/engine_batch.py prefill_part): same outputs, no multi-second decode stalls.
+CHUNKED = os.environ.get("HY4_CHUNKED_PREFILL", "1") == "1"
+CP_LOG = os.environ.get("HY4_CP_LOG", "0") == "1"
+STATS_EVERY = max(1, int(os.environ.get("HY4_STATS_EVERY", "1024")))  # decode steps between engine stats log lines
+# HY4_SPEC_DBG=1 (diagnostic): per decode step what vLLM hands the adapter (auth flags, host vs device sampling, its
+# token / position vs the engine's), summarized every 256 steps and logged at once on a change of that state
+SPEC_DBG = os.environ.get("HY4_SPEC_DBG", "0") == "1"
+
+
+def _dbg_step(self, eng, live, tokens, pos, sp, kwargs, auth):
+    st = self.__dict__.setdefault("_dbg", {"n": 0, "auth": 0, "host": 0, "tokdiff": 0, "posdiff": 0, "last": None})
+    st["n"] += 1
+    st["auth"] += int(bool(auth))
+    st["host"] += int(sp is None)
+    diffs = []
+    for i in live:
+        q = eng.seqs.get(self._row_slot.get(i))
+        if q is None:
+            continue
+        if q["tok"] is not None and int(tokens[i]) != q["tok"]:
+            st["tokdiff"] += 1
+            diffs.append(("tok", i, int(tokens[i]), q["tok"]))
+        if int(pos[i]) != q["pos"]:
+            st["posdiff"] += 1
+            diffs.append(("pos", i, int(pos[i]), q["pos"]))
+    state = (len(live), bool(auth), sp is None, bool(kwargs.get("reload_inputs", False)), bool(kwargs.get("reset_batch", False)))
+    if state != st["last"] or (diffs and st["tokdiff"] + st["posdiff"] <= 50):
+        logger.info(f"HY4DBG step {st['n']}: live {len(live)} rows {live} slots {[self._row_slot.get(i) for i in live]} "
+                    f"auth {auth} reload {state[3]} reset {state[4]} host_sampling {sp is None} diffs {diffs[:4]} "
+                    f"idle {sorted(eng.idle)} seqs {sorted(eng.seqs)} solo {eng.solo} model.slot {eng.model.slot}")
+        st["last"] = state
+    if st["n"] % 256 == 0:
+        logger.info(f"HY4DBG summary {st}; spec {eng.stats.get('spec_emitted', 0)}/{eng.stats.get('spec_passes', 0)} "
+                    f"bspec {eng.stats.get('bspec_emitted', 0)}/{eng.stats.get('bspec_rows', 0)} ra_taken "
+                    f"{eng.stats.get('ra_taken', 0)} ra_undone {eng.stats.get('ra_undone', 0)} pool {eng.pool_stats}")
 POOL_TOKEN_BYTES = 12 * 1216 + 12 * 256 // 4  # per token per die: the sparse layers' latent row + its group-key share
 
 
@@ -178,7 +216,11 @@ class HYV4FlashForConditionalGeneration:
         "supports_prefix_caching": False,
         "supports_async_decode": False,
         "supports_sample_on_device": True,
-        "supports_chunked_prefill": False,
+        "supports_chunked_prefill": CHUNKED,
+        # (vllm-tt-plugin with the chunked-prefill interleave patch: the part size, and the intermediate-part mask passed
+        # to prefill_forward; older plugins: serving/sitecustomize.py does both)
+        "chunked_prefill_tokens": int(os.environ.get("HY4_CP_TOKENS", "2048")),
+        "prefill_intermediate_mask": True,
     }
     decode_input_update_contract = 1
 
@@ -280,29 +322,67 @@ class HYV4FlashForConditionalGeneration:
             self._engine.capture()
 
     # ------------------------------------------------------------------ prefill
+    def _bind(self, row, slot):
+        """vLLM row -> model slot; another row still mapped to that slot (its request finished, the slot reallocated)
+        forgets it."""
+        for r in [r for r, s in self._row_slot.items() if s == slot and r != row]:
+            del self._row_slot[r]
+        self._row_slot[row] = slot
+
+    def _parts(self, N, kwargs):
+        """(start positions, intermediate flags) of a prefill step's rows. A row is an intermediate part of its prompt
+        when vLLM chunked prefill scheduled only part of it (the plugin's intermediate_prefill_mask: the kwarg
+        `intermediate_prefill`, or set on the model by serving/sitecustomize.py's runner shim)."""
+        sp0 = kwargs.get("start_pos")
+        start = [int(v) for v in torch.as_tensor(sp0).reshape(-1).tolist()] if sp0 is not None else [0] * N
+        inter = kwargs.get("intermediate_prefill")
+        if inter is None:
+            inter, self._hy4_inter = getattr(self, "_hy4_inter", None), None
+        inter = [bool(v) for v in torch.as_tensor(inter).reshape(-1).tolist()] if inter is not None else None
+        if inter is None:
+            if any(start):
+                raise NotImplementedError("Hy4: a prompt part (start_pos > 0) without the runner's intermediate-part "
+                                          "mask (serving/sitecustomize.py not loaded?); set HY4_CHUNKED_PREFILL=0")
+            inter = [False] * N
+        return start, inter
+
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
+        t0 = time.perf_counter()
+        last = getattr(self, "_t_ret", None)
+        out = self._prefill_forward(tokens, page_table, kv_cache, prompt_lens, **kwargs)
+        t1 = time.perf_counter()
+        if CP_LOG:  # (HY4_CP_LOG=1: each prefill step's time in the model and since the last model call returned)
+            logger.info(f"Hy4 prefill step: {int(tokens.shape[0])} rows, ends {[int(v) for v in prompt_lens]}, "
+                        f"{(t1 - t0) * 1e3:.1f} ms in the model, {(t0 - last) * 1e3 if last else 0:.1f} ms before")
+        self._t_ret = t1
+        return out
+
+    def _prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
         N = int(tokens.shape[0])
-        start_pos = kwargs.get("start_pos")
-        if start_pos is not None and any(int(v) for v in torch.as_tensor(start_pos).reshape(-1).tolist()):
-            raise NotImplementedError("prefix caching / chunked prefill are off for Hy4 (start_pos must be 0)")
+        start, inter = self._parts(N, kwargs)
         plens = [int(prompt_lens[u]) for u in range(N)] if prompt_lens is not None else [int(tokens.shape[1])] * N
         sp = kwargs.get("sampling_params")
-        mms = self._images(tokens, plens, kwargs)
+        if sp is not None and any(inter):  # (the plugin samples on the host when a step has an intermediate part)
+            raise RuntimeError("Hy4: device sampling asked for a step with intermediate prompt parts")
+        mms = self._images(tokens, plens, kwargs, skip=inter)
         if self.multi:
-            return self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"), mms)
-        out = []
-        for u in range(N):
+            return self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"), mms, start, inter)
+        V = int(self._engine.V)
+        out, logits = [], torch.zeros((N, 1, V), dtype=torch.float32)
+        for u in range(N):  # (one user: no one decodes meanwhile; the whole prompt at its last part)
+            if inter[u]:
+                out.append(0)
+                continue
             out.append(self._engine.prefill(tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u), mm=mms[u]))
+            logits[u, 0, :] = self._engine.last_logits[:V]
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
         self._engine.adopt_next = True
-        V = int(self._engine.V)
-        logits = torch.full((N, 1, V), float("-inf"), dtype=torch.float32)
-        logits[:, 0, :] = self._engine.last_logits[:V]
         return logits
 
-    def _images(self, tokens, plens, kwargs):
-        """Per request: Hy4Model.set_images kwargs of its images (the ViT runs here), or None (text)."""
+    def _images(self, tokens, plens, kwargs, skip=None):
+        """Per request: Hy4Model.set_images kwargs of its images (the ViT runs here), or None (text, or skip[u]: an
+        intermediate part, prefilled whole at its last part)."""
         N = int(tokens.shape[0])
         if getattr(self, "vit", None) is None or not (kwargs.get("pixel_values") or kwargs.get("pixel_values_videos")):
             return [None] * N
@@ -311,13 +391,70 @@ class HYV4FlashForConditionalGeneration:
         out = []
         for u in range(N):
             imgs, vids = request_images(kwargs, u), request_videos(kwargs, u)  # videos: serving/sitecustomize.py shim
+            if (imgs or vids) and skip is not None and skip[u]:
+                out.append("defer")
+                continue
             out.append(self.vit.prepare(tokens[u, : plens[u]].tolist(), imgs, vids) if imgs or vids else None)
         return out
 
-    def _prefill_multi(self, tokens, plens, sp, rows, mms=None):
+    def _prefill_parts(self, tokens, plens, sp, rows, mms, start, inter):
+        """A prefill step with prompt parts (vLLM chunked prefill): every part row through Hy4BatchEngine.prefill_part
+        (its slot: the row's prompt in parts, else a new one), the whole short prompts packed as before. A prompt in
+        parts that this step does not continue was preempted / aborted: dropped (its computed positions kept for
+        prefix reuse). Image prompts: nothing until their last part, then one whole prefill."""
+        N = int(tokens.shape[0])
+        eng = self._engine
+        V = int(eng.V)
+        part = [u for u in range(N) if (inter[u] or start[u] > 0) and mms[u] is None]
+        cont = {}
+        for u in part:  # continuations: the slot holding the prompt's earlier parts (the plugin may move its row)
+            if start[u] > 0:
+                n = plens[u]
+                own = [c for c, st in eng.cp.items() if c not in cont.values() and len(st["ids"]) <= n
+                       and torch.equal(tokens[u, : len(st["ids"])].to(torch.long), torch.tensor(st["ids"]))]
+                s = own[0] if own else self._row_slot.get(rows[u])
+                if s is not None and s not in eng.seqs and (own or s not in eng.cp):
+                    cont[u] = s
+                    self._bind(rows[u], s)
+        for s in [s for s in list(eng.cp) if s not in cont.values()]:
+            eng.finish(s)
+        whole = [u for u in range(N) if u not in part and mms[u] != "defer"]
+        out, logits = [0] * N, torch.zeros((N, 1, V), dtype=torch.float32)
+        if whole:
+            sub = self._prefill_multi(tokens[whole], [plens[u] for u in whole], sp, [rows[u] for u in whole],
+                                      [mms[u] for u in whole], taken=list(cont.values()))
+            for i, u in enumerate(whole):
+                if sp is not None:
+                    out[u] = int(sub[i, 0])
+                else:
+                    logits[u] = sub[i]
+        for u in part:
+            row = rows[u]
+            slot = cont.get(u)
+            if slot is None:  # a new prompt (or one whose parts were dropped: prefix reuse continues it)
+                old = self._row_slot.pop(row, None)
+                if old is not None:
+                    eng.finish(old)
+                slot = eng.alloc(taken=[self._row_slot[rows[w]] for w in whole] + list(cont.values()),
+                                 ids=tokens[u, : plens[u]].tolist(), part=bool(inter[u]))
+                self._bind(row, slot)
+            tok = eng.prefill_part(slot, tokens[u, : plens[u]].tolist(), final=not inter[u],
+                                   sampling=_mtp_sampling(sp, u))
+            if not inter[u]:
+                out[u] = tok
+                if sp is None:
+                    eng.seqs[slot]["adopt"] = True
+                    logits[u, 0, :] = eng.last_logits[slot][:V]
+        if sp is not None:
+            return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
+        return logits
+
+    def _prefill_multi(self, tokens, plens, sp, rows, mms=None, start=None, inter=None, taken=()):
         N = int(tokens.shape[0])
         rows = list(range(N)) if rows is None else [int(r) for r in rows]
         eng = self._engine
+        if inter is not None and (any(inter) or any(start) or eng.cp):
+            return self._prefill_parts(tokens, plens, sp, rows, mms or [None] * N, start, inter)
         slots, reqs = [], []
         for u, row in enumerate(rows):
             old = self._row_slot.pop(row, None)  # the row's previous request is gone
@@ -325,8 +462,8 @@ class HYV4FlashForConditionalGeneration:
                 eng.finish(old)
             # (text prompts: the slot whose kept sequence shares the longest prefix, tt/engine_batch.py prefix reuse)
             text = mms is None or mms[u] is None
-            slot = eng.alloc(taken=slots, ids=tokens[u, : plens[u]].tolist() if text else None)
-            self._row_slot[row] = slot
+            slot = eng.alloc(taken=slots + list(taken), ids=tokens[u, : plens[u]].tolist() if text else None)
+            self._bind(row, slot)
             slots.append(slot)
             reqs.append((slot, tokens[u, : plens[u]].tolist(), _mtp_sampling(sp, u)))
             if os.environ.get("HY4_LOG_PROMPT", "0") == "1":  # (debug: what the engine is given)
@@ -376,6 +513,8 @@ class HYV4FlashForConditionalGeneration:
         if missing:
             raise RuntimeError(f"Hy4 decode rows {missing} have no prefilled slot (rows {self._row_slot})")
         if sp is None:  # host sampling: next-token logits
+            if SPEC_DBG:
+                _dbg_step(self, eng, live, tokens, pos, sp, kwargs, None)
             V = int(eng.V)
             logits = torch.full((tokens.numel(), 1, V), float("-inf"), dtype=torch.float32)
             res = eng.step_logits({self._row_slot[i]: (int(tokens[i]), int(pos[i])) for i in live}) if live else {}
@@ -386,6 +525,8 @@ class HYV4FlashForConditionalGeneration:
         if not live:
             return out
         auth = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))
+        if SPEC_DBG:
+            _dbg_step(self, eng, live, tokens, pos, sp, kwargs, auth)
         reqs = {}
         for i in live:
             slot = self._row_slot[i]
@@ -396,7 +537,7 @@ class HYV4FlashForConditionalGeneration:
         for i in live:
             ids = res[self._row_slot[i]]
             out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
-        if self._decode_steps % 1024 == 0:
+        if self._decode_steps % STATS_EVERY == 0:
             logger.info(f"Hy4 batch engine stats: {eng.stats}")
         return out
 
@@ -426,6 +567,9 @@ class HYV4FlashForConditionalGeneration:
                     ps.clear()
             except Exception:  # noqa: BLE001
                 pass
+        if CP_LOG and getattr(self._engine, "cp", None):
+            logger.info(f"Hy4 decode step (a prompt in parts): {(t1 - t0) * 1e3:.1f} ms in the model, "
+                        f"{(t0 - last) * 1e3 if last else 0:.1f} ms before")
         if len(tl) >= 512:
             med = [sorted(x[i] for x in tl)[len(tl) // 2] * 1e3 for i in (0, 1)]
             logger.info(f"Hy4 decode steps (median of {len(tl)}): {med[0]:.2f} ms in the model, {med[1]:.2f} ms between "

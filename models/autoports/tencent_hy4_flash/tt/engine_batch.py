@@ -37,6 +37,7 @@ from models.autoports.tencent_hy4_flash.tt.engine import HostSampler, sample_row
 RUNAHEAD = os.environ.get("HY4_RUNAHEAD", "1") == "1"
 # HY4_TIME_BSPEC=1: batched spec step breakdown (draft inputs, draft wait, verify host / device, accept) logged per 32 steps
 TIME_BSPEC = os.environ.get("HY4_TIME_BSPEC", "0") == "1"
+SPEC_DBG = os.environ.get("HY4_SPEC_DBG", "0") == "1"  # (diagnostic: drafts vs target picks, _dbg_spec)
 
 
 def _accept(smp, lgs, drafts):
@@ -178,34 +179,44 @@ class Hy4BatchEngine:
         self.pool_stats.update({"evicted": 0, "trims": 0})
         self.kept = {}  # slot -> {"toks": the finished sequence's fed tokens (positions 0 ..), "t": finish time, "img",
         #                          "full": its positions < full were computed by whole prefill chunks (_full)}
+        # prompts prefilled in parts across decode steps (prefill_part): slot -> {"done": positions computed, "go": its
+        # computation started (reset / rewind), "ids", "parts", "t"}; such a slot is never allocated / evicted meanwhile
+        self.cp = {}
 
     # ------------------------------------------------------------------ slots
-    def alloc(self, taken=(), ids=None) -> int:
+    def alloc(self, taken=(), ids=None, part=False) -> int:
         """A free slot: (ids given, prefix reuse on) the one whose kept sequence shares the longest reusable prefix with
-        ids (ties: the lowest), else the least recently finished (never used first)."""
-        free = [s for s in range(self.S) if s not in self.seqs and s not in taken]
+        ids (ties: the lowest), else the least recently finished (never used first). part: ids is the first part of a
+        longer prompt (prefill_part): the longest prefix the kept sequence covers (_cp_cover), at least one chunk."""
+        free = [s for s in range(self.S) if s not in self.seqs and s not in taken and s not in self.cp]
         if not free:
             raise RuntimeError(f"Hy4: all {self.S} slots busy")
         if not self.pc_on:
             return free[0]
         if ids is not None:
             ids = [int(t) for t in ids]
-            r, s = max((self._reuse(s, ids), -s) for s in free)
+            if part:
+                r, s = max((self._grid(self._cp_cover(s, ids)), -s) for s in free)
+            else:
+                r, s = max((self._reuse(s, ids), -s) for s in free)
             if r > 0:
                 return -s
         return min(free, key=lambda s: (self.kept.get(s, {}).get("t", 0.0), s))
 
     def finish(self, slot: int):
         self._settle()
+        if int(slot) in self.cp:
+            self._cp_drop(int(slot))
         q = self.seqs.pop(int(slot), None)
         if self.solo == int(slot):
             self.solo = None
             self._solo_out(int(slot))
         elif q is not None:
             if self.pc_on:
-                self._park(q["lane"])
+                self._park(q["lane"])  # (makes the finished slot the model's active one)
             else:
                 self.dec.drop(q["lane"])
+            self._solo_active()
         if q is not None and self.pc_on:
             self.kept[int(slot)] = {"toks": q["toks"], "t": time.time(), "img": bool(q.get("img")),
                                     "full": int(q.get("full", 0))}
@@ -252,12 +263,13 @@ class Hy4BatchEngine:
                 if self._trim(exclude=slot):
                     continue
             victims = sorted((self.kept.get(u, {}).get("t", -1.0), u) for u in m.ext
-                             if u != slot and u not in self.seqs and u not in self._pinned)
+                             if u != slot and u not in self.seqs and u not in self._pinned and u not in self.cp)
             if victims:
                 self._free(victims[0][1])
                 self.pool_stats["evicted"] += 1
                 continue
-            zombies = [u for u in self.seqs if u in self.idle and u != slot and u not in self._pinned]
+            zombies = [u for u in self.seqs if u in self.idle and u != slot and u not in self._pinned
+                       and u not in self.cp]
             if zombies:  # (finished in vLLM, its pool tokens already counted free there)
                 for u in zombies:
                     self.finish(u)
@@ -451,6 +463,142 @@ class Hy4BatchEngine:
         logger.info(f"Hy4 prefill {n} tokens ({r} reused) into slot {slot} (lane {lane}) in {dt:.2f} s; live {self.live}")
         return tok
 
+    # ------------------------------------------------------------------ a prompt in parts (vLLM chunked prefill)
+    def _grid(self, n) -> int:
+        """The last chunk boundary of a fresh prefill <= n (0, 2048, 2048 + chunk, ...)."""
+        dense = int(self.cfg.idx_candidate_topk)
+        return 0 if n < dense else dense + ((n - dense) // self._big()) * self._big()
+
+    def _cp_cover(self, slot, ids) -> int:
+        """Positions < this of the prompt known so far (ids) the slot's kept sequence holds as whole prefill chunks (its
+        prefix reuse can reach at least there once the rest of the prompt is known); 0: none."""
+        k = self.kept.get(slot)
+        m = self.model
+        if (not self.pc_on or k is None or k["img"] or slot in self.seqs or slot not in m.ext
+                or (m.engram is not None and not hasattr(m.engram, "hist"))):
+            return 0
+        lim = min(len(k["toks"]), len(ids))
+        neq = np.flatnonzero(np.asarray(k["toks"][:lim], dtype=np.int64) != np.asarray(ids[:lim], dtype=np.int64))
+        return min(int(neq[0]) if neq.size else lim, int(k.get("full", 0)))
+
+    def prefill_part(self, slot: int, ids, final: bool, sampling=None):
+        """A text prompt prefilled in parts with other sequences' decode steps in between (vLLM chunked prefill):
+        ids = its tokens known so far (positions 0 .. e), final: e is its end. Computes up to the last fresh-prefill
+        chunk boundary <= e (final: to the end): every chunk runs exactly as in prefill() of the whole prompt (same
+        positions, rows, programs: bit-identical caches and logits). Between parts the slot is pinned (never allocated,
+        trimmed or evicted); other slots' decode passes never address its caches; its model / indexer state is kept by
+        set_slot; the prefill ring's window before its next part by _swa_yield / swa_resume; the prefill constants are
+        released after every part (before any decode replay). Prefix reuse: a first part the slot's kept sequence
+        already holds is not started until the prompt leaves it (the reuse then reaches as far as prefill()'s).
+        -> the first token (final), else None."""
+        slot = int(slot)
+        idl = [int(t) for t in ids]
+        n = len(idl)
+        m = self.model
+        st = self.cp.get(slot)
+        if st is None:
+            if final:  # (the whole prompt in one part)
+                return self.prefill(slot, idl, sampling)
+            self._settle()
+            self.idle.discard(slot)
+            self.finish(slot)
+            st = self.cp[slot] = {"done": 0, "go": False, "parts": 0, "t": 0.0, "r": 0, "ids": idl}
+        if n + 64 > m.max_ctx:
+            raise ValueError(f"Hy4: prompt of {n} tokens exceeds the slot context {m.max_ctx - 64}")
+        if idl[: st["done"]] != st["ids"][: st["done"]]:
+            raise RuntimeError(f"Hy4 slot {slot}: a prompt part does not continue the computed {st['done']} tokens")
+        st["ids"] = idl
+        t0 = time.time()
+        tgt = n if final else self._grid(n)
+        lg = None
+        if not st["go"] and tgt > 0 and (final or self._cp_cover(slot, idl) < tgt):
+            self._cp_start(slot, idl, st, tgt, final)
+        if st["go"] and tgt > st["done"]:
+            done = st["done"]
+            self._settle()
+            if self.solo is not None:  # (the attention staging windows are shared)
+                self._exit_solo()
+            if self.pooled:
+                self._ensure(slot, max(m.pf_end(tgt, done), tgt + self.SLACK), soft=not final)
+            m.set_slot(slot)
+            m.refresh_bases()
+            if m.pos != done:
+                raise RuntimeError(f"Hy4 slot {slot}: model at {m.pos}, its prompt computed to {done}")
+            if st["parts"]:
+                m.swa_resume(done)
+            m._swa_hold.add(slot)
+            lg = m.prefill(torch.as_tensor(idl[done:tgt], dtype=torch.long), head=final)
+            st["done"] = tgt
+            st["parts"] += 1
+        if not final:
+            t1 = time.time()
+            m.prefill_caches_release()  # (before any decode replay; its readbacks wait for the part's device work)
+            st["t"] += time.time() - t0
+            if os.environ.get("HY4_CP_LOG", "0") == "1":
+                logger.info(f"Hy4 part slot {slot}: {st['done']} of {n} known, {(t1 - t0) * 1e3:.1f} ms enqueue, "
+                            f"{(time.time() - t1) * 1e3:.1f} ms release")
+            return None
+        st["t"] += time.time() - t0
+        self.cp.pop(slot)
+        m._swa_hold.discard(slot)
+        r = st["r"]
+        if self.pc_on:
+            m.swa_snapshot(self._full(n))
+        m.prefill_caches_release()
+        self._hn = {}
+        self._fit(slot, n)
+        lane = self.dec.add(slot, n, idl)
+        smp = HostSampler(sampling)
+        tok = smp(lg)
+        self.seqs[slot] = {"lane": lane, "tok": tok, "pos": n, "smp": smp, "adopt": False, "toks": idl, "img": False,
+                           "full": self._full(n)}
+        self.last_logits[slot] = lg
+        self.stats["t_prefill"] += st["t"]
+        self.stats["prefills"] += 1
+        self.stats["prefill_tokens"] += n - r
+        self.stats["reused_tokens"] += r
+        self.stats["prefill_parts"] = self.stats.get("prefill_parts", 0) + st["parts"]
+        logger.info(f"Hy4 prefill {n} tokens ({r} reused) into slot {slot} (lane {lane}) in {st['parts']} parts, "
+                    f"{st['t']:.2f} s; live {self.live}")
+        return tok
+
+    def _cp_start(self, slot, idl, st, tgt, final):
+        """A prompt's first computed part: prefill()'s set-up (the reuse decision on the prompt known so far). (The
+        decoding sequences' batched-spec state stays: no lane changes until the last part.)"""
+        self._settle()
+        if self.solo is not None:
+            self._exit_solo()
+        m = self.model
+        r = self._reuse(slot, idl)
+        if self.pooled:
+            if not r:
+                self._free(slot)
+            self._ensure(slot, max(m.pf_end(tgt, r), tgt + self.SLACK), soft=not final)
+        m.set_slot(slot)
+        m.refresh_bases()
+        if r:
+            m.rewind(r, idl)
+        else:
+            m.reset()
+        self.kept.pop(slot, None)
+        st.update(go=True, done=r, r=r)
+
+    def _cp_drop(self, slot):
+        """A prompt in parts abandoned (vLLM preempted / aborted it): its computed positions kept for prefix reuse (the
+        resumed prompt continues from them), else its extent freed."""
+        st = self.cp.pop(slot)
+        m = self.model
+        m._swa_hold.discard(slot)
+        if not st["go"]:  # (its kept sequence untouched)
+            return
+        done = st["done"]
+        if self.pc_on and slot in m.ext and done >= max(self.pc_min, int(self.cfg.window)):
+            m._swa_save(slot, done)  # (the ring's window, unless _swa_yield saved it)
+            self.kept[slot] = {"toks": st["ids"][:done], "t": time.time(), "img": False, "full": done}
+        elif self.pooled:
+            self._free(slot)
+        logger.info(f"Hy4 prompt in parts dropped from slot {slot} at {done} of {len(st['ids'])} known tokens")
+
     def _fit(self, slot, n):
         """After a prefill of n tokens: the extent cut to n + lookahead + growth headroom (the padded rows past n are
         never read)."""
@@ -566,6 +714,25 @@ class Hy4BatchEngine:
             for a, t in zip(self._SOLO_ATTRS, orig):
                 setattr(ix, a, t)
 
+    def _solo_active(self):
+        """The solo sequence's slot back as the model's active one. The single path addresses the active slot's cache
+        regions (layer bases, staging, Engram / position state); finishing another slot meanwhile (_park: the adapter's
+        idle zombies evicted under pool pressure, a vLLM batch remap) made that slot active, and once its extent was
+        freed (_free) every base fell back to the trash rows: the solo passes then wrote their KV / group rows at
+        trash_row + position, past the end of the caches (other tensors' device memory: spec acceptance 1.00 for good)."""
+        if self.solo is not None and self.model.slot != self.solo:
+            self.model.set_slot(self.solo)
+
+    def _solo_check(self):
+        """Before a single-path pass: the solo slot is the active one and holds its pool extent (a pass based on a
+        missing extent would write past the caches' end: an error instead of silent device memory corruption)."""
+        m = self.model
+        if m.slot != self.solo:
+            logger.warning(f"Hy4 solo slot {self.solo} was not the active slot ({m.slot}): re-activated")
+            self._solo_active()
+        if self.pooled and m.slot not in m.ext:
+            raise RuntimeError(f"Hy4 solo slot {m.slot} has no pool extent (extents {dict(m.ext)})")
+
     def _exit_solo(self):
         slot, self.solo = self.solo, None
         self._solo_out(slot)
@@ -656,6 +823,7 @@ class Hy4BatchEngine:
                 self._exit_solo()
             if self.solo is None:
                 self._enter_solo(slot)
+            self._solo_check()
             out = {slot: self.dec.run(list(ids), logits_rows="all", p0=self.seqs[slot]["pos"]).reshape(len(ids), -1)}
         else:
             if self.solo is not None:
@@ -741,10 +909,13 @@ class Hy4BatchEngine:
         the matching prefix + the target's next token; sampled: exact speculative sampling (tt/engine.py)."""
         t0 = time.time()
         q, d, smp = self.seqs[slot], self.dec, self.seqs[slot]["smp"]
+        self._solo_check()
         drafts = d.draft(q["tok"], q["pos"], q["n"])[: self.k]
         rows = [q["tok"]] + drafts
         lgs = d.run(rows, logits_rows="all", p0=q["pos"])  # [k + 1, V]
         acc, emit = _accept(smp, lgs, drafts)
+        if SPEC_DBG:
+            self._dbg_spec("solo", slot, q, drafts, lgs, acc)
         q["toks"] += rows[: len(emit)]  # the accepted rows' tokens (fed at pos .. pos + acc)
         q["n"] = acc
         q["pos"] += len(emit)
@@ -756,6 +927,16 @@ class Hy4BatchEngine:
         self.stats["spec_emitted"] = self.stats.get("spec_emitted", 0) + len(emit)
         self.stats["spec_passes"] = self.stats.get("spec_passes", 0) + 1
         return emit
+
+    def _dbg_spec(self, kind, slot, q, drafts, lgs, acc):
+        """HY4_SPEC_DBG=1: drafts vs the target's greedy picks, the first 4 passes then every 128th per kind."""
+        c = self.__dict__.setdefault("_dbgc", {})
+        c[kind] = c.get(kind, 0) + 1
+        if c[kind] <= 4 or c[kind] % 128 == 0:
+            picks = lgs.argmax(-1).tolist()[: len(drafts) + 1]
+            logger.info(f"HY4DBG {kind} #{c[kind]} slot {slot} pos {q['pos']} n {q.get('n')} bonus {q['tok']} drafts "
+                        f"{drafts} picks {picks} acc {acc} greedy {q['smp'].greedy} solo {self.solo} "
+                        f"model.slot {self.model.slot} seqs {sorted(self.seqs)} idle {sorted(self.idle)}")
 
     # ------------------------------------------------------------------ batched speculative decoding
     def _set_hn(self, slots):
@@ -813,6 +994,8 @@ class Hy4BatchEngine:
             q = self.seqs[s]
             lgs = lo[q["lane"]]  # [K + 1, V]
             acc, emit = accs[i] if i in accs else job(s, dr)
+            if SPEC_DBG:
+                self._dbg_spec("bspec", s, q, dr, lgs, acc)
             p0, ln = q["pos"], d.lanes[q["lane"]]
             p1 = p0 + acc + 1  # rows p0 .. p0 + acc accepted
             ln["pos"] = p1
@@ -982,19 +1165,21 @@ class Hy4BatchEngine:
         dec.trace = self.trace
         logger.info(f"warm: eager batched passes done; {m.dram_report()}")
         steps = int(os.environ.get("HY4_WARM_STEPS", "3"))
-        self._warm_capture(solo, steps)
-        # the long chunks' prefill matmuls size their CBs to the L1 room (tt/common.py l1_cb_room), which the captures
-        # above lowered (their L1 residents): a 2048-row chunk at serve time compiled 3 programs and released every
-        # trace (mix 2026-11-23). Compile them in that L1 state now (one prefill past the dense regime), then capture
-        # again (the decoders release their traces at the next pass; the room is stable after: no further compiles)
-        if os.environ.get("HY4_WARM_POSTCAP", "1") == "1" and self.chunk + 1064 < m.max_ctx:
+        # captures in both regimes (slot 0 past the dense regime: its rows select, the passes' score width 2048, the
+        # drafts sparse; then slot 0 short: dense-only passes): served runs captured the regime the warm-up left out
+        # (and every draft row n) at serve time, up to 620 ms per step. The long chunks' prefill matmuls size their CBs
+        # to the L1 room (tt/common.py l1_cb_room), which the captures lower (their L1 residents): the first round's
+        # long prefill compiles them (the decoders release their traces at the next pass); rounds repeat until one
+        # compiles nothing (the room is stable then)
+        L = 2 * self.chunk + 1000 if 2 * self.chunk + 1064 < m.max_ctx else self.chunk + 1000
+        prompts = [rnd(L), rnd(int(prompt_len or 64))] if self.chunk + 1064 < m.max_ctx else [rnd(int(prompt_len or 64))]
+        for it in range(int(os.environ.get("HY4_WARM_ROUNDS", "3"))):
             n0 = int(m.mesh.num_program_cache_entries())
-            self.prefill(0, rnd(self.chunk + 1000))
-            self.prefill(0, rnd(int(prompt_len or 64)))  # (slot 0 short again: the dense traces, as captured above)
+            self._warm_capture(solo, steps, prompts)
             n1 = int(m.mesh.num_program_cache_entries())
-            logger.info(f"warm: post-capture long prefill compiled {n1 - n0} programs")
-            if n1 != n0:
-                self._warm_capture(solo, steps)
+            logger.info(f"warm: capture round {it}: {n1 - n0} programs compiled")
+            if n1 == n0:
+                break
         for s in range(self.S):
             self.finish(s)
             m.set_slot(s)
@@ -1011,24 +1196,27 @@ class Hy4BatchEngine:
         logger.info(f"Hy4 batch engine warm-up {time.time() - t0:.1f} s ({self.S} slots, widths {widths}, "
                     f"{len(dec.btraces)} batched traces, {len(dec.traces)} single)")
 
-    def _warm_capture(self, solo, steps):
-        """The traced passes of warm(): every batch size, the batched spec, the single path (both regimes, every score
-        bucket)."""
+    def _warm_capture(self, solo, steps, prompts=(None,)):
+        """The traced passes of warm(): per slot-0 prompt (None: as it is) every batch size, the batched spec, the
+        single path (both regimes, every score bucket)."""
         dec = self.dec
-        for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
-            self._warm_spec(solo)
-        for R in range(1, self.S + 1):
-            for _ in range(steps):
-                self.step({s: (None, None, False) for s in range(R)})
-        self._warm_bspec([0], steps=steps + 1)
-        for r in solo[:2]:  # capture the single-path traces of both regimes
-            for _ in range(steps):
-                self.step(r)
-        for b in dec.buckets[1:] if solo else []:  # and of every larger score bucket
-            dec.min_bucket = b
-            for _ in range(steps):
-                self.step(solo[0])
-        dec.min_bucket = 0
+        for ids in prompts:
+            if ids is not None:
+                self.prefill(0, ids)
+            for _ in range(2):  # spec first: the drafter's row slices compile at its first traced draft (a trace release)
+                self._warm_spec(solo)
+            for R in range(1, self.S + 1):
+                for _ in range(steps):
+                    self.step({s: (None, None, False) for s in range(R)})
+            self._warm_bspec([0], steps=steps + 1)
+            for r in solo[:2]:  # capture the single-path traces of both regimes
+                for _ in range(steps):
+                    self.step(r)
+            for b in dec.buckets[1:] if solo else []:  # and of every larger score bucket
+                dec.min_bucket = b
+                for _ in range(steps):
+                    self.step(solo[0])
+            dec.min_bucket = 0
 
     def _warm_spec(self, solo):
         """k > 0: the solo path's verify passes (k + 1 rows) and drafts, both regimes (slot 0 selects, slot 1 dense)
@@ -1043,7 +1231,19 @@ class Hy4BatchEngine:
                     self.step(solo[1] if len(solo) > 1 and r is solo[0] else solo[0])
                 for _ in range(3):
                     self.step(r)
+                self._warm_drafts()
         dec.min_bucket = 0
+
+    def _warm_drafts(self):
+        """The solo sequence's drafts after its last verify pass at every accepted-row count n (a draft slices row n of
+        the pass's hidden rows / selections: a program and a trace per n; served runs met the n's the warm-up's random
+        tokens never accepted). Drafts only: the sequence's state is untouched (its next step drafts again)."""
+        d, s = self.dec, self.solo
+        if s is None or not self.k or getattr(d, "last_key", (0,))[0] != self.k + 1:
+            return
+        q = self.seqs[s]
+        for n in range(self.k + 1):
+            d.draft(q["tok"], q["pos"], n)
 
     def _warm_bspec(self, widths, steps=3):
         """Batched spec (HY4_BSPEC): per listed batch size and score width bucket a plain pass, then verify passes (the
