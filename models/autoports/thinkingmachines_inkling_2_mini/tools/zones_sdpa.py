@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Decode SDPA (tt/attn/inkling_sdpa.py) device zones: one decode row of a sliding (W 1024) or global layer at position
 POS, run N times with the device profiler; per zone (S_*, and the RISC kernels): mean us, max over cores.
-env: TP (1: 24 q / 8 kv heads), POS (300), W (1024; 0 = global), N (6)"""
+env: TP (1: 24 q / 8 kv heads), POS (300), W (1024; 0 = global), N (6), B (0: one decode row; > 0: B users at POS,
+POS + 7, .. as the batched decoder calls it); the CSV under TT_METAL_PROFILER_DIR when set (a private profiler dir)"""
 
 import collections
 import csv
+import glob
 import os
 import sys
 
@@ -17,13 +19,20 @@ import test_sdpa_device as T  # noqa: E402
 
 def main():
     dev = ttnn.open_device(device_id=0)
-    pos, W = int(os.environ.get("POS", "300")), int(os.environ.get("W", "1024"))
+    pos, W, B = int(os.environ.get("POS", "300")), int(os.environ.get("W", "1024")), int(os.environ.get("B", "0"))
     for i in range(int(os.environ.get("N", "6"))):
-        T.run_case(dev, W, T.E, [pos], seed=i)
+        if B:
+            T.run_case(dev, W, T.E, [pos + 7 * u for u in range(B)], seed=i, users=B)
+        else:
+            T.run_case(dev, W, T.E, [pos], seed=i)
     ttnn.synchronize_device(dev)
     ttnn.ReadDeviceProfiler(dev)
     ttnn.close_device(dev)
-    rows = list(csv.reader(open("/opt/tt-metal/generated/profiler/.logs/profile_log_device.csv")))
+    path = "/opt/tt-metal/generated/profiler/.logs/profile_log_device.csv"
+    if os.environ.get("TT_METAL_PROFILER_DIR"):
+        path = glob.glob(os.environ["TT_METAL_PROFILER_DIR"] + "/**/profile_log_device.csv", recursive=True,
+                         include_hidden=True)[0]
+    rows = list(csv.reader(open(path)))
     freq = 1350.0
     try:
         freq = float(rows[0][0].split("CHIP_FREQ[MHz]:")[1].split(",")[0].strip())

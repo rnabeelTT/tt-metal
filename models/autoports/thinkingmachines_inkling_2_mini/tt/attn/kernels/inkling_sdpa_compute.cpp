@@ -39,6 +39,9 @@
 #ifndef SDPA_MI
 #define SDPA_MI 1
 #endif
+#ifndef SDPA_FIN2
+#define SDPA_FIN2 0
+#endif
 
 // matmul_blocks (stock compute_common.hpp) for one 1 x N subblock per in0 tile row (subblock_h 1, one in1 subblock,
 // one K block), with in0 starting at tile in0_off and the added mask block offset by row * mask_row_stride: the band
@@ -187,8 +190,9 @@ void kernel_main() {
     const uint32_t Sk_chunk_t_dynamic = get_dynamic_Sk_chunk_t<Sk_chunk_t, max_dynamic_chunk_size>(max_pos);
     const uint32_t k_chunk_size_dynamic = Sk_chunk_t_dynamic * tt::constants::TILE_HEIGHT;
     const uint32_t W_eff = W == 0 ? 0 : max_pos - min_lo + 1;
+    uint32_t cores_eff;
     auto [PSt, k_num_chunks, k_chunk_start, k_chunk_end, window_start_unaligned, window_start_chunk] =
-        get_workload_for_core(max_pos, 0, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff);
+        inkling_workload(max_pos, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff, cores_eff);
     if (k_chunk_start == k_chunk_end) {
         continue;
     }
@@ -198,7 +202,7 @@ void kernel_main() {
     uint32_t num_active_rounds = 0;
     for (uint32_t r = 0; r < MAX_TREE_REDUCTION_ROUNDS; ++r) {
         const uint32_t child_id = children_per_round[r];
-        if (child_id != UINT32_MAX && child_id < k_num_chunks) {
+        if (child_id != UINT32_MAX && child_id < k_num_chunks && child_id < cores_eff) {
             active_children_per_round[r] = child_id;
             num_active_children++;
             num_active_rounds = r + 1;
@@ -211,9 +215,7 @@ void kernel_main() {
     CircularBuffer(cb_q_in).wait_front(q_chunk_tiles);
 
     // dynamic matmul configuration (stock DYNAMIC_CHUNK_SIZE path; also exact for a fixed Sk <= dst)
-    const uint32_t out_in0_block_w_dynamic = Sk_chunk_t_dynamic;
     const uint32_t out_num_blocks_dynamic = 1;
-    const uint32_t qk_chunk_tiles_dynamic = Sq_chunk_t * Sk_chunk_t_dynamic;
 
     uint32_t cb_cur_max = cb_max_1;
     uint32_t cb_prev_max = cb_max_2;
@@ -226,8 +228,14 @@ void kernel_main() {
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
         reconfig_data_format(cb_k_in, cb_q_in);
         pack_reconfig_data_format(cb_qk_im);
-        const bool masked = inkling_chunk_masked(k_chunk, k_chunk_size_dynamic, min_lim, W, max_lo);
-        const bool band = inkling_chunk_band(k_chunk, k_chunk_size_dynamic, min_lim, E);
+        uint32_t tb, Skc;  // this chunk's key tiles (SDPA_TRIM: the last one only its live tiles)
+        inkling_chunk_tiles(
+            k_chunk, Sk_chunk_t_dynamic, max_pos, min_lo, k_chunk + 1 == k_chunk_end, tb, Skc, k_num_chunks,
+            window_start_chunk, cores_eff);
+        const bool masked = inkling_tiles_masked(tb, Skc, min_lim, W, max_lo);
+        const bool band = inkling_tiles_band(tb, Skc, min_lim, E);
+        const uint32_t out_in0_block_w_dynamic = Skc;
+        const uint32_t qk_chunk_tiles_dynamic = Sq_chunk_t * Skc;
 
         {
         DeviceZoneScopedN("S_C_BIAS");
@@ -238,9 +246,9 @@ void kernel_main() {
             pack_reconfig_data_format(cb_bias);
             for (uint32_t m = 0; m < MI; ++m) {
                 inkling_matmul_rows(
-                    cb_rq, cb_tbl, cb_bias, 1, Sk_chunk_t_dynamic, R, false, masked, cb_mask_in, cb_zero_in, m * R, 0);
+                    cb_rq, cb_tbl, cb_bias, 1, Skc, R, false, masked, cb_mask_in, cb_zero_in, m * R, 0);
                 if (masked) {
-                    CircularBuffer(cb_mask_in).pop_front(Sk_chunk_t_dynamic);
+                    CircularBuffer(cb_mask_in).pop_front(Skc);
                 }
             }
             CircularBuffer(cb_bias).wait_front(qk_chunk_tiles_dynamic);
@@ -253,8 +261,7 @@ void kernel_main() {
         DeviceZoneScopedN("S_C_QK");
         /* QK = Q_CHUNK @ K_CHUNK (+ each Q tile row's bias block, added on DST) */
         inkling_matmul_rows(
-            cb_q_in, cb_k_in, cb_qk_im, Sq_chunk_t, Sk_chunk_t_dynamic, DHt, true, band, cb_bias, cb_zero_in, 0,
-            Sk_chunk_t_dynamic);
+            cb_q_in, cb_k_in, cb_qk_im, Sq_chunk_t, Skc, DHt, true, band, cb_bias, cb_zero_in, 0, Skc);
         if (band) {
             CircularBuffer(cb_bias).pop_front(qk_chunk_tiles_dynamic);
         }
@@ -264,18 +271,18 @@ void kernel_main() {
         reconfig_data_format(cb_qk_im, cb_identity_scale_in);
         pack_reconfig_data_format(cb_cur_max);
         reduce_c<PoolType::MAX, ReduceDim::REDUCE_ROW, cb_qk_im, cb_identity_scale_in, Sq_chunk_t, vector_mode>(
-            cb_cur_max, cb_prev_max, Sk_chunk_t_dynamic, k_chunk > k_chunk_start);
+            cb_cur_max, cb_prev_max, Skc, k_chunk > k_chunk_start);
         reconfig_data_format(cb_qk_im, cb_cur_max);
         pack_reconfig_data_format(cb_qk_im);
         /* QK = exp((QK - cur_max) * scale) */
         sub_exp_block_bcast_cols_inplace<cb_qk_im, Sq_chunk_t, scale_fp32, true, false, vector_mode>(
-            cb_cur_max, cb_cur_sum, Sk_chunk_t_dynamic);
+            cb_cur_max, cb_cur_sum, Skc);
         CircularBuffer(cb_qk_im).wait_front(qk_chunk_tiles_dynamic);
 
         reconfig_data_format(cb_qk_im, cb_identity_scale_in);
         pack_reconfig_data_format(cb_cur_sum);
         reduce_c<PoolType::SUM, ReduceDim::REDUCE_ROW, cb_qk_im, cb_identity_scale_in, Sq_chunk_t, vector_mode>(
-            cb_cur_sum, cb_cur_sum, Sk_chunk_t_dynamic, false);
+            cb_cur_sum, cb_cur_sum, Skc, false);
 
         }
         {
@@ -289,7 +296,7 @@ void kernel_main() {
             cb_out_mm,
             Sq_chunk_t,
             vDHt,
-            Sk_chunk_t_dynamic,
+            Skc,
             out_num_blocks_dynamic,
             out_in0_num_subblocks,
             out_in1_num_subblocks,
@@ -346,10 +353,9 @@ void kernel_main() {
             if (active_children_per_round[round] == UINT32_MAX) {
                 continue;
             }
-            move_block<true>(cb_l_in, cb_prev_sum_2, Sq_chunk_t);
             correction_block<scale_fp32, vector_mode>(
                 cb_m_in,
-                cb_prev_sum_2,
+                cb_l_in,
                 cb_cur_max,
                 cb_prev_max,
                 cb_cur_sum,
@@ -357,9 +363,8 @@ void kernel_main() {
                 cb_exp_max_diff,
                 cb_exp_max_diff_2,
                 Sq_chunk_t);
-            move_block<true>(cb_out_o, cb_out_accumulate_im_2, out_chunk_tiles);
             mul_block_bcast_cols_inplace<Sq_chunk_t, vDHt>(cb_out_accumulate_im, cb_exp_max_diff);
-            mul_block_bcast_cols_inplace<Sq_chunk_t, vDHt>(cb_out_accumulate_im_2, cb_exp_max_diff_2);
+            mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_o, cb_exp_max_diff_2, cb_out_accumulate_im_2);
             add_block_inplace<true>(cb_out_accumulate_im, cb_out_accumulate_im_2, out_chunk_tiles);
             CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
             CircularBuffer(cb_m_in).pop_front(Sq_chunk_t);
@@ -373,6 +378,20 @@ void kernel_main() {
     DeviceZoneScopedN("S_C_FIN");
     CircularBuffer(cb_sink).wait_front(Sq_chunk_t);
     if (is_tree_root) {
+#if SDPA_FIN2
+        /* Inkling-2 sink (a zero-value key with logit s per row): OUT = OUT_ACC / (SUM + exp((s - m) * scale)), the
+           same as rescaling to max(m, s) first (exp((m - m') * scale) cancels) in 4 steps instead of 9 */
+        reconfig_data_format(cb_sink, cb_prev_max);
+        pack_reconfig_data_format(cb_exp_max_diff_2);
+        sub_exp_block<scale_fp32>(cb_sink, cb_prev_max, cb_exp_max_diff_2, Sq_chunk_t);
+        reconfig_data_format(cb_prev_sum, cb_exp_max_diff_2);
+        pack_reconfig_data_format(cb_prev_sum);
+        add_block_inplace<true>(cb_prev_sum, cb_exp_max_diff_2, Sq_chunk_t);
+        reconfig_data_format(cb_prev_sum, cb_prev_sum);
+        recip_block_inplace(cb_prev_sum, Sq_chunk_t);
+        mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_accumulate_im, cb_prev_sum, cb_out_final);
+        CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
+#else
         /* Inkling-2 sink (the stock op's attention-sink step with a per-row sink): m' = max(m, s);
            SUM = SUM * exp((m - m') * scale) + exp((s - m') * scale); OUT_ACC *= exp((m - m') * scale) */
         reconfig_data_format(cb_sink, cb_prev_max);
@@ -398,12 +417,9 @@ void kernel_main() {
         reconfig_data_format(cb_prev_sum, cb_prev_sum);
         pack_reconfig_data_format(cb_prev_sum);
         recip_block_inplace(cb_prev_sum, Sq_chunk_t);
-        reconfig_data_format(cb_out_accumulate_im, cb_prev_sum);
-        pack_reconfig_data_format(cb_out_accumulate_im);
-        mul_block_bcast_cols_inplace<Sq_chunk_t, vDHt>(cb_out_accumulate_im, cb_prev_sum);
-        pack_reconfig_data_format(cb_out_final);
+        mul_block_bcast_cols<Sq_chunk_t, vDHt, false, false>(cb_out_accumulate_im, cb_prev_sum, cb_out_final);
         CircularBuffer(cb_prev_max).pop_front(Sq_chunk_t);
-        move_block<true>(cb_out_accumulate_im, cb_out_final, out_chunk_tiles);
+#endif
     } else if (has_parent) {
         if constexpr (MI == 1) {
             move_block<true>(cb_out_accumulate_im, cb_out_o, out_chunk_tiles);

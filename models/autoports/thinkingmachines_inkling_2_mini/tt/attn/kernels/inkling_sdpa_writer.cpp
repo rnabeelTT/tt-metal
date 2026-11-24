@@ -44,6 +44,11 @@ void kernel_main() {
     constexpr uint32_t W = get_compile_time_arg_val(9);  // sliding window (0 = global layer)
     constexpr uint32_t num_kv_heads_w = get_compile_time_arg_val(10);
     constexpr auto out_args = TensorAccessorArgs<11>();
+    // the bias-table tiles (read here, beside the masks: the reader's NOC streams K / V meanwhile)
+    constexpr uint32_t E = get_compile_time_arg_val(out_args.next_compile_time_args_offset());
+    constexpr uint32_t M_tiles = get_compile_time_arg_val(out_args.next_compile_time_args_offset() + 1);
+    constexpr auto tbl_args = TensorAccessorArgs<out_args.next_compile_time_args_offset() + 2>();
+    constexpr uint32_t cb_tbl = tt::CBIndex::c_11;  // per band chunk and item: R x Sk table tiles (row-major [j][t])
 
     constexpr uint32_t cb_mask_in = tt::CBIndex::c_3;
     constexpr uint32_t cb_identity_scale_in = tt::CBIndex::c_5;
@@ -77,6 +82,7 @@ void kernel_main() {
     arg_idx += num_cores_per_head;
     const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t tbl_addr = get_arg_val<uint32_t>(arg_idx++);
 
     // Semaphore encoding (stock op): each round counts in its own 4-bit field of the reducer semaphore
     constexpr uint32_t step_semaphore_inc[6] = {1, 16, 256, 4096, 65536, 1048576};
@@ -89,6 +95,20 @@ void kernel_main() {
         ckernel::ReduceDim::REDUCE_ROW,
         dataflow_kernel_lib::SUM_AND_MAX_REDUCE_FACTOR>();
     dataflow_kernel_lib::prepare_zero_tile<cb_zero_in>();
+#ifdef SDPA_NEG_OFF
+    // a fully masked bf16 tile, built while the positions are not yet known (past the broadcast slots of the scratch
+    // CB): the masks copy it (one L1 -> L1 read) instead of 512 RISC stores on the bias phase's path
+    uint32_t neg_l1 = 0;
+    {
+        CircularBuffer cb_scr(tt::CBIndex::c_10);
+        neg_l1 = ((cb_scr.get_write_ptr() + 63) & ~63u) + SDPA_NEG_OFF;
+        constexpr uint32_t NEGW = mask_neg_bf16 | (mask_neg_bf16 << 16);
+        volatile tt_l1_ptr uint32_t* p = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(neg_l1);
+        for (uint32_t w = 0; w < 512; ++w) {
+            p[w] = NEGW;
+        }
+    }
+#endif
 
     // Work units: unit = item * num_kv_heads + kv head. A unit is one 32-row Q tile (item = R consecutive rows of the
     // sequence x the G query heads of one kv head), computed by the num_cores_per_head cores of a group (decode: one
@@ -126,8 +146,9 @@ void kernel_main() {
     const uint32_t Sk_chunk_t_dynamic = get_dynamic_Sk_chunk_t<Sk_chunk_t, max_dynamic_chunk_size>(max_pos);
     const uint32_t k_chunk_size_dynamic = Sk_chunk_t_dynamic * tt::constants::TILE_HEIGHT;
     const uint32_t W_eff = W == 0 ? 0 : max_pos - min_lo + 1;
+    uint32_t cores_eff;
     auto [PSt, k_num_chunks, k_chunk_start, k_chunk_end, window_start_unaligned, window_start_chunk] =
-        get_workload_for_core(max_pos, 0, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff);
+        inkling_workload(max_pos, core_num_in_reduce, num_cores_per_head, k_chunk_size_dynamic, W_eff, cores_eff);
     if (k_chunk_start == k_chunk_end) {
         continue;  // no data: not part of the reduction
     }
@@ -138,7 +159,7 @@ void kernel_main() {
     uint32_t num_active_rounds = 0;
     for (uint32_t r = 0; r < MAX_TREE_REDUCTION_ROUNDS; ++r) {
         const uint32_t child_id = children_per_round[r];
-        if (child_id != UINT32_MAX && child_id < k_num_chunks) {
+        if (child_id != UINT32_MAX && child_id < k_num_chunks && child_id < cores_eff) {
             active_children_per_round[r] = child_id;
             num_active_children++;
             num_active_rounds = r + 1;
@@ -154,18 +175,55 @@ void kernel_main() {
     static_assert(mask_tile_bytes == 2048, "bf16 32x32 mask tiles");
     constexpr uint32_t NEG2 = mask_neg_bf16 | (mask_neg_bf16 << 16);
     CircularBuffer cb_mask(cb_mask_in);
+    CircularBuffer cb_tblc(cb_tbl);
+    const auto tbl_reader = TensorAccessor(tbl_args, tbl_addr, mask_tile_bytes);
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
-        if (!inkling_chunk_masked(k_chunk, k_chunk_size_dynamic, min_lim, W, max_lo)) {
-            continue;
+        uint32_t tb, Skc;
+        inkling_chunk_tiles(
+            k_chunk, Sk_chunk_t_dynamic, max_pos, min_lo, k_chunk + 1 == k_chunk_end, tb, Skc, k_num_chunks,
+            window_start_chunk, cores_eff);
+        const bool masked = inkling_tiles_masked(tb, Skc, min_lim, W, max_lo);
+        const bool band = inkling_tiles_band(tb, Skc, min_lim, E);
+        for (uint32_t mi = 0; mi < MI && (masked || band); ++mi) {
+        if (band) {
+            // R x Sk table tiles: row j, key tile b = tb + t -> T[phi_j][m = a_j - b] (zero outside [0, M))
+            const uint32_t n = R * Skc;
+            cb_tblc.reserve_back(n);
+            uint32_t idx = 0;
+            for (uint32_t j = 0; j < R; ++j) {
+                const uint32_t a = lim[mi * R + j] >> 5, phi = lim[mi * R + j] & 31;
+                for (uint32_t t = 0; t < Skc; ++t, ++idx) {
+                    const uint32_t b = tb + t;
+                    if (b <= a && a - b < M_tiles) {
+                        noc_async_read(
+                            tbl_reader.get_noc_addr(phi * M_tiles + (a - b)),
+                            cb_tblc.get_write_ptr() + idx * mask_tile_bytes,
+                            mask_tile_bytes);
+                    } else {
+                        fill_tile_zeros<mask_tile_bytes, false>(noc, cb_tbl, idx);
+                    }
+                }
+            }
+            if (!masked) {
+                noc.write_zeros_l1_barrier();
+                noc_async_read_barrier();
+                cb_tblc.push_back(n);
+            }
         }
-        for (uint32_t mi = 0; mi < MI; ++mi) {
-        cb_mask.reserve_back(Sk_chunk_t_dynamic);
+        if (!masked) {
+            continue;
+        }  // (a masked chunk is a band chunk: its table reads land while the mask is built, both pushed below)
+        cb_mask.reserve_back(Skc);
         volatile tt_l1_ptr uint32_t* m = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(cb_mask.get_write_ptr());
         // a fully masked tile is written once per block (RISC stores) and copied (L1 -> L1 NOC reads) to the others;
         // a partly masked tile: zeros (NOC), then the live rows (R x G per item: the rows past them are never read)
+#ifdef SDPA_NEG_OFF
+        uint32_t neg_tile = neg_l1;
+#else
         uint32_t neg_tile = 0;
-        for (uint32_t t = 0; t < Sk_chunk_t_dynamic; ++t) {
-            const uint32_t base = (k_chunk * Sk_chunk_t_dynamic + t) * 32;  // first position of this tile
+#endif
+        for (uint32_t t = 0; t < Skc; ++t) {
+            const uint32_t base = (tb + t) * 32;  // first position of this tile
             if (base + 31 <= min_lim && base >= max_lo) {  // every row attends the whole tile
                 fill_tile_zeros<mask_tile_bytes, false>(noc, cb_mask_in, t);
             } else if (base > max_pos || base + 31 < min_lo) {  // no row attends any of it
@@ -202,7 +260,10 @@ void kernel_main() {
         }
         noc.write_zeros_l1_barrier();
         noc_async_read_barrier();
-        cb_mask.push_back(Sk_chunk_t_dynamic);
+        if (band) {
+            cb_tblc.push_back(R * Skc);
+        }
+        cb_mask.push_back(Skc);
         }  // items
     }
 

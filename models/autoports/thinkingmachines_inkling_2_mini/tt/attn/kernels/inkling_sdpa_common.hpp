@@ -14,6 +14,8 @@
 
 #include <stdint.h>
 
+#include <tuple>
+
 constexpr uint32_t ROWS_SDPA_MAX_ROWS = 32;
 
 // lim[0..R) = each row's last attended position; returns false when every row is skipped. max_pos = the newest
@@ -83,4 +85,65 @@ inline void rows_sdpa_row_runs(uint32_t src, uint32_t dst, uint32_t n, Fn fn) {
         dst += k;
         n -= k;
     }
+}
+
+// SDPA_TRIM (decode: one unit per core): a core's LAST chunk covers only its key tiles some row attends, [tb, tb + n):
+// the newest chunk's tiles past max_pos and the window's first chunk's tiles before min_lo are fully masked (they add
+// exact zeros), so they are neither read nor computed. Only the last chunk of a core is trimmed: every CB block before
+// it keeps the full size (a smaller block last never wraps a CB).
+#ifndef SDPA_TRIM
+#define SDPA_TRIM 0
+#endif
+#ifndef SDPA_BALANCE
+#define SDPA_BALANCE 0
+#endif
+// SDPA_BALANCE (with SDPA_TRIM): when every core holds one chunk (k_num_chunks <= cores per unit), the live tiles
+// [min_lo / 32, max_pos / 32] are split evenly over the same number of chunks (k_rel = k_chunk - the window's first
+// chunk): the newest chunk otherwise holds a few live tiles and the others a full chunk each
+inline void inkling_chunk_tiles(
+    uint32_t k_chunk, uint32_t Sk, uint32_t max_pos, uint32_t min_lo, bool last, uint32_t& tb, uint32_t& n,
+    uint32_t k_num_chunks = 0, uint32_t window_start_chunk = 0, uint32_t cores = 0) {
+    if (SDPA_TRIM && SDPA_BALANCE && k_num_chunks <= cores) {
+        const uint32_t first = min_lo >> 5, T = (max_pos >> 5) + 1 - first, k = k_chunk - window_start_chunk;
+        tb = first + k * T / k_num_chunks;
+        n = first + (k + 1) * T / k_num_chunks - tb;
+        return;
+    }
+    tb = k_chunk * Sk;
+    uint32_t te = tb + Sk;
+    if (SDPA_TRIM && last) {
+        const uint32_t a = min_lo >> 5, b = (max_pos >> 5) + 1;
+        tb = a > tb ? a : tb;
+        te = b < te ? b : te;
+    }
+    n = te - tb;
+}
+
+// the mask / band tests on a chunk's tiles [tb, tb + n) (inkling_chunk_masked / inkling_chunk_band on whole chunks)
+inline bool inkling_tiles_masked(uint32_t tb, uint32_t n, uint32_t min_lim, uint32_t W, uint32_t max_lo) {
+    return (tb + n) * 32 - 1 > min_lim || (W != 0 && tb * 32 < max_lo);
+}
+inline bool inkling_tiles_band(uint32_t tb, uint32_t n, uint32_t min_lim, uint32_t E) {
+    return (tb + n) * 32 - 1 + E > min_lim;
+}
+
+// SDPA_MU_MIN (multi-user decode split over cores, MU_SPLIT): a unit with at most SDPA_MU_MIN chunks runs on its
+// root core alone, every chunk in order (the unsplit program's arithmetic: short contexts stay bitwise); longer ones
+// split over the unit's cores (the stock workload). cores_eff = the cores of the unit with work allowed.
+#ifndef SDPA_MU_MIN
+#define SDPA_MU_MIN 0
+#endif
+inline std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> inkling_workload(
+    uint32_t max_pos, uint32_t core, uint32_t cores, uint32_t chunk_size, uint32_t W_eff, uint32_t& cores_eff) {
+    auto w = get_workload_for_core(max_pos, 0, core, cores, chunk_size, W_eff);
+    cores_eff = cores;
+    if (SDPA_MU_MIN && std::get<1>(w) <= SDPA_MU_MIN) {
+        cores_eff = 1;
+        if (core == 0) {
+            w = get_workload_for_core(max_pos, 0, 0, 1, chunk_size, W_eff);
+        } else {
+            std::get<3>(w) = std::get<2>(w);
+        }
+    }
+    return w;
 }

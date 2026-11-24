@@ -384,6 +384,29 @@ cores per head) x kv heads) now assumes 16: K / V 6.8 -> 1.4 us per chunk, SDPA 
 300); long contexts keep the stock throttle (global layer at 60K: 385 us either way; a fixed looser throttle made the
 slowest core 385 -> 413 us), prefill too. One die 22.3 -> 21.9 ms, TP4 14.4 / 21.3 -> 14.0 / 20.9 ms (B=1 / 4); bitwise. Note: the device profiler writes one CSV in the shared generated mount:
 profile on one die at a time.
+Decode SDPA fixed latency (tools/zones_sdpa.py with B= users; one die, position 300, 256-key
+chunks): of ~21 us, ~4.5 us was the reader prologue (every program core read the same 64-byte cur_pos stick, then the
+busy ones the same Q / Rq / sink rows: tiny DRAM reads serialized at one bank, ~3 + ~2 us), the newest chunk computed /
+read whole though it held a few live tiles, and finalize / reduction ~6 us of 1-tile compute steps. Now (all bitwise,
+I2M_SDPA_* switches): program core 0 reads every item's position stick, a 512-byte page-table prefix and the Q / Rq /
+sink tiles in one round trip and multicasts them (semaphore 1; BCAST); a core's last chunk reads / computes only its
+live key tiles (TRIM; QK CB doubled so the smaller in-place block never wraps); the bias-table tiles are read by the
+writer beside the masks (its fully masked tile prebuilt while it waits for the positions); Q rows are not zero-filled
+for R = 1 (rows are independent and never written out); the reduction / finalize lose 3 tile copies; multi-user decode
+splits each (user, kv head) over grid / units cores when it has > 4 chunks (MU_SPLIT / MU_MIN: <= 4 stays on one core,
+bitwise). Kernel spans base -> new (us): TP1 B=1 sliding / global 300 21.2 / 21.2 -> 17.8 / 17.7, B=4 27.8 -> 24.2;
+TP2 B=1 / 4 19.9 / 24.6 -> 16.7 / 21.7; TP4 20.5 / 24.0 -> 17.0 / 21.5; TP1 global 4K B=1 / 4 68.9 / 131.0 -> 57.8 /
+121.5, 8K 87.7 / 243.9 -> 77.1 / 204.4, sliding 8K 38.0 -> 26.8, 32K 219.8 / 899.0 -> 210.3 / 732.3; TP2 / TP4 32K
+131.8 / 96.8 -> 122.8 / 88.2. Traced (test_batched, prefixes 64..200) one die B=1 / 4 20.7 / 35.6 -> 20.4 / 35.4 ms,
+TP2 15.7 / 24.6 -> 15.4 / 24.5; outputs and the decode eval identical (TP2 B=1 0.9639 / 0.9945 / 0.0121 to the last
+digit). Measured, off by default: BALANCE (one chunk per core: the live tiles split evenly, -2 us at 300) costs decode
+KL (TP2 B=1 0.0121 -> 0.0168), the 128-key lesson again; FIN2 (sink + normalization as O / (l + exp(s - m)), 4 compute
+steps instead of 9, -1.5 us) is equal at op level (mean 1 - pcc 5.50e-4 vs 5.54e-4) but its evals were mixed (TP2 B=1
+KL 0.0121 -> 0.0104, one die B=4 0.0123 -> 0.0171); the split at short contexts (always on) cost B=4 top-1 ~0.4 pt.
+Not taken: table / K / V reads in flight together (transaction ids): one core's reads do not get faster, K lands later;
+the throttle 2x / 4x looser at 4K B=4 / 32K B=1: 121 -> 115 / 210 -> 211 us. What is left at 300 positions: core 0's
+round trip + multicast 1.7 us, Q placement 0.6, the full first chunk on the critical core (~6 us), the reduction ~2.5
+and finalize ~3 us.
 Streamed q readers per bank: 2 on one die (3 / 4: 22.4 / 23.1 vs 21.9 ms), 4 on more dies (TP2 17.6 -> 17.2, TP4 14.0 /
 20.9 -> 13.9 / 20.8 ms). Not kept: o_proj streamed the same way (K = 3072: one die 21.9 -> 22.3, TP2 17.2 -> 17.6 ms).
 Single dies of the box run independent jobs (the p150 mesh graph descriptor, ~/inkling2-work/jobs/die.sh).

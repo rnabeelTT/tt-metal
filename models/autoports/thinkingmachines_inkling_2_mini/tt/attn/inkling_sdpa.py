@@ -192,6 +192,12 @@ def inkling_sdpa_decode(
             repr(out_memory_config),
             bool(pt_per_item),
             mi,
+            MU_SPLIT,
+            MU_MIN,
+            TRIM,
+            BCAST,
+            BALANCE,
+            FIN2,
             tuple(repr(t.memory_config()) for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)),
         )
         st = _PF_CACHE.get(key)
@@ -276,11 +282,17 @@ def _build_and_run(
     """The program for one call (static_only: its static parts, no launch; _pf_static)."""
     grid = mesh.compute_with_storage_grid_size()
     n_units = n_items // mi * NKV
+    mu_min = 0
     if n_items == 1:  # decode / verify: groups = kv heads, cpk cores per group split the K span (tree reduction)
         cpk = min((grid.x * grid.y) // NKV, 1 << MAX_TREE_ROUNDS)  # cores per kv head
         if cpk < 1:
             raise ValueError(f"rows_sdpa_decode: {NKV} kv heads on a {grid.x}x{grid.y} grid")
         n_groups = NKV
+    elif MU_SPLIT and pt_per_item and mi == 1 and 2 * n_units <= grid.x * grid.y:
+        # multi-user decode with room for >= 2 cores per (user, kv head): split each unit's K span as for one item
+        cpk = min((grid.x * grid.y) // n_units, 1 << MAX_TREE_ROUNDS)
+        n_groups = n_units
+        mu_min = MU_MIN
     else:  # prefill: one core per group, the units round-robin over the groups
         cpk = 1
         n_groups = min(grid.x * grid.y, n_units)
@@ -300,9 +312,22 @@ def _build_and_run(
     )
 
     Sk_cb = Sk_fixed or DST_TILES
+    # one unit per core (decode): a core's last chunk reads / computes only its live key tiles (kernels: SDPA_TRIM)
+    trim = TRIM and cpk > 1 and Sk_cb in (1, 2, 4, 8)
+    # one unit per core (decode): core 0 reads every item's position / page-table prefix / Q / Rq / sink and multicasts
+    # them to the program's cores (kernels: SDPA_BCAST); per item a slot of the scratch CB
+    bcast = BCAST and cpk > 1 and mi == 1
+    pt_pre = min(BCAST_PT, _align(int(page_table.shape[-1]) * 4))
+    slot = _align(R * 4) + pt_pre + R * (DHt + 2) * 2048
+    # (+ one tile past the slots: the writer's fully masked tile)
+    scr_pages = -(-(n_items * slot + 128) // 2048) + 1 if bcast else R * (DHt + 2) + 1
+    rects = _mcast_rects(noc, grid.x) if bcast else []
     bf, bt = ttnn.bfloat16, 2048
     kt, vt = _tile_bytes(k_cache.dtype), _tile_bytes(v_cache.dtype)
     pos_stick = _align(R * 4)
+    defs = _mi_defines(mi, pos_stick, trim, bcast, pt_pre) + [("SDPA_MU_MIN", str(mu_min))]
+    if bcast:
+        defs.append(("SDPA_NEG_OFF", str(_align(n_items * slot))))
     pt_stick = _align(int(page_table.shape[-1]) * 4)
     cbs = [
         _cb(cr, 0, bf, bt, mi * DHt),  # q (gathered; mi items' tile rows)
@@ -318,7 +343,7 @@ def _build_and_run(
         _cb(cr, 7, bf, bt, 1),  # child sum
         _cb(cr, 8, ttnn.uint32, pos_stick, mi),  # cur_pos (writer)
         _cb(cr, 9, ttnn.uint32, pt_stick, 1),  # page-table row
-        _cb(cr, 10, bf, bt, R * DHt + 1),  # q scratch (every row's tile row; + 64-byte alignment slack)
+        _cb(cr, 10, bf, bt, scr_pages),  # q / rq / sink scratch (+ 64-byte alignment slack) or the broadcast slots
         _cb(cr, 12, bf, bt, 1),  # zero tile
         _cb(cr, 15, ttnn.uint32, pos_stick, mi),  # cur_pos (compute)
         _cb(cr, 16, bf, bt, DHt),  # O to the parent / from a child
@@ -328,7 +353,7 @@ def _build_and_run(
         _cb(cr, 21, bf, bt, mi),
         _cb(cr, 22, bf, bt, mi),
         _cb(cr, 23, bf, bt, DHt),
-        _cb(cr, 24, bf, bt, mi * Sk_cb),  # QK / P
+        _cb(cr, 24, bf, bt, mi * Sk_cb * (2 if trim else 1)),  # QK / P (trim: a smaller last block never wraps)
         _cb(cr, 25, bf, bt, mi * DHt),
         _cb(cr, 26, bf, bt, mi * DHt),
     ] + [_cb(cr, i, bf, bt, mi) for i in range(27, 32)]
@@ -348,6 +373,7 @@ def _build_and_run(
         ttnn.deallocate(o_ref)
     else:
         wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
+    wr_ct += [extent, M_tiles] + ttnn.TensorAccessorArgs(table).get_compile_time_args()
     cp_ct = [DHt, DHt, Sk_fixed, DST_TILES, cpk, R, struct.unpack("<I", struct.pack("<f", float(scale)))[0], DST_TILES]
     cp_ct += [window, extent, G]
 
@@ -366,6 +392,7 @@ def _build_and_run(
                     + [p.y for p in group]
                     + [n_groups, n_units],
                     [c, int(is_root), parent] + children + [g, n_groups, n_units],
+                    [len(rects)] + [v for r in rects for v in r],
                 )
             )
         return dict(
@@ -380,7 +407,7 @@ def _build_and_run(
             n_units=n_units,
             out_shape=out_shape,
             out_mc=out_mc,
-            defs=_mi_defines(mi, pos_stick),
+            defs=defs,
         )
     rd_rt, wr_rt, cp_rt = [], [], []
     for i in range(n_cores):
@@ -403,17 +430,18 @@ def _build_and_run(
                 n_units,
                 sink.buffer_address(),
             ]
+            + [len(rects)]
+            + [v for r in rects for v in r]
         )
         wr_rt.append(
             [out.buffer_address(), g, c, int(is_root), parent, send]
             + children
             + [p.x for p in group]
             + [p.y for p in group]
-            + [n_groups, n_units]
+            + [n_groups, n_units, table.buffer_address()]
         )
         cp_rt.append([c, int(is_root), parent] + children + [g, n_groups, n_units])
 
-    defs = _mi_defines(mi, pos_stick)
 
     def dm(source, ct, rt, riscv, noc_id):
         return ttnn.KernelDescriptor(
@@ -450,7 +478,8 @@ def _build_and_run(
             config=cfg,
         ),
     ]
-    semaphores = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, cr, 0)]
+    # 0: the tree reduction (writer), 1: core 0's broadcast of the positions / Q landed (reader, SDPA_BCAST)
+    semaphores = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, cr, 0) for i in range(2)]
     program = ttnn.ProgramDescriptor(kernels=kernels, semaphores=semaphores, cbs=cbs)
     ttnn.generic_op([q, k_cache, v_cache, cur_pos, page_table, rq, table, sink, out], program)
     return out
@@ -460,12 +489,53 @@ def _build_and_run(
 # (cores, CBs, compile-time args, the per-core non-address arguments, the compute kernel's arguments) are built once per
 # shape key and the program carries a stable custom hash (generic_op then skips hashing the descriptor). The same
 # program as before: ~1.5 ms of Python per call (473 calls per 16K prompt) was its construction.
+# I2M_SDPA_TRIM (default 1): skip the fully masked key tiles of a decode core's last chunk (bitwise)
+TRIM = __import__("os").environ.get("I2M_SDPA_TRIM", "1") == "1"
+# I2M_SDPA_BCAST (default 1): decode positions / Q read once by core 0 and multicast (bitwise)
+BCAST = __import__("os").environ.get("I2M_SDPA_BCAST", "1") == "1"
+BCAST_PT = 512  # page-table bytes per item in the broadcast (128 blocks: 8K positions at 64-row blocks)
+# I2M_SDPA_BALANCE (default 0): with one chunk per core, the live key tiles split evenly over the chunks (same count;
+# not bitwise: the partition boundaries move)
+BALANCE = __import__("os").environ.get("I2M_SDPA_BALANCE", "0") == "1"
+# I2M_SDPA_FIN2 (default 0): the sink and the normalization in 4 compute steps (O / (l + exp(s - m))) instead of 9 (not
+# bitwise: fewer roundings)
+FIN2 = __import__("os").environ.get("I2M_SDPA_FIN2", "0") == "1"
+# I2M_SDPA_MU_SPLIT (default 1): multi-user decode (pt_per_item, few units) splits each (user, kv head) over cores
+MU_SPLIT = __import__("os").environ.get("I2M_SDPA_MU_SPLIT", "1") == "1"
+# I2M_SDPA_MU_MIN (default 4): a split unit with at most this many chunks (1024 positions) runs on one core, as unsplit
+MU_MIN = int(__import__("os").environ.get("I2M_SDPA_MU_MIN", "4"))
 _PF_CACHE_ON = __import__("os").environ.get("INKLING_SDPA_PF_CACHE", "1") == "1"
 _PF_CACHE = {}
 
 
-def _mi_defines(mi, pos_stick):
-    return [("SDPA_MI", str(mi)), ("SDPA_POS_WORDS", str(pos_stick // 4))]
+def _mi_defines(mi, pos_stick, trim=False, bcast=False, pt_pre=64):
+    return [
+        ("SDPA_MI", str(mi)),
+        ("SDPA_POS_WORDS", str(pos_stick // 4)),
+        ("SDPA_TRIM", str(int(trim))),
+        ("SDPA_BCAST", str(int(bcast))),
+        ("SDPA_BCAST_PT", str(pt_pre)),
+        ("SDPA_BALANCE", str(int(trim and BALANCE))),
+        ("SDPA_FIN2", str(int(FIN2))),
+    ]
+
+
+def _mcast_rects(noc, gx):
+    """The program cores (the first len(noc) of the grid, row-major) as multicast rectangles from core 0:
+    (x0, y0, x1, y1, destinations) in NOC coordinates; core 0 itself is never written (not counted)."""
+    n = len(noc)
+    full, rem = divmod(n, gx)
+    rects = []
+    if full:
+        rects.append((0, full * gx - 1))
+    if rem:
+        rects.append((full * gx, n - 1))
+    out = []
+    for a, b in rects:
+        dests = b - a + 1 - (1 if a == 0 else 0)
+        if dests:
+            out.append((noc[a].x, noc[a].y, noc[b].x, noc[b].y, dests))
+    return out
 
 
 def _stable_hash(key):
@@ -546,7 +616,7 @@ def _pf_static(
             math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=False, math_approx_mode=True
         ),
     )
-    st["sem"] = [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, st["cr"], 0)]
+    st["sem"] = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, st["cr"], 0) for i in range(2)]
     st["hash"] = _stable_hash(("inkling_sdpa_pf", key, st["rd_ct"], st["wr_ct"], st["cp_ct"]))
     return st
 
@@ -563,8 +633,8 @@ def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink):
     ]
     rqa, ta, oa = rq.buffer_address(), table.buffer_address(), out.buffer_address()
     n_groups, n_units = st["n_groups"], st["n_units"]
-    rd_rt = [a + pc[0] + [rqa, ta, n_groups, n_units, sink.buffer_address()] for pc in st["per_core"]]
-    wr_rt = [[oa] + pc[1] for pc in st["per_core"]]
+    rd_rt = [a + pc[0] + [rqa, ta, n_groups, n_units, sink.buffer_address()] + pc[3] for pc in st["per_core"]]
+    wr_rt = [[oa] + pc[1] + [ta] for pc in st["per_core"]]
     cores, cr = st["cores"], st["cr"]
 
     def dm(source, ct, rt, riscv, noc_id):
