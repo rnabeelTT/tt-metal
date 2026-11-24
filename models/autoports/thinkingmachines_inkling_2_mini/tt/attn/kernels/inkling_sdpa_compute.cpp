@@ -36,6 +36,9 @@
 #include "ttnn/operations/transformer/sdpa/device/kernels/compute/compute_common.hpp"
 #include "inkling_sdpa_common.hpp"
 
+#ifndef SDPA_PAIR
+#define SDPA_PAIR 0
+#endif
 #ifndef SDPA_MI
 #define SDPA_MI 1
 #endif
@@ -211,6 +214,8 @@ void kernel_main() {
     // SDPA_MI (prefill): MI consecutive items per unit, their Q tiles stacked as MI tile rows: each K / V chunk is read
     // once for all of them (per-row max / sum as in the stock prefill SDPA; band bias and masks per item)
     constexpr uint32_t MI = SDPA_MI;
+    // SDPA_PAIR (prefill): rows 2p / 2p + 1 share one Rq tile (r in columns 0-15 / 16-31) and one pair-table tile
+    constexpr uint32_t RP = SDPA_PAIR ? R / 2 : R;
     constexpr uint32_t Sq_chunk_t = MI;
     constexpr uint32_t q_chunk_tiles = Sq_chunk_t * DHt;
     constexpr uint32_t out_chunk_tiles = Sq_chunk_t * vDHt;
@@ -351,7 +356,7 @@ void kernel_main() {
             pack_reconfig_data_format(cb_bias);
             for (uint32_t m = 0; m < MI; ++m) {
                 inkling_matmul_rows(
-                    cb_rq, cb_tbl, cb_bias, 1, Skc, R, false, masked, cb_mask_in, cb_zero_in, m * R, 0);
+                    cb_rq, cb_tbl, cb_bias, 1, Skc, RP, false, masked, cb_mask_in, cb_zero_in, m * RP, 0);
                 if (masked) {
                     CircularBuffer(cb_mask_in).pop_front(Skc);
                 }
@@ -567,7 +572,7 @@ void kernel_main() {
         }
     }
     CircularBuffer(cb_q_in).pop_front(q_chunk_tiles);
-    CircularBuffer(cb_rq).pop_front(MI * R);
+    CircularBuffer(cb_rq).pop_front(MI * RP);
     CircularBuffer(cb_sink).pop_front(Sq_chunk_t);
     }  // units
 }

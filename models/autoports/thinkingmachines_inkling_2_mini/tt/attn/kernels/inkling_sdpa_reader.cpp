@@ -20,6 +20,9 @@
 #include "inkling_sdpa_common.hpp"
 #include "tools/profiler/kernel_profiler.hpp"
 
+#ifndef SDPA_PAIR
+#define SDPA_PAIR 0  // prefill: rows 2p / 2p + 1 share an Rq tile (r in columns 0-15 / 16-31)
+#endif
 #ifndef SDPA_MI
 #define SDPA_MI 1  // prefill: consecutive items per unit (their Q tiles stacked; see the compute)
 #endif
@@ -59,6 +62,7 @@ void kernel_main() {
     constexpr auto sink_args = TensorAccessorArgs<tbl_args.next_compile_time_args_offset()>();
     static_assert(R * G <= 32, "the rows' query heads of one kv head share one tile");
     constexpr uint32_t MI = SDPA_MI;
+    constexpr uint32_t RP = SDPA_PAIR ? R / 2 : R;
 
     constexpr uint32_t cb_q_in = tt::CBIndex::c_0;
     constexpr uint32_t cb_k_in = tt::CBIndex::c_1;
@@ -187,6 +191,18 @@ void kernel_main() {
             }
         }
     };
+    // rows [r0, r1) of a source tile, columns 0-15 -> rows (j / 2)*G .. of a destination tile, columns 16-31 for odd j
+    // (SDPA_PAIR: the Rq tiles)
+    auto place_pair = [&](uint32_t src_tile, uint32_t dst_tile, uint32_t j) {
+        rows_sdpa_row_runs(r0, j * G, G, [&](uint32_t s, uint32_t t, uint32_t k) {
+            noc.async_read(
+                self,
+                CoreLocalMem<uint32_t>(dst_tile + rows_sdpa_row_off(t) + (j & 1) * 512),
+                k * 32,
+                {.noc_x = my_noc_x, .noc_y = my_noc_y, .addr = src_tile + rows_sdpa_row_off(s)},
+                {});
+        });
+    };
     // rows [r0, r1) of a source tile -> rows j*G .. j*G+G-1 of a destination tile (two 32-byte face rows per row)
     auto place_rows = [&](uint32_t src_tile, uint32_t dst_tile, uint32_t j) {
         rows_sdpa_row_runs(r0, j * G, G, [&](uint32_t s, uint32_t t, uint32_t k) {
@@ -295,7 +311,7 @@ void kernel_main() {
     // the bias sums over j) and left as they are for R == 1 (rows are independent through QK, softmax, PV and
     // the reduction, and never written out)
     cb_q.reserve_back(MI * DHt);
-    cb_rqc.reserve_back(MI * R);
+    cb_rqc.reserve_back(MI * RP);
     cb_sinkc.reserve_back(MI);
     uint32_t scr_q, scr_rq, scr_sink;  // the source tiles of item m (scratch or broadcast slot)
     if constexpr (SDPA_BCAST) {
@@ -317,14 +333,14 @@ void kernel_main() {
             }
         }
         const uint32_t q_l1 = cb_q.get_write_ptr() + m * DHt * q_tile_bytes;
-        const uint32_t rq_l1 = cb_rqc.get_write_ptr() + m * R * q_tile_bytes;
+        const uint32_t rq_l1 = cb_rqc.get_write_ptr() + m * RP * q_tile_bytes;
         const uint32_t sink_l1 = cb_sinkc.get_write_ptr() + m * q_tile_bytes;
         if constexpr (R > 1) {
             for (uint32_t d = 0; d < DHt; ++d) {
                 fill_tile_zeros<q_tile_bytes, false>(noc, cb_q_in, m * DHt + d);
             }
-            for (uint32_t j = 0; j < R; ++j) {
-                fill_tile_zeros<q_tile_bytes, false>(noc, cb_rq, m * R + j);
+            for (uint32_t j = 0; j < RP; ++j) {
+                fill_tile_zeros<q_tile_bytes, false>(noc, cb_rq, m * RP + j);
             }
             fill_tile_zeros<q_tile_bytes, false>(noc, cb_sink, m);
             noc.write_zeros_l1_barrier();
@@ -336,13 +352,17 @@ void kernel_main() {
             }
         }
         for (uint32_t j = 0; j < R; ++j) {
-            place_rows(scr_rq + j * q_tile_bytes, rq_l1 + j * q_tile_bytes, j);
+            if constexpr (SDPA_PAIR) {
+                place_pair(scr_rq + j * q_tile_bytes, rq_l1 + (j / 2) * q_tile_bytes, j);
+            } else {
+                place_rows(scr_rq + j * q_tile_bytes, rq_l1 + j * q_tile_bytes, j);
+            }
             place_rows(scr_sink + j * q_tile_bytes, sink_l1, j);
         }
         noc.async_read_barrier();
     }
     cb_q.push_back(MI * DHt);
-    cb_rqc.push_back(MI * R);
+    cb_rqc.push_back(MI * RP);
     cb_sinkc.push_back(MI);
     }
 

@@ -22,6 +22,9 @@
 #include "inkling_sdpa_common.hpp"
 
 #define MAX_TREE_REDUCTION_ROUNDS 6
+#ifndef SDPA_PAIR
+#define SDPA_PAIR 0
+#endif
 #ifndef SDPA_MI
 #define SDPA_MI 1  // prefill: consecutive items per unit (no tree reduction then)
 #endif
@@ -68,6 +71,11 @@ void kernel_main() {
     constexpr uint32_t cb_out = tt::CBIndex::c_20;
     constexpr uint32_t PNHt = 1;
     constexpr uint32_t MI = SDPA_MI;
+    // SDPA_PAIR (prefill): rows 2p / 2p + 1 (consecutive positions) read one pair-table tile P[phi][mm] (M + 1 per
+    // phase): rows 0-15 = T[phi][mm - 1], rows 16-31 = row 2p + 1's T[phi + 1][mm - 1] (phi 31: T[0][mm]), mm = a - b + 1
+    constexpr uint32_t RP = SDPA_PAIR ? R / 2 : R;
+    constexpr uint32_t RS = SDPA_PAIR ? 2 : 1;
+    constexpr uint32_t MO = SDPA_PAIR ? 1 : 0;
 
     uint32_t arg_idx = 0;
     const uint32_t out_addr = get_arg_val<uint32_t>(arg_idx++);
@@ -191,16 +199,16 @@ void kernel_main() {
         for (uint32_t mi = 0; mi < MI && (masked || band); ++mi) {
         if (band) {
             // R x Sk table tiles: row j, key tile b = tb + t -> T[phi_j][m = a_j - b] (zero outside [0, M))
-            const uint32_t n = R * Skc;
+            const uint32_t n = RP * Skc;
             cb_tblc.reserve_back(n);
             uint32_t idx = 0;
-            for (uint32_t j = 0; j < R; ++j) {
-                const uint32_t a = lim[mi * R + j] >> 5, phi = lim[mi * R + j] & 31;
+            for (uint32_t j = 0; j < R; j += RS) {
+                const uint32_t a = (lim[mi * R + j] >> 5) + MO, phi = lim[mi * R + j] & 31;
                 for (uint32_t t = 0; t < Skc; ++t, ++idx) {
                     const uint32_t b = tb + t;
-                    if (b <= a && a - b < M_tiles) {
+                    if (b <= a && a - b < M_tiles + MO) {
                         noc_async_read(
-                            tbl_reader.get_noc_addr(phi * M_tiles + (a - b)),
+                            tbl_reader.get_noc_addr(phi * (M_tiles + MO) + (a - b)),
                             cb_tblc.get_write_ptr() + idx * mask_tile_bytes,
                             mask_tile_bytes);
                     } else {
@@ -265,7 +273,7 @@ void kernel_main() {
         noc.write_zeros_l1_barrier();
         noc_async_read_barrier();
         if (band) {
-            cb_tblc.push_back(R * Skc);
+            cb_tblc.push_back(RP * Skc);
         }
         cb_mask.push_back(Skc);
         }  // items

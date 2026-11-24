@@ -52,6 +52,21 @@ def build_tables(proj: torch.Tensor, scale: float) -> torch.Tensor:
     return T
 
 
+def build_pair_tables(T: torch.Tensor) -> torch.Tensor:
+    """build_tables' T [32, 32, M * 32] (d_rel <= 16) -> the row-pair tables [32, 32, (M + 1) * 32] (SDPA_PAIR):
+    P[phi][mm] rows 0-15 = T[phi][mm - 1] rows 0-15, rows 16-31 = the next position's T[phi + 1][mm - 1] (phi 31:
+    T[0][mm]) rows 0-15; zero outside [0, M)."""
+    M = T.shape[-1] // TILE
+    assert not T[:, 16:].any(), "pair tables need d_rel <= 16"
+    Tz = torch.zeros(TILE, 16, (M + 2) * TILE, dtype=T.dtype)  # tile index i + 1 = T's tile i (0 and M + 1: zero)
+    Tz[:, :, TILE : (M + 1) * TILE] = T[:, :16]
+    P = torch.zeros(TILE, TILE, (M + 1) * TILE, dtype=T.dtype)
+    P[:, :16] = Tz[:, :, : (M + 1) * TILE]  # P[phi][mm] top = T[phi][mm - 1]
+    P[:31, 16:] = Tz[1:, :, : (M + 1) * TILE]  # bottom = T[phi + 1][mm - 1]
+    P[31, 16:] = Tz[0, :, TILE:]  # phi 31: T[0][mm]
+    return P
+
+
 def rq_tiles(r: torch.Tensor, G: int) -> torch.Tensor:
     """r [R, G, d_rel] (one kv head's G query heads, R rows) -> per-row Rq tiles [R, 32, 32]: tile row r*G+i holds
     r[r, i] in columns 0..d_rel-1 of tile R_r, every other row zero."""

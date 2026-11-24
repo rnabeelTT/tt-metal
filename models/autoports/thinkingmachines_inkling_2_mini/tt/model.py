@@ -222,6 +222,22 @@ class Ops:
         return outs
 
 
+# I2M_GATE_PC (default 1): prefill rows' gate down matmul [T, 2H] x [2H, r] with the rows split over the cores (1D, the
+# weight multicast): the default config ran ~10 TFLOPS (512 rows 0.111 -> 0.038 ms; bitwise)
+GATE_PC = os.environ.get("I2M_GATE_PC", "1") == "1"
+
+
+def _gate_pc(mesh, T, N):
+    g = mesh.compute_with_storage_grid_size()
+    Mt = T // 32
+    pm = -(-Mt // (g.x * g.y))
+    while Mt % pm:
+        pm += 1
+    return ttnn.MatmulMultiCoreReuseMultiCast1DProgramConfig(
+        compute_with_storage_grid_size=(g.x, g.y), in0_block_w=8, out_subblock_h=1, out_subblock_w=N // 32,
+        per_core_M=pm, per_core_N=N // 32, fuse_batch=True, fused_activation=None, mcast_in0=False)
+
+
 class MessageGate:
     """(1 - tanh(Wf g)) * h + tanh(Wg g) * m, g = Wd [rms(h) | rms(m)] (bf16 Linear in transformers)."""
 
@@ -269,8 +285,12 @@ class MessageGate:
                 o.gatefk = GateKernel(o.mesh, H, int(self.wd.shape[-1]), o.eps)
             return o.gatefk(hf, mf, self.wd, self.wfg_bf)
         hm = ttnn.concat([_bf(o.rms(hf)), _bf(o.rms(mf))], dim=-1)  # [.., 2H] bf16 (transformers: bf16 Linear input)
-        g = dmm(hm, self.wd, o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
         T = int(hf.shape[-2])
+        if GATE_PC and T % 32 == 0 and 64 <= T and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
+            g = ttnn.matmul(hm, self.wd, compute_kernel_config=o.ckc, dtype=ttnn.bfloat16,
+                            program_config=_gate_pc(o.mesh, T, int(self.wd.shape[-1])))
+        else:
+            g = dmm(hm, self.wd, o.ckc, dtype=ttnn.bfloat16)  # bf16 Linear output
         if GATE_KERNEL and (T <= 32 or T % 32 == 0) and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
             mc = ttnn.L1_MEMORY_CONFIG if T <= 32 else DRAM
             fg = dmm(_f32(g), self.wfg, o.ckc, dtype=ttnn.float32, memory_config=mc)  # pre-tanh [.., 2H]

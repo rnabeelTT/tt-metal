@@ -116,6 +116,7 @@ def inkling_sdpa_decode(
     sink=None,
     pt_per_item=False,
     mi=1,
+    table2=None,
 ):
     """-> [1, n_items * R, NH, HD] bf16, or [1, 1, n_items * R, NH * HD] when mi * R == 32 (freshly allocated; the
     caller frees it). window: 0 (global) or the sliding window; extent: rel_extent E (the table must be
@@ -131,6 +132,8 @@ def inkling_sdpa_decode(
     ``mi`` (prefill): consecutive items per work unit (one sequence: with pt_per_item, groups of mi items must not
     straddle sequences); each K / V chunk is read once for the mi items' stacked Q tiles (long contexts: the K / V
     stream, not the compute, bounds the one-item units).
+    ``table2`` (prefill, mi > 1): relbias.build_pair_tables of the table: rows 2p / 2p + 1 of an item (consecutive
+    positions) share one Rq tile and one table tile (half the bias matmuls and table reads; bitwise).
     """
     n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
     R = int(cur_pos.shape[-1])
@@ -172,6 +175,16 @@ def inkling_sdpa_decode(
     mesh = q.device()
     if n_items == 1 or n_items % mi:
         mi = 1
+    if table2 is not None and PAIR and mi > 1 and n_items > 1 and R % 2 == 0:
+        if tuple(table2.shape) != (1, TILE, TILE, (M_tiles + 1) * TILE):
+            raise ValueError(f"inkling_sdpa_decode: table2 {tuple(table2.shape)} for extent {extent}")
+        table = table2
+    tbl_l1 = None
+    if table is table2 and TBL_L1 and table.memory_config().buffer_type == ttnn.BufferType.DRAM:
+        # prefill: every unit reads (nearly) the whole bias table; from L1 banks instead of DRAM (bitwise). Only with
+        # the pair tables: their smaller CBs (-160 KB per core) leave room for the copy (~20 KB per bank, freed
+        # after the call) below the persistent L1 buffers
+        table = tbl_l1 = ttnn.to_memory_config(table, ttnn.L1_MEMORY_CONFIG)
     if n_items > 1 and _PF_CACHE_ON:  # prefill: the program's static parts per shape (see _PF_CACHE)
         key = (
             id(mesh),
@@ -189,6 +202,7 @@ def inkling_sdpa_decode(
             Sk_fixed,
             int(page_table.shape[-1]),
             float(scale),
+            int(table.shape[-1]),
             repr(out_memory_config),
             bool(pt_per_item),
             mi,
@@ -222,8 +236,11 @@ def inkling_sdpa_decode(
                 pt_per_item,
                 mi,
             )
-        return _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)
-    return _build_and_run(
+        out = _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)
+        if tbl_l1 is not None:
+            ttnn.deallocate(tbl_l1)
+        return out
+    out = _build_and_run(
         q,
         k_cache,
         v_cache,
@@ -250,6 +267,9 @@ def inkling_sdpa_decode(
         pt_per_item=pt_per_item,
         mi=mi,
     )
+    if tbl_l1 is not None:
+        ttnn.deallocate(tbl_l1)
+    return out
 
 
 def _build_and_run(
@@ -326,7 +346,9 @@ def _build_and_run(
     bf, bt = ttnn.bfloat16, 2048
     kt, vt = _tile_bytes(k_cache.dtype), _tile_bytes(v_cache.dtype)
     pos_stick = _align(R * 4)
-    defs = _mi_defines(mi, pos_stick, trim, bcast, pt_pre) + [("SDPA_MU_MIN", str(mu_min))]
+    pair = int(table.shape[-1]) == (M_tiles + 1) * TILE  # (the row-pair tables, see inkling_sdpa_decode)
+    RP = R // 2 if pair else R
+    defs = _mi_defines(mi, pos_stick, trim, bcast, pt_pre) + [("SDPA_MU_MIN", str(mu_min)), ("SDPA_PAIR", str(int(pair)))]
     if bcast:
         defs.append(("SDPA_NEG_OFF", str(_align(n_items * slot))))
     pt_stick = _align(int(page_table.shape[-1]) * 4)
@@ -335,8 +357,8 @@ def _build_and_run(
         _cb(cr, 1, k_cache.dtype, kt, Sk_cb * DHt * 2),  # K chunks, double-buffered
         _cb(cr, 2, v_cache.dtype, vt, Sk_cb * DHt * 2),  # V chunks
         _cb(cr, 3, bf, bt, Sk_cb * 2),  # per-row mask blocks
-        _cb(cr, 4, bf, bt, mi * R),  # Rq tiles (one per verify row)
-        _cb(cr, 11, bf, bt, R * Sk_cb * 2),  # bias-table tiles, double-buffered
+        _cb(cr, 4, bf, bt, mi * RP),  # Rq tiles (one per verify row; SDPA_PAIR: per row pair)
+        _cb(cr, 11, bf, bt, RP * Sk_cb * 2),  # bias-table tiles, double-buffered
         _cb(cr, 13, bf, bt, mi * Sk_cb),  # bias (+ mask) block
         _cb(cr, 14, bf, bt, mi),  # Inkling-2: per-row sinks
         _cb(cr, 5, bf, bt, 1),  # reduce scaler
@@ -509,6 +531,12 @@ FUSE = __import__("os").environ.get("I2M_SDPA_FUSE", "1") == "1"
 MU_SPLIT = __import__("os").environ.get("I2M_SDPA_MU_SPLIT", "1") == "1"
 # I2M_SDPA_MU_MIN (default 4): a split unit with at most this many chunks (1024 positions) runs on one core, as unsplit
 MU_MIN = int(__import__("os").environ.get("I2M_SDPA_MU_MIN", "4"))
+# I2M_SDPA_TBL_L1 (default 1; with I2M_SDPA_PAIR): prefill reads the bias table from an L1-interleaved copy made per
+# call and freed after it (DRAM-bound before: every unit reads ~the whole table; one die 2048 rows 3.7 -> 2.5 ms per
+# call; bitwise)
+TBL_L1 = __import__("os").environ.get("I2M_SDPA_TBL_L1", "1") == "1"
+# I2M_SDPA_PAIR (default 1): prefill rows paired in the bias (table2): half the bias matmuls and table reads (bitwise)
+PAIR = __import__("os").environ.get("I2M_SDPA_PAIR", "1") == "1"
 _PF_CACHE_ON = __import__("os").environ.get("INKLING_SDPA_PF_CACHE", "1") == "1"
 _PF_CACHE = {}
 

@@ -29,7 +29,7 @@ import ttnn
 from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce
 from models.autoports.thinkingmachines_inkling_2_mini.tt import relbias
-from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import inkling_sdpa_decode
+from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import PAIR as SDPA_PAIR, inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import DynShortConv, ShortConv
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -160,6 +160,10 @@ class AttnWeights:
         T = relbias.build_tables(L("rel_logits_proj.proj").float(), self.scale)
         self.table = ttnn.as_tensor(T.reshape(1, 32, 32, -1), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT,
                                     device=mesh, memory_config=DRAM, mesh_mapper=rep)
+        self.table2 = None  # (prefill: the row-pair tables, inkling_sdpa_decode table2)
+        if SDPA_PAIR:
+            self.table2 = ttnn.as_tensor(relbias.build_pair_tables(T).reshape(1, 32, 32, -1), dtype=ttnn.bfloat16,
+                                         layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=DRAM, mesh_mapper=rep)
         # sink -> [1, R, NH, 32]: sink / scale in every column (see inkling_sdpa)
         self.sink_bcast = ttnn.from_torch(torch.full((1, 1, 1, 32), 1.0 / self.scale), dtype=ttnn.float32,
                                           layout=ttnn.TILE_LAYOUT, device=mesh, mesh_mapper=rep)
@@ -490,7 +494,7 @@ def _attn_tail(w, c, q, rq, sk, g, p0, R, slot, rows_mode, tt_ccl):
     else:
         positions = c._up_i32(torch.arange(p0, p0 + R).reshape(-1, R_ITEM))
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, c.read_slot[slot], rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM, mi=SDPA_MI)
+                            sink=sk, out_memory_config=DRAM, mi=SDPA_MI, table2=w.table2)
     for t in (q, rq, sk, positions):
         ttnn.deallocate(t)
     if int(o.shape[-1]) != NH * HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
@@ -636,7 +640,7 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
 def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
     """The packed SDPA over T rows -> [1, 1, T, NH * HD]."""
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, pt, rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI)
+                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI, table2=w.table2)
     for t in (q, rq, sk):
         ttnn.deallocate(t)
     if int(o.shape[-1]) != w.NH * w.HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)

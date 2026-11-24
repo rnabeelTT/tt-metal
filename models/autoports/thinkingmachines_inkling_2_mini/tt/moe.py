@@ -49,6 +49,8 @@ ACT_KERNEL = os.environ.get("I2M_MOE_ACT_KERNEL", "1") == "1"  # the sorted pref
 # I2M_GMM_ACT (default 1): the activation and routing weights inside the gate|up grouped matmul (bitwise; no gate|up
 # output, no tt/moeact.py program); merged sub-shards in one gate|up call (A read once)
 GMM_ACT = os.environ.get("I2M_GMM_ACT", "1") == "1"
+# I2M_UNDISP (default 1): the sub-shards' un-dispatches and their sums in one program (tt/undisp.py; bitwise)
+UNDISP = os.environ.get("I2M_UNDISP", "1") == "1"
 _GMM = __import__("types").SimpleNamespace()
 assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
@@ -346,6 +348,18 @@ class MoE:
         for i, (ug, dn, W, ns) in enumerate(calls):
             wsub = (S, 0) if merged else self.wsub[i]
             din = self._gmm(x_disp, ug, m["group_ids"], alloc(ns * W), E, wsub, act=m["weights"], nsub=ns)
+            if merged and UNDISP and m.get("undispatch_rm") is not None:  # one un-dispatch for all sub-shards
+                ds = [self._gmm(din, dn, m["group_ids"], alloc(H, ttnn.ROW_MAJOR_LAYOUT), E, (S, s), koff=s * W, K=W)
+                      for s in range(ns)]
+                ttnn.deallocate(din)
+                if getattr(_GMM, "undisp", None) is None:
+                    from .undisp import Undispatch
+
+                    _GMM.undisp = Undispatch(self.mesh)
+                out = _GMM.undisp(ds, m["undispatch_rm"], T, k)
+                for d in ds:
+                    ttnn.deallocate(d)
+                return out
             for s in range(ns):  # (each sub-shard's down reads its columns of din in place)
                 down(din, dn, (S, s) if merged else wsub, s * W, W)
             ttnn.deallocate(din)
