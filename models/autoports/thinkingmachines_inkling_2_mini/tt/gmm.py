@@ -10,11 +10,17 @@ tiles of gate|up (24 at TP4) on that many cores, this one spreads (column block,
 from __future__ import annotations
 
 import hashlib
+import struct
 
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
 
+# I2M_GMM_DB (act mode; auto: when the experts average >= 3 groups, i.e. the compute per weight block is long): the
+# weight block double-buffered (h = 2 columns: 922 KB of CBs at K 2304) so the next expert's weights load during the
+# compute; 0 / 1: never / always
+ACT_DB = __import__("os").environ.get("I2M_GMM_DB", "auto")
+ACT_KB = 960
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
 
@@ -24,15 +30,22 @@ class GroupedMM:
         g = mesh.compute_with_storage_grid_size()
         self.gx, self.ncores = g.x, max_cores or g.x * g.y  # (whole rows of the grid)
 
-    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0):
+    def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0, act=None, nsub=1, koff=0, K=None, ocol=0):
         """a [1, G, gs, K] bf16, w [1, E, K, N] (bfp8 / bf16 tiles), ids [1, G] uint16 ROW_MAJOR, out [1, G, gs, N].
         wsub (S, s): w holds S sub-shards per expert as virtual experts e * S + s ([1, E * S, K, N]); this call's s.
-        k0: w's experts have more K rows than a ([1, E, Kw, N]): rows [k0, k0 + K) of each."""
-        G, gs, K = int(a.shape[1]), int(a.shape[2]), int(a.shape[3])
+        k0: w's experts have more K rows than a ([1, E, Kw, N]): rows [k0, k0 + K) of each.
+        K, koff: the product reads a's columns [koff, koff + K) (default: all of them).
+        act (the dispatched rows' routing weights [1, 1, Rd, 1] bf16): w is a gate|up weight ([g | u], W columns
+        each) and C = bf16(bf16(tanh(g / 4) sigmoid(g) tanh(u)) w) [1, G, gs, nsub * W] (tt/moeact.py's math, bitwise),
+        sub-shards s .. s + nsub - 1 of wsub side by side, from out's column tile ocol."""
+        G, gs, KA = int(a.shape[1]), int(a.shape[2]), int(a.shape[3])
+        K = KA if K is None else K
         N = int(w.shape[-1])
         Kt, Nt, mt = K // 32, N // 32, gs // 32
         w_page = TILE_BYTES[w.dtype]
         rm = out.layout == ttnn.ROW_MAJOR_LAYOUT  # (row-major C: untilized blocks of <= 4 tiles with FP32 DST)
+        if act is not None:
+            return self._act(a, w, ids, out, E, act, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol)
         # the column block (DST: 8 FP32 tiles, Nt % nb == 0) and the weight blocks in the CB (2: the next expert's loads
         # during the compute): the weight and A CBs within ~800 KB of L1 (the packed prefill keeps L1 buffers above
         # ~1.3 MB); the widest block first (fewer A multicast receivers)
@@ -67,16 +80,18 @@ class GroupedMM:
         defs = [("GMM_RM", str(int(rm)))]
         rd = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs,
-            compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page]
+            compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page, KA // 32, 0, 0, NB]
             + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
-            + ttnn.TensorAccessorArgs(ids).get_compile_time_args(),
-            runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
+            + ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(ids).get_compile_time_args(),
+            runtime_args=_rt(cores, [r + [0, r[0] * nb] for r in rt]),
+            config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
         rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
-                                  int(w.shape[-2]) // 32, k0]
+                                  int(w.shape[-2]) // 32, k0, koff // 32, 0]
         wr = ttnn.KernelDescriptor(
             kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, Nt, nb, mt, cb_ids, E] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),
-            runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
+            runtime_args=_rt(cores, [r + [r[0] * nb] for r in rt]),
+            config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
         wr.common_runtime_args = [out.buffer_address()]
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
                                            math_approx_mode=False)
@@ -85,8 +100,81 @@ class GroupedMM:
                                    runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
-        key = ("i2m_gmm4", G, gs, K, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid,
+        key = ("i2m_gmm5", G, gs, K, KA, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid,
                tuple(repr(t.memory_config()) for t in (a, w, ids, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids, out], prog)
+        return out
+
+    def _slices(self, NB):
+        """The group slices for NB column blocks: (S, cores' (x, y) per (slice, b), the slice corners)."""
+        gy = self.ncores // self.gx
+        w_ = max((d for d in range(1, self.gx + 1) if NB % d == 0 and NB // d <= gy),
+                 key=lambda d: (self.gx // d) * (gy // (NB // d)))
+        h_ = NB // w_
+        per_row = self.gx // w_
+        return w_, h_, per_row, gy
+
+    def _act(self, a, w, ids, out, E, wts, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol=0):
+        """gate|up + the activation and routing weights (see __call__): column block b of the output = sub-shard
+        s = b // (Wt / h), its columns [c0, c0 + h); the weight block holds the h gate and the h up columns."""
+        Wt = Nt // 2
+        # (DST: 2h products + the weights + a scratch tile <= 8). I2M_GMM_DB: the widest h whose weight block fits
+        # twice in ACT_KB of CBs (the next expert's weights load during the compute)
+        hs = [d for d in (3, 2, 1) if Wt % d == 0]
+        fits = lambda h_, k, kb: Kt * (k * 2 * h_ * w_page + 2 * 2048) <= kb * 1024  # noqa: E731
+        db = ACT_DB == "1" or (ACT_DB == "auto" and G >= 3 * E)
+        h = next((d for d in hs if fits(d, 2, ACT_KB)), hs[0]) if db else hs[0]
+        nb = 2 * h
+        nbuf = 2 if fits(h, 2, ACT_KB if db else 800) else 1
+        NB = nsub * Wt // h
+        w_, h_, per_row, gy = self._slices(NB)
+        S = max(1, min(E, per_row * (gy // h_)))
+        bounds = [E * s // S for s in range(S + 1)]
+        cores, rt, wrt = [], [], []
+        for s in range(S):
+            x0, y0 = (s % per_row) * w_, (s // per_row) * h_
+            snoc = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
+            hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
+            for b in range(NB):
+                cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
+                sub, c0 = b // (Wt // h), (b % (Wt // h)) * h
+                rt.append([b, bounds[s], bounds[s + 1], snoc.x, snoc.y, snoc.x, snoc.y, hi.x, hi.y, G, sub, c0])
+                wrt.append([b, bounds[s], bounds[s + 1], 0, 0, 0, 0, 0, 0, G, ocol + sub * Wt + c0])
+        crs = _range_set(cores)
+        cb_a, cb_w, cb_ids, cb_out, cb_rw = 0, 1, 2, 3, 4
+        ids_bytes = (G * 2 + 63) // 64 * 64
+        bf = ttnn.bfloat16
+        cbs = [_cb(crs, cb_a, bf, 2048, 2 * Kt), _cb(crs, cb_w, w.dtype, w_page, nbuf * Kt * nb),
+               _cb(crs, cb_ids, ttnn.uint16, ids_bytes, 1), _cb(crs, cb_out, bf, 2048, 2 * h),
+               _cb(crs, cb_rw, bf, 2048, 2)]
+        dm = ttnn.DataMovementConfigDescriptor
+        defs = [("GMM_RM", "0"), ("GMM_ACT", "1")]
+        KA = int(a.shape[3]) // 32
+        rd = ttnn.KernelDescriptor(
+            kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs, defines=defs,
+            compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page, KA, cb_rw, Wt, NB]
+            + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
+            + ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(wts).get_compile_time_args(),
+            runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
+        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
+                                  int(w.shape[-2]) // 32, 0, 0, wts.buffer_address()]
+        No = int(out.shape[-1]) // 32
+        wr = ttnn.KernelDescriptor(
+            kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
+            compile_time_args=[cb_out, No, h, mt, cb_ids, E] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),
+            runtime_args=_rt(cores, wrt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
+        wr.common_runtime_args = [out.buffer_address()]
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
+                                           math_approx_mode=False)
+        quarter = struct.unpack("<I", struct.pack("<f", 0.25))[0]
+        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
+                                   compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt, cb_ids, E, cb_rw, quarter],
+                                   runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
+        key = ("i2m_gmm_act1", tuple(defs), G, gs, Kt, KA, Nt, No, E, h, nbuf, S, nsub, str(w.dtype), self.fid,
+               tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)))
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        ttnn.generic_op([a, w, ids, out, wts], prog)
         return out

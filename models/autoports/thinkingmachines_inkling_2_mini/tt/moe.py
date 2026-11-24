@@ -46,6 +46,9 @@ GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
 # (its 1D config puts gate|up's 24 output tiles on 24 cores)
 GMM = os.environ.get("I2M_MOE_GMM", "1") == "1"
 ACT_KERNEL = os.environ.get("I2M_MOE_ACT_KERNEL", "1") == "1"  # the sorted prefill's activation in one program
+# I2M_GMM_ACT (default 1): the activation and routing weights inside the gate|up grouped matmul (bitwise; no gate|up
+# output, no tt/moeact.py program); merged sub-shards in one gate|up call (A read once)
+GMM_ACT = os.environ.get("I2M_GMM_ACT", "1") == "1"
 _GMM = __import__("types").SimpleNamespace()
 assert GROUP_ROWS in (32, 64), "the sorted dispatch groups: 32 or 64 rows (128 mis-dispatches: pcc 0.87)"
 SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows as two fused 16-row calls
@@ -53,6 +56,12 @@ SPLIT_DECODE = os.environ.get("I2M_MOE_SPLIT", "1") == "1"  # 17-32 decode rows 
 # sub-shard [gate | up / 25], down x 100); decode rows (<= 16) run the fused kernels, prefill / wider batches the
 # sparse_matmul union path over the same sub-shard tensors. sparse: the original layout and paths.
 FUSED_LAYOUT = os.environ.get("I2M_MOE_LAYOUT", "fused") == "fused"
+
+
+def undispatch_rows_(down, m, T, k, H):
+    from models.autoports.minimaxai_minimax_m2_7.tt.moe_dispatch import undispatch_rows
+
+    return undispatch_rows(down, None, m["undispatch"], T, k, H, undispatch_rm=m.get("undispatch_rm"))
 
 
 def softcap(t, c):
@@ -234,8 +243,10 @@ class MoE:
         else:
             x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
         out = None
+        if GMM and GMM_ACT:
+            out = self._sorted_act(x_disp, m, G, gs, T)
         dins = []
-        for (ug, dn, W, _, _), wsub in zip(self.subs, self.wsub):
+        for (ug, dn, W, _, _), wsub in ([] if out is not None else zip(self.subs, self.wsub)):
             cgu, cdn = self._cfg_sorted[("gs", gs)][W]
             alloc = lambda n: ttnn.allocate_tensor_on_device(ttnn.Shape([1, G, gs, n]), ttnn.bfloat16,  # noqa: E731
                                                              ttnn.TILE_LAYOUT, self.mesh, DRAM)
@@ -299,13 +310,54 @@ class MoE:
         ttnn.deallocate(down)
         return y if out is None else ttnn.add(out, y)
 
-    def _gmm(self, a, w, ids, out, E, wsub=(1, 0), k0=0):
+    def _sorted_act(self, x_disp, m, G, gs, T):
+        """_sorted's expert part with the activation inside the gate|up grouped matmul (GMM_ACT): the same numerics."""
+        E, H, k = self.E, self.H, self.k
+        alloc = lambda n, lay=ttnn.TILE_LAYOUT: ttnn.allocate_tensor_on_device(  # noqa: E731
+            ttnn.Shape([1, G, gs, n]), ttnn.bfloat16, lay, self.mesh, DRAM)
+        out = None
+
+        def down(din, dn, ws, koff, K, k0=0):
+            nonlocal out
+            d = self._gmm(din, dn, m["group_ids"], alloc(H, ttnn.ROW_MAJOR_LAYOUT), E, ws, k0=k0, koff=koff, K=K)
+            y = undispatch_rows_(d, m, T, k, H)
+            ttnn.deallocate(d)
+            out = y if out is None else ttnn.add(out, y)
+
+        if self.fe.rem is not None:  # (REM: main + remainder gate|up side by side in one din, the down over its K)
+            dn, Wd = self.rem_dn
+            din = (ttnn.zeros([1, G, gs, Wd], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.mesh,
+                              memory_config=DRAM)
+                   if Wd > sum(W for _, _, W, _, _ in self.subs) else alloc(Wd))
+            col = 0
+            for (ug, _, W, _, _), ws in zip(self.subs, self.wsub):
+                self._gmm(x_disp, ug, m["group_ids"], din, E, ws, act=m["weights"], ocol=col)
+                col += W // TILE
+            split = getattr(self.fe.subs[0][0], "down_split", None)
+            segs = ((0, 32 * split), (32 * split, Wd)) if split else ((0, Wd),)
+            for a, b in segs:  # (split: each K segment's down alone, the outputs added in bf16)
+                down(din, dn, self.wsub[0], a, b - a, k0=a // TILE)
+            ttnn.deallocate(din)
+            return out
+        S = self.wsub[0][0]
+        merged = S > 1  # (the sub-shards stacked as virtual experts e * S + s: one gate|up call for all)
+        calls = [(self.subs[0][0], self.subs[0][1], self.subs[0][2], S)] if merged else \
+            [(ug, dn, W, 1) for ug, dn, W, _, _ in self.subs]
+        for i, (ug, dn, W, ns) in enumerate(calls):
+            wsub = (S, 0) if merged else self.wsub[i]
+            din = self._gmm(x_disp, ug, m["group_ids"], alloc(ns * W), E, wsub, act=m["weights"], nsub=ns)
+            for s in range(ns):  # (each sub-shard's down reads its columns of din in place)
+                down(din, dn, (S, s) if merged else wsub, s * W, W)
+            ttnn.deallocate(din)
+        return out
+
+    def _gmm(self, a, w, ids, out, E, wsub=(1, 0), k0=0, **kw):
         if getattr(_GMM, "op", None) is None:
             from .gmm import GroupedMM
 
             _GMM.op = GroupedMM(self.mesh, ttnn.MathFidelity.HiFi2 if w.dtype != ttnn.bfloat16 else
                                 ttnn.MathFidelity.HiFi4)
-        return _GMM.op(a, w, ids, out, E, wsub=wsub, k0=k0)
+        return _GMM.op(a, w, ids, out, E, wsub=wsub, k0=k0, **kw)
 
     def _gather(self, x, w, ids, T):
         k, Il, H = self.k, self.Il, self.H
