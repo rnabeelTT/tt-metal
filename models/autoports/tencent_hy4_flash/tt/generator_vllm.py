@@ -366,7 +366,9 @@ class HYV4FlashForConditionalGeneration:
             raise RuntimeError("Hy4: device sampling asked for a step with intermediate prompt parts")
         mms = self._images(tokens, plens, kwargs, skip=inter)
         if self.multi:
-            return self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"), mms, start, inter)
+            out = self._prefill_multi(tokens, plens, sp, kwargs.get("empty_slots"), mms, start, inter)
+            self._check_orphans("prefill")
+            return out
         V = int(self._engine.V)
         out, logits = [], torch.zeros((N, 1, V), dtype=torch.float32)
         for u in range(N):  # (one user: no one decodes meanwhile; the whole prompt at its last part)
@@ -415,6 +417,13 @@ class HYV4FlashForConditionalGeneration:
                 s = own[0] if own else self._row_slot.get(rows[u])
                 if s is not None and s not in eng.seqs and (own or s not in eng.cp):
                     cont[u] = s
+                    # the plugin re-picks a continuing prompt's state slot (its row here) every step: the row's previous
+                    # sequence (a finished / preempted request: the plugin gives a prefill only a slot no live request
+                    # holds) is gone, as on every other path that rebinds a row; unbound it would hold its engine slot
+                    # forever ("all 8 slots busy", soak 2026-11-24)
+                    prev = self._row_slot.get(rows[u])
+                    if prev is not None and prev != s and prev in eng.seqs:
+                        eng.finish(prev)
                     self._bind(rows[u], s)
         for s in [s for s in list(eng.cp) if s not in cont.values()]:
             eng.finish(s)
@@ -490,6 +499,16 @@ class HYV4FlashForConditionalGeneration:
         for u, slot in enumerate(slots):
             logits[u, 0, :] = eng.last_logits[slot][:V]
         return logits
+
+    def _check_orphans(self, where):
+        """Every engine sequence is reachable from a row (decode reads slots only through _row_slot; an unreachable one
+        is a leaked engine slot that ends in "all N slots busy"). Logged as an error, not repaired: a new leak path
+        must show up, not be hidden."""
+        orphans = set(self._engine.seqs) - set(self._row_slot.values())
+        if orphans and orphans != getattr(self, "_orphans_seen", None):
+            logger.error(f"Hy4 slot leak after {where}: engine slots {sorted(orphans)} have no row (rows "
+                         f"{self._row_slot}, seqs {sorted(self._engine.seqs)}, cp {sorted(self._engine.cp)})")
+        self._orphans_seen = orphans
 
     # ------------------------------------------------------------------ decode
     def _remap(self, mapping):
@@ -585,6 +604,7 @@ class HYV4FlashForConditionalGeneration:
             remap = kwargs.get("slot_remap", args[10] if len(args) > 10 else None)
             if remap is not None:
                 self._remap(remap)
+                self._check_orphans("remap")
             self._decode_steps += 1
             return self._decode_multi(tokens, pos, sp, kwargs)
         live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]

@@ -9,8 +9,8 @@
 # baked into the image): ~/m27-work/hy4/pkg/RUNBOOK.md
 schema: "5.1"
 
-repo: raahemnabeel/hy4-flash-qb2
-name: hy4-flash-qb2
+repo: raahemnabeel/hy4-flash
+name: hy4-flash
 weights: {repo: tencent/Hy4-flash, revision: b2498eba6a1a3f9bbcab4190bc1313a3c7010c2f}   # 2026-11-19; later eccd312 sets engram_fp8_embedding false (our FP8 store assumes true)
 kind: vllm-plugin
 arch: blackhole
@@ -36,7 +36,7 @@ source:
 
 runtime:
   vllm: {version: "0.26.0"}
-  plugin: {path: /home/raahem/vllm-tt-plugin-pub}   # e0e2952, branch dflash
+  plugin: {path: /home/raahem/vllm-tt-plugin-hy4}   # branch hy4-dflash = dflash e0e2952 + upstream #135 (3509066: finished ids survive the decode fallback)
   extra_models_dir: models/autoports/tencent_hy4_flash/vllm_bundle
 
 serve:
