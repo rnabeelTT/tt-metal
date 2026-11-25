@@ -16,6 +16,7 @@ from models.demos.blackhole.qwen36.tt.decode_linear.ops import KERNEL_DIR as DL_
 from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
 
 from .head import KDIR
+from .bconv import _ks
 
 OB = {ttnn.float32: 4096, ttnn.bfloat16: 2048}
 TINY = __import__("os").environ.get("I2M_MS_TINY", "1") == "1"
@@ -127,16 +128,16 @@ class MultiStream:
                 if cores is None:
                     continue
                 kernels += [
-                    ttnn.KernelDescriptor(kernel_source=str(KDIR / "ilstream_reader.cpp") if self.il
-                                          else str(DL_DIR / "dl_reader.cpp"), core_ranges=cores,
+                    ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "ilstream_reader.cpp") if self.il
+                                          else _ks(DL_DIR, "dl_reader.cpp"), core_ranges=cores,
                                           compile_time_args=rd_ct, runtime_args=rt_for(rd_args, cores),
                                           config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
-                    ttnn.KernelDescriptor(kernel_source=str(KDIR / "mstream_writer.cpp"), core_ranges=cores,
+                    ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "mstream_writer.cpp"), core_ranges=cores,
                                           compile_time_args=wr_ct, runtime_args=rt_for(wr_args, cores),
                                           config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
                 ]
             kernels.append(ttnn.KernelDescriptor(
-                kernel_source=str(KDIR / "ms_compute.cpp"), core_ranges=dl.cores,
+                kernel_source=_ks(KDIR, "ms_compute.cpp"), core_ranges=dl.cores,
                 compile_time_args=[cb_x, cb_w, cb_out, dl.kt, kb if self.il else dl.kt, gw], runtime_args=cp_rt,
                 config=ttnn.ComputeConfigDescriptor(math_fidelity=dl.fidelity, fp32_dest_acc_en=True,
                                                     math_approx_mode=False)))

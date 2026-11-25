@@ -15,6 +15,7 @@ from pathlib import Path
 import ttnn
 from models.demos.blackhole.qwen36.tt.decode_linear.ops import KERNEL_DIR as DL_DIR
 from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
+from .bconv import _ks
 
 KDIR = Path(__file__).parent / "kernels"
 
@@ -70,15 +71,15 @@ class StreamHead(DecodeLinear):
             if cores is None:
                 continue
             kernels += [
-                ttnn.KernelDescriptor(kernel_source=str(DL_DIR / "dl_reader.cpp"), core_ranges=cores,
+                ttnn.KernelDescriptor(kernel_source=_ks(DL_DIR, "dl_reader.cpp"), core_ranges=cores,
                                       compile_time_args=rd_ct, runtime_args=rt_for(rd_args, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
-                ttnn.KernelDescriptor(kernel_source=str(KDIR / "head_writer.cpp"), core_ranges=cores,
+                ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "head_writer.cpp"), core_ranges=cores,
                                       compile_time_args=wr_ct, runtime_args=rt_for(wr_args, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
             ]
         kernels.append(ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "head_compute.cpp"), core_ranges=self.cores, compile_time_args=cp_ct,
+            kernel_source=_ks(KDIR, "head_compute.cpp"), core_ranges=self.cores, compile_time_args=cp_ct,
             runtime_args=cp_rt,
             defines=[("HEAD_SOFTCAP", "1")] + ([("HEAD_SC_ITERS", str(2 * ((rows + 3) // 4)))]
                                                if self.sc_rows and rows <= 16 else []),

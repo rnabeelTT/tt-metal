@@ -13,6 +13,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32 = 4096
 
@@ -50,12 +51,12 @@ class GateTail:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("gatet_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("gatet_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gatet_compute.cpp"), core_ranges=crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gatet_compute.cpp"), core_ranges=crs,
                                   compile_time_args=[cb_in, cb_out], runtime_args=_rt(cores, [[n] for _, n in work]),
                                   config=cfg),
         ]

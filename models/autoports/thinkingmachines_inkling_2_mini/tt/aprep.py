@@ -20,6 +20,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32, BF = 4096, 2048
 # I2M_APREP_QG (default 1): decode q / k / v heads in groups (4 or 8 heads per core, as the grid allows: units q groups,
@@ -29,6 +30,7 @@ QG = __import__("os").environ.get("I2M_APREP_QG", "1") == "1"
 # math) and gather them at row 0, their SFPU steps on those rows only; a head group's tiles written with one barrier;
 # the ones tile made by the compute (off the reader's path). Outputs bitwise unchanged
 LEAN = __import__("os").environ.get("I2M_APREP_LEAN", "1") == "1"
+PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 
 
 def _bits(x: float) -> int:
@@ -52,6 +54,7 @@ class AttnPrep:
         self.cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
         self.crs = _range_set(self.cores)
         self.HT = w.HD // 32
+        self._pc = {}  # (PCACHE: prefill programs by shape key)
 
     def __call__(self, pq, k, v, tau=None, kv=None, fill=None):
         """kv = (k_cache, v_cache, positions int32 [B], block table int32 [B, max blocks]): the k / v rows written into
@@ -86,6 +89,17 @@ class AttnPrep:
         KG = self.KG if kv is not None else w.NKV  # (k / v head groups only when the rows go to the caches here)
         KN = -(-w.NKV // KG)
         total = (self.QN + 2 * KN + 2) * B
+        carg = PCACHE and prefill  # (APREP_CARGS: the program cached per key, the addresses in the common args)
+        ckey = None
+        if carg:
+            ckey = (B, KG, glob, fill is not None, repr(pq.memory_config()), repr(k.memory_config()),
+                    repr(tau_t.memory_config()), tuple(pq.shape), tuple(k.shape),
+                    tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())))
+            hit = self._pc.get(ckey)
+            if hit is not None:
+                rd, wr, cp, cbs, h = hit
+                return self._finish(rd, wr, cp, cbs, h, pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o, kv, fill, kf, vf,
+                                    prefill)
         cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out = 0, 1, 2, 3, 4, 5, 6
         f32, bf = ttnn.float32, ttnn.bfloat16
         cbs = [_cb(self.crs, cb_xf, f32, F32, 2 * HT), _cb(self.crs, cb_xb, bf, BF, 2 * HT),
@@ -99,7 +113,7 @@ class AttnPrep:
             + ttnn.TensorAccessorArgs(pq).get_compile_time_args() + ttnn.TensorAccessorArgs(k).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(tau_t).get_compile_time_args()
         rd_rt = [[pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address(), i, nc,
-                  total] for i in range(nc)]
+                  total] for i in range(nc)] if not carg else [[i, nc, total] for i in range(nc)]
         cp_ct = [cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out, HT, w.DR // 32, int(glob), _bits(w.qk_clip),
                  _bits(w.rel_clip), _bits(1.0 / w.HD), _bits(w.eps), _bits(1.0 / w.scale)]
         cp_rt = [[i, nc, total] for i in range(nc)]
@@ -124,7 +138,8 @@ class AttnPrep:
                        ("APREP_BLK", str(int(kc.shape[2]))), ("APREP_POS_PAGE", str(pos_page)),
                        ("APREP_TAB_PAGE", str(tab_page)), ("APREP_FILL", str(int(fill is not None)))] + fill_defs
         wr_rt = [[q_o.buffer_address(), r_o.buffer_address(), k_o.buffer_address(), v_o.buffer_address(),
-                  s_o.buffer_address(), i, nc, total] + wr_extra for i in range(nc)]
+                  s_o.buffer_address(), i, nc, total] + wr_extra for i in range(nc)] if not carg else \
+            [[i, nc, total] for i in range(nc)]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         for i in (cb_xf, cb_f):
             u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
@@ -134,26 +149,57 @@ class AttnPrep:
         ud = [("APREP_QN", str(self.QN)), ("APREP_HG", str(self.HG)), ("APREP_KN", str(KN)),
               ("APREP_KG", str(KG)), ("APREP_NH", str(w.NH)), ("APREP_NKVH", str(w.NKV)),
               ("APREP_NOZERO", str(int(LEAN))), ("APREP_WB1", str(int(LEAN))), ("APREP_ONES_C", str(int(LEAN))),
-              ("APREP_KVW", str(int(kv is not None and fill is None)))]
+              ("APREP_KVW", str(int(kv is not None and fill is None)))] + ([("APREP_CARGS", "1")] if carg else [])
         if LEAN and not prefill and self.QN > 1 and (KN > 1 or (kv is not None and fill is None)):
             ud.append(("APREP_RB", str(max(self.HG, KG))))  # (head groups at row 0, SFPU on their rows only)
         dm = lambda src, ct, rt, riscv, noc, defs=(): ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
             defines=list(defs) + ud, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("aprep_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0,
                [("APREP_PQT", str(int(pq.shape[-1]) // 32)), ("APREP_KVT", str(int(k.shape[-1]) // 32))]
                if prefill else []),
             dm("aprep_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1, wr_defs),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "aprep_compute.cpp"), core_ranges=self.crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "aprep_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=cp_ct, runtime_args=_rt(self.cores, cp_rt), config=cfg, defines=ud),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         key = ("i2m_aprep", B, nc, self.HG, KG, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
                repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
                tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())), prefill,
-               tuple(pq.shape), tuple(k.shape), LEAN)
+               tuple(pq.shape), tuple(k.shape), LEAN) + (("cargs",) if carg else ())
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        if carg:
+            self._pc[ckey] = (kernels[0], kernels[1], kernels[2], cbs, prog.custom_program_hash)
+            return self._finish(*kernels, cbs, prog.custom_program_hash, pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o, kv,
+                                fill, kf, vf, prefill)
+        io, seen = [], set()
+        for t in [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ()):
+            if id(t) not in seen:
+                seen.add(id(t))
+                io.append(t)
+        ttnn.generic_op(io, prog)
+        if fill is not None:
+            for cache, t in ((fill[0], kf), (fill[1], vf)):
+                ttnn.experimental.paged_fill_cache(cache, t, fill[2], batch_idx=0)
+                ttnn.deallocate(t)
+            return q_o, r_o, None, None, s_o
+        if kv is not None:
+            if not prefill:
+                ttnn.deallocate(k_o)
+                ttnn.deallocate(v_o)
+            return q_o, r_o, None, None, s_o
+        return q_o, r_o, k_o, v_o, s_o
+
+    def _finish(self, rd, wr, cp, cbs, h, pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o, kv, fill, kf, vf, prefill):
+        """a cached prefill program (APREP_CARGS): the addresses into the common runtime args, dispatch, KV fill"""
+        rd.common_runtime_args = [pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address()]
+        wr.common_runtime_args = [q_o.buffer_address(), r_o.buffer_address(), k_o.buffer_address(),
+                                  v_o.buffer_address(), s_o.buffer_address()] + \
+            ([kv[0].buffer_address(), kv[1].buffer_address(), kv[2].buffer_address(), kv[3].buffer_address()]
+             if kv is not None else [])
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
+        prog.custom_program_hash = h
         io, seen = [], set()
         for t in [pq, k, v, tau_t, q_o, r_o, k_o, v_o, s_o] + list(kv or ()):
             if id(t) not in seen:

@@ -13,6 +13,7 @@ import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
 from .post import BF, CX, CY, C, F32, MR, WS, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, red_pack, tile_rows
+from .bconv import _ks
 
 
 RN1 = __import__("os").environ.get("I2M_PRE_RN1", "1") == "1"  # each norm's rsqrt once, not per tile
@@ -105,7 +106,7 @@ class PreKernel:
                 ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("PRE_PACK", str(int(pack)))] + sdefs
 
         def dm(src, ct, common, riscv, noc):
-            kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+            kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
                                        defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
             kd.common_runtime_args = common
             return kd
@@ -113,7 +114,7 @@ class PreKernel:
         kernels = [
             dm("pre_reader.cpp", rd_ct, rd_common, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_1),
             dm("pre_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "pre_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "pre_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("PRE_RN1", str(int(RN1))), ("SOFT_BATCH", str(int(SOFT_BATCH))),
                                            ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("PRE_PACK", str(int(pack)))]),

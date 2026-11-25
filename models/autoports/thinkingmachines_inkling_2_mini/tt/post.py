@@ -19,6 +19,7 @@ import torch
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32, BF = 4096, 2048
 CX, CY = [int(v) for v in __import__("os").environ.get("I2M_POST_GRID", "9,4").split(",")]  # the core rectangle: Ht / C tiles each
@@ -211,7 +212,7 @@ class PostKernel:
                 ("POST_TH", str(th))] + rdefs + sdefs
 
         def dm(src, ct, common, riscv, noc):
-            kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+            kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
                                        defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
             kd.common_runtime_args = common
             return kd
@@ -219,7 +220,7 @@ class PostKernel:
         kernels = [
             dm("post_reader.cpp", rd_ct, rd_common, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_1),
             dm("post_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "post_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "post_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(self.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH)))] + rdefs),
         ]

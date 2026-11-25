@@ -15,6 +15,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 NCORES = 64
 MAXJ = 40  # job slots per core (6 runtime args each)
@@ -65,7 +66,7 @@ class BlockCopy:
                 a += list(w)
             rt.append(a + [0] * (1 + 6 * MAXJ - len(a)))
         k = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "blkcopy.cpp"), core_ranges=self.crs, compile_time_args=[0, BUF] + self.ct,
+            kernel_source=_ks(KDIR, "blkcopy.cpp"), core_ranges=self.crs, compile_time_args=[0, BUF] + self.ct,
             runtime_args=_rt(self.cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
         prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(self.crs, 0, ttnn.bfloat16, 2048, BUF // 2048)])

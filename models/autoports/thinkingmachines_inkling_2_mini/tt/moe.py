@@ -45,6 +45,7 @@ GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
 # I2M_MOE_GMM (default 1): the sorted prefill's expert matmuls as tt/gmm.py (every core) instead of ttnn.sparse_matmul
 # (its 1D config puts gate|up's 24 output tiles on 24 cores)
 GMM = os.environ.get("I2M_MOE_GMM", "1") == "1"
+PCACHE = os.environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 ACT_KERNEL = os.environ.get("I2M_MOE_ACT_KERNEL", "1") == "1"  # the sorted prefill's activation in one program
 # I2M_GMM_ACT (default 1): the activation and routing weights inside the gate|up grouped matmul (bitwise; no gate|up
 # output, no tt/moeact.py program); merged sub-shards in one gate|up call (A read once)
@@ -234,6 +235,8 @@ class MoE:
         self._dispatches = getattr(self, "_dispatches", {})
         if gs not in self._dispatches:
             self._dispatches[gs] = SortedDispatch(self.mesh, E, k, group=gs)
+            # (the grouped matmuls read group_ids only: no one-hot group mask; I2M_PCACHE as the switch)
+            self._dispatches[gs].need_mask = not (GMM and PCACHE)
         if getattr(self, "_cfg_sorted", {}).get(("gs", gs)) is None:
             kc = lambda W: max(H, W) // TILE  # noqa: E731  (K in one in0 block, see the masked configs)
             self._cfg_sorted = getattr(self, "_cfg_sorted", {})

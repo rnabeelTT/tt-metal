@@ -42,7 +42,11 @@ void kernel_main() {
     constexpr auto s_args = TensorAccessorArgs<5>();
     constexpr auto lg_args = TensorAccessorArgs<s_args.next_compile_time_args_offset()>();
     // per source: s_addr, s_off, lg_addr, lg_off, lg_stride
+#ifdef MIX_CARGS  // (the sources in the common runtime args: the per-core args hold no addresses)
+    auto src_arg = [](uint32_t i, uint32_t k) { return get_common_arg_val<uint32_t>(5 * i + k); };
+#else
     auto src_arg = [](uint32_t i, uint32_t k) { return get_arg_val<uint32_t>(4 + 5 * i + k); };
+#endif
 
     for (uint32_t r = r0; r < r0 + nr; ++r) {
         cb_reserve_back(cb_lg, n * nq);

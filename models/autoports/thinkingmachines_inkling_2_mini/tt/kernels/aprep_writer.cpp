@@ -18,14 +18,24 @@
 #endif
 
 void kernel_main() {
-    const uint32_t q_addr = get_arg_val<uint32_t>(0);
-    const uint32_t r_addr = get_arg_val<uint32_t>(1);
-    const uint32_t k_addr = get_arg_val<uint32_t>(2);
-    const uint32_t v_addr = get_arg_val<uint32_t>(3);
-    const uint32_t s_addr = get_arg_val<uint32_t>(4);
+#ifdef APREP_CARGS  // (the addresses in the common runtime args; per core: start, step, total)
+#define APREP_ADDR(i) get_common_arg_val<uint32_t>(i)
+#define APREP_KVA(i) get_common_arg_val<uint32_t>(5 + (i))
+    const uint32_t start = get_arg_val<uint32_t>(0);
+    const uint32_t step = get_arg_val<uint32_t>(1);
+    const uint32_t total = get_arg_val<uint32_t>(2);
+#else
+#define APREP_ADDR(i) get_arg_val<uint32_t>(i)
+#define APREP_KVA(i) get_arg_val<uint32_t>(8 + (i))
     const uint32_t start = get_arg_val<uint32_t>(5);
     const uint32_t step = get_arg_val<uint32_t>(6);
     const uint32_t total = get_arg_val<uint32_t>(7);
+#endif
+    const uint32_t q_addr = APREP_ADDR(0);
+    const uint32_t r_addr = APREP_ADDR(1);
+    const uint32_t k_addr = APREP_ADDR(2);
+    const uint32_t v_addr = APREP_ADDR(3);
+    const uint32_t s_addr = APREP_ADDR(4);
     constexpr uint32_t cb_out = get_compile_time_arg_val(0);
     constexpr uint32_t HT = get_compile_time_arg_val(1);
     constexpr uint32_t BF = 2048;
@@ -44,10 +54,10 @@ void kernel_main() {
     constexpr auto c_args = TensorAccessorArgs<kv_args.next_compile_time_args_offset()>();  // caches
     constexpr auto p_args = TensorAccessorArgs<c_args.next_compile_time_args_offset()>();  // positions
     constexpr auto t_args = TensorAccessorArgs<p_args.next_compile_time_args_offset()>();  // block table
-    const auto ack = TensorAccessor(c_args, get_arg_val<uint32_t>(8), BF);
-    const auto acv = TensorAccessor(c_args, get_arg_val<uint32_t>(9), BF);
-    const auto apos = TensorAccessor(p_args, get_arg_val<uint32_t>(10), APREP_POS_PAGE);
-    const auto atab = TensorAccessor(t_args, get_arg_val<uint32_t>(11), APREP_TAB_PAGE);
+    const auto ack = TensorAccessor(c_args, APREP_KVA(0), BF);
+    const auto acv = TensorAccessor(c_args, APREP_KVA(1), BF);
+    const auto apos = TensorAccessor(p_args, APREP_KVA(2), APREP_POS_PAGE);
+    const auto atab = TensorAccessor(t_args, APREP_KVA(3), APREP_TAB_PAGE);
     constexpr uint32_t cb_st = APREP_CB_STAGE;
     cb_reserve_back(cb_st, 1);
     const uint32_t st = get_write_ptr(cb_st);  // [0, 256): positions page; [256, 320): table chunk; [512, ...): rows

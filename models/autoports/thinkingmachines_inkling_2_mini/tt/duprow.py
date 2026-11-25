@@ -11,6 +11,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 CORES = 8
 
@@ -30,7 +31,7 @@ class DupRow:
         assert x.dtype == ttnn.bfloat16 and x.layout == ttnn.TILE_LAYOUT and not x.is_sharded()
         nc = len(self.cores)
         k = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "duprow.cpp"), core_ranges=self.crs,
+            kernel_source=_ks(KDIR, "duprow.cpp"), core_ranges=self.crs,
             compile_time_args=[0] + ttnn.TensorAccessorArgs(x).get_compile_time_args(),
             runtime_args=_rt(self.cores, [[x.buffer_address(), i * self.per, self.per] for i in range(nc)]),
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))

@@ -472,13 +472,16 @@ def _kernel_dispatch(self, ids, scores, T, R, Rd, G):
             ttnn.deallocate(t)
     weights = ttnn.reshape(ttnn.to_layout(ttnn.reshape(w_disp, (1, 1, 1, Rd)), ttnn.TILE_LAYOUT), (1, 1, Rd, 1))
     ttnn.deallocate(w_disp)
-    # one-hot of the group experts (the sparse op still validates a [1,G,1,E] sparsity operand)
-    grp_f = self._f32(
-        ttnn.to_layout(ttnn.typecast(ttnn.reshape(group_ids, (1, 1, 1, G)), ttnn.uint32), ttnn.TILE_LAYOUT)
-    )
-    group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)
-    ttnn.deallocate(grp_f)
-    group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
+    # one-hot of the group experts (the sparse op still validates a [1,G,1,E] sparsity operand); a caller whose expert
+    # matmuls read only group_ids sets need_mask = False on the dispatcher (None: six ops fewer per MoE call)
+    group_mask = None
+    if getattr(self, "need_mask", True):
+        grp_f = self._f32(
+            ttnn.to_layout(ttnn.typecast(ttnn.reshape(group_ids, (1, 1, 1, G)), ttnn.uint32), ttnn.TILE_LAYOUT)
+        )
+        group_mask = ttnn.eq(ttnn.reshape(grp_f, (1, G, 1, 1)), self.arange_E)
+        ttnn.deallocate(grp_f)
+        group_mask = ttnn.to_layout(ttnn.typecast(group_mask, ttnn.bfloat16), RM)
     out = {
         "src_tok": ttnn.reshape(src_tok, (1, Rd)),
         "weights": weights,

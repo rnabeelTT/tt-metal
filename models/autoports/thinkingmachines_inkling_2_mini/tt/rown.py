@@ -14,6 +14,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32, BF = 4096, 2048
 BLK = 4
@@ -159,10 +160,10 @@ class RowNorm:
               cb_y, cb_q, cb_lacc, cb_lg, max(nq, 1)]
         per_core = [[r0, n] for r0, n in work]
         dm = lambda src, ct, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, per_core),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, per_core),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=defs)
         rd = dm("rown_reader.cpp", rd_ct, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)
         wr = dm("rown_writer.cpp", wr_ct, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)
-        comp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "rown_compute.cpp"), core_ranges=crs, compile_time_args=cm,
+        comp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "rown_compute.cpp"), core_ranges=crs, compile_time_args=cm,
                                      runtime_args=_rt(cores, [[n] for _, n in work]), config=cfg, defines=defs)
         return rd, wr, comp, cbs, (c0, nc, repr(x.memory_config()), repr(d0.memory_config()))

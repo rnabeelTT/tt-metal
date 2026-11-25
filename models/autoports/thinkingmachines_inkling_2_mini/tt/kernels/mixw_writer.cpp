@@ -20,7 +20,11 @@ void kernel_main() {
     for (uint32_t r = r0; r < r0 + nr; ++r) {
         for (uint32_t t = 0; t < nt; ++t) {
             for (uint32_t q = 0; q < nq; ++q) {
+#ifdef MIX_CARGS
+                const auto ao = TensorAccessor(o_args, get_common_arg_val<uint32_t>(q), F32);
+#else
                 const auto ao = TensorAccessor(o_args, get_arg_val<uint32_t>(5 + q), F32);
+#endif
                 cb_wait_front(cb_out, 1);
                 const uint64_t d = ao.get_noc_addr(r * Ht + t0 + t);
 #if defined(MIX_TH) && MIX_TH < 32  // (the live rows of faces 0 / 1 of a MIX_TH x 32 CB tile)

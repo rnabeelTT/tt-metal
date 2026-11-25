@@ -11,8 +11,12 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 L1_BUDGET = 700_000
+
+
+PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 
 
 class Undispatch:
@@ -46,9 +50,25 @@ class Undispatch:
         st = self._st.get(key)
         if st is None:
             st = self._st[key] = self._static(T, k, S, H)
-        Wt, Wt_c, cs, cores, crs = st["Wt"], st["Wt_c"], st["cs"], st["cores"], st["crs"]
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
                                              ttnn.DRAM_MEMORY_CONFIG)
+        pk = (key, repr(rows[0].memory_config()), repr(und.memory_config()))
+        hit = st.get(pk) if PCACHE else None
+        if hit is None:
+            hit = self._desc(st, key, rows, und, out, T, k, S, H)
+            if PCACHE:
+                st[pk] = hit
+        rd, wr, cp, cbs, h = hit
+        rd.common_runtime_args = [und.buffer_address()] + [r.buffer_address() for r in rows]
+        wr.common_runtime_args = [out.buffer_address()]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
+        prog.custom_program_hash = h
+        ttnn.generic_op(list(rows) + [und, out], prog)
+        return out
+
+    def _desc(self, st, key, rows, und, out, T, k, S, H):
+        """__call__'s kernels (common runtime args set per call), CBs and hash"""
+        Wt, Wt_c, cs, cores, crs = st["Wt"], st["Wt_c"], st["cs"], st["cores"], st["crs"]
         bf = ttnn.bfloat16
         cb_in, cb_til, cb_aa, cb_ab, cb_ta, cb_tb, cb_out, cb_und = range(8)
         cbs = [_cb(crs, cb_in, bf, 2048, 2 * Wt_c)] + [_cb(crs, i, bf, 2048, Wt_c) for i in range(1, 7)]
@@ -56,23 +76,20 @@ class Undispatch:
         cbs.append(_cb(crs, cb_und, ttnn.uint32, und_bytes, 1))
         dm = ttnn.DataMovementConfigDescriptor
         rd = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "undisp_reader.cpp"), core_ranges=crs,
+            kernel_source=_ks(KDIR, "undisp_reader.cpp"), core_ranges=crs,
             compile_time_args=[T, k, S, Wt_c, cs, Wt_c * 64, H * 2, cb_in, cb_und]
             + ttnn.TensorAccessorArgs(rows[0]).get_compile_time_args() + ttnn.TensorAccessorArgs(und).get_compile_time_args(),
             runtime_args=_rt(cores, st["rt"]), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
         rd.common_runtime_args = [und.buffer_address()] + [r.buffer_address() for r in rows]
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "undisp_writer.cpp"), core_ranges=crs,
+            kernel_source=_ks(KDIR, "undisp_writer.cpp"), core_ranges=crs,
             compile_time_args=[Wt, Wt_c, cs, cb_out] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),
             runtime_args=_rt(cores, st["rt"]), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
         wr.common_runtime_args = [out.buffer_address()]
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=False)
         cp = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "undisp_compute.cpp"), core_ranges=crs,
+            kernel_source=_ks(KDIR, "undisp_compute.cpp"), core_ranges=crs,
             compile_time_args=[Wt_c, k, S, cb_in, cb_til, cb_aa, cb_ab, cb_ta, cb_tb, cb_out],
             runtime_args=_rt(cores, [[r[1]] for r in st["rt"]]), config=cfg)
-        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
         hk = ("i2m_undisp", key, tuple(repr(t.memory_config()) for t in (rows[0], und)))
-        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(hk).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op(list(rows) + [und, out], prog)
-        return out
+        return rd, wr, cp, cbs, int.from_bytes(hashlib.sha1(repr(hk).encode()).digest()[:8], "little") & ((1 << 63) - 1)

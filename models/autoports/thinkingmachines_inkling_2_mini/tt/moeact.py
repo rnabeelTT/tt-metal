@@ -13,6 +13,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 
 class MoEAct:
@@ -35,20 +36,20 @@ class MoEAct:
         rt = [[bounds[i], bounds[i + 1]] for i in range(n)]
         dm = ttnn.DataMovementConfigDescriptor
         rd = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "moeact_reader.cpp"), core_ranges=crs,
+            kernel_source=_ks(KDIR, "moeact_reader.cpp"), core_ranges=crs,
             compile_time_args=[cb_g, cb_u, cb_w, Wt] + ttnn.TensorAccessorArgs(gu).get_compile_time_args()
             + ttnn.TensorAccessorArgs(weights).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0))
         rd.common_runtime_args = [gu.buffer_address(), weights.buffer_address()]
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "moeact_writer.cpp"), core_ranges=crs,
+            kernel_source=_ks(KDIR, "moeact_writer.cpp"), core_ranges=crs,
             compile_time_args=[cb_out, Wt] + ttnn.TensorAccessorArgs(out).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1))
         wr.common_runtime_args = [out.buffer_address()]
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         quarter = struct.unpack("<I", struct.pack("<f", 0.25))[0]
-        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "moeact_compute.cpp"), core_ranges=crs,
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "moeact_compute.cpp"), core_ranges=crs,
                                    compile_time_args=[cb_g, cb_u, cb_w, cb_out, Wt, quarter],
                                    runtime_args=_rt(cores, [[r[1] - r[0]] for r in rt]), config=cfg)
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)

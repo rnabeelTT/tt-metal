@@ -60,6 +60,7 @@ from models.demos.blackhole.qwen36.tt.decode_linear.ops import DecodeLinear
 from .dmm import dmm
 from .model import Ops
 from .weights import Checkpoint, load_config
+from .bconv import _ks
 
 KDIR = Path(__file__).parent / "kernels"
 DRAM = ttnn.DRAM_MEMORY_CONFIG
@@ -406,11 +407,11 @@ class DSparkDrafter:
         bits = [_bits(float(a[j])) for a in alphas for j in range(4)]
         cp_ct = [cb_in, cb_out, NM] + bits + [0] * (16 - len(bits))
         kernels = [
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_mix_dm.cpp"), core_ranges=crs, compile_time_args=ct,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_mix_dm.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt(dm_rt),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0)),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_mix_compute.cpp"), core_ranges=crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_mix_compute.cpp"), core_ranges=crs,
                                   compile_time_args=cp_ct, runtime_args=_rt(cp_rt),
                                   config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4,
                                                                       fp32_dest_acc_en=True, math_approx_mode=False)),
@@ -447,7 +448,7 @@ class DSparkDrafter:
         for t in io:
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         ct += [self.H // 32]
-        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_ctrl.cpp"), core_ranges=crs, compile_time_args=ct,
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_ctrl.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt({(0, 0): [t.buffer_address() for t in io]}),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))
@@ -473,7 +474,7 @@ class DSparkDrafter:
             + ttnn.TensorAccessorArgs(p0_t).get_compile_time_args()
         rt = {(c.x, c.y): [src.buffer_address(), cache.buffer_address(), p0_t.buffer_address(), h, S]
               for c, (src, cache, h, S) in zip(cores, jobs)}
-        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_kvw.cpp"), core_ranges=crs, compile_time_args=ct,
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_kvw.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt(rt),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))
@@ -498,7 +499,7 @@ class DSparkDrafter:
         crs = _crs(cores)
         ct = [0, self.D // 32, NBUF] + ttnn.TensorAccessorArgs(jobs[0][0]).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(jobs[0][1]).get_compile_time_args()
-        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_heads.cpp"), core_ranges=crs, compile_time_args=ct,
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_heads.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt(rt),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))
@@ -524,7 +525,7 @@ class DSparkDrafter:
         idx0 = next((j[3] for j in jobs if j[3] is not None), self.idx_n)
         ct = [0] + ttnn.TensorAccessorArgs(jobs[0][0]).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(jobs[0][1]).get_compile_time_args() + ttnn.TensorAccessorArgs(idx0).get_compile_time_args()
-        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_rowcp.cpp"), core_ranges=crs, compile_time_args=ct,
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_rowcp.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt(rt),
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))
@@ -591,7 +592,7 @@ class DSparkDrafter:
                 ttnn.KernelDescriptor(kernel_source=str(rd_src), core_ranges=cores, defines=rd_def,
                                       compile_time_args=rd_ct, runtime_args=sub(rd, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
-                ttnn.KernelDescriptor(kernel_source=str(KDIR / kind), core_ranges=cores, compile_time_args=ct_w,
+                ttnn.KernelDescriptor(kernel_source=_ks(KDIR, kind), core_ranges=cores, compile_time_args=ct_w,
                                       runtime_args=sub(wr, cores), defines=list(wdefines),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
             ]
@@ -656,7 +657,7 @@ class DSparkDrafter:
         ct = [0, self.NS, TOPK, self.Vs, self.V, ks, CAP_NTAB]
         for t in io:
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        k = ttnn.KernelDescriptor(kernel_source=str(KDIR / "dsp_merge.cpp"), core_ranges=crs, compile_time_args=ct,
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_merge.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt({(0, 0): [t.buffer_address() for t in io]}), defines=defines,
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
                                                                            noc=ttnn.NOC.NOC_0))

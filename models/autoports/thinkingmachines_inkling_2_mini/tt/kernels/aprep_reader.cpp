@@ -69,6 +69,15 @@ constexpr bool ZQ = !(APREP_NOZERO && APREP_PQT == 0 && APREP_QN > 1);
 constexpr bool ZKV = !(APREP_NOZERO && APREP_PQT == 0 && (APREP_KN > 1 || APREP_KVW));
 
 void kernel_main() {
+#ifdef APREP_CARGS  // (the addresses in the common runtime args; per core: start, step, total)
+    const uint32_t pq_addr = get_common_arg_val<uint32_t>(0);
+    const uint32_t k_addr = get_common_arg_val<uint32_t>(1);
+    const uint32_t v_addr = get_common_arg_val<uint32_t>(2);
+    const uint32_t tau_addr = get_common_arg_val<uint32_t>(3);
+    const uint32_t start = get_arg_val<uint32_t>(0);
+    const uint32_t step = get_arg_val<uint32_t>(1);
+    const uint32_t total = get_arg_val<uint32_t>(2);
+#else
     const uint32_t pq_addr = get_arg_val<uint32_t>(0);
     const uint32_t k_addr = get_arg_val<uint32_t>(1);
     const uint32_t v_addr = get_arg_val<uint32_t>(2);
@@ -76,6 +85,7 @@ void kernel_main() {
     const uint32_t start = get_arg_val<uint32_t>(4);
     const uint32_t step = get_arg_val<uint32_t>(5);
     const uint32_t total = get_arg_val<uint32_t>(6);
+#endif
 
     constexpr uint32_t cb_xf = get_compile_time_arg_val(0);
     constexpr uint32_t cb_xb = get_compile_time_arg_val(1);

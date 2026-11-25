@@ -76,6 +76,23 @@ void kernel_main() {
     constexpr uint32_t cb_sink = tt::CBIndex::c_14;  // Inkling-2: 1 tile, row r*G+i = row r's head g*G+i sink / scale
 
     uint32_t arg_idx = 0;
+#ifdef SDPA_CARGS  // (prefill: the addresses in the common runtime args, the per-core args hold none)
+    constexpr uint32_t RECT0 = 5;
+    const uint32_t q_addr = get_common_arg_val<uint32_t>(0);
+    const uint32_t k_addr = get_common_arg_val<uint32_t>(1);
+    const uint32_t v_addr = get_common_arg_val<uint32_t>(2);
+    const uint32_t pos_addr = get_common_arg_val<uint32_t>(3);
+    const uint32_t page_table_addr = get_common_arg_val<uint32_t>(4);
+    const uint32_t page_table_page_size = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t group = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t core_num_in_reduce = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t rq_addr = get_common_arg_val<uint32_t>(5);
+    const uint32_t tbl_addr = get_common_arg_val<uint32_t>(6);
+    const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
+    const uint32_t sink_addr = get_common_arg_val<uint32_t>(7);
+#else
+    constexpr uint32_t RECT0 = 13;
     const uint32_t q_addr = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t k_addr = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t v_addr = get_arg_val<uint32_t>(arg_idx++);
@@ -89,6 +106,7 @@ void kernel_main() {
     const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t sink_addr = get_arg_val<uint32_t>(arg_idx++);
+#endif
     // the page-table row (an L1 buffer: the CB is never consumed), read per unit up to the blocks the unit attends (a
     // 1M-token row is 64 KB: reading it whole on every core cost ~5 ms per decode step)
     CircularBuffer cb_page_table(cb_id_page_table);
@@ -145,10 +163,10 @@ void kernel_main() {
             }
             noc_async_read_barrier();
             // multicast rectangles of the program cores (count, then x0 y0 x1 y1 dests each; self is never written)
-            const uint32_t n_rect = get_arg_val<uint32_t>(13);
+            const uint32_t n_rect = get_arg_val<uint32_t>(RECT0);
             *sem = 1;
             for (uint32_t i = 0; i < n_rect; ++i) {
-                const uint32_t b = 14 + 5 * i;
+                const uint32_t b = RECT0 + 1 + 5 * i;
                 const uint32_t x0 = get_arg_val<uint32_t>(b), y0 = get_arg_val<uint32_t>(b + 1);
                 const uint32_t x1 = get_arg_val<uint32_t>(b + 2), y1 = get_arg_val<uint32_t>(b + 3);
                 const uint32_t dests = get_arg_val<uint32_t>(b + 4);

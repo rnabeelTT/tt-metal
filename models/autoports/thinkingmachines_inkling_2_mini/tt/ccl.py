@@ -14,6 +14,7 @@ before every device consumed it."""
 import os
 
 import ttnn
+from .bconv import _ks
 
 ASYNC = os.environ.get("I2M_AR_ASYNC", "1") == "1"
 # I2M_AR_PACK: <= 8 live rows packed into K = 3 / 9 / 18 tiles around the all-reduce (tt/kernels/arpack.cpp; traced,
@@ -78,7 +79,7 @@ class _Packed:
 
         Ht = int(t.shape[-1]) // 32
         ct = [T, self.KJ, 2 * T * Ht, self.cx] + ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / "arpack.cpp"), core_ranges=self.crs, compile_time_args=ct,
+        kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "arpack.cpp"), core_ranges=self.crs, compile_time_args=ct,
                                    defines=[("ARP_PACK", "1")] if pack else [],
                                    config=ttnn.DataMovementConfigDescriptor(
                                        processor=ttnn.DataMovementProcessor.RISCV_1 if pack else
@@ -149,15 +150,15 @@ class _Packed:
         for idx in range(N):
             slot = scratch.buffer_address() + idx * 2048
             pack_k = ttnn.KernelDescriptor(
-                kernel_source=str(KDIR / "arfuse_pack.cpp"), core_ranges=pcrs, compile_time_args=pack_ct,
+                kernel_source=_ks(KDIR, "arfuse_pack.cpp"), core_ranges=pcrs, compile_time_args=pack_ct,
                 runtime_args=[], config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1))
             pack_k.common_runtime_args = [x.buffer_address(), slot, K, links] + noc_args
             shard_k = ttnn.KernelDescriptor(
-                kernel_source=str(KDIR / "arfuse_shard.cpp"), core_ranges=self.crs, compile_time_args=[N, 1, 1],
+                kernel_source=_ks(KDIR, "arfuse_shard.cpp"), core_ranges=self.crs, compile_time_args=[N, 1, 1],
                 runtime_args=shard_rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
             shard_k.common_runtime_args = [sem_addr]
             add_k = ttnn.KernelDescriptor(
-                kernel_source=str(KDIR / "arfuse_add.cpp"), core_ranges=self.crs, compile_time_args=[1, 2, N, 1],
+                kernel_source=_ks(KDIR, "arfuse_add.cpp"), core_ranges=self.crs, compile_time_args=[1, 2, N, 1],
                 runtime_args=[], config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4,
                                                                      fp32_dest_acc_en=False, math_approx_mode=False))
             fwd, bwd = N - 1 - idx, idx
@@ -166,7 +167,7 @@ class _Packed:
                 mine = shnoc[l * kpl:(l + 1) * kpl]
                 send_rt[c.x][c.y] = [slot, sem_addr, len(mine), nl[l]] + [p.x for p in mine] + [p.y for p in mine]
             send_k = ttnn.KernelDescriptor(
-                kernel_source=str(KDIR / "arfuse_send.cpp"), core_ranges=send_crs,
+                kernel_source=_ks(KDIR, "arfuse_send.cpp"), core_ranges=send_crs,
                 compile_time_args=[2048, fwd, bwd, 3], runtime_args=send_rt,
                 config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
             prog = ttnn.ProgramDescriptor(

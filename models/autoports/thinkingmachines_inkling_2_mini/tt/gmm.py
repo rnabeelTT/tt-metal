@@ -15,6 +15,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 # I2M_GMM_DB (act mode; auto: when the experts average >= 3 groups, i.e. the compute per weight block is long, or with
 # I2M_GMM_BANDS: one die 512-row chunks gate|up 1.81 -> 1.68 ms per application, 6 slices of 18 cores, not 8 of 12): the
@@ -49,6 +50,9 @@ GS = __import__("os").environ.get("I2M_GMM_GS", "act")
 _ENV = __import__("os").environ
 BANDS = _ENV.get("I2M_GMM_BANDS", "auto")
 SHARES = _ENV.get("I2M_GMM_SHARES", "auto")
+# I2M_PCACHE (default 1): custom programs keep their kernel / CB descriptors per shape key and only set the per-call
+# common runtime args (buffer addresses) on a hit: the same programs, less host time per call
+PCACHE = _ENV.get("I2M_PCACHE", "1") == "1"
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
 
@@ -71,6 +75,7 @@ class GroupedMM:
         self.mesh, self.fid = mesh, ckc_fidelity
         g = mesh.compute_with_storage_grid_size()
         self.gx, self.ncores = g.x, max_cores or g.x * g.y  # (whole rows of the grid)
+        self._pc = {}  # (PCACHE) structural key -> the call's descriptors but its common runtime args
 
     def __call__(self, a, w, ids, out, E, nb=None, wsub=(1, 0), k0=0, act=None, nsub=1, koff=0, K=None, ocol=0,
                  w2=None):
@@ -94,6 +99,23 @@ class GroupedMM:
         rm = outs[0].layout == ttnn.ROW_MAJOR_LAYOUT  # (row-major C: untilized blocks of <= 4 tiles with FP32 DST)
         if act is not None:
             return self._act(a, w, ids, out, E, act, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol, w2)
+        ck = ("mm", G, gs, K, KA, N, E, nb, NS, rm, w.dtype, tuple(repr(t.memory_config()) for t in [a, w, ids] + outs))
+        hit = self._pc.get(ck) if PCACHE else None
+        if hit is None:
+            hit = self._pc[ck] = self._mm_desc(a, w, ids, outs, E, nb, Kt, Nt, mt, w_page, G, gs, KA, K, N, NS, rm)
+        rd, wr, rest = hit
+        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
+                                  int(w.shape[-2]) // 32, k0, koff // 32, 0]
+        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, k0] + [
+            o.buffer_address() for o in outs]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, rest[0]], semaphores=rest[1], cbs=rest[2])
+        prog.custom_program_hash = rest[3]
+        ttnn.generic_op([a, w, ids] + outs, prog)
+        return out
+
+    def _mm_desc(self, a, w, ids, outs, E, nb, Kt, Nt, mt, w_page, G, gs, KA, K, N, NS, rm):
+        """__call__'s (no act) kernels, semaphores, CBs and hash: everything but the common runtime args (addresses,
+        wsub, k0, koff), which the call sets"""
         # the column block (DST: 8 FP32 tiles, Nt % nb == 0) and the weight blocks in the CB (2: the next expert's loads
         # during the compute): the weight and A CBs within ~800 KB of L1 (the packed prefill keeps L1 buffers above
         # ~1.3 MB); the widest block first (fewer A multicast receivers)
@@ -116,34 +138,28 @@ class GroupedMM:
         defs = [("GMM_RM", str(int(rm))), ("GMM_WW", str(int(ww))), ("GMM_NS", str(NS)), ("GMM_BAL", str(bal)),
                 ("GMM_GS", str(int(gs_)))]
         rd = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs, defines=defs,
+            kernel_source=_ks(KDIR, "gmm_reader.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page, KA // 32, 0, 0, NB]
             + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
             + ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(ids).get_compile_time_args(),
             runtime_args=_rt(cores, [r + [0, r[0] * nb] for r in rt]),
             config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=_nocs(ww)[0]))
-        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
-                                  int(w.shape[-2]) // 32, k0, koff // 32, 0]
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
+            kernel_source=_ks(KDIR, "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, Nt, nb, mt, cb_ids, E] + ttnn.TensorAccessorArgs(outs[0]).get_compile_time_args()
             + [cb_w, Kt, Nt, w_page, 0] + ttnn.TensorAccessorArgs(w).get_compile_time_args(),
             runtime_args=_rt(cores, [r + [r[0] * nb, 0, r[0] * nb] for r in rt]),
             config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=_nocs(ww)[1]))
-        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, k0] + [
-            o.buffer_address() for o in outs]
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
                                            math_approx_mode=False)
-        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gmm_compute.cpp"), core_ranges=crs, defines=defs,
                                    compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt, cb_ids, E],
                                    runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
-        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
         key = ("i2m_gmm6", tuple(defs), G, gs, K, KA, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid, self._lkey(NB),
                tuple(repr(t.memory_config()) for t in [a, w, ids] + outs))
-        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([a, w, ids] + outs, prog)
-        return out
+        h = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        return rd, wr, (cp, sems, cbs, h)
 
     def _bands(self):
         return BANDS == "1" or (BANDS == "auto" and self.mesh.get_num_devices() == 1)
@@ -213,10 +229,30 @@ class GroupedMM:
         """gate|up + the activation and routing weights (see __call__): column block b of the output = sub-shard
         s = b // (Wt / h), its columns [c0, c0 + h); the weight block holds the h gate and the h up columns.
         w2: pairs Wt .. Wt + W2 - 1 come from w2 (nsub 1)."""
+        ck = ("act", G, gs, Kt, int(a.shape[3]), Nt, E, nsub, ocol, w.dtype, int(out.shape[-1]),
+              None if w2 is None else (tuple(w2.shape), w2.dtype),
+              tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)))
+        hit = self._pc.get(ck) if PCACHE else None
+        if hit is None:
+            hit = self._pc[ck] = self._act_desc(a, w, ids, out, E, wts, nsub, Kt, Nt, mt, w_page, G, gs, ocol, w2)
+        rd, wr, rest = hit
+        assert w2 is None or wsub == (1, 0)
+        w2a = [w2.buffer_address()] if w2 is not None else []
+        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
+                                  int(w.shape[-2]) // 32, 0, 0, wts.buffer_address()] + w2a
+        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, 0,
+                                  out.buffer_address()] + w2a
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, rest[0]], semaphores=rest[1], cbs=rest[2])
+        prog.custom_program_hash = rest[3]
+        ttnn.generic_op([a, w, ids, out, wts] + ([w2] if w2 is not None else []), prog)
+        return out
+
+    def _act_desc(self, a, w, ids, out, E, wts, nsub, Kt, Nt, mt, w_page, G, gs, ocol, w2):
+        """_act's kernels, semaphores, CBs and hash (the common runtime args set per call)"""
         Wt = Nt // 2
         W2 = 0
         if w2 is not None:
-            assert nsub == 1 and wsub == (1, 0) and w2.dtype == w.dtype and int(w2.shape[-2]) == int(w.shape[-2])
+            assert nsub == 1 and w2.dtype == w.dtype and int(w2.shape[-2]) == int(w.shape[-2])
             assert repr(w2.memory_config()) == repr(w.memory_config())
             assert w.memory_config().buffer_type == ttnn.BufferType.DRAM  # (interleaved: one accessor's args for both)
             W2 = int(w2.shape[-1]) // 64
@@ -254,33 +290,26 @@ class GroupedMM:
                 ("GMM_GS", str(int(gs_))), ("GMM_W2", str(W2))]
         KA = int(a.shape[3]) // 32
         rd = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "gmm_reader.cpp"), core_ranges=crs, defines=defs,
+            kernel_source=_ks(KDIR, "gmm_reader.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_a, cb_w, cb_ids, Kt, Nt, nb, mt, E, ids_bytes, w_page, KA, cb_rw, Wt, NB]
             + ttnn.TensorAccessorArgs(a).get_compile_time_args() + ttnn.TensorAccessorArgs(w).get_compile_time_args()
             + ttnn.TensorAccessorArgs(ids).get_compile_time_args() + ttnn.TensorAccessorArgs(wts).get_compile_time_args(),
             runtime_args=_rt(cores, rt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=_nocs(ww)[0]))
-        w2a = [w2.buffer_address()] if w2 is not None else []
-        rd.common_runtime_args = [a.buffer_address(), w.buffer_address(), ids.buffer_address(), wsub[0], wsub[1],
-                                  int(w.shape[-2]) // 32, 0, 0, wts.buffer_address()] + w2a
         No = int(out.shape[-1]) // 32
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "gmm_writer.cpp"), core_ranges=crs, defines=defs,
+            kernel_source=_ks(KDIR, "gmm_writer.cpp"), core_ranges=crs, defines=defs,
             compile_time_args=[cb_out, No, h, mt, cb_ids, E] + ttnn.TensorAccessorArgs(out).get_compile_time_args()
             + [cb_w, Kt, Nt, w_page, Wt] + ttnn.TensorAccessorArgs(w).get_compile_time_args(),
             runtime_args=_rt(cores, wrt), config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=_nocs(ww)[1]))
-        wr.common_runtime_args = [w.buffer_address(), wsub[0], wsub[1], int(w.shape[-2]) // 32, 0,
-                                  out.buffer_address()] + w2a
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fid, fp32_dest_acc_en=True, dst_full_sync_en=True,
                                            math_approx_mode=False)
         quarter = struct.unpack("<I", struct.pack("<f", 0.25))[0]
-        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gmm_compute.cpp"), core_ranges=crs, defines=defs,
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gmm_compute.cpp"), core_ranges=crs, defines=defs,
                                    compile_time_args=[cb_a, cb_w, cb_out, Kt, nb, mt, cb_ids, E, cb_rw, quarter],
                                    runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
-        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
         key = ("i2m_gmm_act1", tuple(defs), G, gs, Kt, KA, Nt, No, E, h, nbuf, S, nsub, str(w.dtype), self.fid,
                self._lkey(NB),
                tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)), W2)
-        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([a, w, ids, out, wts] + ([w2] if w2 is not None else []), prog)
-        return out
+        return rd, wr, (cp, sems, cbs,
+                        int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1))

@@ -15,6 +15,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32, BF = 4096, 2048
 
@@ -75,11 +76,11 @@ class GateFused:
                                            dst_full_sync_en=False, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, per_core),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, per_core),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         rd = dm("gatef_reader.cpp", rd_ct, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)
         wr = dm("gatef_writer.cpp", wr_ct, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)
-        cm = ttnn.KernelDescriptor(kernel_source=str(KDIR / "gatef_compute.cpp"), core_ranges=crs,
+        cm = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gatef_compute.cpp"), core_ranges=crs,
                                    compile_time_args=[cb_g, cb_w, cb_hm, cb_out, R],
                                    runtime_args=_rt(cores, [[nc, nr] for _, nc, _, nr in work]), config=cfg)
         key = ("i2m_gatef3", self.Ht, R, T, len(cores), repr(g.memory_config()), repr(h.memory_config()),

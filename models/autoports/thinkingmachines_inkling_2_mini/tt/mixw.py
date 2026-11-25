@@ -16,12 +16,14 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
+from .bconv import _ks
 
 F32 = 4096
 MAX_N = 6  # DST: max + n weights + sum <= 8 fp32 tiles
 
 
 ROWS = __import__("os").environ.get("I2M_MIX_ROWS", "1") == "1"
+PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 
 
 def _rows_def(T):
@@ -60,6 +62,7 @@ class MixKernel:
         self.G = grid.x * grid.y
         self.grid_x = grid.x
         self.splits = {}
+        self._pc = {}  # (PCACHE: prefill __call__ programs by shape key)
 
     def _split(self, RT):
         """Row tiles x H column blocks over the cores: nb column blocks (a divisor of Ht, nb * RT <= cores when
@@ -94,6 +97,25 @@ class MixKernel:
         RT = max(1, T // 32)
         outs = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                                out_mc) for _ in range(nq)]
+        if PCACHE and T > 32:  # (prefill: the program per shape key, the addresses in the common runtime args)
+            if stacked:
+                st = lg_st or nq
+                src = [v for i in range(n)
+                       for v in (S.buffer_address(), i * RT * self.Ht, lg.buffer_address(), i * RT * st + lg_off, st)]
+            else:
+                src = [v for s_, (l_, off, st) in zip(S, lg) for v in (s_.buffer_address(), 0, l_.buffer_address(), off,
+                                                                       st)]
+            key = (stacked, n, nq, T, H, repr(S0.memory_config()), repr(lg0.memory_config()), repr(out_mc))
+            hit = self._pc.get(key)
+            if hit is None:
+                hit = self._pc[key] = self._call_desc(S0, lg0, outs[0], n, nq, T, H, RT, out_mc)
+            rd, wr, cp, cbs, h = hit
+            rd.common_runtime_args = src
+            wr.common_runtime_args = [o.buffer_address() for o in outs]
+            prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
+            prog.custom_program_hash = h
+            ttnn.generic_op(([S, lg] if stacked else list(S) + [e[0] for e in lg]) + outs, prog)
+            return outs
         cores, per, work = self._split(RT)
         crs = _range_set(cores)
         cb_lg, cb_s, cb_w, cb_out = 0, 1, 2, 3
@@ -118,12 +140,12 @@ class MixKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T))
         kernels = [
             dm("mixw_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "mixw_compute.cpp"), core_ranges=crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "mixw_compute.cpp"), core_ranges=crs,
                                   compile_time_args=[cb_lg, cb_s, cb_w, cb_out, n, nq],
                                   runtime_args=_rt(cores, [[per, nr] for _, _, nr in work]), config=cfg,
                                   defines=_rows_def(T)),
@@ -133,6 +155,39 @@ class MixKernel:
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op(([S, lg] if stacked else list(S) + [e[0] for e in lg]) + outs, prog)
         return outs
+
+    def _call_desc(self, S0, lg0, o0, n, nq, T, H, RT, out_mc):
+        """__call__'s kernels (MIX_CARGS: the source / output addresses in the common runtime args), CBs and hash"""
+        cores, per, work = self._split(RT)
+        crs = _range_set(cores)
+        cb_lg, cb_s, cb_w, cb_out = 0, 1, 2, 3
+        nbuf = 2 if RT > 1 else 1
+        cbs = _cbs(crs, T, [nbuf * n * nq, n * min(per, 4), n * nq, 2])
+        rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S0).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(lg0).get_compile_time_args()
+        wr_ct = [cb_out, nq] + ttnn.TensorAccessorArgs(o0).get_compile_time_args()
+        u2d = [ttnn.UnpackToDestMode.Default] * 64
+        for i in (cb_lg, cb_s, cb_w):
+            u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                           dst_full_sync_en=True, math_approx_mode=False)
+        cfg.unpack_to_dest_mode = u2d
+        defs = _dm_defs(T) + [("MIX_CARGS", "1")]
+        dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
+            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=defs)
+        rd = dm("mixw_reader.cpp", rd_ct, [[t0, per, r0, nr] for t0, r0, nr in work], ttnn.DataMovementProcessor.RISCV_1,
+                ttnn.NOC.NOC_0)
+        wr = dm("mixw_writer.cpp", wr_ct, [[t0, per, r0, nr, self.Ht] for t0, r0, nr in work],
+                ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "mixw_compute.cpp"), core_ranges=crs,
+                                   compile_time_args=[cb_lg, cb_s, cb_w, cb_out, n, nq],
+                                   runtime_args=_rt(cores, [[per, nr] for _, _, nr in work]), config=cfg,
+                                   defines=_rows_def(T))
+        key = ("i2m_mixw5c", _th(T), n, nq, T, H, len(cores), repr(S0.memory_config()), repr(lg0.memory_config()),
+               repr(out_mc))
+        h = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        return rd, wr, cp, cbs, h
 
     def groups(self, S, lg, n, nq, G, lg_st, out_mc=ttnn.DRAM_MEMORY_CONFIG):
         """G mixes of the same stacked sources in ONE program, each on its own core group (the __call__ kernels): S
@@ -165,12 +220,12 @@ class MixKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T))
         kernels = [
             dm("mixw_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "mixw_compute.cpp"), core_ranges=crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "mixw_compute.cpp"), core_ranges=crs,
                                   compile_time_args=[cb_lg, cb_s, cb_w, cb_out, n, nq],
                                   runtime_args=_rt(cores, [[per, 1]] * len(cores)), config=cfg, defines=_rows_def(T)),
         ]
@@ -207,12 +262,12 @@ class MixKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T))
         kernels = [
             dm("mixm_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "mixw_compute.cpp"), core_ranges=self.crs,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "mixw_compute.cpp"), core_ranges=self.crs,
                                   compile_time_args=[cb_lg, cb_s, cb_w, cb_out, n, nq],
                                   runtime_args=_rt(self.cores, [[self.per, 1]] * nc), config=cfg,
                                   defines=_rows_def(T)),

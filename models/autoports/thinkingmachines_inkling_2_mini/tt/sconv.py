@@ -28,6 +28,8 @@ from pathlib import Path
 
 import torch
 import ttnn
+from .bconv import _ks
+from .bconv import _range_set as _range_set_m
 
 K = 4  # sconv_kernel_size
 KERNELS = Path(__file__).parent / "sconv_kernels"
@@ -43,6 +45,7 @@ PF_MAXSEG = 8  # sequences per packed prefill chunk (sconv_kernels/pfseg_reader.
 PF_KERNEL = os.environ.get("INKLING_SCONV_PF_KERNEL", "1") == "1"
 # I2M_PF_CONV_FLAT (default 1): the packed prefill conv's (column, row tile) tiles in even contiguous ranges over every
 # core (pfseg PF_FLAT), not one column per core (72 of the cores at hidden 2304; the conv is compute-bound); bitwise
+PCACHE = os.environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 PF_FLAT = os.environ.get("I2M_PF_CONV_FLAT", "1") == "1"
 # INKLING_SCONV_COMMIT_RM (default 1): a prefill chunk's commit through sconv_kernels/commit_rm.cpp (offset at run time)
 COMMIT_RM = os.environ.get("INKLING_SCONV_COMMIT_RM", "1") == "1"
@@ -56,10 +59,7 @@ def _stable_hash(*key):
 
 
 def _range_set(cores):
-    rs = ttnn.CoreRangeSet([ttnn.CoreRange(cores[0], cores[0])])
-    for c in cores[1:]:
-        rs = rs.merge(ttnn.CoreRangeSet([ttnn.CoreRange(c, c)]))
-    return rs
+    return _range_set_m(cores)
 
 
 def _cores(mesh, n):
@@ -82,7 +82,7 @@ def _rt(cores, args):
 
 def _dm(source, cores, ct, rt, riscv, noc):
     return ttnn.KernelDescriptor(
-        kernel_source=str(KERNELS / source),
+        kernel_source=_ks(KERNELS, source),
         core_ranges=_range_set(cores),
         compile_time_args=ct,
         runtime_args=_rt(cores, rt),
@@ -242,7 +242,7 @@ class ShortConv:
             _dm("reader.cpp", cores, rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             _dm("writer.cpp", cores, wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
             ttnn.KernelDescriptor(
-                kernel_source=str(KERNELS / "compute.cpp"),
+                kernel_source=_ks(KERNELS, "compute.cpp"),
                 core_ranges=cr,
                 compile_time_args=[cb_x, cb_s, cb_t, cb_o],
                 runtime_args=_rt(cores, [[cpc]] * len(cores)),
@@ -344,7 +344,7 @@ class ShortConv:
 
         def kd(source, ct, common, cfg):
             k = ttnn.KernelDescriptor(
-                kernel_source=str(KERNELS / source), core_ranges=cr, compile_time_args=ct, config=cfg
+                kernel_source=_ks(KERNELS, source), core_ranges=cr, compile_time_args=ct, config=cfg
             )
             k.common_runtime_args = common
             return k
@@ -415,24 +415,52 @@ class ShortConv:
                      lc.snap_buf.buffer_address() if snap is not None else 0, int(snap) if snap is not None else NONE]
         shift = self._shift_tiles()
         args += [0] * (3 + 7 * PF_MAXSEG - len(args)) + [shift.buffer_address()]
+        if resid is not None:
+            args.append(resid.buffer_address())
+        if k0t is not None:
+            assert G >= cols or not PF_FLAT, (G, cols)  # (pfseg_reader.cpp: one core per column writes the states)
+            args.append(k0t.buffer_address())
+        ckey = (T, int(x.shape[2]), str(out_dtype), None if resid is None else (str(resid.dtype), repr(resid.memory_config())),
+                None if k0t is None else repr(k0t.memory_config()), repr(x.memory_config()))
+        pc = self.__dict__.setdefault("_pf_pc", {})
+        hit = pc.get(ckey) if PCACHE else None
+        if hit is None:
+            hit = self._pf_desc(x, resid, k0t, y, shift, out_dtype, T, pr)
+            if PCACHE:
+                pc[ckey] = hit
+        rd, wr, cp, cbs, h = hit
+        rd.common_runtime_args = args
+        wr.common_runtime_args = [y.buffer_address()]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
+        prog.custom_program_hash = h
+        ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else [])
+                        + ([k0t] if k0t is not None else []) + [y], prog)
+        for row0, R, n, lc in segs:
+            ttnn.copy(lc._pf_stn, lc.st)
+            if lc.snap_row is not None:
+                lc.snap_out = lc.snap_buf
+        return y
+
+    def _pf_desc(self, x, resid, k0t, y, shift, out_dtype, T, pr):
+        """prefill_packed's kernels (common runtime args set per call), CBs and hash"""
+        cols, Rt, G, gy = pr["ct"]
+        cr = pr["cr"]
         cb_x, cb_p, cb_t, cb_scr, cb_m, cb_r, cb_o = 0, 1, 2, 3, 4, 5, 16
         rd_ct = [cb_x, cb_p, cb_t, cb_scr, cols, Rt, G, gy, cb_m]
         for t in (x, self.st, self.taps_tiles, shift):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         defs = [("PF_FLAT", "1")] if PF_FLAT else []
+        args = []
         if resid is not None:
-            args.append(resid.buffer_address())
             rd_ct += [cb_r] + ttnn.TensorAccessorArgs(resid).get_compile_time_args()
             defs += [("PF_RESID", "1"), ("PF_OUT_BF16", str(int(out_dtype == ttnn.bfloat16)))]
         if k0t is not None:
-            assert G >= cols or not PF_FLAT, (G, cols)  # (pfseg_reader.cpp: one core per column writes the states)
-            args.append(k0t.buffer_address())
             rd_ct += ttnn.TensorAccessorArgs(k0t).get_compile_time_args()
             defs += [("PF_ROWOFF", "1")]
         wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
 
         def kd(source, ct, common, cfg):
-            k = ttnn.KernelDescriptor(kernel_source=str(KERNELS / source), core_ranges=cr, compile_time_args=ct,
+            k = ttnn.KernelDescriptor(kernel_source=_ks(KERNELS, source), core_ranges=cr, compile_time_args=ct,
                                       config=cfg, defines=defs)
             k.common_runtime_args = common
             return k
@@ -455,17 +483,9 @@ class ShortConv:
         cbs.append(_cb(cr, cb_o, out_dtype, 4096 if out_dtype == f32 else 2048, 2))
         if resid is not None:
             cbs.append(_cb(cr, cb_r, resid.dtype, 4096 if resid.dtype == f32 else 2048, 2))
-        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg3", PF_FLAT, self.C, T, G, gy, str(out_dtype),
-                                                str(resid.dtype) if resid is not None else "-",
-                                                int(x.shape[2]) if k0t is not None else 0)
-        ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else [])
-                        + ([k0t] if k0t is not None else []) + [y], prog)
-        for row0, R, n, lc in segs:
-            ttnn.copy(lc._pf_stn, lc.st)
-            if lc.snap_row is not None:
-                lc.snap_out = lc.snap_buf
-        return y
+        h = _stable_hash("inkling_sconv_pfseg3", PF_FLAT, self.C, T, G, gy, str(out_dtype),
+                         str(resid.dtype) if resid is not None else "-", int(x.shape[2]) if k0t is not None else 0)
+        return kernels[0], kernels[1], kernels[2], cbs, h
 
     def _shift_tiles(self):
         """6 bf16 tiles [P_0 P_1 P_2 Q_0 Q_1 Q_2] (pfseg_compute.cpp): (P_j x)[r] = x[r + j - 3], (Q_j p)[r] = p[r + j + 29]

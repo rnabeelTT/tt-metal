@@ -78,7 +78,11 @@ void kernel_main() {
     constexpr uint32_t MO = SDPA_PAIR ? 1 : 0;
 
     uint32_t arg_idx = 0;
+#ifdef SDPA_CARGS  // (prefill: the addresses in the common runtime args)
+    const uint32_t out_addr = get_common_arg_val<uint32_t>(0);
+#else
     const uint32_t out_addr = get_arg_val<uint32_t>(arg_idx++);
+#endif
     const uint32_t group = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t core_num_in_reduce = get_arg_val<uint32_t>(arg_idx++);
     const bool is_tree_root = get_arg_val<uint32_t>(arg_idx++) == 1;
@@ -94,7 +98,11 @@ void kernel_main() {
     arg_idx += num_cores_per_head;
     const uint32_t n_groups = get_arg_val<uint32_t>(arg_idx++);
     const uint32_t n_units = get_arg_val<uint32_t>(arg_idx++);
+#ifdef SDPA_CARGS
+    const uint32_t tbl_addr = get_common_arg_val<uint32_t>(1);
+#else
     const uint32_t tbl_addr = get_arg_val<uint32_t>(arg_idx++);
+#endif
 
     // Semaphore encoding (stock op): each round counts in its own 4-bit field of the reducer semaphore
     constexpr uint32_t step_semaphore_inc[6] = {1, 16, 256, 4096, 65536, 1048576};

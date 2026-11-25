@@ -387,7 +387,17 @@ def _rms_unweighted(x, eps):
 # I2M_PREFILL_PREP (default 1): a prefill chunk's q / r / sink prep and K / V cache writes in one program (tt/aprep.py
 # with the chunk's rows as its units): the slices, l2 clips, RMS, tau, casts, transposes and paged_fill_cache
 PREFILL_PREP = __import__("os").environ.get("I2M_PREFILL_PREP", "1") == "1"
+# I2M_PF_TAU1 (default 1): a packed chunk's log-scaling rows uploaded once per chunk (PackedCtx.tau), not per global
+# application (8 x a [1, T, 1, 1] TILE fp32 host tilize + upload: ~4.7 ms each at 2048 rows); the same values
+TAU1 = __import__("os").environ.get("I2M_PF_TAU1", "1") == "1"
 _PREP = {}
+
+
+def _tau_tensor(w, tau_rows):
+    """the rows' log scaling [1, T, 1, 1] fp32 TILE (one tile per row: 8 MB of host tilize + upload at 2048 rows)"""
+    T = int(tau_rows.numel())
+    return ttnn.from_torch(tau_rows.reshape(1, T, 1, 1).float(), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT,
+                           device=w.mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if w.N > 1 else None)
 
 
 def _prefill_prep(w, c, pq, k, v, tau_rows, fill):
@@ -398,13 +408,13 @@ def _prefill_prep(w, c, pq, k, v, tau_rows, fill):
     key = (id(w), T)
     if key not in _PREP:
         _PREP[key] = AttnPrep(w, T, None)
-    tau_t = None
-    if not w.sliding:  # (the log scaling: 1 before n_floor)
-        tau_t = ttnn.from_torch(tau_rows.reshape(1, T, 1, 1).float(), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT,
-                                device=w.mesh,
-                                mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if w.N > 1 else None)
+    tau_t, own = None, False
+    if not w.sliding and isinstance(tau_rows, torch.Tensor):  # (the log scaling: 1 before n_floor)
+        tau_t, own = _tau_tensor(w, tau_rows), True
+    elif not w.sliding:  # (a packed chunk's: built once per chunk, PackedCtx.tau)
+        tau_t = tau_rows
     q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill))
-    if tau_t is not None:
+    if own:
         ttnn.deallocate(tau_t)
     return q, rq, sk
 
@@ -551,7 +561,7 @@ class PackedCtx:
         self._up = up
         self.pos_h = torch.cat(pos).reshape(-1, R_ITEM)
         self.positions = up(self.pos_h)
-        self.pt, self.fill, self.pt_h, self.fill_h, self._subs = {}, {}, {}, {}, {}
+        self.pt, self.fill, self.pt_h, self.fill_h, self._subs, self._taus = {}, {}, {}, {}, {}, {}
         for c in (sliding_cache, global_cache):
             if c is not None:
                 self.pt_h[c.w.sliding] = c.read_host[slot_of]
@@ -572,9 +582,26 @@ class PackedCtx:
                                self._up(self.fill_h[sliding][:, r0 // 64 : r1 // 64]))
         return self._subs[key]
 
+    def tau(self, w):
+        """the chunk's rows' log scaling (global layers) as the prep reads it: one upload per chunk (I2M_PF_TAU1), not
+        one per global application"""
+        key = (w.n_floor, w.alpha)
+        if not TAU1:
+            self._taus_once = getattr(self, "_taus_once", []) + [None]
+        elif key in self._taus:
+            return self._taus[key]
+        tau = torch.cat([tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha) for _, R, p0, _, _, _ in self.segs])
+        t = _tau_tensor(w, tau)
+        if TAU1:
+            self._taus[key] = t
+        else:
+            self._taus_once[-1] = t
+        return t
+
     def release(self):
         for t in [self.positions] + list(self.pt.values()) + list(self.fill.values()) \
-                + [t for s in self._subs.values() for t in s]:
+                + [t for s in self._subs.values() for t in s] + list(self._taus.values()) \
+                + list(getattr(self, "_taus_once", [])):
             ttnn.deallocate(t)
 
 
@@ -627,8 +654,7 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
             ttnn.deallocate(t)
         return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl)
     if prep:  # the q / r / sink prep and the K / V writes in one program
-        tau = torch.cat([tau_of(torch.arange(p0, p0 + R), w.n_floor, w.alpha) for _, R, p0, _, _, _ in ctx.segs])
-        q, rq, sk = _prefill_prep(w, c, pq, k, v, tau, ctx.fill[w.sliding])
+        q, rq, sk = _prefill_prep(w, c, pq, k, v, None if w.sliding else ctx.tau(w), ctx.fill[w.sliding])
         for t in (pq, k, v):
             ttnn.deallocate(t)
         return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
@@ -660,7 +686,7 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
 def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
     """The packed SDPA over T rows -> [1, 1, T, NH * HD]."""
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, pt, rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI, table2=w.table2)
+                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI, table2=w.table2, cargs=True)
     for t in (q, rq, sk):
         ttnn.deallocate(t)
     if int(o.shape[-1]) != w.NH * w.HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)

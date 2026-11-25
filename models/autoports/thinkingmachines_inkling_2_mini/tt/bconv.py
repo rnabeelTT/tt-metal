@@ -46,10 +46,28 @@ def seq_parts(ct, nargs, cb, crs):
     return defs, [_cb(crs, cb, ttnn.float32, 4096, 1)], acc
 
 
+_RS = {}
+_KS = {}
+
+
+def _ks(d, name):
+    """str(d / name), memoized (the pathlib join ran on every program build: ~8 us each, ~1600 per prefill chunk)"""
+    key = (d, name)
+    r = _KS.get(key)
+    if r is None:
+        r = _KS[key] = str(d / name)
+    return r
+
+
 def _range_set(cores):
-    rs = ttnn.CoreRangeSet([ttnn.CoreRange(cores[0], cores[0])])
-    for c in cores[1:]:
-        rs = rs.merge(ttnn.CoreRangeSet([ttnn.CoreRange(c, c)]))
+    """the cores' CoreRangeSet (memoized: the merge loop costs ~75 us at 108 cores, run on every program build)"""
+    key = tuple((c.x, c.y) for c in cores)
+    rs = _RS.get(key)
+    if rs is None:
+        rs = ttnn.CoreRangeSet([ttnn.CoreRange(cores[0], cores[0])])
+        for c in cores[1:]:
+            rs = rs.merge(ttnn.CoreRangeSet([ttnn.CoreRange(c, c)]))
+        _RS[key] = rs
     return rs
 
 
@@ -166,7 +184,7 @@ def _kernels(spec):
     out = []
     for src, ct, rt, defs, dmc in spec["k"]:
         cfg = spec["cfg"] if dmc is None else ttnn.DataMovementConfigDescriptor(processor=dmc[0], noc=dmc[1])
-        out.append(ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+        out.append(ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
                                          runtime_args=_rt(cores, rt), defines=defs, config=cfg))
     return out
 

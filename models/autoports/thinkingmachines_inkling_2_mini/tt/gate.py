@@ -17,6 +17,7 @@ import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
 from .post import MR, RSPLIT, WS, ZLAZY, red_k, red_pack, red_sel
+from .bconv import _ks
 
 F32, BF = 4096, 2048
 ROWS = __import__("os").environ.get("I2M_GATE_ROWS", "1") == "1"  # SFPU passes on the live rows only (<= 16 rows)
@@ -79,12 +80,12 @@ class GateKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
-            kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
             config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
         kernels = [
             dm("gate_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("gate_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gate_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(self.cores, cp_rt), config=cfg,
                                   defines=[("GATE_ROWS", str(int(h.shape[-2])))] + ([] if ROWS else [("GATE_FULL", "1")])),
         ]
@@ -205,7 +206,7 @@ class GateKernel2:
                 ("LOCAL_ONES", str(int(lo and LOCAL_ONES)))]
 
         def dm(src, ct, common, riscv, noc):
-            kd = ttnn.KernelDescriptor(kernel_source=str(KDIR / src), core_ranges=crs, compile_time_args=ct,
+            kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
                                        defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
             kd.common_runtime_args = common
             return kd
@@ -213,7 +214,7 @@ class GateKernel2:
         kernels = [
             dm("gate2_reader.cpp", rd_ct, rd_common, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_1),
             dm("gate2_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
-            ttnn.KernelDescriptor(kernel_source=str(KDIR / "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
+            ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))),
                                            ("G2_PACK", str(int(pack)))]),

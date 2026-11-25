@@ -45,7 +45,8 @@ from pathlib import Path
 import ttnn
 
 from models.autoports.thinkingmachines_inkling_2_mini.tt import relbias
-from models.demos.blackhole.qwen36.tt.gdn_decode.ops import TILE, _cb, _range_set, _rt
+from models.demos.blackhole.qwen36.tt.gdn_decode.ops import TILE, _cb, _rt
+from ..bconv import _ks, _range_set
 
 KERNEL_DIR = Path(__file__).parent / "kernels"
 MAX_TREE_ROUNDS = 6  # the stock op's MAX_TREE_REDUCTION_ROUNDS (64 cores per kv head)
@@ -118,6 +119,7 @@ def inkling_sdpa_decode(
     mi=1,
     table2=None,
     one_min=0,
+    cargs=False,
 ):
     """-> [1, n_items * R, NH, HD] bf16, or [1, 1, n_items * R, NH * HD] when mi * R == 32 (freshly allocated; the
     caller frees it). window: 0 (global) or the sliding window; extent: rel_extent E (the table must be
@@ -136,6 +138,8 @@ def inkling_sdpa_decode(
     ``table2`` (prefill, mi > 1): relbias.build_pair_tables of the table: rows 2p / 2p + 1 of an item (consecutive
     positions) share one Rq tile and one table tile (half the bias matmuls and table reads; bitwise).
     ``one_min`` (one item): a kv head with at most this many chunks runs on one core (as SDPA_MU_MIN).
+    ``cargs`` (prefill, I2M_PCACHE): the reader / writer descriptors kept per shape, the addresses in the common runtime
+    arguments (SDPA_CARGS): ~0.2 ms less host time per call.
     """
     n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
     R = int(cur_pos.shape[-1])
@@ -238,7 +242,7 @@ def inkling_sdpa_decode(
                 pt_per_item,
                 mi,
             )
-        out = _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)
+        out = _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink, cargs=cargs)
         if tbl_l1 is not None:
             ttnn.deallocate(tbl_l1)
         return out
@@ -483,7 +487,7 @@ def _build_and_run(
 
     def dm(source, ct, rt, riscv, noc_id):
         return ttnn.KernelDescriptor(
-            kernel_source=str(KERNEL_DIR / source),
+            kernel_source=_ks(KERNEL_DIR, source),
             core_ranges=cr,
             compile_time_args=ct,
             runtime_args=_rt(cores, rt),
@@ -502,7 +506,7 @@ def _build_and_run(
         dm("inkling_sdpa_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
         dm("inkling_sdpa_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
         ttnn.KernelDescriptor(
-            kernel_source=str(KERNEL_DIR / "inkling_sdpa_compute.cpp"),
+            kernel_source=_ks(KERNEL_DIR, "inkling_sdpa_compute.cpp"),
             core_ranges=cr,
             compile_time_args=cp_ct,
             defines=[
@@ -556,6 +560,7 @@ TBL_L1 = __import__("os").environ.get("I2M_SDPA_TBL_L1", "1") == "1"
 # I2M_SDPA_PAIR (default 1): prefill rows paired in the bias (table2): half the bias matmuls and table reads (bitwise)
 PAIR = __import__("os").environ.get("I2M_SDPA_PAIR", "1") == "1"
 _PF_CACHE_ON = __import__("os").environ.get("INKLING_SDPA_PF_CACHE", "1") == "1"
+PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py; prefill reader / writer: SDPA_CARGS)
 _PF_CACHE = {}
 
 
@@ -653,7 +658,7 @@ def _pf_static(
     if gran != 1 << log2g:
         gran, log2g = 1, 0
     st["compute"] = ttnn.KernelDescriptor(
-        kernel_source=str(KERNEL_DIR / "inkling_sdpa_compute.cpp"),
+        kernel_source=_ks(KERNEL_DIR, "inkling_sdpa_compute.cpp"),
         core_ranges=st["cr"],
         compile_time_args=st["cp_ct"],
         defines=[
@@ -673,9 +678,38 @@ def _pf_static(
     return st
 
 
-def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink):
+def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink, cargs=False):
     mesh = q.device()
     out = ttnn.allocate_tensor_on_device(st["out_shape"], ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, st["out_mc"])
+    if PCACHE and cargs:  # (packed prefill chunks; SDPA_CARGS: the reader / writer descriptors kept per shape, the addresses in the common args)
+        if "carg" not in st:
+            cores, cr = st["cores"], st["cr"]
+            assert all(len(pc[0]) == 3 for pc in st["per_core"])
+            n_groups, n_units = st["n_groups"], st["n_units"]
+            defs = st["defs"] + [("SDPA_CARGS", "1")]
+
+            def dmc(source, ct, rt, riscv, noc_id):
+                return ttnn.KernelDescriptor(
+                    kernel_source=_ks(KERNEL_DIR, source), core_ranges=cr, compile_time_args=ct,
+                    runtime_args=_rt(cores, rt), config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc_id),
+                    defines=defs)
+
+            st["carg"] = (
+                dmc("inkling_sdpa_reader.cpp", st["rd_ct"], [pc[0] + [n_groups, n_units] + pc[3] for pc in st["per_core"]],
+                    ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
+                dmc("inkling_sdpa_writer.cpp", st["wr_ct"], [pc[1] for pc in st["per_core"]],
+                    ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
+                _stable_hash(("cargs", st["hash"])))
+        rd, wr, h = st["carg"]
+        ta = table.buffer_address()
+        rd.common_runtime_args = [q.buffer_address(), k_cache.buffer_address(), v_cache.buffer_address(),
+                                  cur_pos.buffer_address(), page_table.buffer_address(), rq.buffer_address(), ta,
+                                  sink.buffer_address()]
+        wr.common_runtime_args = [out.buffer_address(), ta]
+        program = ttnn.ProgramDescriptor(kernels=[rd, wr, st["compute"]], semaphores=st["sem"], cbs=st["cbs"])
+        program.custom_program_hash = h
+        ttnn.generic_op([q, k_cache, v_cache, cur_pos, page_table, rq, table, sink, out], program)
+        return out
     a = [
         q.buffer_address(),
         k_cache.buffer_address(),
@@ -691,7 +725,7 @@ def _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink):
 
     def dm(source, ct, rt, riscv, noc_id):
         return ttnn.KernelDescriptor(
-            kernel_source=str(KERNEL_DIR / source),
+            kernel_source=_ks(KERNEL_DIR, source),
             core_ranges=cr,
             compile_time_args=ct,
             runtime_args=_rt(cores, rt),

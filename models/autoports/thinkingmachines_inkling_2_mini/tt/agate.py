@@ -11,6 +11,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set
+from .bconv import _ks
 
 
 class AttnGate:
@@ -42,13 +43,13 @@ class AttnGate:
                _cb(self.crs, cb_out, ttnn.bfloat16, 2048, 2)]
         defs = [("AG_ROWS", str(B)), ("AG_J", str(self.J))]
         rd = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "agate_reader.cpp"), core_ranges=self.crs,
+            kernel_source=_ks(KDIR, "agate_reader.cpp"), core_ranges=self.crs,
             compile_time_args=[cb_o, cb_g, self.DT, g0 // 32, self.CX] + ttnn.TensorAccessorArgs(o).get_compile_time_args()
             + ttnn.TensorAccessorArgs(pq).get_compile_time_args(), defines=defs,
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1))
         rd.common_runtime_args = [o.buffer_address(), pq.buffer_address()]
         wr = ttnn.KernelDescriptor(
-            kernel_source=str(KDIR / "agate_writer.cpp"), core_ranges=self.crs,
+            kernel_source=_ks(KDIR, "agate_writer.cpp"), core_ranges=self.crs,
             compile_time_args=[cb_out, self.CX] + ttnn.TensorAccessorArgs(out).get_compile_time_args(), defines=defs,
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
         wr.common_runtime_args = [out.buffer_address()]
@@ -57,7 +58,7 @@ class AttnGate:
         u2d = [ttnn.UnpackToDestMode.Default] * 64
         u2d[cb_g] = ttnn.UnpackToDestMode.UnpackToDestFp32
         cfg.unpack_to_dest_mode = u2d
-        cp = ttnn.KernelDescriptor(kernel_source=str(KDIR / "agate_compute.cpp"), core_ranges=self.crs,
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "agate_compute.cpp"), core_ranges=self.crs,
                                    compile_time_args=[cb_o, cb_g, cb_out], defines=defs, config=cfg)
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
         key = ("i2m_agate", B, self.NH, self.HD, g0, self.J, repr(o.memory_config()), repr(pq.memory_config()), repr(out_mc))
