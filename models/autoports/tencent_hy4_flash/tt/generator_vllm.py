@@ -361,6 +361,22 @@ class HYV4FlashForConditionalGeneration:
         self._engine.stats["rejected"] = self._engine.stats.get("rejected", 0) + 1
         return int(min(self._engine.eos))
 
+    def _step_guarded(self, fn, reqs, rows):
+        """eng.step / eng.step_logits(reqs {slot: ...}); a sequence the pool cannot grow for this step (PoolFull from
+        _ensure_step, raised before any device work) ends with EOS (_reject) and the step runs for the others."""
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolFull
+
+        reqs = dict(reqs)
+        while True:
+            try:
+                return fn(reqs) if reqs else {}
+            except PoolFull as e:
+                s = getattr(e, "slot", None)
+                if s not in reqs:
+                    raise
+                del reqs[s]
+                self._reject(rows[s], s, e)
+
     def _eos_logits(self, V):
         lg = torch.full((V,), float("-inf"), dtype=torch.float32)
         lg[int(min(self._engine.eos))] = 0.0
@@ -608,9 +624,11 @@ class HYV4FlashForConditionalGeneration:
                 _dbg_step(self, eng, live, tokens, pos, sp, kwargs, None)
             V = int(eng.V)
             logits = torch.full((tokens.numel(), 1, V), float("-inf"), dtype=torch.float32)
-            res = eng.step_logits({self._row_slot[i]: (int(tokens[i]), int(pos[i])) for i in live}) if live else {}
+            slots = {i: self._row_slot[i] for i in live}
+            res = self._step_guarded(eng.step_logits, {slots[i]: (int(tokens[i]), int(pos[i])) for i in live},
+                                     {s: i for i, s in slots.items()})
             for i in live:
-                logits[i, 0, :] = res[self._row_slot[i]][:V]
+                logits[i, 0, :] = res[slots[i]][:V] if slots[i] in res else self._eos_logits(V)
             for i in rej:
                 logits[i, 0, :] = self._eos_logits(V)
             return logits
@@ -628,9 +646,10 @@ class HYV4FlashForConditionalGeneration:
             q = eng.seqs[slot]
             q["smp"] = q["smp"] if not auth else _resample(q["smp"], _mtp_sampling(sp, i))
             reqs[slot] = (int(tokens[i]), int(pos[i]), auth)
-        res = eng.step(reqs)
+        slots = {i: self._row_slot[i] for i in live}
+        res = self._step_guarded(eng.step, reqs, {s: i for i, s in slots.items()})
         for i in live:
-            ids = res[self._row_slot[i]]
+            ids = res.get(slots[i], [int(min(eng.eos))])  # (absent: ended by _step_guarded)
             out[i, : len(ids)] = torch.tensor(ids, dtype=torch.int32)
         if self._decode_steps % STATS_EVERY == 0:
             logger.info(f"Hy4 batch engine stats: {eng.stats}")

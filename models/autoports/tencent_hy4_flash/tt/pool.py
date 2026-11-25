@@ -111,7 +111,11 @@ class PoolCopy:
 
 
 class PoolFull(RuntimeError):
-    pass
+    """The shared pool cannot give `slot` the rows it needs (tt/engine_batch.py _ensure)."""
+
+    def __init__(self, msg, slot=None):
+        super().__init__(msg)
+        self.slot = slot
 
 
 class PoolAlloc:

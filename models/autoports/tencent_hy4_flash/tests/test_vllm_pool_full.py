@@ -27,6 +27,7 @@ class FakeEngine:
     def __init__(self, full=()):
         self.V, self.eos, self.seqs, self.cp, self.idle = V, {EOS}, {}, {}, set()
         self.stats, self.last_logits, self.finished, self.full = {}, {}, [], set(full)
+        self.full_dec, self.stepped = set(), []
         self.on_evict = None
 
     def alloc(self, taken=(), ids=None, part=False):
@@ -61,10 +62,18 @@ class FakeEngine:
         self.cp.pop(slot, None)
         return self._first(slot, len(ids))
 
+    def _grow(self, reqs):  # (as _ensure_step: before any device work, the first slot that cannot grow raises)
+        for s in reqs:
+            if s in self.full_dec:
+                raise PoolFull(f"Hy4 pool full: slot {s} needs more", slot=s)
+        self.stepped.append(sorted(reqs))
+
     def step(self, reqs):
+        self._grow(reqs)
         return {s: [5] for s in reqs}
 
     def step_logits(self, reqs):
+        self._grow(reqs)
         return {s: torch.zeros(V) for s in reqs}
 
 
@@ -134,6 +143,23 @@ def test_final_part_rejected():
     a = adapter(eng)
     out = a._prefill_parts(toks(64), [64], sp=object(), rows=[3], mms=[None], start=[0], inter=[False])
     assert out.reshape(-1).tolist() == [EOS] and a._rejected == {3}
+
+
+def test_decode_guard_ends_only_that_sequence():
+    eng = FakeEngine()
+    a = adapter(eng)
+    a._prefill_multi(toks(8, 3), [8, 8, 8], sp=object(), rows=[0, 1, 2])
+    a._decode_steps = 1
+    eng.full_dec = {1}  # row 1's sequence cannot grow for this step
+    o = a._decode_multi(torch.tensor([3, 3, 3]), torch.tensor([8, 8, 8]), sp=object(), kwargs={})
+    assert o[:, 0].tolist() == [5, EOS, 5] and eng.stepped[-1] == [0, 2]
+    assert a._rejected == {1} and 1 not in eng.seqs and eng.stats["rejected"] == 1
+    eng.full_dec = set()  # next step: row 1 stays EOS without touching the engine, the others decode
+    o = a._decode_multi(torch.tensor([3, 4, 3]), torch.tensor([9, 9, 9]), sp=object(), kwargs={})
+    assert o[:, 0].tolist() == [5, EOS, 5] and eng.stepped[-1] == [0, 2]
+    eng.full_dec = {0, 2}  # host-sampled path, every sequence out of room
+    lg = a._decode_multi(torch.tensor([3, 4, 3]), torch.tensor([10, 10, 10]), sp=None, kwargs={})
+    assert [int(lg[i, 0].argmax()) for i in range(3)] == [EOS] * 3 and a._rejected == {0, 1, 2}
 
 
 if __name__ == "__main__":  # (no pytest needed: python -m models.autoports.tencent_hy4_flash.tests.test_vllm_pool_full)
