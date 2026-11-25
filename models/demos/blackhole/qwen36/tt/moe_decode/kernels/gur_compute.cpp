@@ -23,6 +23,7 @@
 #include "api/compute/experimental/custom_mm.h"
 #include "api/compute/pack.h"
 #include "gu_layout.hpp"
+#include "moe_zones.hpp"
 
 // SFPU over the result rows only: M rows of DST faces 0 and 1 (VectorMode::R).
 constexpr uint32_t kRowIters = ROWS <= 4 ? 2 : ROWS / 2;
@@ -131,7 +132,11 @@ void kernel_main() {
     static_assert(kcu * kch == kt && kcu % 2 == 0, "even K chunks");
     cb_wait_front(cb_x, groups * kt);
     cb_wait_front(cb_id, 2);
+    MOE_MARK("G_C0");
     for (uint32_t i = 0; i < n; ++i) {
+        if (i + 1 == n) {
+            MOE_MARK("G_CL");
+        }
         if constexpr (kch == 1) {
             cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
         }
@@ -220,6 +225,7 @@ void kernel_main() {
         cb_pop_front(cb_sc, 2 * groups);
         cb_pop_front(cb_w, nb * kt * m);
     }
+    MOE_MARK("G_CE");
     cb_pop_front(cb_id, 2);
     cb_pop_front(cb_x, groups * kt);
     custom_mm_block_uninit<dense_packing>();

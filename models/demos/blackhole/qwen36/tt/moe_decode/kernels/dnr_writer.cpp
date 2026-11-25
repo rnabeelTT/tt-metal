@@ -23,6 +23,7 @@
 #include "ckernel.h"
 #include "ckernel_defs.h"
 #include "router_topk.hpp"
+#include "moe_zones.hpp"
 
 void kernel_main() {
     const uint32_t act_addr = get_arg_val<uint32_t>(0);
@@ -75,6 +76,7 @@ void kernel_main() {
     const uint32_t slots = 1 - S0 + moe_topk::expand_subs<MOE_SUBS>(
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(tab), rows, uni));
 #endif
+    MOE_MARK("D_WU");
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, slots);
@@ -109,9 +111,11 @@ void kernel_main() {
         }
         noc_async_read_barrier();
         cb_push_back(cb_in0, groups * cs * kt);
+        MOE_MARK("D_WA");
     }
 
     cb_wait_front(cb_out, groups * cols);
+    MOE_MARK("D_WO");
     const uint32_t src = get_read_ptr(cb_out);
     for (uint32_t g = 0; g < groups; ++g) {
         const uint32_t r0 = g * trows;
@@ -123,6 +127,7 @@ void kernel_main() {
             noc_async_write(t + half, s_out.get_noc_addr(n, roff + 512), half);
         }
     }
+    MOE_MARK("D_WE");
     noc_async_write_barrier();
     cb_pop_front(cb_out, groups * cols);
     cb_pop_front(cb_tab, 1);

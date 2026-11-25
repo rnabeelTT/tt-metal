@@ -37,6 +37,11 @@ _os.environ.setdefault("QWEN35_MOE_REM_KCH", _os.environ.get("I2M_MOE_REM_KCH", 
 _os.environ.setdefault("QWEN35_MOE_GU_OFFROW1", _os.environ.get("I2M_MOE_GU_OFFROW1", "1"))
 # I2M_MOE_DN_SKIPPAD: TP4's zero down K pad row not read from DRAM (TP4 down 17.7 / 36.4 -> 16.8 / 34.0 at 1 / 4 rows)
 _os.environ.setdefault("QWEN35_MOE_DN_SKIPPAD", _os.environ.get("I2M_MOE_DN_SKIPPAD", "1"))
+# I2M_MOE_GU_EAST: one die's gate|up group of banks 0 / 4 (the OFFROW=2 group) read from the east bank's columns (its
+# readers beside the other groups' west readers ended 6-10 us late; one-die gate|up 103.3 / 236.9 -> 96.6 / 232.1 us)
+_os.environ.setdefault("QWEN35_MOE_GU_OFFROW_X", "east" if _os.environ.get("I2M_MOE_GU_EAST", "1") == "1" else "")
+# I2M_MOE_DN_SLOT: down weight slots pushed / multiplied one by one as they land (down -0.2 / -0.35 us at TP4 / TP2)
+_os.environ.setdefault("QWEN35_MOE_DN_SLOT", _os.environ.get("I2M_MOE_DN_SLOT", "1"))
 
 # I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
 # allocated L1 address (fast runtime mode does not check CB / L1-buffer clashes: an overlap hangs or corrupts)

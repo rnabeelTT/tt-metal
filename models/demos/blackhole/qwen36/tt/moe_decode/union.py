@@ -430,14 +430,18 @@ class ExpertGateUpRows:
                         if not free:
                             continue
                         rows = [free[i % len(free)] for i in range(readers)]  # (more readers than free rows: reuse)
+                    # QWEN35_MOE_GU_OFFROW_X=east: those readers by the group's second (east) bank's reader column instead
+                    # of beside the other groups' (west) readers (one die, banks 0 / 4: that group ended 6-10 us after
+                    # the others; gate|up 103.3 / 236.9 -> 96.6 / 232.1 us at 1 / 4 rows)
+                    wx = w2.x if os.environ.get("QWEN35_MOE_GU_OFFROW_X") == "east" else w.x
                     cores = []
                     for y in rows:
                         for d in range(grid.x):
                             hit = next(
                                 (
-                                    w.x + dx
+                                    wx + dx
                                     for dx in ((d, -d) if d else (0,))
-                                    if 0 <= w.x + dx < grid.x and (w.x + dx, y) not in used
+                                    if 0 <= wx + dx < grid.x and (wx + dx, y) not in used
                                 ),
                                 None,
                             )
@@ -543,6 +547,8 @@ class ExpertGateUpRows:
         defines = [("ROWS", str(self.trows))] + _ep_defines(self.ep_experts, self.gate_first)
         defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
         kch = [("GU_KCH", str(self.kch))] if self.kch > 1 else []
+        # QWEN35_MOE_ZONES=1: device-profiler points in the rows kernels (kernels/moe_zones.hpp)
+        defines += [("MOE_ZONES", "1")] if os.environ.get("QWEN35_MOE_ZONES") == "1" else []
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -773,6 +779,9 @@ class ExpertDownRows:
         defines += [("MOE_SUBS", str(self.subs))] if self.subs > 1 else []
         defines += [("DN_SPLIT", str(self.split)), ("DN_TMP", "6")] if self.split else []
         defines += [("DN_PAD", str(self.pad))] if self.pad else []
+        # QWEN35_MOE_DN_SLOT=1 (one row group): weight slots pushed and multiplied one by one as they land (bitwise)
+        defines += [("DN_SLOT", "1")] if os.environ.get("QWEN35_MOE_DN_SLOT") == "1" and self.groups == 1 else []
+        defines += [("MOE_ZONES", "1")] if os.environ.get("QWEN35_MOE_ZONES") == "1" else []
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

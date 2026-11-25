@@ -11,6 +11,7 @@
 #include "api/compute/common.h"
 #include "api/compute/experimental/custom_mm.h"
 #include "api/compute/pack.h"
+#include "moe_zones.hpp"
 #ifdef DN_SPLIT
 #include "api/compute/eltwise_binary.h"
 #endif
@@ -54,10 +55,21 @@ void kernel_main() {
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
         cb_wait_front(cb_in0, groups * cs * kt);
+#ifndef DN_SLOT
         cb_wait_front(cb_w, cs * kt * cols);
+#endif
+        if (s0 == 0) {
+            MOE_MARK("D_C1");
+        }
         for (uint32_t g = 0; g < groups; ++g) {
             for (uint32_t s = 0; s < cs; ++s) {
+#ifdef DN_SLOT
+                static_assert(groups == 1, "DN_SLOT: one row group");
+                cb_wait_front(cb_w, kt * cols);
+                const uint32_t a = (g * cs + s) * kt, w = 0;
+#else
                 const uint32_t a = (g * cs + s) * kt, w = s * kt * cols;
+#endif
                 if (s0 + s + 1 < slots) {
                     custom_mm_block<false>(cb_in0, cb_w, a, w, g * cols, ka, cols);
                     custom_mm_block<false>(cb_in0, cb_w, a + ka, w + ka * cols, gc + g * cols, kb, cols);
@@ -65,12 +77,18 @@ void kernel_main() {
                     custom_mm_block<true>(cb_in0, cb_w, a, w, g * cols, ka, cols);
                     custom_mm_block<true>(cb_in0, cb_w, a + ka, w + ka * cols, gc + g * cols, kb, cols);
                 }
+#ifdef DN_SLOT
+                cb_pop_front(cb_w, kt * cols);
+#endif
             }
         }
+#ifndef DN_SLOT
         cb_pop_front(cb_w, cs * kt * cols);
+#endif
         cb_pop_front(cb_in0, groups * cs * kt);
     }
     tile_regs_commit();
+    MOE_MARK("D_CP");
     cb_reserve_back(DN_TMP, 2 * gc);
     tile_regs_wait();
     for (uint32_t t = 0; t < 2 * gc; ++t) {
@@ -102,7 +120,27 @@ void kernel_main() {
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
         cb_wait_front(cb_in0, groups * cs * kt);
+#ifdef DN_SLOT
+        static_assert(groups == 1, "DN_SLOT: one row group");
+        for (uint32_t s = 0; s < cs; ++s) {
+            cb_wait_front(cb_w, kt * cols);
+            if (s0 + s == 0) {
+                MOE_MARK("D_C1");
+            }
+            if (s0 + s + 1 < slots) {
+                custom_mm_block<false>(cb_in0, cb_w, s * kt, 0, 0, kt, cols);
+            } else {
+                custom_mm_block<true>(cb_in0, cb_w, s * kt, 0, 0, kt, cols);
+            }
+            cb_pop_front(cb_w, kt * cols);
+        }
+        cb_pop_front(cb_in0, groups * cs * kt);
+        continue;
+#endif
         cb_wait_front(cb_w, cs * kt * cols);
+        if (s0 == 0) {
+            MOE_MARK("D_C1");
+        }
         for (uint32_t g = 0; g < groups; ++g) {
             if (s0 + cs < slots) {
                 custom_mm_block<false>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
@@ -114,6 +152,7 @@ void kernel_main() {
         cb_pop_front(cb_in0, groups * cs * kt);
     }
     tile_regs_commit();
+    MOE_MARK("D_CP");
 
     cb_reserve_back(cb_out, groups * cols);
     tile_regs_wait();

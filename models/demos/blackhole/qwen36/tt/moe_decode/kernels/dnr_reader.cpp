@@ -17,6 +17,7 @@
 #include "api/dataflow/dataflow_api.h"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
+#include "moe_zones.hpp"
 
 void kernel_main() {
     const uint32_t w_addr = get_arg_val<uint32_t>(0);
@@ -78,6 +79,7 @@ void kernel_main() {
     constexpr uint32_t S0 = 0;
 #endif
     const uint32_t slots = U + 1 - S0;
+    MOE_MARK("D_RU");
 
     const uint64_t routed_noc = get_noc_addr_from_bank_id<true>(bank, w_addr);
     const uint64_t shared_noc = get_noc_addr_from_bank_id<true>(bank, ws_addr);
@@ -92,6 +94,53 @@ void kernel_main() {
     constexpr uint32_t kr = kt - DN_PAD;
 #else
     constexpr uint32_t kr = kt;
+#endif
+#ifdef DN_SLOT
+    // DN_SLOT (one row group): each slot under its own transaction id, pushed as soon as it has landed (the compute takes
+    // slots one by one); up to the whole ring (2 chunks) in flight
+    constexpr uint32_t ring = 2 * chunk;
+    static_assert(ring <= 15, "transaction ids");
+    (void)prev_tiles;
+    uint32_t l1 = cb_base, inflight = 0, oldest = 1;
+    auto push_oldest = [&]() {
+        noc_async_read_barrier_with_trid(oldest);
+        cb_push_back(cb_w, slot_tiles);
+        oldest = oldest == ring ? 1 : oldest + 1;
+        --inflight;
+    };
+    for (uint32_t i = 0; i < slots; ++i) {
+        while (inflight && ncrisc_noc_read_with_transaction_id_flushed(noc_index, oldest)) {
+            push_oldest();
+        }
+        if (inflight == ring) {
+            push_oldest();
+        }
+        cb_reserve_back(cb_w, (inflight + 1) * slot_tiles);
+        const uint32_t s = S0 + i;
+        const uint64_t bank_noc = s == 0 ? shared_noc : routed_noc;
+        const uint32_t e = s == 0 ? 0 : uni[s - 1];
+        noc_async_read_set_trid(trid);
+        noc_async_read_one_packet_set_state<true>(bank_noc, row_bytes, vc);
+        uint32_t src = (e * kt * m + c0) * tile_bytes;
+        for (uint32_t k = 0; k < kr; ++k) {
+            noc_async_read_one_packet_with_state_with_trid((uint32_t)bank_noc, src, l1, trid);
+            src += m * tile_bytes;
+            l1 += row_bytes;
+        }
+        l1 += (kt - kr) * row_bytes;
+        if (l1 >= cb_end) {
+            l1 = cb_base;
+        }
+        trid = trid == ring ? 1 : trid + 1;
+        ++inflight;
+    }
+    MOE_MARK("D_RI");
+    while (inflight) {
+        push_oldest();
+    }
+    MOE_MARK("D_RL");
+    restore_read_cmd_buf();
+    return;
 #endif
     for (uint32_t s0 = 0; s0 < slots; s0 += chunk) {
         const uint32_t cs = slots - s0 < chunk ? slots - s0 : chunk;
@@ -117,11 +166,14 @@ void kernel_main() {
         if (prev_tiles) {
             noc_async_read_barrier_with_trid(trid == 1 ? 2 : 1);
             cb_push_back(cb_w, prev_tiles);
+            MOE_MARK("D_RP");
         }
         prev_tiles = cs * slot_tiles;
         trid = trid == 1 ? 2 : 1;
     }
+    MOE_MARK("D_RI");
     noc_async_read_barrier_with_trid(trid == 1 ? 2 : 1);
     cb_push_back(cb_w, prev_tiles);
+    MOE_MARK("D_RL");
     restore_read_cmd_buf();
 }

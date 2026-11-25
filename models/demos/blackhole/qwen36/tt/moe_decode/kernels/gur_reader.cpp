@@ -22,6 +22,7 @@
 #include "gu_layout.hpp"
 #include "noc_state.hpp"
 #include "router_topk.hpp"
+#include "moe_zones.hpp"
 
 void kernel_main() {
     const uint32_t table_addr = get_arg_val<uint32_t>(0);
@@ -81,6 +82,7 @@ void kernel_main() {
         uni, moe_topk::route_union<topk>(reinterpret_cast<const uint16_t*>(scr), rows, uni));
 #endif
 
+    MOE_MARK("G_RU");
 #ifndef GU_KCH
 #define GU_KCH 1
 #endif
@@ -163,6 +165,7 @@ void kernel_main() {
         }
 #endif
     }
+    MOE_MARK("G_RI");
     // the units still in flight: min(streamed, extra_in_flight)
     const uint32_t pending = nu - free_units;
     for (uint32_t i = 0; i < pending; ++i) {
@@ -170,5 +173,6 @@ void kernel_main() {
         cb_push_back(cb_w, unit_tiles);
         trid_to_wait = trid_to_wait == ntrid ? 1 : trid_to_wait + 1;
     }
+    MOE_MARK("G_RL");
     restore_read_cmd_buf();
 }

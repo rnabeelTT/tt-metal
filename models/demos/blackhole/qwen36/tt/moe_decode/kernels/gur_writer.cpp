@@ -35,6 +35,7 @@
 #include "ckernel_defs.h"
 #include "gu_layout.hpp"
 #include "router_topk.hpp"
+#include "moe_zones.hpp"
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -108,6 +109,7 @@ void kernel_main() {
         }
     }
     cb_push_back(cb_x, groups * kx);
+    MOE_MARK("G_WX");
     invalidate_l1_cache();
 
     const uint16_t* table = reinterpret_cast<const uint16_t*>(tab);
@@ -257,6 +259,7 @@ void kernel_main() {
         }
     };
 #endif
+    MOE_MARK("G_WT");
     uint32_t i = 0;
     for (uint32_t s = slot0; s < U + 1; s += step, ++i) {
         cb_reserve_back(cb_sc, 2 * groups);
@@ -285,6 +288,7 @@ void kernel_main() {
     if (mine) {
         drain(slot0 + (mine - 1) * step);
     }
+    MOE_MARK("G_WE");
     noc_async_write_barrier();
     noc_async_atomic_barrier();
     cb_pop_front(cb_wt, 1);
