@@ -24,8 +24,8 @@ GRID_W = int(os.environ.get("I2M_DMM_GRID_W", "-1"))
 _cfg = {}
 
 
-def _progcfg(mesh, m, k, n):
-    key = (m, k, n)
+def _progcfg(mesh, m, k, n, bw=None):
+    key = (m, k, n, bw)
     if key not in _cfg:
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
 
@@ -34,12 +34,13 @@ def _progcfg(mesh, m, k, n):
         nc = min(grid.x * grid.y if nt >= 2048 else CORES, nt, grid.x * grid.y)
         gw = GRID_W if GRID_W > 0 else (min(9, grid.x) if GRID_W < 0 and mesh.get_num_devices() > 1 else grid.x)
         nc = min(nc, gw * grid.y)  # (the narrower grid's rows: the LM head asks for every core)
-        _cfg[key] = tpc.create_matmul_1d_decode_progcfg(m, k, n, nc, grid_w=gw)
+        _cfg[key] = tpc.create_matmul_1d_decode_progcfg(m, k, n, nc, grid_w=gw, in0_block_w=bw)
     return _cfg[key]
 
 
-def dmm(x, w, ckc, dtype=None, memory_config=None, linear=False):
-    """x [1, b, R, K] (TILE, b * ceil(R / 32) <= 8 row tiles) @ w [1, 1, K, N] -> [1, b, R, N]."""
+def dmm(x, w, ckc, dtype=None, memory_config=None, linear=False, bw=None):
+    """x [1, b, R, K] (TILE, b * ceil(R / 32) <= 8 row tiles) @ w [1, 1, K, N] -> [1, b, R, N].
+    bw: the K block in tiles (default: the largest divisor of K <= 8)"""
     sh = [int(d) for d in x.shape]
     kw = {"compute_kernel_config": ckc}
     if dtype is not None:
@@ -50,5 +51,6 @@ def dmm(x, w, ckc, dtype=None, memory_config=None, linear=False):
     lead = math.prod(sh[:-2])
     rows = lead * math.ceil(sh[-2] / 32) * 32
     if ON and sh[-2] <= 32 and rows <= 256 and not x.is_sharded():
-        kw["program_config"] = _progcfg(x.device(), rows, sh[-1], int(w.shape[-1]))
+        kw["program_config"] = _progcfg(x.device(), rows, sh[-1], int(w.shape[-1]),
+                                        bw if bw and sh[-1] // 32 % bw == 0 else None)
     return fn(x, w, **kw)

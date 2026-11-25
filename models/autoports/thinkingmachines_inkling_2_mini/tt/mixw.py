@@ -43,6 +43,10 @@ def _dm_defs(T):
     return [("MIX_TH", str(th)), ("MIX_T", str(T))] if th < 32 else []
 
 
+def _pk(pk):
+    return [("LG_PK", "1")] if pk else []
+
+
 def _cbs(crs, T, sizes):
     from .post import cbt
 
@@ -189,12 +193,16 @@ class MixKernel:
         h = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         return rd, wr, cp, cbs, h
 
-    def groups(self, S, lg, n, nq, G, lg_st, out_mc=ttnn.DRAM_MEMORY_CONFIG):
+    def groups(self, S, lg, n, nq, G, lg_st, out_mc=ttnn.DRAM_MEMORY_CONFIG, pk=False):
         """G mixes of the same stacked sources in ONE program, each on its own core group (the __call__ kernels): S
         [1, n, T, H] fp32, lg [1, n, T, lg_st * 32] with mix g's nq query tiles at g * nq (T <= 32) -> G lists of nq
-        fp32 [1, 1, T, H] (each mix as __call__(S, lg, n, nq, lg_off=g * nq, lg_st=lg_st) computes it)."""
-        T, H = int(S.shape[2]), int(S.shape[3])
-        assert n <= MAX_N and T <= 32 and G * nq <= lg_st
+        fp32 [1, 1, T, H] (each mix as __call__(S, lg, n, nq, lg_off=g * nq, lg_st=lg_st) computes it).
+        pk: lg holds packed logits (tt/lgx.py; lg_st then counts logits, not tiles). Or S / lg: lists of n
+        [1, 1, T, H] / (logits tensor, mix 0's first logit or tile) (no stacked copy)."""
+        lists = isinstance(S, (list, tuple))
+        S0, lg0 = (S[0], lg[0][0]) if lists else (S, lg)
+        T, H = int(S0.shape[2]), int(S0.shape[3])
+        assert n <= MAX_N and T <= 32 and (lists or G * nq <= lg_st)
         cpg = max(d for d in range(1, self.Ht + 1) if self.Ht % d == 0 and G * d <= self.G)  # cores per mix
         per = self.Ht // cpg
         cores = [ttnn.CoreCoord(i % self.grid_x, i // self.grid_x) for i in range(G * cpg)]
@@ -203,12 +211,16 @@ class MixKernel:
                                                 out_mc) for _ in range(nq)] for _ in range(G)]
         cb_lg, cb_s, cb_w, cb_out = 0, 1, 2, 3
         cbs = _cbs(crs, T, [n * nq, n * min(per, 4), n * nq, 2])
-        rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(lg).get_compile_time_args()
+        rd_ct = [cb_lg, cb_s, n, nq, self.Ht] + ttnn.TensorAccessorArgs(S0).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(lg0).get_compile_time_args()
         rd_rt, wr_rt = [], []
         for g in range(G):
-            src = [v for i in range(n) for v in (S.buffer_address(), i * self.Ht, lg.buffer_address(), i * lg_st + g * nq,
-                                                 lg_st)]
+            if lists:
+                src = [v for s_, (l_, off) in zip(S, lg) for v in (s_.buffer_address(), 0, l_.buffer_address(),
+                                                                    off + g * nq, 0)]
+            else:
+                src = [v for i in range(n) for v in (S.buffer_address(), i * self.Ht, lg.buffer_address(),
+                                                     i * lg_st + g * nq, lg_st)]
             for j in range(cpg):
                 rd_rt.append([j * per, per, 0, 1] + src)
                 wr_rt.append([j * per, per, 0, 1, self.Ht] + [o.buffer_address() for o in outs[g]])
@@ -221,7 +233,7 @@ class MixKernel:
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
-            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T))
+            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T) + _pk(pk))
         kernels = [
             dm("mixw_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
@@ -230,16 +242,18 @@ class MixKernel:
                                   runtime_args=_rt(cores, [[per, 1]] * len(cores)), config=cfg, defines=_rows_def(T)),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_mixw_groups", _th(T), n, nq, G, cpg, T, H, lg_st, repr(S.memory_config()), repr(lg.memory_config()),
-               repr(out_mc))
+        key = ("i2m_mixw_groups", pk, lists, _th(T), n, nq, G, cpg, T, H, lg_st, repr(S0.memory_config()),
+               repr(lg0.memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([S, lg] + [o for og in outs for o in og], prog)
+        io = list({id(t): t for t in (list(S) + [e[0] for e in lg] if lists else [S, lg])}.values())
+        io += [o for og in outs for o in og]
+        ttnn.generic_op(io, prog)
         return outs
 
-    def multi(self, srcs, lgs, nq, out_mc=ttnn.L1_MEMORY_CONFIG):
+    def multi(self, srcs, lgs, nq, out_mc=ttnn.L1_MEMORY_CONFIG, pk=False):
         """One row tile (T <= 32) from separate tensors: srcs n fp32 [1, 1, T, H], lgs n (logits tensor, first tile)
         (each source's nq query tiles at tiles off .. off + nq - 1 of its tensor) -> nq fp32 [1, 1, T, H].
-        (all srcs share one memory config, all logit tensors another)"""
+        (all srcs share one memory config, all logit tensors another; pk: packed logits, off counts logits)"""
         n = len(srcs)
         T, H = int(srcs[0].shape[2]), int(srcs[0].shape[3])
         assert n <= MAX_N and T <= 32 and len(lgs) == n
@@ -263,7 +277,7 @@ class MixKernel:
         cfg.unpack_to_dest_mode = u2d
         dm = lambda src, ct, rt, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=_ks(KDIR, src), core_ranges=self.crs, compile_time_args=ct, runtime_args=_rt(self.cores, rt),
-            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T))
+            config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc), defines=_dm_defs(T) + _pk(pk))
         kernels = [
             dm("mixm_reader.cpp", rd_ct, rd_rt, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0),
             dm("mixw_writer.cpp", wr_ct, wr_rt, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1),
@@ -273,7 +287,7 @@ class MixKernel:
                                   defines=_rows_def(T)),
         ]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        key = ("i2m_mixm3", _th(T), n, nq, T, H, nc, repr(srcs[0].memory_config()), repr(lgs[0][0].memory_config()), repr(out_mc))
+        key = ("i2m_mixm3", pk, _th(T), n, nq, T, H, nc, repr(srcs[0].memory_config()), repr(lgs[0][0].memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op(list(srcs) + [lg for lg, _ in lgs] + outs, prog)
         return outs

@@ -79,7 +79,7 @@ class MixPlan:
         if ops.mixk is None:
             from .mixw import MixKernel
             ops.mixk = MixKernel(m.mesh, m.H)
-        srcs, blocks, pre = {}, [], None
+        srcs, blocks, pre, msgb = {}, [], None, []
         for a, (li, p) in enumerate(m.sched):
             L = m.layers[li]
             if li == cfg.loop_start:
@@ -92,6 +92,8 @@ class MixPlan:
             srcs[("mlp", a)] = blocks + [a] if L.boundary else list(blocks)
             if L.boundary:
                 blocks = blocks + [a]
+            if li == cfg.loop_end - 1 and p < cfg.loop_passes - 1:
+                msgb.append(blocks[len(pre) + 1])  # (the next pass's first message source, BatchedDecoder._step)
         srcs[("head", -1)] = list(blocks)
         self.srcs = srcs
         readers = {}
@@ -108,9 +110,13 @@ class MixPlan:
                 off += nq
             self.qcat[b] = ttnn.concat(qs, dim=3) if len(qs) > 1 else qs[0]
         self.qpk, self.nq = {}, {}  # (I2M_LG_PACK: per block its readers' queries packed, tt/lgx.py)
+        self.msg_off = {}  # (FOLD: a message source block's logits against the message queries, after its readers')
         if lgx.ON:
             for b, keys in readers.items():
                 cols = [lgx.host_cols(*self.query(m, key)) for key in keys]
+                if lgx.FOLD and b in msgb and getattr(m, "msg_qpk", None) is not None:
+                    self.msg_off[b] = sum(int(c.shape[1]) for c in cols)
+                    cols.append(lgx.host_cols(m.msg_qpk, m.msg_nq))
                 self.qpk[b] = lgx.pack_cols(torch.cat(cols, 1), m.mesh, ops.rep)
                 self.nq[b] = sum(int(c.shape[1]) for c in cols)
             if ops.lgx is None:
@@ -609,13 +615,13 @@ class BatchedDecoder:
                     pre_x, pre_blocks, pre_ids = x, list(blocks_n), list(ids)
                 else:
                     x, blocks_n, ids = pre_x, list(pre_blocks), list(pre_ids)
-            msgs = self._messages(li - cfg.loop_start, prev_src) if (L.loop and p > 0) else None
+            msgs = self._messages(li - cfg.loop_start, prev_src, D) if (L.loop and p > 0) else None
             x, blk = self._layer(a, x, blocks_n, msgs, pos_w, pos_wr, pos_sdpa, tau, ids, D)
             if L.boundary:  # (the block: the layer's normed input, made once in _layer)
                 blocks_n, ids = blocks_n + [blk], ids + [a]
             if L.loop and li == cfg.loop_end - 1:
                 x = self.materialize(x)
-                prev_src = [blocks_n[len(pre_blocks) + 1], ops.rms(x)]
+                prev_src = [blocks_n[len(pre_blocks) + 1], ops.rms(x), ids[len(pre_ids) + 1]]
         x = self.materialize(x)
         self._msg = None
         if self.plan is None:
@@ -647,26 +653,42 @@ class BatchedDecoder:
         if self.plan is None:
             return ops.mix(blocks_n + [cur], Q, nq)
         cur = ttnn.sharded_to_interleaved(cur, L1) if cur.is_sharded() else cur
-        lg = dmm(cur, ops.qrep[id(Q)], ops.ckc, dtype=ttnn.float32, memory_config=L1)
+        lg = dmm(cur, Q if lgx.FOLD else ops.qrep[id(Q)], ops.ckc, dtype=ttnn.float32, memory_config=L1, bw=lgx.BW)
         lgs = [(D[b], self.plan.off[(b, key)]) for b in ids] + [(lg, 0)]
-        return ops.mixk.multi(blocks_n + [cur], lgs, nq)
+        return ops.mixk.multi(blocks_n + [cur], lgs, nq, pk=lgx.FOLD)
 
-    def _messages(self, i, prev_src):
+    def _messages(self, i, prev_src, D=None):
         """m.messages(i, prev_src): the pass's sources' logits against every loop layer's queries in one matmul (made
-        at the pass's first loop layer), then this layer's mix."""
+        at the pass's first loop layer), then this layer's mix. (prev_src: the two sources, then the block's id)"""
         m = self.m
         T = int(prev_src[0].shape[-2])
         if not MSG_PASS or T > 32 or getattr(m, "msg_qcat", None) is None or m.ops.mixk is None:
-            return m.messages(i, prev_src)
+            return m.messages(i, prev_src[:2])
         if self._msg is None or self._msg[0] is not prev_src:
-            src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src]
+            src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src[:2]]
+            nl = len(m.msg_Q)
+            fold = lgx.FOLD and MSG_ALL and self.post is not None  # (the mix readers expand the packed logits)
+            b = prev_src[2]
+            if fold and b in self.plan.msg_off and D is not None and \
+                    src[0].memory_config() == src[1].memory_config():
+                # the block's message logits came with its MixPlan matmul: only the pass output's here, no stacking
+                lg = dmm(src[1], m.msg_qpk, m.ops.ckc, dtype=ttnn.float32, memory_config=L1, bw=lgx.BW)
+                # (expanded once here: 100+ mix cores reading the two packed tiles in place contend for them)
+                lg = m.ops.lgx([(D[b], self.plan.msg_off[b]), (lg, 0)], m.msg_nq)
+                allm = m.ops.mixk.groups(src, [(lg, 0), (lg, m.msg_nq)], 2, 4, nl, 0)
+                self._msg = (prev_src, None, None, allm)
+                return allm[i]
             S = ttnn.concat(src, dim=1, memory_config=L1)
-            if lgx.ON and T <= 32:  # (packed queries, then each query's column over its 32: the same values)
+            if fold:
+                lg = dmm(S, m.msg_qpk, m.ops.ckc, dtype=ttnn.float32, memory_config=L1, bw=lgx.BW)
+            elif lgx.ON:  # (packed queries, then each query's column over its 32: the same values)
                 lg = m.ops.lgx(dmm(S, m.msg_qpk, m.ops.ckc, dtype=ttnn.float32, memory_config=L1), m.msg_nq)
             else:
                 lg = dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1)
-            nl = len(m.msg_Q)
-            allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
+            if fold:
+                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, int(lg.shape[-1]), pk=True)
+            else:
+                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
             self._msg = (prev_src, S, lg, allm)
         _, S, lg, allm = self._msg
         if allm is not None:
@@ -754,7 +776,9 @@ class BatchedDecoder:
         if L.boundary:
             blk = xn if xn is not None else ops.rms(x)
             if self.plan is not None:
-                if a in self.plan.qpk:  # (I2M_LG_PACK, tt/lgx.py)
+                if lgx.FOLD:  # (packed: the mix readers expand them, tt/kernels/lgpk.hpp)
+                    D[a] = dmm(blk, self.plan.qpk[a], ops.ckc, dtype=ttnn.float32, memory_config=L1, bw=lgx.BW)
+                elif a in self.plan.qpk:  # (I2M_LG_PACK, tt/lgx.py)
                     D[a] = ops.lgx(dmm(blk, self.plan.qpk[a], ops.ckc, dtype=ttnn.float32, memory_config=L1),
                                    self.plan.nq[a])
                 else:

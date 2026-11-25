@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "lgpk.hpp"
 
 // MIX_TH < 32 (decode, MIX_T <= 16 live rows): the CB tiles are MIX_TH x 32 (faces MIX_TH x 16): rows 0 .. MIX_T - 1
 // of faces 0 / 1 move between them and the tensors' 32 x 32 tiles
@@ -55,10 +56,15 @@ void kernel_main() {
             const auto alg = TensorAccessor(lg_args, src_arg(i, 2), F32);
             const uint32_t base = src_arg(i, 3) + r * src_arg(i, 4);
             for (uint32_t q = 0; q < nq; ++q) {
-                read_tile(alg.get_noc_addr(base + q), l + (i * nq + q) * CT);
+                read_tile(alg.get_noc_addr(lg_tile(base + q)), l + (i * nq + q) * CT);
             }
         }
         noc_async_read_barrier();
+        for (uint32_t i = 0; i < (LG_PK ? n : 0); ++i) {
+            for (uint32_t q = 0; q < nq; ++q) {
+                lg_bcast<MIX_T, MIX_TH>(l + (i * nq + q) * CT, src_arg(i, 3) + r * src_arg(i, 4) + q);
+            }
+        }
         cb_push_back(cb_lg, n * nq);
         for (uint32_t t = 0; t < nt; ++t) {
             cb_reserve_back(cb_s, n);

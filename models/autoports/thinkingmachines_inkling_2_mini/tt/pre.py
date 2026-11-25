@@ -14,6 +14,7 @@ import ttnn
 from .bconv import KDIR, _cb, _range_set, _rt
 from .post import BF, CX, CY, C, F32, MR, WS, ZDEFER, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, red_pack, tile_rows
 from .bconv import _ks
+from . import lgx
 
 
 RN1 = __import__("os").environ.get("I2M_PRE_RN1", "1") == "1"  # each norm's rsqrt once, not per tile
@@ -114,7 +115,7 @@ class PreKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed))),
-                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("PRE_PACK", str(int(pack))), ("PRE_CSQ", str(int(csq)))] + sdefs
+                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("PRE_PACK", str(int(pack))), ("PRE_CSQ", str(int(csq)))] + sdefs + lgx.DEF
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
@@ -133,7 +134,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", T, th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
+        key = ("i2m_pre", lgx.FOLD, T, th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

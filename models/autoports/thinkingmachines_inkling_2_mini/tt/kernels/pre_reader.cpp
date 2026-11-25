@@ -14,6 +14,7 @@
 #define PRE_CSQ 0
 #endif
 #include "glz.hpp"
+#include "lgpk.hpp"
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -173,7 +174,7 @@ void kernel_main() {
         const auto dl = TensorAccessor(b_args, ca(ab + 3 * b + 1), 4096);
         const uint32_t off = ca(ab + 3 * b + 2);
         for (uint32_t q = 0; q < NQ; ++q) {
-            rf(dl.get_noc_addr(off + q), get_write_ptr(cb_d) + (b * NQ + q) * F32);
+            rf(dl.get_noc_addr(lg_tile(off + q)), get_write_ptr(cb_d) + (b * NQ + q) * F32);
         }
         for (uint32_t i = 0; i < PER; ++i) {
             rf(bt.get_noc_addr(t0 + i), get_write_ptr(cb_blk) + (b * PER + i) * F32);
@@ -197,6 +198,11 @@ void kernel_main() {
     cb_push_back(cb_q, NQ * PER);
 #endif
 #endif
+    for (uint32_t b = 0; b < (LG_PK ? NB : 0); ++b) {
+        for (uint32_t q = 0; q < NQ; ++q) {
+            lg_bcast<T, TH>(get_write_ptr(cb_d) + (b * NQ + q) * F32, ca(ab + 3 * b + 2) + q);
+        }
+    }
     cb_push_back(cb_d, NB * NQ);
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {

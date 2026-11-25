@@ -17,6 +17,12 @@ from .bconv import KDIR, _cb, _ks, _range_set, _rt
 
 CORES = 32
 ON = __import__("os").environ.get("I2M_LG_PACK", "1") == "1"
+# I2M_LG_FOLD (default 1): no expand program; the decode mix readers take the packed logits and copy each column
+# over its tile themselves (tt/kernels/lgpk.hpp)
+FOLD = ON and __import__("os").environ.get("I2M_LG_FOLD", "1") == "1"
+DEF = [("LG_PK", "1")] if FOLD else []
+# I2M_LG_BW (default 24): the fp32 logit matmuls' K block (tiles; 8 before): fewer in0 hand-offs, same values
+BW = int(__import__("os").environ.get("I2M_LG_BW", "24"))
 
 
 def pack_cols(cols, mesh, rep):
@@ -41,9 +47,19 @@ class LogitExpand:
         self.gx, self.G = g.x, g.x * g.y
 
     def __call__(self, x, nq, out_mc=ttnn.L1_MEMORY_CONFIG):
-        """x [1, n, T, Wp * 32] fp32 (packed logits) -> [1, n, T, nq * 32] fp32 (query q over tile q's columns)."""
-        n, T, W = int(x.shape[1]), int(x.shape[2]), int(x.shape[3])
-        assert x.dtype == ttnn.float32 and x.layout == ttnn.TILE_LAYOUT and T <= 32 and nq <= W and not x.is_sharded()
+        """x [1, n, T, Wp * 32] fp32 (packed logits) -> [1, n, T, nq * 32] fp32 (query q over tile q's columns).
+        Or x: a list of n (packed [1, 1, T, W] tensor, first logit): row block s from logits off_s .. off_s + nq - 1
+        of its own tensor (all of one memory config)."""
+        if isinstance(x, (list, tuple)):
+            srcs = list(x)
+            n, x = len(srcs), srcs[0][0]
+            T, W = int(x.shape[2]), int(x.shape[3])
+            src = [v for t, off in srcs for v in (t.buffer_address(), 0, int(off))]
+        else:
+            n, T, W = int(x.shape[1]), int(x.shape[2]), int(x.shape[3])
+            srcs = None
+            src = [v for s in range(n) for v in (x.buffer_address(), s * (W // 32), 0)]
+        assert x.dtype == ttnn.float32 and x.layout == ttnn.TILE_LAYOUT and T <= 32 and not x.is_sharded()
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, n, T, nq * 32]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                              out_mc)
         items = n * nq
@@ -53,15 +69,15 @@ class LogitExpand:
         rt = []
         for i in range(nc):
             a, b = items * i // nc, items * (i + 1) // nc
-            rt.append([x.buffer_address(), out.buffer_address(), a, b - a])
-        ct = [0, W // 32, nq] + ttnn.TensorAccessorArgs(x).get_compile_time_args() \
+            rt.append([out.buffer_address(), a, b - a] + src)
+        ct = [0, n, nq] + ttnn.TensorAccessorArgs(x).get_compile_time_args() \
             + ttnn.TensorAccessorArgs(out).get_compile_time_args()
         k = ttnn.KernelDescriptor(
             kernel_source=_ks(KDIR, "lgx.cpp"), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             defines=[("LGX_T", str(T))],
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
         prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(crs, 0, ttnn.float32, 4096, 3)])
-        key = ("i2m_lgx", n, T, W, nq, nc, repr(x.memory_config()), repr(out_mc))
+        key = ("i2m_lgx2", n, T, W, nq, nc, repr(x.memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([x, out], prog)
+        ttnn.generic_op(([t for t, _ in srcs] if srcs else [x]) + [out], prog)
         return out

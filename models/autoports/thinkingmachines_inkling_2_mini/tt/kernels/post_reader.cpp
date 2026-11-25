@@ -14,6 +14,7 @@
 #define POST_CSQ 0
 #endif
 #include "glz.hpp"
+#include "lgpk.hpp"
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -174,7 +175,7 @@ void kernel_main() {
     for (uint32_t b = 0; b < NB; ++b) {
         const auto bt = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b), 4096);
         const auto dl = TensorAccessor(b_args, get_common_arg_val<uint32_t>(a_blk + 3 * b + 1), 4096);
-        rf(dl.get_noc_addr(get_common_arg_val<uint32_t>(a_blk + 3 * b + 2)), get_write_ptr(cb_d) + b * F32);
+        rf(dl.get_noc_addr(lg_tile(get_common_arg_val<uint32_t>(a_blk + 3 * b + 2))), get_write_ptr(cb_d) + b * F32);
         for (uint32_t i = 0; i < PER; ++i) {
             rf(bt.get_noc_addr(t0 + i), get_write_ptr(cb_blk) + (b * PER + i) * F32);
         }
@@ -188,6 +189,9 @@ void kernel_main() {
 #if POST_RD_STAGED
     noc_async_read_barrier();
     GLZ("R_B");
+    for (uint32_t b = 0; b < (LG_PK ? NB : 0); ++b) {
+        lg_bcast<T, TH>(get_write_ptr(cb_d) + b * F32, get_common_arg_val<uint32_t>(a_blk + 3 * b + 2));
+    }
     cb_push_back(cb_d, NB);
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {
@@ -220,6 +224,9 @@ void kernel_main() {
 #endif
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NQ);
+    for (uint32_t b = 0; b < (LG_PK ? NB : 0); ++b) {
+        lg_bcast<T, TH>(get_write_ptr(cb_d) + b * F32, get_common_arg_val<uint32_t>(a_blk + 3 * b + 2));
+    }
     cb_push_back(cb_d, NB);
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {
