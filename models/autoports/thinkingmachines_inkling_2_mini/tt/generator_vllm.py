@@ -27,6 +27,7 @@ import torch
 import ttnn
 from loguru import logger
 
+from models.autoports.thinkingmachines_inkling_2_mini.tt import rown
 from models.autoports.thinkingmachines_inkling_2_mini.tt.batched import BatchedDecoder, TracedDecoder
 from models.autoports.thinkingmachines_inkling_2_mini.tt.model import Inkling2Model
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import _param
@@ -444,6 +445,7 @@ class Inkling2ForCausalLM:
                 out, parts = res[w]
                 tr.capture(compile=False, post=lambda lg, w=w, parts=parts: self._post(lg, w, parts), out=out)
             self._captured = True
+            rown.FROZEN = True
             logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
             if self.vt is not None:  # the largest image a request may hold must fit in what the captures left
                 from models.autoports.thinkingmachines_inkling_2_mini.tt.vllm_mm import max_image_tokens

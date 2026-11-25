@@ -18,6 +18,7 @@ from .bconv import _ks
 
 F32, BF = 4096, 2048
 BLK = 4
+FROZEN = False  # set after the first trace capture: a weight row first needed later is not cached (see _grow)
 
 
 class RowNorm:
@@ -31,18 +32,21 @@ class RowNorm:
         self.eps_bits = struct.unpack("<I", struct.pack("<f", eps))[0]
 
     def _grow(self, w):
-        """the weight w [1, 1, 1, H] fp32 (the checkpoint's bf16 values) as one row-major bf16 row (4.5 KB, cached)"""
+        """the weight w [1, 1, 1, H] fp32 (the checkpoint's bf16 values) as one row-major bf16 row (4.5 KB, cached).
+        After a capture (FROZEN) a missing row is made per call: a kept post-capture buffer can sit where replays write."""
         if id(w) not in self.grows:
             import torch
 
             r = ttnn.to_torch(ttnn.get_device_tensors(w)[0] if self.mesh.get_num_devices() > 1 else w).float()
             r = r.reshape(-1)[: 32 * self.Wt]
             assert torch.equal(r, r.to(torch.bfloat16).float())
-            self.grows[id(w)] = (w, ttnn.from_torch(r.to(torch.bfloat16).reshape(1, 1, 1, -1), dtype=ttnn.bfloat16,
-                                                    layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh,
-                                                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                                                    mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh)
-                                                    if self.mesh.get_num_devices() > 1 else None))
+            g = ttnn.from_torch(r.to(torch.bfloat16).reshape(1, 1, 1, -1), dtype=ttnn.bfloat16,
+                                layout=ttnn.ROW_MAJOR_LAYOUT, device=self.mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                                mesh_mapper=ttnn.ReplicateTensorToMesh(self.mesh)
+                                if self.mesh.get_num_devices() > 1 else None)
+            if FROZEN:
+                return g
+            self.grows[id(w)] = (w, g)
         return self.grows[id(w)][1]
 
     def ok(self, x):
