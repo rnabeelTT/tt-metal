@@ -16,7 +16,8 @@ import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
 
-# I2M_GMM_DB (act mode; auto: when the experts average >= 3 groups, i.e. the compute per weight block is long): the
+# I2M_GMM_DB (act mode; auto: when the experts average >= 3 groups, i.e. the compute per weight block is long, or with
+# I2M_GMM_BANDS: one die 512-row chunks gate|up 1.81 -> 1.68 ms per application, 6 slices of 18 cores, not 8 of 12): the
 # weight block double-buffered (h = 2 columns: 922 KB of CBs at K 2304) so the next expert's weights load during the
 # compute (bitwise; beside the packed prefill's L1 buffers: tests/test_packed_device.py output identical); 0 / 1:
 # never / always
@@ -39,6 +40,15 @@ BAL = int(__import__("os").environ.get("I2M_GMM_BAL", "5"))
 # (bench, gate|up per application: TP4 2048 rows 1.27 -> 0.96 + rem 0.52 -> 0.41 ms, one die 3.78 -> 3.51 ms vs BAL);
 # 1: the downs too (measured 3-7 % slower); 0: off. Replaces BAL; bitwise (the same per-group products)
 GS = __import__("os").environ.get("I2M_GMM_GS", "act")
+# I2M_GMM_BANDS (auto: one die): the group slices as wide horizontal bands down the grid's left columns + tall slices in
+# the columns left (one die, 18-core slices: 6 slices on 108 of the 110 cores, not 5 2 x 9 slices on 90), the act
+# calls' GS group counts weighted per slice (I2M_GMM_SHARES: integers in slice order; auto: by the slice's top grid
+# row, the weight streams on NOC 0 run slower toward the top), and the A multicast's sender at the rectangle corner
+# its NOC starts from (NOC 1: the bottom right; from the top left its multicasts wrapped around the grid). Bitwise
+# (the same per-group products); one die 2048-row chunks: gate|up 3.45 -> 2.35, downs 1.66 -> 1.53 ms per application
+_ENV = __import__("os").environ
+BANDS = _ENV.get("I2M_GMM_BANDS", "auto")
+SHARES = _ENV.get("I2M_GMM_SHARES", "auto")
 TILE_BYTES = {ttnn.bfloat4_b: 576, ttnn.bfloat8_b: 1088, ttnn.bfloat16: 2048}
 
 
@@ -93,25 +103,10 @@ class GroupedMM:
         nbuf = 2 if fits(nb, 2) else 1
         NB = Nt // nb
         ww = _ww(False)
-        # a slice's NB cores: a w x h rectangle (b = 0 at its corner multicasts the A tiles to the others)
-        gy = self.ncores // self.gx
-        # (the rectangle that fits the most slices)
-        w_ = max((d for d in range(1, self.gx + 1) if NB % d == 0 and NB // d <= gy),
-                 key=lambda d: (self.gx // d) * (gy // (NB // d)))
-        h_ = NB // w_
-        per_row = self.gx // w_
-        S = max(1, min(E, per_row * (gy // h_)))  # slices: contiguous expert ranges (each expert's weights read once)
         gs_ = GS == "1"
         bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 and not gs_ else 0
-        bounds = [(s, S) if bal or gs_ else (E * s // S, E * (s + 1) // S) for s in range(S)]
-        cores, rt = [], []
-        for s in range(S):
-            x0, y0 = (s % per_row) * w_, (s // per_row) * h_
-            snoc = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
-            hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
-            for b in range(NB):
-                cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
-                rt.append([b, *bounds[s], snoc.x, snoc.y] + mc(snoc, hi, ww) + [G])
+        S, cores, rt = self._place(NB, E, ww, bal, gs_)
+        rt = [r + [G] for r in rt]
         crs = _range_set(cores)
         cb_a, cb_w, cb_ids, cb_out = 0, 1, 2, 3
         ids_bytes = (G * 2 + 63) // 64 * 64
@@ -144,20 +139,75 @@ class GroupedMM:
                                    runtime_args=_rt(cores, [[r[1], r[2], G] for r in rt]), config=cfg)
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
-        key = ("i2m_gmm6", tuple(defs), G, gs, K, KA, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid,
+        key = ("i2m_gmm6", tuple(defs), G, gs, K, KA, N, E, nb, nbuf, S, rm, str(w.dtype), self.fid, self._lkey(NB),
                tuple(repr(t.memory_config()) for t in [a, w, ids] + outs))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids] + outs, prog)
         return out
 
-    def _slices(self, NB):
-        """The group slices for NB column blocks: (S, cores' (x, y) per (slice, b), the slice corners)."""
-        gy = self.ncores // self.gx
-        w_ = max((d for d in range(1, self.gx + 1) if NB % d == 0 and NB // d <= gy),
-                 key=lambda d: (self.gx // d) * (gy // (NB // d)))
-        h_ = NB // w_
-        per_row = self.gx // w_
-        return w_, h_, per_row, gy
+    def _bands(self):
+        return BANDS == "1" or (BANDS == "auto" and self.mesh.get_num_devices() == 1)
+
+    def _rects(self, NB):
+        """The group slices' rectangles (x0, y0, w, h) of NB cores: one shape tiled over the grid (the shape that fits
+        the most), or (bands) wide horizontal bands down the grid's left columns + the shape that fits the most in the
+        columns left."""
+        gx, gy = self.gx, self.ncores // self.gx
+        shapes = [(d, NB // d) for d in range(1, gx + 1) if NB % d == 0 and NB // d <= gy]
+        fit = lambda w, h, sh: max(sh, key=lambda s: ((w // s[0]) * (h // s[1])))  # noqa: E731
+        if not self._bands():
+            w_, h_ = fit(gx, gy, shapes)
+            per_row = gx // w_
+            return [((i % per_row) * w_, (i // per_row) * h_, w_, h_) for i in range(per_row * (gy // h_))]
+        best = []
+        for w1, h1 in sorted(shapes, reverse=True):  # (the widest bands first)
+            r = [(0, y, w1, h1) for y in range(0, gy - h1 + 1, h1)]
+            left, sub = gx - w1, [s for s in shapes if s[0] <= gx - w1]
+            if sub:
+                w2, h2 = fit(left, gy, sub)
+                r += [(w1 + i * w2, j * h2, w2, h2) for j in range(gy // h2) for i in range(left // w2)]
+            if len(r) > len(best):
+                best = r
+        return best
+
+    def _shares(self, rects):
+        """The slices' GS weights (bands: the measured one die rates of the 18-core layout, else 41 + 2 y0)."""
+        if not self._bands() or SHARES in ("0", ""):
+            return [1] * len(rects)
+        if SHARES != "auto":
+            return ([int(v) for v in SHARES.split(",")] + [1] * len(rects))[:len(rects)]
+        if rects == [(0, 0, 9, 2), (0, 2, 9, 2), (0, 4, 9, 2), (0, 6, 9, 2), (0, 8, 9, 2), (9, 0, 2, 9)]:
+            return [41, 45, 48, 54, 57, 46]
+        return [41 + 2 * y0 for _, y0, _, _ in rects]
+
+    def _lkey(self, NB):
+        return tuple(self._rects(NB)), SHARES
+
+    def _place(self, NB, E, ww, bal, gs_):
+        """The group slices' cores: (S, cores, per core [b, e0, e1, sender x, y, multicast rectangle (4)]). GS: e0, e1
+        = the slice's cumulative share q0, Q << 16 | q1 (tt/kernels/gmm_bal.hpp gmm_gs)."""
+        rects = self._rects(NB)
+        S = max(1, min(E, len(rects)))
+        rects = rects[:S]
+        sh = self._shares(rects)
+        cum = [sum(sh[:i]) for i in range(S + 1)]
+        cores, rt = [], []
+        for s, (x0, y0, w_, h_) in enumerate(rects):
+            lo = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
+            hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
+            rev = ww and self._bands()  # (the NOC 1 multicast's sender at the bottom right: b counts from there)
+            if gs_:
+                bounds = (cum[s], cum[S] << 16 | cum[s + 1])
+            elif bal:
+                bounds = (s, S)
+            else:
+                bounds = (E * s // S, E * (s + 1) // S)
+            snoc = hi if rev else lo
+            for b in range(NB):
+                i = NB - 1 - b if rev else b
+                cores.append(ttnn.CoreCoord(x0 + i % w_, y0 + i // w_))
+                rt.append([b, *bounds, snoc.x, snoc.y] + mc(lo, hi, ww))
+        return S, cores, rt
 
     def _act(self, a, w, ids, out, E, wts, wsub, nsub, Kt, Nt, mt, w_page, G, gs, ocol=0, w2=None):
         """gate|up + the activation and routing weights (see __call__): column block b of the output = sub-shard
@@ -177,27 +227,21 @@ class GroupedMM:
         # double-buffered)
         hs = [d for d in (3, 2, 1) if P % d == 0]
         fits = lambda h_, k, kb: Kt * (k * 2 * h_ * w_page + 2 * 2048) <= kb * 1024  # noqa: E731
-        db = ACT_DB == "1" or (ACT_DB == "auto" and G >= 3 * E)
+        db = ACT_DB == "1" or (ACT_DB == "auto" and (G >= 3 * E or self._bands()))
         h = next((d for d in hs if fits(d, 2, ACT_KB) and (ACT_DB == "1" or 2 * d >= hs[0])), hs[0]) if db else hs[0]
         nb = 2 * h
         nbuf = 2 if fits(h, 2, ACT_KB if db else 800) else 1
         NB = nsub * P // h
         ww = _ww(True)
-        w_, h_, per_row, gy = self._slices(NB)
-        S = max(1, min(E, per_row * (gy // h_)))
         gs_ = GS in ("1", "act")
         bal = BAL if G >= 3 * E and self.mesh.get_num_devices() == 1 and not gs_ else 0
-        bounds = [(s, S) if bal or gs_ else (E * s // S, E * (s + 1) // S) for s in range(S)]
-        cores, rt, wrt = [], [], []
-        for s in range(S):
-            x0, y0 = (s % per_row) * w_, (s // per_row) * h_
-            snoc = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0, y0))
-            hi = self.mesh.worker_core_from_logical_core(ttnn.CoreCoord(x0 + w_ - 1, y0 + h_ - 1))
-            for b in range(NB):
-                cores.append(ttnn.CoreCoord(x0 + b % w_, y0 + b // w_))
-                sub, c0 = b // (P // h), (b % (P // h)) * h
-                rt.append([b, *bounds[s], snoc.x, snoc.y] + mc(snoc, hi, ww) + [G, sub, c0])
-                wrt.append([b, *bounds[s], 0, 0, 0, 0, 0, 0, G, ocol + sub * P + c0, sub, c0])
+        S, cores, prt = self._place(NB, E, ww, bal, gs_)
+        rt, wrt = [], []
+        for r in prt:
+            b = r[0]
+            sub, c0 = b // (P // h), (b % (P // h)) * h
+            rt.append(r + [G, sub, c0])
+            wrt.append([b, r[1], r[2], 0, 0, 0, 0, 0, 0, G, ocol + sub * P + c0, sub, c0])
         crs = _range_set(cores)
         cb_a, cb_w, cb_ids, cb_out, cb_rw = 0, 1, 2, 3, 4
         ids_bytes = (G * 2 + 63) // 64 * 64
@@ -235,6 +279,7 @@ class GroupedMM:
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(2)]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=sems, cbs=cbs)
         key = ("i2m_gmm_act1", tuple(defs), G, gs, Kt, KA, Nt, No, E, h, nbuf, S, nsub, str(w.dtype), self.fid,
+               self._lkey(NB),
                tuple(repr(t.memory_config()) for t in (a, w, ids, out, wts)), W2)
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([a, w, ids, out, wts] + ([w2] if w2 is not None else []), prog)

@@ -45,10 +45,11 @@ inline void gmm_bal(F id, uint32_t G, uint32_t E, uint32_t s, uint32_t S, uint32
     e0 = e0 < e1 ? e0 : e1;
 }
 
-// GMM_GS: group slice s of S takes the real groups (ids < E, sorted first) [gr s / S, gr (s + 1) / S): equal group
-// counts whatever the experts' loads; an expert's groups may span slices (each loads its weight block).
+// GMM_GS: a group slice takes the real groups (ids < E, sorted first) [gr q0 / Q, gr q1 / Q): its share [q0, q1) of Q
+// (tt/gmm.py: q0, Q << 16 | q1; equal shares q = s, s + 1 of S) whatever the experts' loads; an expert's groups may
+// span slices (each loads its weight block).
 template <typename F>
-inline void gmm_gs(F id, uint32_t G, uint32_t E, uint32_t s, uint32_t S, uint32_t& g0, uint32_t& g1) {
+inline void gmm_gs(F id, uint32_t G, uint32_t E, uint32_t q0, uint32_t qq, uint32_t& g0, uint32_t& g1) {
     uint32_t lo = 0, hi = G;
     while (lo < hi) {
         const uint32_t mid = (lo + hi) / 2;
@@ -58,8 +59,9 @@ inline void gmm_gs(F id, uint32_t G, uint32_t E, uint32_t s, uint32_t S, uint32_
             hi = mid;
         }
     }
-    g0 = lo * s / S;
-    g1 = lo * (s + 1) / S;
+    const uint32_t Q = qq >> 16, q1 = qq & 0xFFFF;
+    g0 = lo * q0 / Q;
+    g1 = lo * q1 / Q;
 }
 
 // GMM_W2 = W2 (act): the gate|up pairs continue in a second weight tensor ([gate | up], W2 column tiles each) after

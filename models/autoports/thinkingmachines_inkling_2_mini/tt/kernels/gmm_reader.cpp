@@ -10,7 +10,8 @@
 // every core: they consume in lockstep); semaphore 0 (on the sender): receivers ready, 1 (on the receivers): the tile
 // row landed.
 //
-// runtime args: b, e0, e1, sender x / y, multicast x0 y0 x1 y1 (NOC 0), G, s, c0
+// runtime args: b, e0, e1 (GMM_GS: the slice's share, tt/kernels/gmm_bal.hpp), sender x / y, multicast x0 y0 x1 y1,
+// G, s, c0
 // common args: a, w, ids, ws, wo, wkt, k0, koff, rw, (GMM_W2) w2
 // (expert e's weights are w's expert e * ws + wo + s: a sub-shard of experts stacked as virtual experts,
 // tt/moe_fused.py; this core's weight columns start at c0; A's columns at tile koff of its KA-tile rows)
@@ -142,23 +143,10 @@ void kernel_main() {
         }
         for (uint32_t mi = 0; mi < mt; ++mi) {
 #if GMM_ACT
+            // (the routing weights' read overlaps the A delivery: its barrier is the A's)
             cb_reserve_back(cb_rw, 1);
             const uint32_t rl = get_write_ptr(cb_rw);
             noc_async_read(ar.get_noc_addr(g * mt + mi), rl, 2048);
-            noc_async_read_barrier();
-            // column 0 of each row (faces 0 / 2) -> all 32 columns (tt/kernels/moeact_reader.cpp)
-            volatile tt_l1_ptr uint16_t* t = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rl);
-            for (uint32_t hf = 0; hf < 2; ++hf) {
-                for (uint32_t row = 0; row < 16; ++row) {
-                    const uint32_t base = hf * 512 + row * 16;
-                    const uint16_t v = t[base];
-                    for (uint32_t col = 0; col < 16; ++col) {
-                        t[base + col] = v;
-                        t[base + 256 + col] = v;
-                    }
-                }
-            }
-            cb_push_back(cb_rw, 1);
 #endif
             cb_reserve_back(cb_a, KT);
             const uint32_t al = get_write_ptr(cb_a);
@@ -178,8 +166,26 @@ void kernel_main() {
                 noc_semaphore_set(valid, 0);
                 noc_semaphore_inc(get_noc_addr(sx, sy, s_ready), 1);
                 noc_semaphore_wait(valid, 1);
+#if GMM_ACT
+                noc_async_read_barrier();
+#endif
             }
             cb_push_back(cb_a, KT);
+#if GMM_ACT
+            // column 0 of each row (faces 0 / 2) -> all 32 columns (tt/kernels/moeact_reader.cpp)
+            volatile tt_l1_ptr uint16_t* t = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(rl);
+            for (uint32_t hf = 0; hf < 2; ++hf) {
+                for (uint32_t row = 0; row < 16; ++row) {
+                    const uint32_t base = hf * 512 + row * 16;
+                    const uint16_t v = t[base];
+                    for (uint32_t col = 0; col < 16; ++col) {
+                        t[base + col] = v;
+                        t[base + 256 + col] = v;
+                    }
+                }
+            }
+            cb_push_back(cb_rw, 1);
+#endif
         }
     }
     noc_async_write_barrier();  // (the A multicasts and semaphore updates)
