@@ -24,6 +24,116 @@ GATHER = __import__("os").environ.get("I2M_TOPK_GATHER", "1") == "1"
 # reserved its 2 KB on every core, and with every width's trace their region reached the prefill SDPA's static CBs at
 # 2048-row chunks (p300x2: "CBs clash with L1 buffers")
 TOPK_DRAM = __import__("os").environ.get("I2M_TOPK_DRAM", "1") == "1"
+# I2M_TOPK_MAX (default 1): the shift of the second top-k pass, bf16(row max), from one program reading only the live
+# rows of the fp32 logits (tt/kernels/rowmax.cpp) instead of a whole-tile typecast + a first top-k pass (bf16 rounding is
+# monotone: the same value; candidates and tokens bitwise)
+TOPK_MAX = __import__("os").environ.get("I2M_TOPK_MAX", "1") == "1"
+
+
+class RowMax:
+    """fp32 TILE [1, 1, rows, Vp] (rows <= 8 live) -> fp32 TILE [1, 1, rows, 1]: bf16(row max) (tt/kernels/rowmax.cpp)."""
+
+    NC, BATCH = 80, 16
+
+    def __init__(self, mesh, Vp: int):
+        self.mesh, self.T = mesh, Vp // 32
+        nc = min(self.NC, self.T)
+        self.cores = [ttnn.CoreCoord(i % 8, i // 8) for i in range(nc)]
+        self.crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in self.cores])
+        per = -(-self.T // nc)
+        self.work = [(c, i * per, max(0, min(per, self.T - i * per))) for i, c in enumerate(self.cores)]
+        self.mxy = mesh.worker_core_from_logical_core(self.cores[0])
+
+    def __call__(self, lg, rows, fill=False):
+        """fill (rows 1): the value in all 32 rows ([1, 1, 32, 1])."""
+        import hashlib
+        from pathlib import Path
+
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32 if fill else rows, 1]), ttnn.float32, ttnn.TILE_LAYOUT,
+                                             self.mesh, ttnn.L1_MEMORY_CONFIG)
+        nc = len(self.cores)
+        ct = [0, rows, nc, self.mxy.x, self.mxy.y, 0, self.BATCH, int(fill)] + ttnn.TensorAccessorArgs(lg).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        rt = ttnn.RuntimeArgs()
+        for i, (c, t0, n) in enumerate(self.work):
+            rt[c.x][c.y] = [lg.buffer_address(), out.buffer_address(), t0, n, i]
+        k = ttnn.KernelDescriptor(kernel_source=str(Path(__file__).parent / "kernels" / "rowmax.cpp"),
+                                  core_ranges=self.crs, compile_time_args=ct, runtime_args=rt,
+                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                           noc=ttnn.NOC.NOC_0))
+        nb = (nc * -(-rows // 4) * 16 + 63) // 64 * 64 + max(4096, self.BATCH * 2 * rows * 64)
+        fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, self.crs, 0)],
+                                      cbs=[ttnn.CBDescriptor(total_size=nb, core_ranges=self.crs, format_descriptors=[fmt])])
+        key = ("i2m_rowmax", tuple(ct), repr(lg.memory_config()))
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        ttnn.generic_op([lg, out], prog)
+        return out
+
+
+# I2M_TOPK_DENSE (default 1, with TOPK_MAX): a one-row group's shift + bf16 cast on a dense copy of the live row (row 0 of
+# tile t -> row t % 32 of dense tile t / 32, tt/kernels/rowpack.cpp), scattered back into row 0 of the top-k input: the
+# same subtract / typecast ops on 1 / 32 of the tiles (the padding rows are never read by the top-k); the dense copy and
+# the shift in one program. With TOPK_MAX, one die W = 1: the trace's sampling tail 523 -> 235 us; served p150 plain TPOT
+# T = 1 17.78 -> 17.44 ms, T = 0 17.83 -> 17.50 (texts identical)
+TOPK_DENSE = __import__("os").environ.get("I2M_TOPK_DENSE", "1") == "1"
+
+
+class RowPack:
+    """[1, 1, 1, 32 T] TILE row 0 <-> dense [1, 1, 32, 32 ceil(T / 32)] TILE (tt/kernels/rowpack.cpp)."""
+
+    NC, BATCH = 80, 16
+
+    def __init__(self, mesh, Vp: int):
+        self.mesh, self.T = mesh, Vp // 32
+        self.TD = -(-self.T // 32)
+        nc = min(self.NC, self.T)
+        self.cores = [ttnn.CoreCoord(i % 8, i // 8) for i in range(nc)]
+        self.crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in self.cores])
+        per = -(-self.T // nc)
+        self.work = [(c, i * per, max(0, min(per, self.T - i * per))) for i, c in enumerate(self.cores)]
+
+    def run(self, src, dst, pack, top=None):
+        import hashlib
+        from pathlib import Path
+
+        ct = [0, self.BATCH] + ttnn.TensorAccessorArgs(src).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(dst).get_compile_time_args()
+        if top is not None:
+            m = self.mesh.worker_core_from_logical_core(self.cores[0])
+            ct += [len(self.cores), m.x, m.y] + ttnn.TensorAccessorArgs(top).get_compile_time_args()
+        rt = ttnn.RuntimeArgs()
+        for i, (c, t0, n) in enumerate(self.work):
+            rt[c.x][c.y] = [src.buffer_address(), dst.buffer_address(), t0, n] + (
+                [i, top.buffer_address()] if top is not None else [])
+        k = ttnn.KernelDescriptor(kernel_source=str(Path(__file__).parent / "kernels" / "rowpack.cpp"),
+                                  core_ranges=self.crs, compile_time_args=ct, runtime_args=rt,
+                                  defines=[("RP_PACK", str(int(pack))), ("RP_MAX", str(int(top is not None)))],
+                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                           noc=ttnn.NOC.NOC_0))
+        nb = self.BATCH * 2 * 64 + (len(self.cores) * 16 + 4096 if top is not None else 0)
+        fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, self.crs, 0)], cbs=[
+            ttnn.CBDescriptor(total_size=nb, core_ranges=self.crs, format_descriptors=[fmt])])
+        key = ("i2m_rowpack", tuple(ct), pack, top is not None, repr(src.memory_config()), repr(dst.memory_config()))
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        ttnn.generic_op([src, dst] + ([top] if top is not None else []), prog)
+        return dst
+
+    def pack(self, lg, with_max=False):
+        """-> dense fp32 copy (with_max: and the fp32 [1, 1, 32, 1] bf16(row max) tile, as RowMax(fill=True))"""
+        d = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, 32 * self.TD]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
+                                           ttnn.L1_MEMORY_CONFIG)
+        if not with_max:
+            return self.run(lg, d, True)
+        top = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, 1]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
+                                             ttnn.L1_MEMORY_CONFIG)
+        return self.run(lg, d, True, top), top
+
+    def unpack(self, db):
+        s = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, 32 * self.T]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
+                                           ttnn.DRAM_MEMORY_CONFIG)
+        return self.run(db, s, False)
 
 
 class DeviceTopK:
@@ -37,26 +147,40 @@ class DeviceTopK:
         self.N = mesh.get_num_devices()
         self.sharded = sharded and self.N > 1
         self.rtk = RowsTopK(mesh, Vp, k=K)
+        self.rmax = RowMax(mesh, Vp) if TOPK_MAX else None
+        self.rpack = RowPack(mesh, Vp) if TOPK_MAX and TOPK_DENSE else None
 
     def device(self, lg, W: int):
         """Device half (traceable): lg [1, 1, W, Vp] fp32 TILE -> [(indices [1, 1, rows, K], logits - row max
         [1, 1, rows, K] bf16, rows)] per group of <= 8 rows. Two fused top-k passes: the first's best bf16 value (within
         one bf16 ulp of the row max) shifts the fp32 row so the candidates sit near 0, where bf16 resolves them to
         ~1e-3 (softmax is shift-invariant; the arg max stays exact); a gather of the fp32 values would cost 3.5 ms."""
-        lb = ttnn.typecast(lg, ttnn.bfloat16)
+        lb = ttnn.typecast(lg, ttnn.bfloat16) if self.rmax is None else None
         parts = []
         for g0 in range(0, W, GROUP):
             rows = min(GROUP, W - g0)
-            part_b = lb if W <= GROUP else ttnn.slice(lb, [0, 0, g0, 0], [1, 1, g0 + rows, self.Vp])
             part_f = lg if W <= GROUP else ttnn.slice(lg, [0, 0, g0, 0], [1, 1, g0 + rows, self.Vp])
-            v1, _ = self.rtk(part_b, rows)
-            top = ttnn.typecast(ttnn.slice(v1, [0, 0, 0, 0], [1, 1, rows, 1]), ttnn.float32)
+            dense = self.rpack is not None and rows == 1
+            if dense:  # (the dense copy and the shift in one program)
+                d, top = self.rpack.pack(part_f, with_max=True)
+            elif self.rmax is not None:
+                top = self.rmax(part_f, rows)
+            else:
+                part_b = lb if W <= GROUP else ttnn.slice(lb, [0, 0, g0, 0], [1, 1, g0 + rows, self.Vp])
+                v1, _ = self.rtk(part_b, rows)
+                top = ttnn.typecast(ttnn.slice(v1, [0, 0, 0, 0], [1, 1, rows, 1]), ttnn.float32)
             if self.sharded:  # every die shifts by the same value: the max over the dies' maxima
                 tops = ttnn.all_gather(top, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N]
                 top = ttnn.max(tops, dim=-1, keepdim=True)
             if int(part_f.shape[2]) != rows:
                 part_f = ttnn.slice(part_f, [0, 0, 0, 0], [1, 1, rows, self.Vp])
-            shifted = ttnn.typecast(ttnn.subtract(part_f, top), ttnn.bfloat16)
+            if dense:
+                db = ttnn.typecast(ttnn.subtract(d, top), ttnn.bfloat16)
+                ttnn.deallocate(d)
+                shifted = self.rpack.unpack(db)
+                ttnn.deallocate(db)
+            else:
+                shifted = ttnn.typecast(ttnn.subtract(part_f, top), ttnn.bfloat16)
             v2, i2 = self.rtk(shifted, rows)
             i2, v2 = ttnn.slice(i2, [0, 0, 0, 0], [1, 1, rows, K]), ttnn.slice(v2, [0, 0, 0, 0], [1, 1, rows, K])
             if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
