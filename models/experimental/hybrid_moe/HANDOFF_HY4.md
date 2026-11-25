@@ -420,8 +420,32 @@ Borrowed from M2.7 (expert-sorted MoE) and tt-metal PR 61548 (rows split over ch
 - Checks: layer 0 (indexed attention + compressed indexer) in float64, one 3000-token pass vs 1024-token chunks through
   the HF cache: bit-identical (0.0) incl. past 2048 where the indexer selects. Noise floor of the BF16 reference:
   fp32-vs-bf16 attention softmax + batch 1 vs 8: top-1 agreement 0.928 (gsm8k) / 0.96-1.0 (chat); full model single
-  pass vs chunked over 3000 tokens: 0.97 / 0.91 / 0.86 (positions 0-1K / 1-2K / 2-3K). A TT port within ~0.9 top-1
-  of this reference is at the reference's own noise level.
+  pass vs chunked over 3000 tokens: 0.97 / 0.91 / 0.86 (positions 0-1K / 1-2K / 2-3K). CORRECTED 2026-11-25: these
+  are changes of arithmetic, not a floor for the port. With the reference's own arithmetic (batch 8 padded vs the
+  reference run) top-1 is 0.994 on the gate texts; the port's gap is the weight rounding (section below).
+- Quality decomposition (2026-11-25; quant_emul_hy4.py, compare_gen_hy4.py, gen_prompts_hy4.py; runs in
+  ~/m27-work/hy4/qa). Device = the published image (rev 454a55fe316) + tools from tag published/hy4-flash, run with
+  ~/.cache/hybrid-moe as the tensor cache: the serving weight cache stores some decode streams in another layout
+  under the same names (attn g [49152] vs [24576]) and batch_gate fails on it with a shard-height TT_FATAL.
+  Gate texts (8 users, pooled over 4288 tokens; the card's per-sequence mean in brackets):
+
+  | run | top-1 | top-5 | KL top 32 |
+  | --- | ---: | ---: | ---: |
+  | device, published | 0.841 (0.865) | 0.972 | 0.318 |
+  | device, attention q_b/g/o + dense layer bf16 | 0.836 (0.856) | 0.970 | 0.330 |
+  | CPU reference, nothing rounded (batched) | 0.994 | 1.000 | 0.002 |
+  | CPU, experts bfp4 only | 0.847 | 0.972 | 0.322 |
+  | CPU, published precisions (experts bfp4, attention + dense bfp8) | 0.842 | 0.971 | 0.322 |
+  | CPU, experts bfp4 gate/up + bfp8 down, attention + dense bfp8 | 0.856 | 0.977 | 0.252 |
+  | CPU, attention + dense bfp8 only (experts exact) | 0.921 | 0.990 | 0.123 |
+  | CPU, experts bfp8, attention + dense bfp8 | 0.921 (0.951) | 0.991 | 0.126 |
+
+  Reference-continuation test (the autoport / gpt-oss gate style: 8 chat prompts incl. AIME 2024 I P1, 775 tokens the
+  reference generated greedily): device published 0.938 top-1 / 1.000 top-5 / 1.000 top-32 (KL 0.054), one user per
+  pass 0.935; CPU experts bfp8 + attention bfp8 0.990 / 1.000 (KL 0.004). The bfp4 experts are nearly the whole gap;
+  bfp8 attention costs ~7 points alone but is hidden behind them. bfp8 experts need ~147 GiB (> 128 GiB of the 4 dies);
+  bfp8 downs alone need +5.8 GiB/die (do not fit; +1.4 points). Not finished: rtne / GPTQ bfp4 rounding (bfp4_round.py,
+  as M2.7: KL 0.080 -> 0.060) on Hy4's experts, and bfp8 experts + bf16 attention (both runs stopped).
 - Note: config.json spells the attention types `deepseek_sparse_attention` / `sliding_attention`; transformers
   remaps the first to `indexed_attention` (its rope_parameters key too). `mrope_interleaved` is ignored with a warning
   (the interleave is always applied); for text the 3 M-RoPE planes are equal, so it is plain 1-D RoPE.
