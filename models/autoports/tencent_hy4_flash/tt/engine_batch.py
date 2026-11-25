@@ -249,7 +249,7 @@ class Hy4BatchEngine:
         if cur is not None and cur[1] >= need:
             return
         if not self.pooled:
-            raise PoolFull(f"Hy4 slot {slot}: {need} tokens > its fixed extent {m.ext_rows}")
+            raise PoolFull(f"Hy4 slot {slot}: {need} tokens > its fixed extent {m.ext_rows}", slot=slot)
         want = min(rup(need + self.GROW), m.ext_rows) if soft else need
         self._settle()
         stage = 0
@@ -292,7 +292,7 @@ class Hy4BatchEngine:
                 stage = 2
                 if self._compact(around=slot if slot in m.ext else None):
                     continue
-            raise PoolFull(f"Hy4 pool full: slot {slot} needs {need} tokens; extents {dict(m.ext)} of {self.pa.P}")
+            raise PoolFull(f"Hy4 pool full: slot {slot} needs {need} tokens; extents {dict(m.ext)} of {self.pa.P}", slot=slot)
 
     def _grow(self, slot, size) -> bool:
         m = self.model
