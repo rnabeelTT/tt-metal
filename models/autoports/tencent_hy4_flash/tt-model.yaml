@@ -132,11 +132,13 @@ card:
     | MMLU-Pro (fixed 1,000-question subset) | 73.3% | 1.4 | — | 1,000 | no_think, greedy |
     | GPQA-Diamond, thinking | 87.4% | 2.4 | — | 198 | high, temperature 0.9, max_tokens 18,944 |
     | Needle retrieval (2K-11K, alone and with 7 users) | 6/6 | — | — | 6 | no_think, greedy |
-    | Top-1 agreement / KL (top 32) with the BF16 reference, 8 users | 86.5% / 0.223 | — | — | 8 texts | teacher forced |
+    | Top-1 / top-5 / top-100 token agreement with the BF16 reference on its own greedy answers (8 chat prompts incl. an AIME 2024 problem, one with thinking on, up to 100 tokens each), 8 users | 93.8% / 100% / 100% | — | — | 775 tokens | teacher forced |
+    | Top-1 agreement / KL (top 32) with the BF16 reference on held-out text (4 human-written 1,000-token texts + 4 chat prompts), 8 users | 86.5% / 0.223 | — | — | 8 texts | teacher forced |
     | Same, 3K-token text, prefill / decode | 82.7% / 0.293, 82.8% / 0.275 | — | — | 1 text | teacher forced |
 
     Evals served through the OpenAI endpoint with 8 requests in flight (lm-evaluation-harness; seed 42).
     SE = sqrt(p(1-p)/n). Tencent publishes no figures for these settings.
+    The first agreement row is the measurement other tt-metal model gates use (the reference's own continuation; gates are typically >= 90% top-1, >= 98% top-5). Held-out text is harder: the reference itself is often unsure there, so near-tied tokens flip. Nearly all of the difference from the BF16 model comes from the bfp4 routed experts: the CPU reference with only its expert weights rounded to bfp4 scores the same (84.7% vs 84.1% on the device, pooled over tokens); bfp8 experts (92.1%) need ~147 GiB, more than the 128 GiB of device DRAM.
 
     Precision (the checkpoint is BF16):
 
