@@ -17,6 +17,10 @@
 #include "api/dataflow/dataflow_api.h"
 #include "tools/profiler/kernel_profiler.hpp"
 #include "red.hpp"
+#ifndef RED_ZDEFER
+#define RED_ZDEFER 0
+#endif
+#include "glz.hpp"
 
 // rows 0 .. T-1 of a TH x 32 CB tile (faces min(TH, 16) x 16) into a 32 x 32 tensor tile
 template <uint32_t T, uint32_t E, uint32_t TH>
@@ -93,6 +97,7 @@ void kernel_main() {
         noc_semaphore_set_multicast(s_go, mc(s_go), C - 1);
     }
     noc_semaphore_wait(sem(s_go), 1);
+    GLZ("W_GO");
     }
     // the unused gather rows -> 0 (red.hpp); G2_ZLAZY: round 1's parts here, the later rounds' after round 1
     constexpr uint32_t NP = G2_MR && T > 1 ? 2 : 1;  // rounds 1 / 2's roots per row
@@ -117,19 +122,32 @@ void kernel_main() {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
+#if !RED_ZDEFER
         noc_async_read_barrier();
+#endif
     }
-    if (NP > 1 && c < T * NP) {  // (its pair's two parts)
-        zero_parts(2 * (c % NP), 2 * (c % NP) + 2);
-    } else if (root) {
-        zero_parts(0, G2_ZLAZY ? 4 : GP);
-    }
+    // round 1's unused gather rows -> 0 (RED_ZDEFER: after this core's own round-1 send; the zeroed rows are not
+    // the ones the partials land in, so only the root's reduce needs them, not the senders)
+    auto zero1 = [&]() {
+#if RED_ZDEFER
+        noc_async_read_barrier();
+#endif
+        if (NP > 1 && c < T * NP) {  // (its pair's two parts)
+            zero_parts(2 * (c % NP), 2 * (c % NP) + 2);
+        } else if (root) {
+            zero_parts(0, G2_ZLAZY ? 4 : GP);
+        }
+    };
+#if !RED_ZDEFER
+    zero1();
+#endif
     uint32_t gcnt = 0, tcnt = 0;  // (this core's s_g / s_t targets so far)
 
     // one round: parts -> the roots; with a broadcast, the roots' ntot totals -> everyone's tb
     // np roots per row: pair p / 2 of row t -> core t np + p / 2
     auto round = [&](uint32_t parts, uint32_t cb_t, uint32_t tb, uint32_t k, bool bcast, uint32_t np) {
         cb_wait_front(cb_part, parts);
+        GLZ("W_P");
         const uint32_t src = get_read_ptr(cb_part);
         const uint32_t d = g + red_off<G2_RK, TR>(c);
         for (uint32_t t = 0; t < (G2_PACK ? 1 : T); ++t) {  // (row t < 16 of a CB tile)
@@ -144,15 +162,22 @@ void kernel_main() {
             }
         }
         noc_async_writes_flushed();  // (in order with the increments behind them: same route, same VC)
+        GLZ("W_S");
         for (uint32_t r = 0; r < (G2_PACK ? 1 : T * np); ++r) {
             noc_semaphore_inc(rxy(r, s_g), 1);
         }
+#if RED_ZDEFER
+        if (k == 1) {
+            zero1();
+        }
+#endif
         cb_pop_front(cb_part, parts);
         const bool isr = G2_PACK ? c == 0 : c < T * np;
         if (isr) {
             gcnt += C;
             cb_reserve_back(cb_gath, GT);
             noc_semaphore_wait(sem(s_g), gcnt);
+            GLZ("W_G");
             cb_push_back(cb_gath, GT);
         }
         if (!bcast) {
@@ -161,6 +186,7 @@ void kernel_main() {
         const uint32_t ntot = parts / 2, nt = ntot / np, jp = c % np, row = c / np;  // (this root's: tiles jp .. jp + nt - 1)
         if (isr) {
             cb_wait_front(cb_tout, nt);
+            GLZ("W_T");
             const uint32_t ts = get_read_ptr(cb_tout);
             // the totals' multicasts linked, then the done value set by a multicast behind them (same route / VC:
             // in order, no barrier; the matmul in0 sender's scheme); every core's own copy by a local write
@@ -203,6 +229,7 @@ void kernel_main() {
             cb_pop_front(cb_tout, nt);
         }
         noc_semaphore_wait(sem(s_done), k);
+        GLZ("W_D");
         cb_push_back(cb_t, ntot);
     };
     {
@@ -287,6 +314,7 @@ void kernel_main() {
         }
     }
     // (the round sends are only flushed: every write and increment acknowledged before the kernel ends)
+    GLZ("W_END");
     noc_async_write_barrier();
     noc_async_atomic_barrier();
     *sem(s_ready) = 0;

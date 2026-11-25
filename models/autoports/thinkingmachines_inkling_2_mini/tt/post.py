@@ -52,6 +52,16 @@ _MR = __import__("os").environ.get("I2M_RED_MR", "pre")
 MR = {"post", "pre", "gate2", "multi"} if _MR == "1" else set() if _MR == "0" else set(_MR.split(","))
 # the rounds' gather zeroing and partial sends as stateful one-packet NOC writes (red.hpp; post / pre / gate2). I2M_RED_WS
 WS = __import__("os").environ.get("I2M_RED_WS", "1") == "1"
+# a round-1 root zeroes its gather's unused rows after its own send, not before it (red.hpp rows: the partials never
+# land there; post / pre / gate2). I2M_RED_ZDEFER
+ZDEFER = __import__("os").environ.get("I2M_RED_ZDEFER", "0") == "1"
+# post compute: round 1's tail (r, lg) with the softmax, round 2's tail with the normed output, each one DST block
+# (no CB round trip; the same ops). I2M_POST_FUSE
+POST_FUSE = __import__("os").environ.get("I2M_POST_FUSE", "0") == "1"
+# the mix block also squares mi (round 2's products: no mi round trip). I2M_POST_MSQ
+POST_MSQ = __import__("os").environ.get("I2M_POST_MSQ", "0") == "1"
+# round 1's products (resid^2, resid q) in the conv's DST block, the query rows read with the conv inputs. I2M_POST_CSQ
+CSQ = __import__("os").environ.get("I2M_POST_CSQ", "0") == "1"
 # rounds of 1 < T rows with red_k(T) T <= 8: every core's T rows in its gather group's spare rows, one root (core 0)
 # reducing all rows at once (red.hpp TR): one write per part and face, no relay. I2M_RED_PACK: the programs (pre, postl:
 # post without a router round, gate: gate2 / multi without one; 1 all, 0 none)
@@ -173,7 +183,7 @@ class PostKernel:
                     _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), r(cb_t3, f32, ET)]
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
                                             self.mesh, out_mc) if rt else None
-        rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_RSPLIT", str(int(RSPLIT and rt))), ("POST_DUP", str(int(dup))), ("POST_MR", str(int(mr))), ("POST_PACK", str(int(pack))), ("RED_WS", str(int(WS))), ("POST_CB_RW", str(cb_rw)),
+        rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_RSPLIT", str(int(RSPLIT and rt))), ("POST_DUP", str(int(dup))), ("POST_MR", str(int(mr))), ("POST_PACK", str(int(pack))), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("POST_CSQ", str(int(CSQ))), ("POST_CB_RW", str(cb_rw)),
                  ("POST_CB_XB", str(cb_xb)), ("POST_CB_P3", str(cb_p3)), ("POST_CB_G3", str(cb_g3)),
                  ("POST_CB_T3", str(cb_t3))]
         k = conv.kernel
@@ -222,11 +232,11 @@ class PostKernel:
             dm("post_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
             ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "post_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(self.cores, [[i] for i in range(C)]), config=cfg,
-                                  defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH)))] + rdefs),
+                                  defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH))), ("POST_FUSE", str(int(POST_FUSE))), ("POST_MSQ", str(int(POST_MSQ)))] + rdefs),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

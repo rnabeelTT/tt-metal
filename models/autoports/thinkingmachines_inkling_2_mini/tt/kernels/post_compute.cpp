@@ -15,6 +15,7 @@
 #include "api/compute/binary_max_min.h"
 #include "api/compute/common.h"
 #include "api/compute/compute_kernel_api.h"
+#include "glz.hpp"
 #include "api/compute/eltwise_binary_sfpu.h"
 #include "api/compute/eltwise_unary/binop_with_scalar.h"
 #include "api/compute/eltwise_unary/exp.h"
@@ -26,6 +27,9 @@
 #include "api/compute/tile_move_copy.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
+#ifndef POST_CSQ
+#define POST_CSQ 0
+#endif
 #ifndef ROWS
 #define ROWS 16
 #endif
@@ -43,8 +47,10 @@ inline void calculate_post_bin(const uint32_t a, const uint32_t b, const uint32_
             sfpi::dst_reg[o * tile] = x + y;
         } else if constexpr (OP == 1) {
             sfpi::dst_reg[o * tile] = x - y;
-        } else {
+        } else if constexpr (OP == 2) {
             sfpi::dst_reg[o * tile] = x * y;
+        } else {  // (a copy)
+            sfpi::dst_reg[o * tile] = x;
         }
         sfpi::dst_reg++;
     }
@@ -83,6 +89,7 @@ ALWI void bin(uint32_t a, uint32_t b, uint32_t o) {
 ALWI void add(uint32_t a, uint32_t b, uint32_t o) { bin<0>(a, b, o); }
 ALWI void sub(uint32_t a, uint32_t b, uint32_t o) { bin<1>(a, b, o); }
 ALWI void mul(uint32_t a, uint32_t b, uint32_t o) { bin<2>(a, b, o); }
+ALWI void mov(uint32_t a, uint32_t o) { bin<3>(a, a, o); }
 ALWI void sinit() { MATH((SFPU_BINARY_INIT(unused))); }
 ALWI void split(uint32_t x, uint32_t hi, uint32_t lo) {
     MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_post_split, (0xFFFFE000u, RIT), x, hi, lo,
@@ -188,6 +195,17 @@ void kernel_main() {
         sw = true;
     };
     constexpr uint32_t n = NB + 1;
+#ifndef POST_FUSE
+#define POST_FUSE 0
+#endif
+    // POST_FUSE: round 1's tail with the softmax (r / lg kept in DST; n <= 5 leaves DST 6 for r), round 2's tail with the
+    // normed output (PER <= 2: mi, nw and rn in one DST block)
+    constexpr bool PFUSE = POST_FUSE && SOFT_BATCH && NB <= 4 && !POST_MR;
+    constexpr bool PFUSE2 = POST_FUSE && PER <= 2;
+#ifndef POST_MSQ
+#define POST_MSQ 0
+#endif
+    constexpr bool MSQ = POST_MSQ && NORM;  // (the mix block also squares mi)
     static_assert(n <= 6, "DST: max + n weights + sum");
 
     // matmuls: in0 -> srcB, in1 -> srcA (each CB's tile shape: the token-row CBs hold TH x 32 tiles, POST_TH)
@@ -195,12 +213,17 @@ void kernel_main() {
 
     {
     DeviceZoneScopedN("P_C_CONV");
-    // ---- conv + residual, per tile
+    // ---- conv + residual, per tile (POST_CSQ: with round 1's products resid^2, resid q in the same DST block)
     cb_reserve_back(cb_res, PER);
+#if POST_CSQ
+    cb_wait_front(cb_q, PER);
+    cb_reserve_back(cb_sq, 4 * PER);
+#endif
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_att, 1);
         cb_wait_front(cb_s, 3);
         cb_wait_front(cb_w, 4);
+        GLZ("C_IN");
         tile_regs_acquire();
         // DST: 0 x, 1 wc, 2 s0, 3 w0, 4 s1, 5 w1, 6 s2, 7 w2 (one unpack init per format)
         cp(cb_att, 0, 0);
@@ -226,6 +249,14 @@ void kernel_main() {
             sinit();
             add(1, 2, 1);
         }
+#if POST_CSQ  // (DST 2, 3, 5, 7 free: q at 7; [resid^2 hi, lo, resid q hi, lo] -> 2, 3, 5, 7)
+        cp(cb_q, i, 7);
+        sinit();
+        mul(1, 7, 7);
+        mul(1, 1, 5);
+        split(5, 2, 3);
+        split(7, 5, 7);
+#endif
         tile_regs_commit();
         cb_reserve_back(cb_so, 3);
         cb_reserve_back(cb_rout, 1);
@@ -235,6 +266,12 @@ void kernel_main() {
         pack_tile(0, cb_so);
         pack_tile(1, cb_res);
         pack_tile(1, cb_rout);
+#if POST_CSQ
+        pack_tile(2, cb_sq);
+        pack_tile(3, cb_sq);
+        pack_tile(5, cb_sq);
+        pack_tile(7, cb_sq);
+#endif
         tile_regs_release();
         cb_push_back(cb_so, 3);
         cb_push_back(cb_rout, 1);
@@ -254,6 +291,8 @@ void kernel_main() {
     // ---- round 1 partials: sum resid^2 (hi + lo, exact), resid . q
     cb_wait_front(cb_ones, 1);
     cb_wait_front(cb_q, PER);
+    GLZ("C_IN");
+#if !POST_CSQ
     cb_reserve_back(cb_sq, 4 * PER);
     for (uint32_t i = 0; i < PER; ++i) {  // [resid^2 hi, lo, resid q hi, lo] per tile (fp32 products, exact sums)
         tile_regs_acquire();
@@ -272,6 +311,7 @@ void kernel_main() {
         pack_tile(5, cb_sq);
         tile_regs_release();
     }
+#endif
     cb_push_back(cb_sq, 4 * PER);
     cb_wait_front(cb_sq, 4 * PER);
     cb_reserve_back(cb_part, 4);
@@ -295,6 +335,7 @@ void kernel_main() {
     pack_tile(5, cb_part);
     tile_regs_release();
     cb_push_back(cb_part, 4);
+    GLZ("C_PP");
     cb_pop_front(cb_sq, 4 * PER);
     cb_pop_front(cb_q, PER);
 
@@ -310,6 +351,7 @@ void kernel_main() {
             tile_regs_acquire();
             mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
             cb_wait_front(cb_gath, 4 * NQ);
+            GLZ("C_GATH");
             for (uint32_t k = 0; k < NQ; ++k) {
                 matmul_tiles(cb_sel, cb_gath, k, 2 * j * NQ + k, 0);
                 matmul_tiles(cb_sel, cb_gath, k, (2 * j + 1) * NQ + k, 0);
@@ -320,6 +362,7 @@ void kernel_main() {
             pack_to(0, cb_tout);
             tile_regs_release();
             cb_push_back(cb_tout, 1);
+            GLZ("C_TOUT");
             cb_pop_front(cb_gath, 4 * NQ);
         }
     } else
@@ -329,6 +372,7 @@ void kernel_main() {
         tile_regs_acquire();
         mm_begin(cb_sel, cb_gath);  // (configured before the gather arrives)
         cb_wait_front(cb_gath, 4 * NQ);
+        GLZ("C_GATH");
         for (uint32_t k = 0; k < NQ; ++k) {
             matmul_tiles(cb_sel, cb_gath, k, k, 0);
             matmul_tiles(cb_sel, cb_gath, k, NQ + k, 0);
@@ -342,119 +386,196 @@ void kernel_main() {
         pack_tile(1, cb_tout);
         tile_regs_release();
         cb_push_back(cb_tout, 2);
+        GLZ("C_TOUT");
         cb_pop_front(cb_gath, 4 * NQ);
     }
-    tile_regs_acquire();
-    cp_prep(cb_tot);  // (configured before the totals arrive)
-    cb_wait_front(cb_tot, 2);
-    cp(cb_tot, 0, 0);
-    cp(cb_tot, 1, 1);
-    drain();
-    binop_with_scalar_tile_init();
-    mul_unary_tile(0, inv_h);
-    add_unary_tile(0, eps);
-    rsqrt_tile_init<false>();
-    rsqrt_tile<false>(0);
-    sinit();
-    mul(1, 0, 1);  // lg = r dot
-    tile_regs_commit();
-    cb_reserve_back(cb_red, 2);
-    tile_regs_wait();
-    pack_to(0, cb_red);
-    pack_tile(1, cb_red);
-    tile_regs_release();
-    cb_push_back(cb_red, 2);
-    cb_pop_front(cb_tot, 2);
-    cb_wait_front(cb_red, 2);
+    if constexpr (!PFUSE) {
+        tile_regs_acquire();
+        cp_prep(cb_tot);  // (configured before the totals arrive)
+        cb_wait_front(cb_tot, 2);
+        GLZ("C_TOT");
+        cp(cb_tot, 0, 0);
+        cp(cb_tot, 1, 1);
+        drain();
+        binop_with_scalar_tile_init();
+        mul_unary_tile(0, inv_h);
+        add_unary_tile(0, eps);
+        rsqrt_tile_init<false>();
+        rsqrt_tile<false>(0);
+        sinit();
+        mul(1, 0, 1);  // lg = r dot
+        tile_regs_commit();
+        cb_reserve_back(cb_red, 2);
+        tile_regs_wait();
+        pack_to(0, cb_red);
+        pack_tile(1, cb_red);
+        tile_regs_release();
+        cb_push_back(cb_red, 2);
+        cb_pop_front(cb_tot, 2);
+        cb_wait_front(cb_red, 2);
+    }
 
     }
     {
     DeviceZoneScopedN("P_C_SOFT");
     // ---- softmax over [block logits..., lg]: DST 0 = max, 1..n = e_i -> w_i, 7 = sum
-    cb_wait_front(cb_d, NB);
-    tile_regs_acquire();
-#if SOFT_BATCH  // (each SFPU op over all sources: one init per op kind)
-    cp(cb_red, 1, 0);
-    for (uint32_t i = 0; i < n; ++i) {
-        if (i < NB) {
-            cp(cb_d, i, 1 + i);
-        } else {
-            cp(cb_red, 1, 1 + i);
-        }
-    }
-    if constexpr (NB > 0) {
+    if constexpr (PFUSE) {  // (r in DST 6, lg at n and copied to 0: the round-1 tail and the softmax in one block)
+        cb_wait_front(cb_d, NB);
+        tile_regs_acquire();
+        cp_prep(cb_tot);  // (configured before the totals arrive)
+        cb_wait_front(cb_tot, 2);
+        GLZ("C_TOT");
+        cp(cb_tot, 0, 6);
+        cp(cb_tot, 1, n);
         drain();
-        binary_max_tile_init();
-        for (uint32_t b = 0; b < NB; ++b) {
-            binary_max_tile(0, 1 + b, 0, VectorMode::R);
-        }
-    }
-    drain();
-    sinit();
-    for (uint32_t i = 0; i < n; ++i) {
-        sub(1 + i, 0, 1 + i);
-    }
-    drain();
-    exp_tile_init();
-    for (uint32_t i = 0; i < n; ++i) {
-        exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
-    }
-#else
-    cp(cb_red, 1, 0);
-    for (uint32_t b = 0; b < NB; ++b) {
-        cp(cb_d, b, 1);
-        binary_max_tile_init();
-        binary_max_tile(0, 1, 0, VectorMode::R);
-    }
-    for (uint32_t i = 0; i < n; ++i) {
-        if (i < NB) {
-            cp(cb_d, i, 1 + i);
-        } else {
-            cp(cb_red, 1, 1 + i);
-        }
+        binop_with_scalar_tile_init();
+        mul_unary_tile(6, inv_h);
+        add_unary_tile(6, eps);
+        rsqrt_tile_init<false>();
+        rsqrt_tile<false>(6);
         sinit();
-        sub(1 + i, 0, 1 + i);
-        exp_tile_init();
-        exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
-    }
-#endif
-    if constexpr (n > 1) {  // (one source: w = exp(0) = 1)
-        drain();
-        sinit();
-        add(1, 2, 7);
-        for (uint32_t i = 2; i < n; ++i) {
-            add(7, 1 + i, 7);
+        mul(n, 6, n);  // lg = r dot
+        mov(n, 0);
+        for (uint32_t i = 0; i < NB; ++i) {
+            cp(cb_d, i, 1 + i);
+        }
+        if constexpr (NB > 0) {
+            drain();
+            binary_max_tile_init();
+            for (uint32_t b = 0; b < NB; ++b) {
+                binary_max_tile(0, 1 + b, 0, VectorMode::R);
+            }
         }
         drain();
-        recip_tile_init();
-        recip_tile(7, VectorMode::R);
         sinit();
         for (uint32_t i = 0; i < n; ++i) {
-            mul(1 + i, 7, 1 + i);
+            sub(1 + i, 0, 1 + i);
         }
+        drain();
+        exp_tile_init();
+        for (uint32_t i = 0; i < n; ++i) {
+            exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
+        }
+        if constexpr (n > 1) {
+            drain();
+            sinit();
+            add(1, 2, 7);
+            for (uint32_t i = 2; i < n; ++i) {
+                add(7, 1 + i, 7);
+            }
+            drain();
+            recip_tile_init();
+            recip_tile(7, VectorMode::R);
+            sinit();
+            for (uint32_t i = 0; i < n; ++i) {
+                mul(1 + i, 7, 1 + i);
+            }
+        }
+        sinit();
+        mul(n, 6, n);  // (the current source's weight times r)
+        tile_regs_commit();
+        cb_reserve_back(cb_wt, n);
+        tile_regs_wait();
+        pack_cfg(cb_wt);
+        for (uint32_t i = 0; i < n; ++i) {
+            pack_tile(1 + i, cb_wt);
+        }
+        tile_regs_release();
+        cb_push_back(cb_wt, n);
+        cb_wait_front(cb_wt, n);
+        cb_pop_front(cb_d, NB);
+        cb_pop_front(cb_tot, 2);
+    } else {
+        cb_wait_front(cb_d, NB);
+        GLZ("C_IN");
+        tile_regs_acquire();
+    #if SOFT_BATCH  // (each SFPU op over all sources: one init per op kind)
+        cp(cb_red, 1, 0);
+        for (uint32_t i = 0; i < n; ++i) {
+            if (i < NB) {
+                cp(cb_d, i, 1 + i);
+            } else {
+                cp(cb_red, 1, 1 + i);
+            }
+        }
+        if constexpr (NB > 0) {
+            drain();
+            binary_max_tile_init();
+            for (uint32_t b = 0; b < NB; ++b) {
+                binary_max_tile(0, 1 + b, 0, VectorMode::R);
+            }
+        }
+        drain();
+        sinit();
+        for (uint32_t i = 0; i < n; ++i) {
+            sub(1 + i, 0, 1 + i);
+        }
+        drain();
+        exp_tile_init();
+        for (uint32_t i = 0; i < n; ++i) {
+            exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
+        }
+    #else
+        cp(cb_red, 1, 0);
+        for (uint32_t b = 0; b < NB; ++b) {
+            cp(cb_d, b, 1);
+            binary_max_tile_init();
+            binary_max_tile(0, 1, 0, VectorMode::R);
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            if (i < NB) {
+                cp(cb_d, i, 1 + i);
+            } else {
+                cp(cb_red, 1, 1 + i);
+            }
+            sinit();
+            sub(1 + i, 0, 1 + i);
+            exp_tile_init();
+            exp_tile<false, false, InputClamping::ClampToNegative, RIT>(1 + i, VectorMode::R);
+        }
+    #endif
+        if constexpr (n > 1) {  // (one source: w = exp(0) = 1)
+            drain();
+            sinit();
+            add(1, 2, 7);
+            for (uint32_t i = 2; i < n; ++i) {
+                add(7, 1 + i, 7);
+            }
+            drain();
+            recip_tile_init();
+            recip_tile(7, VectorMode::R);
+            sinit();
+            for (uint32_t i = 0; i < n; ++i) {
+                mul(1 + i, 7, 1 + i);
+            }
+        }
+        cp(cb_red, 0, 7);  // the current source's weight times r (its source is resid, normed by r)
+        sinit();
+        mul(n, 7, n);
+        tile_regs_commit();
+        cb_reserve_back(cb_wt, n);
+        tile_regs_wait();
+        pack_cfg(cb_wt);
+        for (uint32_t i = 0; i < n; ++i) {
+            pack_tile(1 + i, cb_wt);
+        }
+        tile_regs_release();
+        cb_push_back(cb_wt, n);
+        cb_wait_front(cb_wt, n);
+        cb_pop_front(cb_d, NB);
     }
-    cp(cb_red, 0, 7);  // the current source's weight times r (its source is resid, normed by r)
-    sinit();
-    mul(n, 7, n);
-    tile_regs_commit();
-    cb_reserve_back(cb_wt, n);
-    tile_regs_wait();
-    pack_cfg(cb_wt);
-    for (uint32_t i = 0; i < n; ++i) {
-        pack_tile(1 + i, cb_wt);
-    }
-    tile_regs_release();
-    cb_push_back(cb_wt, n);
-    cb_wait_front(cb_wt, n);
-    cb_pop_front(cb_d, NB);
 
     }
     {
     DeviceZoneScopedN("P_C_MIX");
     // ---- mi = sum_b w_b block_b + w_cur r resid
     cb_wait_front(cb_blk, NB * PER);
+    GLZ("C_IN");
     if constexpr (NORM) {
         cb_reserve_back(cb_mi, PER);
+    }
+    if constexpr (MSQ) {
+        cb_reserve_back(cb_sq, 2 * PER);
     }
     for (uint32_t i = 0; i < PER; ++i) {
         tile_regs_acquire();
@@ -471,10 +592,19 @@ void kernel_main() {
             mul(d, d + 1, d);
             add(0, d, 0);
         }
+        if constexpr (MSQ) {  // (round 2's product mi^2 hi / lo here: no mi round trip)
+            sinit();
+            mul(0, 0, 1);
+            split(1, 1, 2);
+        }
         tile_regs_commit();
         tile_regs_wait();
         if constexpr (NORM) {
             pack_to(0, cb_mi);
+            if constexpr (MSQ) {
+                pack_tile(1, cb_sq);
+                pack_tile(2, cb_sq);
+            }
         } else {
             cb_reserve_back(cb_out, 1);
             pack_to(0, cb_out);
@@ -493,6 +623,7 @@ void kernel_main() {
         cb_push_back(cb_mi, PER);
         cb_wait_front(cb_mi, PER);
         // round 2 partial: sum mi^2
+        if constexpr (!MSQ) {
         cb_reserve_back(cb_sq, 2 * PER);
         for (uint32_t i = 0; i < PER; ++i) {
             tile_regs_acquire();
@@ -505,6 +636,7 @@ void kernel_main() {
             pack_to(0, cb_sq);
             pack_tile(1, cb_sq);
             tile_regs_release();
+        }
         }
         cb_push_back(cb_sq, 2 * PER);
         cb_wait_front(cb_sq, 2 * PER);
@@ -522,12 +654,14 @@ void kernel_main() {
         pack_tile(3, cb_part2);
         tile_regs_release();
         cb_push_back(cb_part2, 2);
+        GLZ("C_PP");
         cb_pop_front(cb_sq, 2 * PER);
         // reduce -> rn (into cb_red slot 0 again: r is no longer needed)
         if (root) {
             tile_regs_acquire();
             mm_begin(cb_sel, cb_gath2);  // (configured before the gather arrives)
             cb_wait_front(cb_gath2, 2 * NQ);
+            GLZ("C_GATH");
             for (uint32_t k = 0; k < NQ; ++k) {
                 matmul_tiles(cb_sel, cb_gath2, k, k, 0);
                 matmul_tiles(cb_sel, cb_gath2, k, NQ + k, 0);
@@ -538,56 +672,108 @@ void kernel_main() {
             pack_to(0, cb_tout);
             tile_regs_release();
             cb_push_back(cb_tout, 1);
+            GLZ("C_TOUT");
             cb_pop_front(cb_gath2, 2 * NQ);
         }
-        tile_regs_acquire();
-        cp_prep(cb_tot2);  // (configured before the totals arrive)
-        cb_wait_front(cb_tot2, 1);
-        cp(cb_tot2, 0, 0);
-        drain();
-        binop_with_scalar_tile_init();
-        mul_unary_tile(0, inv_h);
-        add_unary_tile(0, eps);
-        rsqrt_tile_init<false>();
-        rsqrt_tile<false>(0);
-        tile_regs_commit();
-        cb_pop_front(cb_red, 2);
-        cb_reserve_back(cb_red, 1);
-        tile_regs_wait();
-        pack_to(0, cb_red);
-        tile_regs_release();
-        cb_push_back(cb_red, 1);
-        cb_pop_front(cb_tot2, 1);
-        cb_wait_front(cb_red, 1);
-        cb_wait_front(cb_nw, PER);
-        for (uint32_t i = 0; i < PER; ++i) {
+        if constexpr (PFUSE2) {  // (rn in DST 7, mi at 0.., nw at PER..: one block, no rn round trip)
+            cb_wait_front(cb_nw, PER);
             tile_regs_acquire();
-            cp(cb_mi, i, 0);
-            cp(cb_red, 0, 1);
+            cp_prep(cb_tot2);  // (configured before the totals arrive)
+            cb_wait_front(cb_tot2, 1);
+            GLZ("C_TOT");
+            cp(cb_tot2, 0, 7);
+            drain();
+            binop_with_scalar_tile_init();
+            mul_unary_tile(7, inv_h);
+            add_unary_tile(7, eps);
+            rsqrt_tile_init<false>();
+            rsqrt_tile<false>(7);
+            for (uint32_t i = 0; i < PER; ++i) {
+                cp(cb_mi, i, i);
+                cp(cb_nw, i, PER + i);
+            }
             sinit();
-            mul(0, 1, 0);
-            cp(cb_nw, i, 1);
-            sinit();
-            mul(0, 1, 0);
+            for (uint32_t i = 0; i < PER; ++i) {
+                mul(i, 7, i);
+            }
+            for (uint32_t i = 0; i < PER; ++i) {
+                mul(i, PER + i, i);
+            }
             tile_regs_commit();
-            cb_reserve_back(cb_out, 1);
+            cb_reserve_back(cb_out, PER);
             tile_regs_wait();
-            pack_to(0, cb_out);
+            pack_cfg(cb_out);
+            for (uint32_t i = 0; i < PER; ++i) {
+                pack_tile(i, cb_out);
+            }
 #if POST_RT
-            pack_tile(0, POST_CB_XB);
+            for (uint32_t i = 0; i < PER; ++i) {
+                pack_tile(i, POST_CB_XB);
+            }
 #endif
             tile_regs_release();
-            cb_push_back(cb_out, 1);
+            cb_push_back(cb_out, PER);
+            cb_pop_front(cb_tot2, 1);
+            if constexpr (!PFUSE) {
+                cb_pop_front(cb_red, 2);
+            }
+            cb_pop_front(cb_mi, PER);
+            cb_pop_front(cb_nw, PER);
+        } else {
+            tile_regs_acquire();
+            cp_prep(cb_tot2);  // (configured before the totals arrive)
+            cb_wait_front(cb_tot2, 1);
+            GLZ("C_TOT");
+            cp(cb_tot2, 0, 0);
+            drain();
+            binop_with_scalar_tile_init();
+            mul_unary_tile(0, inv_h);
+            add_unary_tile(0, eps);
+            rsqrt_tile_init<false>();
+            rsqrt_tile<false>(0);
+            tile_regs_commit();
+            if constexpr (!PFUSE) {
+                cb_pop_front(cb_red, 2);
+            }
+            cb_reserve_back(cb_red, 1);
+            tile_regs_wait();
+            pack_to(0, cb_red);
+            tile_regs_release();
+            cb_push_back(cb_red, 1);
+            cb_pop_front(cb_tot2, 1);
+            cb_wait_front(cb_red, 1);
+            cb_wait_front(cb_nw, PER);
+            GLZ("C_IN");
+            for (uint32_t i = 0; i < PER; ++i) {
+                tile_regs_acquire();
+                cp(cb_mi, i, 0);
+                cp(cb_red, 0, 1);
+                sinit();
+                mul(0, 1, 0);
+                cp(cb_nw, i, 1);
+                sinit();
+                mul(0, 1, 0);
+                tile_regs_commit();
+                cb_reserve_back(cb_out, 1);
+                tile_regs_wait();
+                pack_to(0, cb_out);
+    #if POST_RT
+                pack_tile(0, POST_CB_XB);
+    #endif
+                tile_regs_release();
+                cb_push_back(cb_out, 1);
+            }
+            cb_pop_front(cb_red, 1);
+            cb_pop_front(cb_mi, PER);
+            cb_pop_front(cb_nw, PER);
         }
-        cb_pop_front(cb_red, 1);
-        cb_pop_front(cb_mi, PER);
-        cb_pop_front(cb_nw, PER);
 #if POST_RT
         {  // router round: out (bf16) @ [W hi | W lo] rows of this core's tiles -> ET tiles -> hi / lo parts
             constexpr uint32_t ET = POST_RT, cb_xb = POST_CB_XB, cb_rw = POST_CB_RW, cb_p3 = POST_CB_P3;
             cb_push_back(cb_xb, PER);
             cb_wait_front(cb_xb, PER);
             cb_wait_front(cb_rw, 2 * PER * ET);
+            GLZ("C_IN");
             tile_regs_acquire();
             mm_begin(cb_xb, cb_rw);
             for (uint32_t e = 0; e < ET; ++e) {
@@ -611,6 +797,7 @@ void kernel_main() {
             }
             tile_regs_release();
             cb_push_back(cb_p3, 2 * ET);
+            GLZ("C_PP");
             cb_pop_front(cb_xb, PER);
             cb_pop_front(cb_rw, 2 * PER * ET);
 #if POST_RSPLIT  // (core t ET + e reduces logit tile e of row t)
@@ -622,6 +809,7 @@ void kernel_main() {
                 tile_regs_acquire();
                 mm_begin(cb_sel, cb_g3);  // (configured before the gather arrives)
                 cb_wait_front(cb_g3, 2 * ET * NQ);
+                GLZ("C_GATH");
                 for (uint32_t k = 0; k < NQ; ++k) {
                     matmul_tiles(cb_sel, cb_g3, k, (2 * e) * NQ + k, 0);
                     matmul_tiles(cb_sel, cb_g3, k, (2 * e + 1) * NQ + k, 0);
@@ -633,6 +821,7 @@ void kernel_main() {
                 pack_tile(0, cb_t3);
                 tile_regs_release();
                 cb_push_back(cb_t3, 1);
+                GLZ("C_TOUT");
                 cb_pop_front(cb_g3, 2 * ET * NQ);
             }
             if (false) {
@@ -643,6 +832,7 @@ void kernel_main() {
                 tile_regs_acquire();
                 mm_begin(cb_sel, cb_g3);  // (configured before the gather arrives)
                 cb_wait_front(cb_g3, 2 * ET * NQ);
+                GLZ("C_GATH");
                 for (uint32_t e = 0; e < ET; ++e) {
                     for (uint32_t k = 0; k < NQ; ++k) {
                         matmul_tiles(cb_sel, cb_g3, k, (2 * e) * NQ + k, e);
@@ -658,11 +848,12 @@ void kernel_main() {
                 }
                 tile_regs_release();
                 cb_push_back(cb_t3, ET);
+                GLZ("C_TOUT");
                 cb_pop_front(cb_g3, 2 * ET * NQ);
             }
         }
 #endif
-    } else {
+    } else if constexpr (!PFUSE) {
         cb_pop_front(cb_red, 2);
     }
     }

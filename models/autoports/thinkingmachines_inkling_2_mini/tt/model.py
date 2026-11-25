@@ -162,6 +162,7 @@ class Ops:
             mesh.arch(), math_fidelity=ttnn.MathFidelity.HiFi4, math_approx_mode=False, fp32_dest_acc_en=True,
             packer_l1_acc=False)
         self.qrep = {}  # id(Q) -> Qrep [1,1,H,nq*32] (tt/mixw.py)
+        self.lgx = None  # (tt/lgx.py LogitExpand, I2M_LG_PACK)
         self.mixk = None
         self.gatek = None
         self.gatefk = None
@@ -532,6 +533,12 @@ class Inkling2Model:
         # pass computes its two sources' logits against all of them in one matmul (tt/batched.py _messages)
         self.msg_qcat = ops.up(torch.cat([(mq[i].float().T * H**-0.5).repeat_interleave(32, dim=1)
                                           for i in range(mq.shape[0])], 1).reshape(1, 1, H, -1))
+        from . import lgx
+
+        if lgx.ON:  # (the same queries packed: tt/lgx.py)
+            self.msg_qpk = lgx.pack_cols(torch.cat([mq[i].float().T * H**-0.5 for i in range(mq.shape[0])], 1),
+                                         self.mesh, ops.rep)
+            self.msg_nq = 4 * mq.shape[0]
         self.final_Q = self.ops.query(ck.final_query().float().reshape(-1, H).T * H**-0.5)
         self.final_norm = ops.up(ck.get("model.llm.norm.weight").float().reshape(1, 1, 1, -1))
         self.embed_norm = ops.up(ck.get("model.llm.embed_norm.weight").float().reshape(1, 1, 1, -1))

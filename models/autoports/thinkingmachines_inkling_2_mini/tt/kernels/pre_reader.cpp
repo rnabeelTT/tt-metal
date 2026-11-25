@@ -10,6 +10,10 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#ifndef PRE_CSQ
+#define PRE_CSQ 0
+#endif
+#include "glz.hpp"
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -100,7 +104,17 @@ void kernel_main() {
 #endif
         }
     }
+#if PRE_CSQ  // (NQ = 1: the query rows with the x inputs: the x block takes round 1's products)
+    cb_reserve_back(cb_q, PER);
+    {
+        const auto aq = TensorAccessor(w_args, ca(11), 4096);
+        for (uint32_t i = 0; i < PER; ++i) {
+            rf(aq.get_noc_addr(t0 + i), get_write_ptr(cb_q) + i * F32);
+        }
+    }
+#endif
     noc_async_read_barrier();
+    GLZ("R_B");
 #ifdef SEQ_R
     if constexpr (SEQ_ONE && seq_fits<PER>()) {
         seq_fin<2, TH, PER>(get_write_ptr(cb_s), 3 * F32, get_write_ptr(cb_in), BF, seq_scr);
@@ -131,8 +145,12 @@ void kernel_main() {
             read_rows<TH, 2, TH>(sel.get_noc_addr(k), get_write_ptr(cb_sel) + k * BF);
         }
     }
+#if PRE_CSQ
+    cb_push_back(cb_q, PER);
+#else
     cb_reserve_back(cb_q, NQ * PER);  // [q][tile]
-    for (uint32_t q = 0; q < NQ; ++q) {
+#endif
+    for (uint32_t q = 0; q < (PRE_CSQ ? 0 : NQ); ++q) {
         const auto aq = TensorAccessor(w_args, ca(11 + q), 4096);
         for (uint32_t i = 0; i < PER; ++i) {
             rf(aq.get_noc_addr(t0 + i), get_write_ptr(cb_q) + (q * PER + i) * F32);
@@ -140,9 +158,12 @@ void kernel_main() {
     }
 #if PRE_RD_STAGED  // (the round-1 inputs pushed before the mix's are read)
     noc_async_read_barrier();
+    GLZ("R_B");
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NSEL);
+#if !PRE_CSQ
     cb_push_back(cb_q, NQ * PER);
+#endif
 #endif
     constexpr uint32_t ab = 11 + 2 * NQ;
     cb_reserve_back(cb_d, NB * NQ);  // [b][q]
@@ -168,10 +189,13 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
+    GLZ("R_B");
 #if !PRE_RD_STAGED
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NSEL);
+#if !PRE_CSQ
     cb_push_back(cb_q, NQ * PER);
+#endif
 #endif
     cb_push_back(cb_d, NB * NQ);
     cb_push_back(cb_blk, NB * PER);

@@ -26,6 +26,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import _l2cli
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attn.inkling_sdpa import MU_MIN, inkling_sdpa_decode
 from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import PackedAR, all_reduce, unpacked
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import K
+from models.autoports.thinkingmachines_inkling_2_mini.tt import lgx
 
 DRAM = ttnn.DRAM_MEMORY_CONFIG
 # I2M_SDPA_K_CHUNK: keys per decode SDPA chunk (one core each; smaller chunks spread a short context over more cores)
@@ -106,6 +107,14 @@ class MixPlan:
                 qs.append(ops.qrep[id(Q)])
                 off += nq
             self.qcat[b] = ttnn.concat(qs, dim=3) if len(qs) > 1 else qs[0]
+        self.qpk, self.nq = {}, {}  # (I2M_LG_PACK: per block its readers' queries packed, tt/lgx.py)
+        if lgx.ON:
+            for b, keys in readers.items():
+                cols = [lgx.host_cols(*self.query(m, key)) for key in keys]
+                self.qpk[b] = lgx.pack_cols(torch.cat(cols, 1), m.mesh, ops.rep)
+                self.nq[b] = sum(int(c.shape[1]) for c in cols)
+            if ops.lgx is None:
+                ops.lgx = lgx.LogitExpand(m.mesh)
 
     @staticmethod
     def query(m, key):
@@ -646,7 +655,10 @@ class BatchedDecoder:
         if self._msg is None or self._msg[0] is not prev_src:
             src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src]
             S = ttnn.concat(src, dim=1, memory_config=L1)
-            lg = dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1)
+            if lgx.ON and T <= 32:  # (packed queries, then each query's column over its 32: the same values)
+                lg = m.ops.lgx(dmm(S, m.msg_qpk, m.ops.ckc, dtype=ttnn.float32, memory_config=L1), m.msg_nq)
+            else:
+                lg = dmm(S, m.msg_qcat, m.ops.ckc, dtype=ttnn.float32, memory_config=L1)
             nl = len(m.msg_Q)
             allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
             self._msg = (prev_src, S, lg, allm)
@@ -736,7 +748,11 @@ class BatchedDecoder:
         if L.boundary:
             blk = xn if xn is not None else ops.rms(x)
             if self.plan is not None:
-                D[a] = dmm(blk, self.plan.qcat[a], ops.ckc, dtype=ttnn.float32, memory_config=L1)
+                if a in self.plan.qpk:  # (I2M_LG_PACK, tt/lgx.py)
+                    D[a] = ops.lgx(dmm(blk, self.plan.qpk[a], ops.ckc, dtype=ttnn.float32, memory_config=L1),
+                                   self.plan.nq[a])
+                else:
+                    D[a] = dmm(blk, self.plan.qcat[a], ops.ckc, dtype=ttnn.float32, memory_config=L1)
             blocks_n, ids = blocks_n + [blk], list(ids) + [a]
         if self.post is not None and ba.attn.kernel is not None:
             # conv + residual + norm + mix (+ the MoE-input norm) in one program (tt/post.py)

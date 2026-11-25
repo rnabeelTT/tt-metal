@@ -16,7 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import MR, RSPLIT, WS, ZLAZY, red_k, red_pack, red_sel
+from .post import MR, RSPLIT, WS, ZDEFER, ZLAZY, red_k, red_pack, red_sel
 from .bconv import _ks
 
 F32, BF = 4096, 2048
@@ -30,6 +30,9 @@ def _bits(x: float) -> int:
 # the 3-gate program: each core's reader fills the ones tile and only the roots read the 0 / 1 selection tiles (90
 # cores reading one DRAM page beside the three gates' weight reads). I2M_LOCAL_ONES
 LOCAL_ONES = __import__("os").environ.get("I2M_LOCAL_ONES", "1") == "1"
+# GateKernel2 compute: the round-1 norm and the scaled operands, tanh and the output, round 3's norm and the output
+# each in one DST block (no CB round trip between them; the same ops). I2M_G2_FUSE
+G2_FUSE = __import__("os").environ.get("I2M_G2_FUSE", "1") == "1"
 
 
 class GateKernel:
@@ -202,7 +205,7 @@ class GateKernel2:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
-                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))), ("RED_WS", str(int(WS))), ("G2_PACK", str(int(pack))),
+                ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("G2_PACK", str(int(pack))),
                 ("LOCAL_ONES", str(int(lo and LOCAL_ONES)))]
 
         def dm(src, ct, common, riscv, noc):
@@ -217,9 +220,9 @@ class GateKernel2:
             ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))),
-                                           ("G2_PACK", str(int(pack)))]),
+                                           ("G2_PACK", str(int(pack))), ("G2_FUSE", str(int(G2_FUSE)))]),
         ]
-        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, lo,
+        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "glz.hpp"
 #include "tools/profiler/kernel_profiler.hpp"
 
 // rows 0 .. T-1 of a tile (faces 0 / 1) into a TH x 32 CB tile (faces min(TH, 16) x 16)
@@ -76,6 +77,7 @@ void kernel_main() {
         noc_async_read(aones.get_noc_addr(0), get_write_ptr(cb_ones), BF);
     }
     noc_async_read_barrier();
+    GLZ("R_B");
     cb_push_back(cb_h, PER);
     cb_push_back(cb_m, PER);
     cb_push_back(cb_ones, 1);
@@ -97,6 +99,7 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
+    GLZ("R_B");
     cb_push_back(cb_sel, NSEL);
     cb_push_back(cb_wd, 2 * PER * R);
     cb_reserve_back(cb_wf, R * PER);
@@ -108,6 +111,7 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
+    GLZ("R_B");
     cb_push_back(cb_wf, R * PER);
     cb_push_back(cb_wg, R * PER);
     if constexpr (NORM) {
@@ -117,6 +121,7 @@ void kernel_main() {
             read_rows<T, 4, TH>(anw.get_noc_addr(t0 + t), get_write_ptr(cb_nw) + t * FT);
         }
         noc_async_read_barrier();
+        GLZ("R_B");
         cb_push_back(cb_nw, PER);
     }
     if constexpr (ROUTER) {
@@ -131,6 +136,7 @@ void kernel_main() {
             }
         }
         noc_async_read_barrier();
+        GLZ("R_B");
         cb_push_back(cb_rw, 2 * PER * ET);
     }
 }

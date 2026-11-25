@@ -10,6 +10,10 @@
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#ifndef POST_CSQ
+#define POST_CSQ 0
+#endif
+#include "glz.hpp"
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -112,7 +116,14 @@ void kernel_main() {
         }
 #endif
     }
+#if POST_CSQ  // (the query rows with the conv inputs: the conv's DST block takes round 1's products)
+    cb_reserve_back(cb_q, PER);
+    for (uint32_t i = 0; i < PER; ++i) {
+        rf(q.get_noc_addr(t0 + i), get_write_ptr(cb_q) + i * F32);
+    }
+#endif
     noc_async_read_barrier();
+    GLZ("R_B");
 #ifdef SEQ_R
     if constexpr (SEQ_ONE && seq_fits<PER>()) {
         seq_fin<2, TH, PER>(get_write_ptr(cb_s), 3 * F32, get_write_ptr(cb_att), BF, seq_scr);
@@ -130,10 +141,14 @@ void kernel_main() {
         cb_push_back(cb_s, 3);
         cb_push_back(cb_w, 4);
     }
+#if POST_CSQ
+    cb_push_back(cb_q, PER);
+#else
     cb_reserve_back(cb_q, PER);
     for (uint32_t i = 0; i < PER; ++i) {
         rf(q.get_noc_addr(t0 + i), get_write_ptr(cb_q) + i * F32);
     }
+#endif
     cb_reserve_back(cb_ones, 1);
     noc_async_read(ones.get_noc_addr(0), get_write_ptr(cb_ones), 2048);
     cb_reserve_back(cb_sel, NQ);
@@ -146,7 +161,10 @@ void kernel_main() {
     }
 #if POST_RD_STAGED  // (the round-1 inputs pushed first, then the mix's, then the router's)
     noc_async_read_barrier();
+    GLZ("R_B");
+#if !POST_CSQ
     cb_push_back(cb_q, PER);
+#endif
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NQ);
 #endif
@@ -169,6 +187,7 @@ void kernel_main() {
     }
 #if POST_RD_STAGED
     noc_async_read_barrier();
+    GLZ("R_B");
     cb_push_back(cb_d, NB);
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {
@@ -191,11 +210,14 @@ void kernel_main() {
     }
 #endif
     noc_async_read_barrier();
+    GLZ("R_B");
 #if POST_RT
     cb_push_back(POST_CB_RW, 2 * PER * POST_RT);
 #endif
 #if !POST_RD_STAGED
+#if !POST_CSQ
     cb_push_back(cb_q, PER);
+#endif
     cb_push_back(cb_ones, 1);
     cb_push_back(cb_sel, NQ);
     cb_push_back(cb_d, NB);
