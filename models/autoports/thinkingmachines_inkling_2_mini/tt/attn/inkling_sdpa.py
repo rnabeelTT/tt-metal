@@ -323,7 +323,15 @@ def _build_and_run(
         cpk = 1
         n_groups = min(grid.x * grid.y, n_units)
     n_cores = n_groups * cpk
-    cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(n_cores)]  # row-major (stock op)
+    # SW_CORES: a sliding layer's unit never holds more than `need` chunks (the window + R - 1 rows over whole chunks,
+    # one more for the alignment) and the stock split gives chunk k_num_chunks - 1 - c to core c when the unit has more
+    # cores than chunks: only cores 0 .. need - 1 of a unit ever work; the others are not launched (the program keeps
+    # the cpk-core split, tree and read throttle: bitwise)
+    inst = cpk
+    if SW_CORES and window and cpk > 1 and Sk_fixed:
+        need = -(-(window + R - 1) // (Sk_fixed * TILE)) + 1
+        inst = min(cpk, need)
+    cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(n_groups * inst)]  # row-major (stock op)
     noc = [mesh.worker_core_from_logical_core(c) for c in cores]
     cr = _range_set(cores)
     rounds = (cpk - 1).bit_length() if cpk > 1 else 0
@@ -407,10 +415,11 @@ def _build_and_run(
 
     if static_only:
         per_core = []
-        for i in range(n_cores):
-            g, c = divmod(i, cpk)
+        for i in range(len(cores)):
+            g, c = divmod(i, inst)
             is_root, parent, send, children = tree_params(c, cpk)
-            group = noc[g * cpk : (g + 1) * cpk]
+            group = noc[g * inst : (g + 1) * inst]
+            group = group + [group[0]] * (cpk - inst)  # (never addressed: parents are lower cores)
             per_core.append(
                 (
                     [pt_stick, g, c],
@@ -438,10 +447,11 @@ def _build_and_run(
             defs=defs,
         )
     rd_rt, wr_rt, cp_rt = [], [], []
-    for i in range(n_cores):
-        g, c = divmod(i, cpk)
+    for i in range(len(cores)):
+        g, c = divmod(i, inst)
         is_root, parent, send, children = tree_params(c, cpk)
-        group = noc[g * cpk : (g + 1) * cpk]
+        group = noc[g * inst : (g + 1) * inst]
+        group = group + [group[0]] * (cpk - inst)  # (never addressed: parents are lower cores)
         rd_rt.append(
             [
                 q.buffer_address(),
@@ -532,6 +542,9 @@ FIN2 = __import__("os").environ.get("I2M_SDPA_FIN2", "0") == "1"
 # swapping roles instead of copying, the reduction's O update and the finalize's sum / reciprocal / O scale keep their
 # intermediates in DST (bf16 DST and CBs: a pack + unpack round trip is exact)
 FUSE = __import__("os").environ.get("I2M_SDPA_FUSE", "1") == "1"
+# I2M_SDPA_SW_CORES (default 1): a sliding layer's decode program launches only the cores of each unit that can hold a
+# chunk (bitwise; TP4 launched 110 cores for at most 2 x 6 busy ones)
+SW_CORES = __import__("os").environ.get("I2M_SDPA_SW_CORES", "1") == "1"
 # I2M_SDPA_MU_SPLIT (default 1): multi-user decode (pt_per_item, few units) splits each (user, kv head) over cores
 MU_SPLIT = __import__("os").environ.get("I2M_SDPA_MU_SPLIT", "1") == "1"
 # I2M_SDPA_MU_MIN (default 4): a split unit with at most this many chunks (1024 positions) runs on one core, as unsplit
