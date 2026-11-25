@@ -62,6 +62,9 @@ if SPEC:
 
     mtp_plugin_shim.apply(SPEC + 1)
 SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
+# I2M_DR_SNAPS: drafter cache snapshots kept in host memory with the prefix snapshots (LRU; default: as many), so a
+# resumed prompt keeps speculative decoding after other requests used the drafter (tt/drafter.DrafterSnapshots: 4 KB
+# per prompt token + 6.4 MB of sliding rings each)
 SPEC_DEBUG = os.environ.get("I2M_SPEC_DEBUG", "0") == "1"
 SPEC_DUMP = os.environ.get("I2M_SPEC_DUMP")  # (a path: every pass's verify / draft candidates, for offline study)
 # I2M_SPEC_MIN: a request whose tokens per pass (running mean, over >= 16 passes) fall below this goes back to plain
@@ -155,6 +158,7 @@ def _prefix_slots():
 
 
 PREFIX_SLOTS = _prefix_slots()
+DR_SNAPS = int(os.environ.get("I2M_DR_SNAPS", str(PREFIX_SLOTS)))
 
 
 def _host_tensor(t):
@@ -252,7 +256,7 @@ class Inkling2ForCausalLM:
             self.store = PrefixStore(model, PREFIX_SLOTS)  # (device pools: before any trace capture)
             logger.info(f"prefix cache: {PREFIX_SLOTS} state snapshots, prompts >= {PREFIX_MIN} tokens")
         self.px_stats = {"hits": 0, "hit_tokens": 0, "saves": 0, "fallbacks": 0}
-        self.dr = self.spec = None
+        self.dr = self.spec = self.dsnaps = None
         self.dr_seen = []  # the tokens the drafter's caches hold, by position
         if SPEC and TRACE and model is not None and B >= SPEC + 1:
             from models.autoports.thinkingmachines_inkling_2_mini.tt.drafter import DSparkDrafter
@@ -260,6 +264,12 @@ class Inkling2ForCausalLM:
             self.dr = DSparkDrafter(mesh, model, max_len=min(max_seq_len, SPEC_MAX_LEN) + 64, d_max=SPEC)
             self.ver = BatchedDecoder(model, SPEC + 1, shared=self.dec, verify=SPEC + 1)
             self.vtr = TracedDecoder(self.ver)
+            self.dsnaps = None
+            if self.store is not None and DR_SNAPS > 0:
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.drafter import DrafterSnapshots
+
+                self.dsnaps = DrafterSnapshots(self.dr, DR_SNAPS)
+                self.dsnaps.warm()
             self.sp_stats = [0, 0]  # passes, drafts kept
             self._dump = []
             logger.info(f"speculative decoding: {SPEC} drafts per pass (sequences up to {SPEC_MAX_LEN} tokens)")
@@ -465,6 +475,18 @@ class Inkling2ForCausalLM:
         self.row2slot[row] = slot
         return slot
 
+    def release_request(self, row):
+        """The plugin's hook for a finished / preempted request (its state slot, a row2slot key), called before the next
+        step is built: its slot and pages are free now, not at the next decode step (a prefill in between took a higher
+        slot and decoded without speculation)."""
+        slot = self.row2slot.pop(int(row), None)
+        if slot is None:
+            return
+        self.m.pages.free(slot)
+        self.hs.forget(int(row))
+        if self.spec is not None and self.spec["row"] == int(row):  # (as decode_forward does for a finished one)
+            self.spec = None
+
     # ------------------------------------------------------------------ prefill
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
         """Prefill N requests into their rows' slots; returns the last prompt token's logits [N, 1, vocab] (host).
@@ -536,10 +558,18 @@ class Inkling2ForCausalLM:
         # a prompt resumed from the prefix cache at b0 keeps speculative decoding when the drafter's caches still hold
         # those b0 tokens (its caches are positional, one sequence: e.g. the previous turn of the same chat)
         b0 = reqs[0]["b0"] if reqs else 0
-        spec = (self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and reqs[0]["P"] + 64 <= SPEC_MAX_LEN
-                and (not b0 or self.dr_seen[:b0] == reqs[0]["key"][:b0]))
+        spec = self.dr is not None and len(reqs) == 1 and reqs[0]["slot"] == 0 and reqs[0]["P"] + 64 <= SPEC_MAX_LEN
+        dsnap = None
+        if spec and b0 and self.dr_seen[:b0] != reqs[0]["key"][:b0]:  # (another sequence since: its snapshot, if kept)
+            dsnap = self.dsnaps.find(reqs[0]["key"], b0) if self.dsnaps is not None else None
+            spec = dsnap is not None
         if spec:
             self.dr.reset()
+            if dsnap is not None:
+                t = time.perf_counter()
+                self.dsnaps.restore(dsnap, b0)
+                ttnn.synchronize_device(self.mesh)
+                logger.info(f"drafter caches restored at {b0} in {(time.perf_counter() - t) * 1e3:.1f} ms")
             self._pmark("dr_reset")
         for lane, r in enumerate(reqs):
             r["lane"] = lane
@@ -605,6 +635,7 @@ class Inkling2ForCausalLM:
                 self._pmark("dr_commit")
             for r, (q, k) in armed:
                 self.store.save(k, r["slot"], q, r["lane"])
+                r.setdefault("saved", []).append(q)
                 self.px_stats["saves"] += 1
             self._pmark("snapshot")
             done = []
@@ -622,6 +653,12 @@ class Inkling2ForCausalLM:
                     if spec:
                         self.ver.set_accept([0])
                         self.dr_seen = r["key"]
+                        # (the rings hold [q - W, q) while the rows written past q stay within their 512-row margin)
+                        for q in r.get("saved", ()) if self.dsnaps is not None else ():
+                            if (r["P"] + 63) // 64 * 64 - q <= 512:
+                                t = time.perf_counter()
+                                self.dsnaps.save(r["key"], q)
+                                logger.info(f"drafter caches saved at {q} in {(time.perf_counter() - t) * 1e3:.1f} ms")
                         self.spec = dict(row=next(k for k, v in self.row2slot.items() if v == 0), n=None)
                     out[r["u"], 0, : self.V] = lgh[i]
                     live.remove(r)

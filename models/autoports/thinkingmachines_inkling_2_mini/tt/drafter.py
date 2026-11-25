@@ -912,3 +912,71 @@ class DSparkDrafter:
         if self.trace is not None:
             ttnn.release_trace(self.mesh, self.trace)
             self.trace = None
+
+
+
+class DrafterSnapshots:
+    """The drafter's caches at a prompt's prefix-cache snapshot position q, so a later request resumed at q (the next
+    chat turn, a resend) keeps speculative decoding after other requests used the drafter: n slots in host memory (LRU,
+    keyed by the prompt's content; no device memory kept), each the global layer's rows [0, q) and the sliding
+    layers' whole rings. The global rows go through a transient device tensor and one block-copy program."""
+
+    def __init__(self, dr: DSparkDrafter, n: int):
+        from .blkcopy import BlockCopy
+
+        self.dr, self.n = dr, int(n)
+        self.bc = BlockCopy(dr.mesh, dr.kc[0])
+        self.slots = [None] * self.n  # (q, content key[:q], host tensors) per slot
+        self.used = [0] * self.n
+        self.tick = 0
+
+    def _glob(self, q):
+        """(layer, cache, tile offset of head h) for the global layer's K / V; tiles per head for rows [0, q)."""
+        dr = self.dr
+        TD = dr.D // 32
+        caches = [(li, c) for li in range(dr.L) if li not in dr.local for c in (dr.kc[li], dr.vc[li])]
+        return caches, [h * dr.S[li] // 32 * TD for li, _ in caches[:1] for h in range(dr.NKV)], (q + 31) // 32 * TD
+
+    def _tmp(self, q, ncache):
+        dr = self.dr
+        return ttnn.empty([ncache * dr.NKV * ((q + 31) // 32), 1, 32, dr.D], BF16, TILE, dr.mesh, DRAM)
+
+    def find(self, key, q):
+        """The slot holding the drafter at q of this content, or None."""
+        for i, s in enumerate(self.slots):
+            if s is not None and s[0] == q and s[1] == key[:q]:
+                return i
+        return None
+
+    def save(self, key, q):
+        dr = self.dr
+        i = self.find(key, q)
+        if i is None:
+            i = min(range(self.n), key=lambda j: self.used[j])
+        caches, offs, n = self._glob(q)
+        tmp = self._tmp(q, len(caches))
+        self.bc([(c, o, tmp, (ci * dr.NKV + h) * n, n) for ci, (_, c) in enumerate(caches) for h, o in enumerate(offs)])
+        host = [ttnn.from_device(tmp)] + [ttnn.from_device(c) for li in sorted(dr.local) for c in (dr.kc[li], dr.vc[li])]
+        ttnn.deallocate(tmp)
+        self.slots[i] = (q, list(key[:q]), host)
+        self.tick += 1
+        self.used[i] = self.tick
+
+    def restore(self, i, q):
+        dr = self.dr
+        _, _, host = self.slots[i]
+        caches, offs, n = self._glob(q)
+        tmp = ttnn.to_device(host[0], dr.mesh, memory_config=DRAM)
+        self.bc([(tmp, (ci * dr.NKV + h) * n, c, o, n) for ci, (_, c) in enumerate(caches) for h, o in enumerate(offs)])
+        rings = [c for li in sorted(dr.local) for c in (dr.kc[li], dr.vc[li])]
+        for h, c in zip(host[1:], rings):
+            ttnn.copy_host_to_device_tensor(h, c)
+        ttnn.deallocate(tmp)
+        self.tick += 1
+        self.used[i] = self.tick
+
+    def warm(self):
+        """Compile the copy program (before any trace capture)."""
+        self.save([0] * 64, 64)
+        self.restore(0, 64)
+        self.slots[0] = None
