@@ -56,6 +56,19 @@ HEAD_DT = _DT[os.environ.get("I2M_HEAD_DT", "bfp8")]  # lm_head
 # packed prefill: up to LANES sequences per prefill chunk, each with its own conv-state lane
 # (default 8; 4 on one die: each lane's conv states take ~32 MB of DRAM over the 48 applications)
 LANES = int(os.environ.get("I2M_PREFILL_LANES", "0"))
+# I2M_PF_ROWN (default 1): prefill norms (> 32 rows) as one program per call reading the row once, with the input /
+# output casts (tt/rown.py; bitwise equal to typecast + ttnn.rms_norm + typecast)
+PF_ROWN = os.environ.get("I2M_PF_ROWN", "1") == "1"
+# I2M_PF_GATEF (default 1, with PF_ROWN): prefill message gates: the two norms written straight into the halves of the
+# down matmul's input (no casts / concat; the input's norm once for the three attention-side gates) and the forget /
+# gain matmul with the tail in one program (tt/gatef.py); bitwise
+PF_GATEF = os.environ.get("I2M_PF_GATEF", "1") == "1"
+# I2M_PF_ROWN_LG (default 1, with PF_ROWN): a prefill mix's current-source norm computes that source's mix logits in
+# the same program (tt/rown.py qrep; bitwise equal to the separate matmul)
+PF_ROWN_LG = os.environ.get("I2M_PF_ROWN_LG", "1") == "1"
+# I2M_PF_MIXC (default 1): prefill message logits once per pass: both sources against every loop layer's queries in one
+# matmul each (the decode's msg_qcat), not two matmuls per application; bitwise
+PF_MIXC = os.environ.get("I2M_PF_MIXC", "1") == "1"
 
 
 def _lane_bufs(cv):
@@ -99,6 +112,8 @@ class Ops:
         self.gatefk = None
         self.gate2k = None  # (set by the decoder when the post-attention rectangle exists: tt/gate.py GateKernel2)
         self.rms_cfg = {}
+        self.rown = None
+        self.gatepf = None  # (tt/gatef.py, the prefill gate)
 
     def query(self, Qcols):
         """Qcols [H, nq] (pre-scaled) -> Q [1,1,H,32] fp32 (columns 0..nq-1); also builds the mix kernel's Qrep."""
@@ -127,8 +142,19 @@ class Ops:
             y = ttnn.to_memory_config(y, ttnn.L1_MEMORY_CONFIG)
             # (the output cast stays a typecast: the reshard's fp32 -> bf16 conversion rounds differently, 1 ulp)
             return ttnn.typecast(y, out_dtype) if out_dtype is not None and out_dtype != ttnn.float32 else y
+        if self.rown_ok(x):
+            return self.rown(x, w, out_dtype=out_dtype or ttnn.float32)
         y = self._rms(x, w)
         return ttnn.typecast(y, out_dtype) if out_dtype is not None and y.dtype != out_dtype else y
+
+    def rown_ok(self, x):
+        """prefill rows (> 32, whole tiles) go through tt/rown.py (I2M_PF_ROWN)"""
+        if not (PF_ROWN and FUSED_OPS and len(x.shape) == 4 and int(x.shape[2]) > 32):
+            return False
+        if self.rown is None:
+            from .rown import RowNorm
+            self.rown = RowNorm(self.mesh, int(x.shape[3]), self.eps)
+        return self.rown.ok(x)
 
     def _rms_cfg(self, H):
         if H not in self.rms_cfg:
@@ -274,9 +300,37 @@ class MessageGate:
             router = None
         return o.gate2k(hf, mf, self.wd, self.wfg_bf, nw=nw_rows, router=router, dup=dup)
 
-    def __call__(self, h, m):
+    def pf_ok(self, h):
+        """the prefill gate path (I2M_PF_GATEF): rows > 32 in whole tiles"""
+        o = self.ops
+        return PF_GATEF and GATE_FUSED and GATE_KERNEL and GATE_PC and o.rown_ok(h) and int(h.shape[1]) == 1
+
+    def hm_buf(self, T):
+        """the down matmul's input [1, 1, T, 2H] bf16: [rms(h) | rms(m)]"""
+        return ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, 2 * self.H]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                              self.ops.mesh, DRAM)
+
+    def __call__(self, h, m, hm=None, m_done=False):
+        """hm (prefill path): the down matmul's input with its rms(h) half (m_done: and its rms(m) half) written"""
         o, H = self.ops, self.H
         hf, mf = _f32(h), _f32(m)
+        if self.pf_ok(hf):
+            T = int(hf.shape[-2])
+            bf = ttnn.bfloat16
+            if hm is None:  # (both norms in one program)
+                hm = self.hm_buf(T)
+                o.rown.multi([dict(x=hf, out_dtype=bf, dests=[(hm, 0)]), dict(x=mf, out_dtype=bf, dests=[(hm, H // 32)])])
+            elif not m_done:
+                o.rown(mf, None, out_dtype=bf, dests=[(hm, H // 32)])
+            g = ttnn.matmul(hm, self.wd, compute_kernel_config=o.ckc, dtype=ttnn.bfloat16,
+                            program_config=_gate_pc(o.mesh, T, int(self.wd.shape[-1])))
+            ttnn.deallocate(hm)
+            if o.gatepf is None:
+                from .gatef import GateFused
+                o.gatepf = GateFused(o.mesh, H, int(self.wd.shape[-1]))
+            out = o.gatepf(g, self.wfg_bf, hf, mf)
+            ttnn.deallocate(g)
+            return out
         if GATE2 and o.gate2k is not None and int(hf.shape[-2]) <= 16 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
             return o.gate2k(hf, mf, self.wd, self.wfg_bf)
         if GATE_FUSED and int(hf.shape[-2]) <= 32 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
@@ -469,7 +523,7 @@ class Inkling2Model:
                             device=self.mesh, mesh_mapper=self.ops.rep)
         e = ttnn.embedding(t, self.embed, layout=ttnn.TILE_LAYOUT)  # [1, T, H]
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
-        return _bf(self.ops.rms(e, self.embed_norm))
+        return _bf(self.ops.rms(e, self.embed_norm, out_dtype=ttnn.bfloat16))
 
     def merge_rows(self, x, rows, emb):
         """x [1, 1, T, H] bf16 with rows `rows` replaced by emb [k, H]: x * keep + M (keep 0 / 1 per row, M zero
@@ -488,14 +542,29 @@ class Inkling2Model:
             ttnn.deallocate(t)
         return y
 
-    def _pmix(self, key, blocks_n, ids, D, cur, Q, nq):
-        """Prefill mix(blocks_n + [cur], Q, nq) with the blocks' logits from D (each block's against every later query,
-        computed once: MixPlan) and only the current source's here."""
+    def _pnorm(self, x, Q):
+        """the current source of a prefill mix: rms(x) fp32, with its logits against Q's queries when RowNorm can
+        compute them (I2M_PF_ROWN_LG) -> (cur, logits | None)"""
         ops = self.ops
-        lg = ttnn.matmul(cur, ops.qrep[id(Q)], compute_kernel_config=ops.ckc, dtype=ttnn.float32, memory_config=DRAM)
+        if PF_ROWN_LG and ops.rown_ok(x):
+            return ops.rown(x, None, qrep=ops.qrep[id(Q)])
+        return ops.rms(x), None
+
+    def _pmix(self, key, blocks_n, ids, D, cur, Q, nq, lg=None):
+        """Prefill mix(blocks_n + [cur], Q, nq) with the blocks' logits from D (each block's against every later query,
+        computed once: MixPlan) and only the current source's here (lg: already computed)."""
+        ops = self.ops
+        if lg is None:
+            lg = ttnn.matmul(cur, ops.qrep[id(Q)], compute_kernel_config=ops.ckc, dtype=ttnn.float32,
+                             memory_config=DRAM)
         plan = self._pf_plan
         lgs = [(D[b], plan.off[(b, key)], int(D[b].shape[-1]) // 32) for b in ids] + [lg]
         return ops.mixk(blocks_n + [cur], lgs, len(blocks_n) + 1, nq, out_mc=DRAM)
+
+    def _block_logits(self, a, blk):
+        """MixPlan: block a's logits against every later query, [1, 1, T, nq_all * 32] (each query's in its 32 columns)"""
+        ops, plan = self.ops, self._pf_plan
+        return ttnn.matmul(blk, plan.qcat[a], compute_kernel_config=ops.ckc, dtype=ttnn.float32, memory_config=DRAM)
 
     def layer_forward(self, a: int, x, blocks_n, p0, messages=None, valid=None, slot=0, ctx=None, ids=None, D=None):
         """Application a on x [1,1,T,H] bf16 (block partial sum) at positions p0..; blocks_n = rms-normed fp32 blocks.
@@ -508,25 +577,47 @@ class Inkling2Model:
         nvalid = T if valid is None else valid
         xn = None
         if L.nq:
-            xn = ops.rms(x)
-            ins = (self._pmix(("attn", a), blocks_n, ids, D, xn, L.attn_Q, L.nq) if D is not None
-                   else ops.mix(blocks_n + [xn], L.attn_Q, L.nq))
+            if D is not None:
+                xn, xlg = self._pnorm(x, L.attn_Q)
+                ins = self._pmix(("attn", a), blocks_n, ids, D, xn, L.attn_Q, L.nq, lg=xlg)
+            else:
+                xn = ops.rms(x)
+                ins = ops.mix(blocks_n + [xn], L.attn_Q, L.nq)
         else:
             ins = [_f32(x)]
         if L.sliding:
             h = ins[0]
-            if messages is not None:
+            if messages is not None and L.gates["attn"].pf_ok(h):
+                # rms(h) once into the three gates' inputs, the three messages' norms beside it: one program
+                hms = [L.gates[n].hm_buf(T) for n in ("attn", "k", "v")]
+                bf = ttnn.bfloat16
+                ops.rown.multi([dict(x=h, out_dtype=bf, dests=[(t, 0) for t in hms])]
+                               + [dict(x=_f32(m), out_dtype=bf, dests=[(t, self.H // 32)])
+                                  for m, t in zip(messages[:3], hms)])
+                qi, ki, vi = (L.gates[n](h, m, hm=t, m_done=True)
+                              for n, m, t in zip(("attn", "k", "v"), messages[:3], hms))
+            elif messages is not None:
                 qi, ki, vi = (L.gates[n](h, m) for n, m in zip(("attn", "k", "v"), messages[:3]))
             else:
                 qi = ki = vi = h
-            qn = _bf(ops.rms(qi, L.in_norm))
-            kn = qn if ki is qi else _bf(ops.rms(ki, L.in_norm))
-            vn = qn if vi is qi else _bf(ops.rms(vi, L.in_norm))
+            bf16 = ttnn.bfloat16
+            if ki is not qi and ops.rown_ok(qi):  # (the three norms in one program)
+                qn, kn, vn = ops.rown.multi([dict(x=t, w=L.in_norm, out_dtype=bf16) for t in (qi, ki, vi)])
+            else:
+                qn = _bf(ops.rms(qi, L.in_norm, out_dtype=bf16))
+                kn = qn if ki is qi else _bf(ops.rms(ki, L.in_norm, out_dtype=bf16))
+                vn = qn if vi is qi else _bf(ops.rms(vi, L.in_norm, out_dtype=bf16))
         else:
             qi, ki, vi = ins if len(ins) == 3 else ins * 3
             if messages is not None:
                 qi, ki, vi = (L.gates[n](h, m) for n, h, m in zip(("attn", "k", "v"), (qi, ki, vi), messages[:3]))
-            qn, kn, vn = _bf(ops.rms(qi, L.q_norm)), _bf(ops.rms(ki, L.k_norm)), _bf(ops.rms(vi, L.v_norm))
+            bf16 = ttnn.bfloat16
+            if ops.rown_ok(qi):  # (the three norms in one program)
+                qn, kn, vn = ops.rown.multi([dict(x=t, w=w_, out_dtype=bf16)
+                                             for t, w_ in ((qi, L.q_norm), (ki, L.k_norm), (vi, L.v_norm))])
+            else:
+                qn, kn, vn = (_bf(ops.rms(qi, L.q_norm, out_dtype=bf16)), _bf(ops.rms(ki, L.k_norm, out_dtype=bf16)),
+                              _bf(ops.rms(vi, L.v_norm, out_dtype=bf16)))
         r_in = None if L.boundary else x  # (the residual add rides the attention-output conv)
         f32 = ttnn.float32
         if ctx is not None:
@@ -540,16 +631,18 @@ class Inkling2Model:
             self._blk = blk = xn if xn is not None else ops.rms(x)
             blocks_n = blocks_n + [blk]
             if D is not None:
-                D[a] = ttnn.matmul(blk, self._pf_plan.qcat[a], compute_kernel_config=ops.ckc, dtype=ttnn.float32,
-                                   memory_config=DRAM)
+                D[a] = self._block_logits(a, blk)
                 ids = list(ids) + [a]
         else:
             resid = att  # (x + conv(attention output), fp32)
-        m = (self._pmix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1) if D is not None
-             else ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1))[0]
+        if D is not None:
+            rn_, rlg = self._pnorm(resid, L.mlp_Q)
+            m = self._pmix(("mlp", a), blocks_n, ids, D, rn_, L.mlp_Q, 1, lg=rlg)[0]
+        else:
+            m = ops.mix(blocks_n + [ops.rms(resid)], L.mlp_Q, 1)[0]
         if messages is not None:
             m = L.gates["mlp"](m, messages[3])
-        mo = L.moe.forward(_bf(ops.rms(m, L.mlp_norm)))
+        mo = L.moe.forward(_bf(ops.rms(m, L.mlp_norm, out_dtype=ttnn.bfloat16)))
         if ctx is not None:
             return self._seg_conv(st, 3, mo, ctx, resid=resid, out_dtype=ttnn.bfloat16)
         return st.conv("mlp", mo, rows_mode, nvalid, resid=resid, out_dtype=ttnn.bfloat16)
@@ -564,8 +657,25 @@ class Inkling2Model:
                                              out_dtype=out_dtype)
 
     def messages(self, loop_idx, prev_src_n):
-        """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages."""
-        return self.ops.mix(prev_src_n, self.msg_Q[loop_idx], 4)
+        """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages.
+        Prefill (I2M_PF_MIXC): both sources' logits against every loop layer's queries once per pass."""
+        ops = self.ops
+        T = int(prev_src_n[0].shape[-2])
+        if not (PF_MIXC and MIX_KERNEL and FUSED_OPS and T > 32 and T % 32 == 0
+                and len({repr(s.memory_config()) for s in prev_src_n}) == 1):
+            return ops.mix(prev_src_n, self.msg_Q[loop_idx], 4)
+        if getattr(self, "_msg_src", None) is not prev_src_n:
+            for t in getattr(self, "_msg_lg", None) or []:
+                ttnn.deallocate(t)
+            self._msg_lg = [ttnn.matmul(s_, self.msg_qcat, compute_kernel_config=ops.ckc, dtype=ttnn.float32,
+                                        memory_config=DRAM) for s_ in prev_src_n]
+            self._msg_src = prev_src_n
+        st = int(self._msg_lg[0].shape[-1]) // 32
+        if ops.mixk is None:
+            from .mixw import MixKernel
+            ops.mixk = MixKernel(self.mesh, self.H)
+        return ops.mixk(list(prev_src_n), [(lg, 4 * loop_idx, st) for lg in self._msg_lg], len(prev_src_n), 4,
+                        out_mc=DRAM)
 
     def head(self, x, blocks_n):
         """x [1,1,T,H] bf16 (layer 23's output) -> logits [1,1,T,Vp] fp32 (softcapped)."""
@@ -575,7 +685,7 @@ class Inkling2Model:
     def head_tail(self, h, normed=None):
         """The final mix's output h -> logits (norm, LM head, softcap). normed: a list that gets the normed h."""
         ops = self.ops
-        h = _bf(ops.rms(h, self.final_norm))
+        h = _bf(ops.rms(h, self.final_norm, out_dtype=ttnn.bfloat16))
         if normed is not None:
             normed.append(h)
         if self.shead is not None:  # (one call per tile row of 32)
@@ -664,6 +774,9 @@ class Inkling2Model:
                 # sources for the next pass's messages: the block appended at layer 12 of this pass + this output
                 b12 = blocks_n[len(pre_blocks) + 1]
                 prev_src = [b12, ops.rms(x)]
+        for t in getattr(self, "_msg_lg", None) or []:  # (the per-pass message logits: chunk-sized, not kept)
+            ttnn.deallocate(t)
+        self._msg_lg = self._msg_src = None
         if taps is not None:
             hn = _bf(ops.rms(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0], self.final_norm))
             taps[:] = [ttnn.concat([_bf(t) for t in taps] + [hn], dim=1)]

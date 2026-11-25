@@ -41,6 +41,9 @@ PF_MAXSEG = 8  # sequences per packed prefill chunk (sconv_kernels/pfseg_reader.
 # (sconv_kernels/pf_*.cpp: the same arithmetic as the fused rows kernel, the carried rows passed between tiles) plus a
 # state copy, instead of ~15 ttnn ops per conv
 PF_KERNEL = os.environ.get("INKLING_SCONV_PF_KERNEL", "1") == "1"
+# I2M_PF_CONV_FLAT (default 1): the packed prefill conv's (column, row tile) tiles in even contiguous ranges over every
+# core (pfseg PF_FLAT), not one column per core (72 of the cores at hidden 2304; the conv is compute-bound); bitwise
+PF_FLAT = os.environ.get("I2M_PF_CONV_FLAT", "1") == "1"
 # INKLING_SCONV_COMMIT_RM (default 1): a prefill chunk's commit through sconv_kernels/commit_rm.cpp (offset at run time)
 COMMIT_RM = os.environ.get("INKLING_SCONV_COMMIT_RM", "1") == "1"
 
@@ -264,19 +267,21 @@ class ShortConv:
             and not x.is_sharded()
         )
 
-    def _pf_program(self, R):
+    def _pf_program(self, R, flat=False):
         """The prefill conv program for R rows (built once per R; the per-call addresses and the commit row count are
-        common runtime arguments, so a call only rewrites those)."""
+        common runtime arguments, so a call only rewrites those). flat (pfseg PF_FLAT): G = the core count."""
         P = getattr(self, "_pf_progs", None)
         if P is None:
             P = self._pf_progs = {}
-        if R in P:
-            return P[R]
+        if (R, flat) in P:
+            return P[(R, flat)]
         grid = self.mesh.compute_with_storage_grid_size()
         gx, gy = int(grid.x), int(grid.y)
         cols, Rt = self.cols, R // 32
         G = max(1, min(Rt, (gx * gy) // cols))
         n_items = cols * G
+        if flat:
+            G = n_items = min(gx * gy, cols * Rt)
         cores = [ttnn.CoreCoord(i // gy, i % gy) for i in range(n_items)]
         cr = _range_set(cores)
         if self._pf_stn is None:
@@ -295,8 +300,8 @@ class ShortConv:
             _cb(cr, cb_scr, ttnn.float32, 768 + 2048, 1),
             _cb(cr, cb_o, ttnn.bfloat16, 2048, 2),
         ]
-        P[R] = dict(cr=cr, cbs=cbs, ct=(cols, Rt, G, gy), hash=_stable_hash("inkling_sconv_pf", self.C, R, G, gy))
-        return P[R]
+        P[(R, flat)] = dict(cr=cr, cbs=cbs, ct=(cols, Rt, G, gy), hash=_stable_hash("inkling_sconv_pf", self.C, R, G, gy))
+        return P[(R, flat)]
 
     def prefill_commit(self, x, n=None, resid=None, out_dtype=ttnn.bfloat16):
         """A prefill chunk: x [1, 1, R, C] bf16 tile (R % 32 == 0) -> y [1, 1, R, C] bf16; the state advances past the
@@ -387,7 +392,7 @@ class ShortConv:
         resid ([1, 1, T, C] bf16 / fp32): -> out_dtype(f32(resid) + f32(y)) instead (the following residual add)."""
         T = int(x.shape[2])
         assert self._pf_ok(x) and len(segs) <= PF_MAXSEG, (T, len(segs))
-        pr = self._pf_program(T)
+        pr = self._pf_program(T, PF_FLAT)
         cols, Rt, G, gy = pr["ct"]
         cr = pr["cr"]
         if resid is None:
@@ -408,11 +413,11 @@ class ShortConv:
         rd_ct = [cb_x, cb_p, cb_t, cb_scr, cols, Rt, G, gy, cb_m]
         for t in (x, self.st, self.taps_tiles, shift):
             rd_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
-        defs = []
+        defs = [("PF_FLAT", "1")] if PF_FLAT else []
         if resid is not None:
             args.append(resid.buffer_address())
             rd_ct += [cb_r] + ttnn.TensorAccessorArgs(resid).get_compile_time_args()
-            defs = [("PF_RESID", "1"), ("PF_OUT_BF16", str(int(out_dtype == ttnn.bfloat16)))]
+            defs += [("PF_RESID", "1"), ("PF_OUT_BF16", str(int(out_dtype == ttnn.bfloat16)))]
         wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
 
         def kd(source, ct, common, cfg):
@@ -440,7 +445,7 @@ class ShortConv:
         if resid is not None:
             cbs.append(_cb(cr, cb_r, resid.dtype, 4096 if resid.dtype == f32 else 2048, 2))
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
-        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg3", self.C, T, G, gy, str(out_dtype),
+        prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg3", PF_FLAT, self.C, T, G, gy, str(out_dtype),
                                                 str(resid.dtype) if resid is not None else "-")
         ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else []) + [y], prog)
         for row0, R, n, lc in segs:

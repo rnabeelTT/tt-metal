@@ -33,6 +33,13 @@ void kernel_main() {
     constexpr uint32_t cb_r = get_compile_time_arg_val(9);  // PF_RESID: the residual tiles
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
+#ifdef PF_FLAT
+    if (item >= G) {
+        return;
+    }
+    const uint32_t t0 = item * (cols * Rt) / G;
+    const uint32_t n = (item + 1) * (cols * Rt) / G - t0;
+#else
     if (item >= cols * G) {
         return;
     }
@@ -40,11 +47,22 @@ void kernel_main() {
     const uint32_t k0 = (item / cols) * per;
     const uint32_t k1 = (k0 + per < Rt) ? k0 + per : Rt;
     const uint32_t n = k1 > k0 ? k1 - k0 : 0;
+#endif
 
     compute_kernel_hw_startup<SrcOrder::Reverse>(cb_m, cb_x, cb_o);  // (matmul: in1 -> srcA)
+#ifndef PF_FLAT
     cb_wait_front(cb_t, 4);
+#endif
     cb_wait_front(cb_m, 6);
     for (uint32_t i = 0; i < n; ++i) {
+#ifdef PF_FLAT
+        if (i == 0 || (t0 + i) % Rt == 0) {  // a new column: its taps
+            if (i > 0) {
+                cb_pop_front(cb_t, 4);
+            }
+            cb_wait_front(cb_t, 4);
+        }
+#endif
         cb_wait_front(cb_x, 1);
         cb_wait_front(cb_p, 1);
         cb_reserve_back(cb_o, 1);
@@ -91,6 +109,8 @@ void kernel_main() {
         cb_pop_front(cb_x, 1);
         cb_pop_front(cb_p, 1);
     }
-    cb_pop_front(cb_t, 4);
+    if (n > 0) {
+        cb_pop_front(cb_t, 4);
+    }
     cb_pop_front(cb_m, 6);
 }

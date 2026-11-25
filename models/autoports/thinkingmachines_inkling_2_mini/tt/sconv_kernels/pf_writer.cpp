@@ -18,6 +18,21 @@ void kernel_main() {
     constexpr auto out_args = TensorAccessorArgs<5>();
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
+    const auto s_out = TensorAccessor(out_args, out_addr, TB);
+#ifdef PF_FLAT
+    if (item >= G) {
+        return;
+    }
+    for (uint32_t t = item * (cols * Rt) / G; t < (item + 1) * (cols * Rt) / G; ++t) {
+        cb_wait_front(cb_o, 1);
+        noc_async_write(get_read_ptr(cb_o), s_out.get_noc_addr((t % Rt) * cols + t / Rt), TB);
+        noc_async_writes_flushed();
+        cb_pop_front(cb_o, 1);
+    }
+    noc_async_write_barrier();
+    noc_async_atomic_barrier();
+    return;
+#endif
     if (item >= cols * G) {
         return;
     }
@@ -25,7 +40,6 @@ void kernel_main() {
     constexpr uint32_t per = (Rt + G - 1) / G;
     const uint32_t k0 = (item / cols) * per;
     const uint32_t k1 = (k0 + per < Rt) ? k0 + per : Rt;
-    const auto s_out = TensorAccessor(out_args, out_addr, TB);
     for (uint32_t k = k0; k < k1; ++k) {
         cb_wait_front(cb_o, 1);
         noc_async_write(get_read_ptr(cb_o), s_out.get_noc_addr(k * cols + c), TB);

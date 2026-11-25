@@ -49,6 +49,16 @@ void kernel_main() {
 #endif
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
+#ifdef PF_FLAT
+    // PF_FLAT (= the core count G): tiles t = c * Rt + k (column-major) in G even contiguous ranges; a range may cross
+    // columns (the taps are pushed again for each column)
+    if (item >= G) {
+        return;
+    }
+    const uint32_t t0 = item * (cols * Rt) / G;
+    const uint32_t t1 = (item + 1) * (cols * Rt) / G;
+    uint32_t c = t0 / Rt;
+#else
     if (item >= cols * G) {
         return;
     }
@@ -57,6 +67,7 @@ void kernel_main() {
     constexpr uint32_t per = (Rt + G - 1) / G;
     const uint32_t k0 = g * per;
     const uint32_t k1 = (k0 + per < Rt) ? k0 + per : Rt;
+#endif
 
     const auto s_x = TensorAccessor(x_args, x_addr, TB);
     const auto s_taps = TensorAccessor(taps_args, taps_addr, TB);
@@ -89,12 +100,19 @@ void kernel_main() {
         noc_async_write_barrier();
     };
 
-    // the taps, once per core (the compute holds them for the whole range)
-    cb_reserve_back(cb_t, 4);
-    const uint32_t t = get_write_ptr(cb_t);
-    for (uint32_t j = 0; j < 4; ++j) {
-        noc_async_read(s_taps.get_noc_addr(j * cols + c), t + j * TB, TB);
-    }
+    // the taps, once per core (the compute holds them for the whole range); PF_FLAT: once per column of the range
+    auto push_taps = [&](uint32_t col) {
+        cb_reserve_back(cb_t, 4);
+        const uint32_t t = get_write_ptr(cb_t);
+        for (uint32_t j = 0; j < 4; ++j) {
+            noc_async_read(s_taps.get_noc_addr(j * cols + col), t + j * TB, TB);
+        }
+        noc_async_read_barrier();
+        cb_push_back(cb_t, 4);
+    };
+#ifndef PF_FLAT
+    push_taps(c);
+#endif
     cb_reserve_back(cb_m, 6);
     {
         const auto s_m = TensorAccessor(m_args, get_common_arg_val<uint32_t>(3 + 7 * MAXSEG), TB);
@@ -104,13 +122,21 @@ void kernel_main() {
         }
     }
     noc_async_read_barrier();
-    cb_push_back(cb_t, 4);
     cb_push_back(cb_m, 6);
+#ifdef PF_FLAT
+    for (uint32_t tt = t0; tt < t1; ++tt) {
+        const uint32_t k = tt % Rt;
+        if (tt == t0 || k == 0) {
+            c = tt / Rt;
+            push_taps(c);
+        }
+#else
     if (k0 >= k1) {
         return;
     }
 
     for (uint32_t k = k0; k < k1; ++k) {
+#endif
         const uint32_t s = seg_of(k);
         const uint32_t ks = arg(s, 0);
         if (k == ks) {
