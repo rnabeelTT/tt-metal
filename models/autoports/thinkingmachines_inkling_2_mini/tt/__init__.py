@@ -89,11 +89,12 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
 # SDPA's ~57 KB; pre -> attention gates; agate -> o_proj). Traced one die, position 300: B=1 / B=4 / 4-row verify
 # 17.68 / 28.71 / 31.24 -> 17.18 / 28.21 / 30.76 ms (+16 / +64 KB: B=1 17.32 / 17.07); logits bitwise (B=1, B=4,
 # verify). Every mesh this process opens without its own worker_l1_size gets it; the served profiles pass the same size
-# (tt-model.yaml additional_config tt.worker_l1_size, the &i2m_worker_l1 / &i2m_worker_l1_tp2 anchors: keep them in step).
-# +64 KB on 2 dies (I2M_RING_KB_TP2): the SDPA's wait for ring space; one die keeps +32 (at +64 the p150 profile's
-# 8-row MoE gate|up CBs end 6 KB below the lowest L1 buffer, beside the o_proj prefetch's global CB). TP2 B=1 / B=4 /
-# verify 11.34 / 19.15 / 18.55 -> 11.19 / 19.00 / 18.38 ms, logits bitwise (B1 / B4 / V4 / B8 / B16), L1 margin at
-# B=16 129 -> 97 KB.
+# (tt-model.yaml additional_config tt.worker_l1_size, the &i2m_worker_l1 / &i2m_worker_l1_mesh anchors: keep them in step).
+# +64 KB on 2 and 4 dies (I2M_RING_KB_TP2): the SDPA's wait for ring space; one die keeps +32 (at +64 the p150
+# profile's 8-row MoE gate|up CBs end 6 KB below the lowest L1 buffer, beside the o_proj prefetch's global CB). TP2
+# B=1 / B=4 / verify 11.34 / 19.15 / 18.55 -> 11.19 / 19.00 / 18.38 ms, logits bitwise (B1 / B4 / V4 / B8 / B16), L1
+# margin at B=16 129 -> 97 KB; TP4 9.24 / 14.14 / 13.40 -> 9.16 / 14.00 / 13.29 ms, bitwise (B1 / B32), margin at
+# B=32 256 -> 224 KB.
 RING_KB = int(_os.environ.get("I2M_RING_KB", "32"))
 RING_KB_TP2 = int(_os.environ.get("I2M_RING_KB_TP2", _os.environ.get("I2M_RING_KB", "64")))
 WORKER_L1_DEFAULT = 1461248  # Blackhole: 1536 KB - the unreserved base (MEM_MAP_END + the 69 KB ring)
@@ -102,7 +103,7 @@ WORKER_L1_SIZE = WORKER_L1_DEFAULT - RING_KB * 1024
 
 def worker_l1_size(ndev: int) -> int:
     """the worker L1 size this port runs a mesh of ndev dies with (the served profiles pass the same)"""
-    return WORKER_L1_DEFAULT - (RING_KB_TP2 if ndev == 2 else RING_KB) * 1024
+    return WORKER_L1_DEFAULT - (RING_KB_TP2 if ndev in (2, 4) else RING_KB) * 1024
 
 
 if RING_KB or RING_KB_TP2:

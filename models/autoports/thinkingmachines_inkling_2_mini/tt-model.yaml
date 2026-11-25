@@ -82,8 +82,9 @@ serve_profiles:
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 1048576
-    # the traces take 39 MB of the trace region: 128 MB frees 172 MB per die for the drafter's caches to 64K (+185 MB)
-    additional_config: {tt: {trace_region_size: 134217728}}
+    # the traces take 39 MB of the trace region: 128 MB frees 172 MB per die for the drafter's caches to 64K (+185 MB);
+    # the kernel-config ring +64 KB on 2 and 4 dies (tt/__init__.py I2M_RING_KB_TP2): 1461248 - 64 * 1024
+    additional_config: {tt: {trace_region_size: 134217728, worker_l1_size: &i2m_worker_l1_mesh 1395712}}
     # 2048-row prefill chunks: +14% prefill; speculative decoding (DSpark drafter, 3 drafts per pass): the pool 2.06M ->
     # 1.7M tokens
     env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000", I2M_SPEC_MAX_LEN: "65536"}
@@ -92,7 +93,7 @@ serve_profiles:
     hardware: p150x4
     mesh_device: P150x4
     max_model_len: 1048576
-    additional_config: {tt: {trace_region_size: 134217728}}
+    additional_config: {tt: {trace_region_size: 134217728, worker_l1_size: *i2m_worker_l1_mesh}}
     env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p300
     description: One p300 board (2 dies, tensor parallel 2), 16 sequences sharing a 491,520-token context.
@@ -101,8 +102,7 @@ serve_profiles:
     max_num_seqs: 16
     max_model_len: 491520
     # the traces take 33 MB of the trace region: 96 MB frees 204 MB per die for the drafter's caches to 64K (+185 MB);
-    # the kernel-config ring +64 KB on 2 dies (tt/__init__.py I2M_RING_KB_TP2): 1461248 - 64 * 1024
-    additional_config: {tt: {trace_region_size: 100663296, worker_l1_size: &i2m_worker_l1_tp2 1395712}}
+    additional_config: {tt: {trace_region_size: 100663296, worker_l1_size: *i2m_worker_l1_mesh}}
     # fabric init needs every visible chip in the mesh; speculative decoding: the pool 647K -> 520K tokens
     env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p150x2
@@ -111,7 +111,7 @@ serve_profiles:
     mesh_device: P150x2
     max_num_seqs: 16
     max_model_len: 491520
-    additional_config: {tt: {trace_region_size: 100663296, worker_l1_size: *i2m_worker_l1_tp2}}
+    additional_config: {tt: {trace_region_size: 100663296, worker_l1_size: *i2m_worker_l1_mesh}}
     env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p150
     description: One p150 (1 die), 8 sequences sharing a 32,768-token context, speculative decoding
