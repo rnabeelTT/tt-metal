@@ -134,7 +134,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", lgx.FOLD, T, th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
+        key = ("i2m_pre", lgx.FOLD, T, red_k(T), th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

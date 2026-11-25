@@ -222,7 +222,7 @@ class GateKernel2:
                                   defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))),
                                            ("G2_PACK", str(int(pack))), ("G2_FUSE", str(int(G2_FUSE)))]),
         ]
-        key = (T, th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
+        key = (T, red_k(T), th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

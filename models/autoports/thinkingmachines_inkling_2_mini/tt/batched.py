@@ -59,8 +59,9 @@ MSG_PASS = __import__("os").environ.get("I2M_MSG_PASS", "1") == "1"
 MSG_ALL = __import__("os").environ.get("I2M_MSG_ALL", "1") == "1"
 AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention output gate in one program (tt/agate.py)
 # a one-slot verify pass's R rows as one SDPA item: K / V read once per kv head, not once per row (I2M_SDPA_VROWS=1:
-# split over cores as one-row decode; 2: a kv head with <= I2M_SDPA_MU_MIN chunks on one core, as the per-row items)
-VROWS = int(__import__("os").environ.get("I2M_SDPA_VROWS", "2"))
+# split over cores as one-row decode, each row bitwise the one-row decode unless the pass straddles a chunk boundary;
+# 2: a kv head with <= I2M_SDPA_MU_MIN chunks on one core, as the per-row items of a multi-slot decode)
+VROWS = int(__import__("os").environ.get("I2M_SDPA_VROWS", "1"))
 
 
 class Tail:
@@ -572,8 +573,15 @@ class BatchedDecoder:
         # block 0 to the idle block, sliding rows write the ring's scratch block): skipped by the SDPA instead, their
         # rows were never written and went inf / NaN through the steps, into the MoE routing and the cross-row ops
         pw = pos.clamp(min=0)
+        ps, self.rows_ok = pw, self.B
+        if self.R and self.ps_shape == (1, self.B) and int(pos[0]) >= 0:
+            # one verify item splits K / V over cores by its last row's chunk count: rows past the first chunk boundary
+            # after row 0 attend as if at the row before it (their outputs are not used: rows_ok), so the live rows
+            # split as their one-row decode does (bitwise)
+            cap = min((int(pos[0]) // c + 1) * c for c in (SDPA_K_CHUNK, SDPA_K_CHUNK_SW)) - 1
+            ps, self.rows_ok = pw.clamp(max=cap), int((pos <= cap).sum())
         host += [
-            (pw.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
+            (ps.reshape(self.ps_shape).to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_sdpa),
             (pw.to(torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT, self.pos_w),
             # (idle rows: the ring's scratch block, see AttnCache)
             (torch.where(pos < 0, self.ring_period, pw % self.ring_period).to(torch.int32), ttnn.int32,
@@ -589,13 +597,15 @@ class BatchedDecoder:
         existing logits tensor to write them into)."""
         if not self.R:
             return self._step(out)
-        from . import bconv
+        from . import bconv, post
 
         bconv.SEQ = (self.R, self.B // self.R, self.acc)
+        post.ROWX = True
         try:
             return self._step(out)
         finally:
             bconv.SEQ = None
+            post.ROWX = False
 
     def _step(self, out=None):
         m, B, ops, cfg = self.m, self.B, self.m.ops, self.m.cfg

@@ -33,8 +33,13 @@ C = CX * CY
 _RK = __import__("os").environ.get("I2M_RED_K")
 
 
+# ROWX (set by a speculative verify pass, BatchedDecoder.step): every row reduced as a one-row program does (8 partials
+# per group, no packing), so verify rows are bitwise the one-row decode
+ROWX = False
+
+
 def red_k(T):
-    return int(_RK) if _RK else (2 if T > 1 else 8)
+    return int(_RK) if _RK else (2 if T > 1 and not ROWX else 8)
 
 ROUTER_ROWS = int(__import__("os").environ.get("I2M_POST_ROUTER_ROWS", "4"))
 # the reader pushes the round-1 inputs, then the mix inputs, then the router weights (needed only after round 2), each
@@ -237,7 +242,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", lgx.FOLD, T, th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

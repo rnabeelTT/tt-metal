@@ -943,8 +943,9 @@ class Inkling2ForCausalLM:
             ci, cl = self.dr.cand_host(d)
             q = [(ci[j], cl[j]) for j in range(d)]
         pf.mark("dq_read")
-        em, k = self.hs.spec(idx, vals, r, drafts, sp, outs=_row(kwargs.get("output_tokens"), r),
-                             prompt=_row(kwargs.get("prompt_tokens"), r), q=q)
+        J = self.ver.rows_ok - 1  # (the drafts whose verify rows are live: a pass stops at a K / V chunk boundary)
+        em, k = self.hs.spec(idx, vals, r, drafts[:J], sp, outs=_row(kwargs.get("output_tokens"), r),
+                             prompt=_row(kwargs.get("prompt_tokens"), r), q=q[:J] if q is not None else None)
         pf.mark("accept")
         self.ver.set_accept([k])
         if SPEC_DUMP and q is not None:  # (offline acceptance study: the target's candidates / the drafter's per step)

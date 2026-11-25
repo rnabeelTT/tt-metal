@@ -49,7 +49,7 @@ def main():
         one.set_inputs(ids[P + t : P + t + 1], torch.tensor([P + t]))
         seq.append(m.logits_host(one.step(), 1)[0])
     seq = torch.stack(seq)
-    # the same steps on the full-width decoder (slot 0 live, the others idle): the verify pass's kernels, one row each
+    # the same steps on the full-width decoder (slot 0 live, the others idle)
     W = full.B
     prefill()
     seqw = []
@@ -81,9 +81,10 @@ def main():
             d.capture()
         a, b = two_passes(d)
         dump[name] = (a, b)
-        for tag, got, ref in (("pass 1", a, seq[:R]), (f"pass 2 (accept {A + 1})", b, seq[A + 1 :])):
-            print(f"  {name} {tag} vs 1-wide per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
         for tag, got, ref in (("pass 1", a, seqw[:R]), (f"pass 2 (accept {A + 1})", b, seqw[A + 1 :])):
+            print(f"  {name} {tag} vs full-width per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
+        # the verify rows are the 1-wide decode's (plain greedy = speculative greedy)
+        for tag, got, ref in (("pass 1", a, seq[:R]), (f"pass 2 (accept {A + 1})", b, seq[A + 1 :])):
             print(f"  {name} {tag} per row pcc: " + " ".join(f"{pcc(got[r], ref[r]):.6f}" for r in range(R)))
             p = min(pcc(got[r], ref[r]) for r in range(R))
             top = (got.argmax(-1) == ref.argmax(-1)).float().mean().item()
@@ -112,8 +113,8 @@ def main():
             print(f"tap {j}: min row pcc vs HF {p:.5f}", flush=True)
             ok = ok and p > 0.97  # (the device model vs HF: ~0.98 on the final state)
     ttnn.close_mesh_device(mesh)
-    # (I2M_SDPA_VROWS: past one chunk (1: 256 keys, 2: 1024) the verify SDPA splits K / V over cores as one-row decode,
-    # not as the width-R decode: not bitwise there)
+    # (I2M_SDPA_VROWS=1: a pass straddling a 256-key chunk boundary splits K / V by its last row's chunk count: not
+    # bitwise there)
     print(f"{'PASS' if worst > (0.995 if VROWS else 0.9999) and ok else 'FAIL'}: worst pcc {worst:.6f}")
 
 

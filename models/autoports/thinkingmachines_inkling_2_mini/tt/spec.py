@@ -3,7 +3,7 @@
 """Greedy speculative decoding of one sequence: the DSpark drafter (tt/drafter.py) proposes d tokens, one verify pass
 (BatchedDecoder verify=d+1, tt/kernels/seqshift.hpp) scores the anchor and the drafts, the longest agreeing prefix is
 accepted plus the target's own next token. Every emitted token is the target's argmax given the emitted prefix (the
-verify rows are the sequential decode of the same width, bitwise).
+verify rows are the one-row sequential decode, bitwise).
 
 A pass = two trace replays: the drafter's (commit the previous pass's accepted rows from the verify pass's taps output,
 draft the next d tokens), then the verify pass's (with the device top-K of its rows)."""
@@ -78,7 +78,7 @@ class SpecGreedy:
         self.dec.step()
         y = self._pick(*self.topk.host(self.dec.extra), R)
         k = 0
-        while k < self.d and drafts[k] == y[k]:
+        while k < min(self.d, self.ver.rows_ok - 1) and drafts[k] == y[k]:
             k += 1
         self.ver.set_accept([k])
         self.pending = (n, k + 1)  # (the next drafter replay commits rows 0 .. k of this pass's taps)
