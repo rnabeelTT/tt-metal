@@ -24,6 +24,12 @@ def _drop_sockets(hyb):
         gc.collect()
 
 
+def _stop_prefetch(mesh):
+    pf = sys.modules.get("models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch")
+    if pf is not None:
+        pf.stop(mesh)
+
+
 def quiesce(mesh):
     import ttnn
 
@@ -32,6 +38,7 @@ def quiesce(mesh):
     for name, fn in (
         ("pinx flush", lambda: f.px.flush() if f is not None and getattr(f, "px", None) is not None else None),
         ("synchronize", lambda: ttnn.synchronize_device(mesh)),
+        ("tensor prefetcher stop", lambda: _stop_prefetch(mesh)),
         ("fetch release", lambda: f.release() if f is not None else None),
         ("sockets release", lambda: _drop_sockets(hyb)),
     ):

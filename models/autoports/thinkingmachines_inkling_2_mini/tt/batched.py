@@ -305,7 +305,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    if getattr(w, "ms", None) is not None and B <= 16:  # (q | k | v streamed in one program)
+    if getattr(w, "pf", None) is not None and B <= 16:  # (q prefetched into a global CB: tt/prefetch.py)
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch import qkv as pf_qkv
+
+        pq, pk, pv = pf_qkv(w.pf, w, [xq, xk, xv], B)
+    elif getattr(w, "ms", None) is not None and B <= 16:  # (q | k | v streamed in one program)
         pq, pk, pv = w.ms([xq, xk, xv], w.ms_w, B)
     else:
         pq = proj(w, "q", xq, ttnn.float32)

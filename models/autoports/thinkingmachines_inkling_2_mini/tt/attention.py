@@ -154,6 +154,13 @@ class AttnWeights:
                                   fidelity=ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2,
                                   groups=[[0], [1, 2]] if kv else None)
             self.ms_w = [self.w_q, self.w_k, self.w_v]
+        self.pf = None
+        if self.ms is not None:  # (I2M_PREFETCH: q streamed ahead into a global CB, tt/prefetch.py)
+            from . import prefetch as PF
+
+            if PF.ON:
+                self.pf = PF.qkv_prefetch(mesh, wq.shape[1], fqp, self.kd,
+                                          ttnn.MathFidelity.HiFi4 if ATTN_HIFI4 else ttnn.MathFidelity.HiFi2)
         # per-head scales (fp32): q [NH, HD], r [NH, DR] (head-sharded), as [1, 1, NH, HD] rows
         hs = lambda t, n: ttnn.from_torch(t.float().reshape(1, 1, n * N, -1), dtype=ttnn.float32,  # noqa: E731
                                           layout=ttnn.TILE_LAYOUT, device=mesh,
