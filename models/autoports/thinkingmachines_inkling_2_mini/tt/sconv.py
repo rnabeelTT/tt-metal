@@ -384,14 +384,20 @@ class ShortConv:
         self._last_seq = None
         return y
 
-    def prefill_packed(self, x, segs, resid=None, out_dtype=ttnn.bfloat16):
+    def prefill_packed(self, x, segs, resid=None, out_dtype=ttnn.bfloat16, rs=None):
         """A packed prefill chunk (several sequences): x [1, 1, T, C] bf16 tile -> y [1, 1, T, C] bf16 in one program
         (sconv_kernels/pfseg_reader.cpp; the program depends on T only). segs: [(row0, R, n, lane_conv)] (64-row
         aligned, covering all T rows): segment rows run against lane_conv's state, which then advances past the
         segment's first n rows; a lane conv with snap_row set also gets the state at that row in its snap_buf.
-        resid ([1, 1, T, C] bf16 / fp32): -> out_dtype(f32(resid) + f32(y)) instead (the following residual add)."""
+        resid ([1, 1, T, C] bf16 / fp32): -> out_dtype(f32(resid) + f32(y)) instead (the following residual add).
+        rs = (k0, Tl) (I2M_PF_ROWSPLIT): x holds all T rows, the die computes Tl rows from row tile k0 (a per-die uint32
+        tensor [1, 1, 1, 16], value at 0): resid and y are those rows [1, 1, Tl, C]; every segment's states are still
+        written on every die."""
         T = int(x.shape[2])
         assert self._pf_ok(x) and len(segs) <= PF_MAXSEG, (T, len(segs))
+        k0t = None
+        if rs is not None:
+            k0t, T = rs
         pr = self._pf_program(T, PF_FLAT)
         cols, Rt, G, gy = pr["ct"]
         cr = pr["cr"]
@@ -418,6 +424,11 @@ class ShortConv:
             args.append(resid.buffer_address())
             rd_ct += [cb_r] + ttnn.TensorAccessorArgs(resid).get_compile_time_args()
             defs += [("PF_RESID", "1"), ("PF_OUT_BF16", str(int(out_dtype == ttnn.bfloat16)))]
+        if k0t is not None:
+            assert G >= cols or not PF_FLAT, (G, cols)  # (pfseg_reader.cpp: one core per column writes the states)
+            args.append(k0t.buffer_address())
+            rd_ct += ttnn.TensorAccessorArgs(k0t).get_compile_time_args()
+            defs += [("PF_ROWOFF", "1")]
         wr_ct = [cb_o, cols, Rt, G, gy] + ttnn.TensorAccessorArgs(y).get_compile_time_args()
 
         def kd(source, ct, common, cfg):
@@ -446,8 +457,10 @@ class ShortConv:
             cbs.append(_cb(cr, cb_r, resid.dtype, 4096 if resid.dtype == f32 else 2048, 2))
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
         prog.custom_program_hash = _stable_hash("inkling_sconv_pfseg3", PF_FLAT, self.C, T, G, gy, str(out_dtype),
-                                                str(resid.dtype) if resid is not None else "-")
-        ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else []) + [y], prog)
+                                                str(resid.dtype) if resid is not None else "-",
+                                                int(x.shape[2]) if k0t is not None else 0)
+        ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else [])
+                        + ([k0t] if k0t is not None else []) + [y], prog)
         for row0, R, n, lc in segs:
             ttnn.copy(lc._pf_stn, lc.st)
             if lc.snap_row is not None:

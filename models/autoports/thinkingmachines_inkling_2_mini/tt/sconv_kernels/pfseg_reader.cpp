@@ -11,7 +11,12 @@
 // or at a segment start a tile holding the state's 3 rows at rows 29 .. 31, zeros above).
 //
 // common args: x_addr, taps_addr, nseg, then per segment (MAXSEG slots): ks, ke, st, stn, n, sb, snap; shift_addr;
-// resid_addr (PF_RESID: tile (k, c) of the residual, pushed beside x_k for the compute's add)
+// resid_addr (PF_RESID: tile (k, c) of the residual, pushed beside x_k for the compute's add); k0_addr (PF_ROWOFF)
+//
+// PF_ROWOFF (the prefill glue split by rows over the dies): x holds all rows, this die computes row tiles
+// K0 .. K0 + Rt - 1 (K0 from a per-die uint32 tensor, so every die runs the same program); the residual and the output
+// are this die's rows (tile k). Every segment's state points are written from x / the old state on every die (the conv
+// states stay replicated), by one core per column before the row loop.
 
 #include <stdint.h>
 
@@ -46,6 +51,11 @@ void kernel_main() {
     constexpr auto r_args = TensorAccessorArgs<m_args.next_compile_time_args_offset() + 1>();
     constexpr uint32_t RB = get_tile_size(cb_r);
     const auto s_r = TensorAccessor(r_args, get_common_arg_val<uint32_t>(4 + 7 * MAXSEG), RB);
+    constexpr uint32_t k0_ct = r_args.next_compile_time_args_offset();
+    constexpr uint32_t k0_arg = 5 + 7 * MAXSEG;
+#else
+    constexpr uint32_t k0_ct = m_args.next_compile_time_args_offset();
+    constexpr uint32_t k0_arg = 4 + 7 * MAXSEG;
 #endif
 
     const uint32_t item = (uint32_t)get_absolute_logical_x() * GY + (uint32_t)get_absolute_logical_y();
@@ -77,6 +87,18 @@ void kernel_main() {
     volatile uint32_t* prev = reinterpret_cast<volatile uint32_t*>(scr);
     const uint32_t orow = scr + 384;
     volatile uint32_t* orw = reinterpret_cast<volatile uint32_t*>(orow);
+#ifdef PF_ROWOFF
+    uint32_t K0;
+    {
+        constexpr auto k0_args = TensorAccessorArgs<k0_ct>();
+        const auto s_k0 = TensorAccessor(k0_args, get_common_arg_val<uint32_t>(k0_arg), 64);
+        noc_async_read(s_k0.get_noc_addr(0), scr + 512, 64);
+        noc_async_read_barrier();
+        K0 = reinterpret_cast<volatile uint32_t*>(scr + 512)[0];
+    }
+#else
+    constexpr uint32_t K0 = 0;
+#endif
 
     auto arg = [&](uint32_t s, uint32_t f) { return get_common_arg_val<uint32_t>(3 + s * 7 + f); };
     auto seg_of = [&](uint32_t k) {
@@ -123,6 +145,51 @@ void kernel_main() {
     }
     noc_async_read_barrier();
     cb_push_back(cb_m, 6);
+#ifdef PF_ROWOFF
+    (void)put;
+    {
+#ifdef PF_FLAT
+        const bool mine = item < cols;  // (host: G >= cols)
+        const uint32_t sc = item;
+#else
+        const bool mine = item < cols;  // (row group 0)
+        const uint32_t sc = c;
+#endif
+        if (mine) {
+            const uint32_t xs = scr + 768;  // one bf16 x tile
+            volatile uint32_t* xsw = reinterpret_cast<volatile uint32_t*>(xs);
+            for (uint32_t s = 0; s < nseg; ++s) {
+                const auto s_st = TensorAccessor(st_args, arg(s, 2), ROWB);
+                for (uint32_t r = 0; r < 3; ++r) {
+                    noc_async_read(s_st.get_noc_addr(r, sc * 128), scr + r * 128, 128);
+                }
+                noc_async_read_barrier();
+                for (uint32_t pt = 0; pt < 2; ++pt) {
+                    const uint32_t P = pt == 0 ? arg(s, 4) : arg(s, 6);
+                    const uint32_t dst = pt == 0 ? arg(s, 3) : arg(s, 5);
+                    if (P == NONE) {
+                        continue;
+                    }
+                    for (uint32_t r = 0; r < 3; ++r) {
+                        if (P + r < 3) {
+                            for (uint32_t w = 0; w < 32; ++w) {
+                                orw[w] = prev[(P + r) * 32 + w];
+                            }
+                        } else {
+                            const uint32_t gr = arg(s, 0) * 32 + P + r - 3;
+                            noc_async_read(s_x.get_noc_addr((gr / 32) * cols + sc), xs, TB);
+                            noc_async_read_barrier();
+                            sconv::row_to_f32(orw, xsw, gr % 32);
+                        }
+                        const auto s_d = TensorAccessor(st_args, dst, ROWB);
+                        noc_async_write(orow, s_d.get_noc_addr(r, sc * 128), 128);
+                        noc_async_write_barrier();
+                    }
+                }
+            }
+        }
+    }
+#endif
 #ifdef PF_FLAT
     for (uint32_t tt = t0; tt < t1; ++tt) {
         const uint32_t k = tt % Rt;
@@ -137,10 +204,12 @@ void kernel_main() {
 
     for (uint32_t k = k0; k < k1; ++k) {
 #endif
-        const uint32_t s = seg_of(k);
+        const uint32_t kg = K0 + k;  // (the row tile in x)
+        const uint32_t s = seg_of(kg);
         const uint32_t ks = arg(s, 0);
-        if (k == ks) {
+        if (kg == ks) {
             load_state(s);
+#ifndef PF_ROWOFF
             // state points inside the old state (P < 3): rows P + r < 3 come from it
             for (uint32_t pt = 0; pt < 2; ++pt) {
                 const uint32_t P = pt == 0 ? arg(s, 4) : arg(s, 6);
@@ -157,14 +226,15 @@ void kernel_main() {
                     }
                 }
             }
+#endif
         }
         cb_reserve_back(cb_x, 1);
         cb_reserve_back(cb_p, 1);
         const uint32_t x = get_write_ptr(cb_x);
         const uint32_t pp = get_write_ptr(cb_p);
-        noc_async_read(s_x.get_noc_addr(k * cols + c), x, TB);
-        if (k != ks) {
-            noc_async_read(s_x.get_noc_addr((k - 1) * cols + c), pp, TB);
+        noc_async_read(s_x.get_noc_addr(kg * cols + c), x, TB);
+        if (kg != ks) {
+            noc_async_read(s_x.get_noc_addr((kg - 1) * cols + c), pp, TB);
         } else {
             volatile uint32_t* pw = reinterpret_cast<volatile uint32_t*>(pp);
             for (uint32_t w = 0; w < TB / 4; ++w) {
@@ -177,6 +247,7 @@ void kernel_main() {
         noc_async_read_barrier();
         volatile uint32_t* xw = reinterpret_cast<volatile uint32_t*>(x);
         // state rows that are rows of this tile: seq_s[P + r] = segment row P + r - 3
+#ifndef PF_ROWOFF
         for (uint32_t pt = 0; pt < 2; ++pt) {
             const uint32_t P = pt == 0 ? arg(s, 4) : arg(s, 6);
             const uint32_t dst = pt == 0 ? arg(s, 3) : arg(s, 5);
@@ -193,6 +264,7 @@ void kernel_main() {
                 }
             }
         }
+#endif
 #ifdef PF_RESID
         cb_reserve_back(cb_r, 1);
         noc_async_read(s_r.get_noc_addr(k * cols + c), get_write_ptr(cb_r), RB);
