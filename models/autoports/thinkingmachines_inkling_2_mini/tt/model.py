@@ -69,11 +69,11 @@ PF_ROWN_LG = os.environ.get("I2M_PF_ROWN_LG", "1") == "1"
 # I2M_PF_MIXC (default 1): prefill message logits once per pass: both sources against every loop layer's queries in one
 # matmul each (the decode's msg_qcat), not two matmuls per application; bitwise
 PF_MIXC = os.environ.get("I2M_PF_MIXC", "1") == "1"
-# I2M_PF_ROWSPLIT (auto: on at 4 dies, TP4 4K prefill 773.0 -> 676.8 ms; 1 also on 2 dies): a packed prefill
-# chunk's replicated glue (norms, mixes, logits, gates, messages, the hidden-size convs) runs on each die's T / N rows instead of all T: the residual stream, blocks and
-# messages are row-split, the all-reduces stay as they are (their full output gives the convs their halo and every
+# I2M_PF_ROWSPLIT (default on; 4K prefill TP4 773.0 -> 676.8 ms, TP2 1209.4 -> 1154.9): on > 1 die, a packed
+# prefill chunk's replicated glue (norms, mixes, logits, gates, messages, the hidden-size convs) runs on each die's
+# T / N rows instead of all T: the residual stream, blocks and messages are row-split, the all-reduces stay as they are (their full output gives the convs their halo and every
 # segment's state rows), and only the attention inputs and the MoE input are all-gathered (RowSplit)
-PF_ROWSPLIT = os.environ.get("I2M_PF_ROWSPLIT", "auto")
+PF_ROWSPLIT = os.environ.get("I2M_PF_ROWSPLIT", "1") == "1"
 
 
 class RowSplit:
@@ -92,8 +92,7 @@ class RowSplit:
     @staticmethod
     def ok(mesh, T):
         N = mesh.get_num_devices()
-        on = PF_ROWSPLIT == "1" or (PF_ROWSPLIT == "auto" and N >= 4)
-        return on and N > 1 and T % (32 * N) == 0 and T // N > 32
+        return PF_ROWSPLIT and N > 1 and T % (32 * N) == 0 and T // N > 32
 
     def part(self, t):
         """[1, 1, T, W] (the same on every die) -> this die's rows"""
