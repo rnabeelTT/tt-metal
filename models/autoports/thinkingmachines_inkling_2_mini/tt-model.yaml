@@ -108,18 +108,19 @@ serve_profiles:
     env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
   - name: p150
     description: One p150 (1 die), 8 sequences sharing a 32,768-token context, speculative decoding
-      for sequences under 8,192 tokens (the bfp8 experts take 27 of the die's 31.5 GiB). p150-long has a larger context, text only, without it.
+      at every length (the bfp8 experts take 27 of the die's 31.5 GiB). p150-long has a larger context, text only, without it.
     hardware: p150
     mesh_device: P150
     max_num_seqs: 8
     max_model_len: 32768
-    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1}}
+    # the one-die traces take 18-24 MB of the trace region: 64 MB frees 236 MB for the drafter's 32K caches
+    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1, trace_region_size: 67108864}}
     # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
     # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
     # Speculative decoding: the drafter needs ~0.5 GB, the KV pool 57K -> 32K tokens
-    # the drafter's caches cover 8K tokens (32K do not fit beside the vision tower)
+    # the drafter's caches cover the whole 32K context (+132 MB over 8K; 0.51 GiB free after the captures, was 0.41)
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_SPEC: "3",
-          I2M_KV_POOL_TOKENS: "32768", I2M_SPEC_MAX_LEN: "8192"}
+          I2M_KV_POOL_TOKENS: "32768", I2M_SPEC_MAX_LEN: "32768"}
   - name: p150-long
     description: One p150 (1 die), 8 sequences sharing a 49,152-token context, text only, no
       speculative decoding.
@@ -270,7 +271,7 @@ card:
   limitations: |
     - Prefill runs about 2,000-2,100 prompt tokens/s on 4 dies, 2,300-2,400 on 2 and 1,450 on 1 (4K and 16K-token
       prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
-    - Speculative decoding applies only while one request is decoding and its sequence is under 32,768 tokens (8,192 on `p150`); with
+    - Speculative decoding applies only while one request is decoding and its sequence is under 32,768 tokens; with
       several users, or past that length, every request decodes one token per step.
     - A profile's sequences share its KV cache (1.7M tokens on 4 dies; the context on 2 and 1 die): one request may use
       the whole context, and requests that do not fit beside the running ones wait.
