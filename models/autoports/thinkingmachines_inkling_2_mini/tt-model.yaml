@@ -59,6 +59,8 @@ serve:
       sample_on_device_mode: decode_only
       trace_region_size: 314572800
       l1_small_size: 24576
+      # the kernel-config ring +I2M_RING_KB (tt/__init__.py): 1461248 - RING_KB * 1024; keep the two in step
+      worker_l1_size: &i2m_worker_l1 1428480
       fabric_config: FABRIC_1D
   env:
     ARCH_NAME: blackhole
@@ -111,7 +113,7 @@ serve_profiles:
     mesh_device: P150
     max_num_seqs: 8
     max_model_len: 32768
-    additional_config: {tt: {fabric_config: DISABLED}}
+    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1}}
     # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
     # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
     # Speculative decoding: the drafter needs ~0.5 GB, the KV pool 57K -> 32K tokens
@@ -125,7 +127,7 @@ serve_profiles:
     mesh_device: P150
     max_num_seqs: 8
     max_model_len: 49152
-    additional_config: {tt: {fabric_config: DISABLED}}
+    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1}}
     # no vision tower and a 49K pool: the prefill's transients need the room
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_VISION: "0",
           I2M_KV_POOL_TOKENS: "49152"}

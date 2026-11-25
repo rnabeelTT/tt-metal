@@ -44,7 +44,8 @@ _os.environ.setdefault("QWEN35_MOE_GU_OFFROW_X", "east" if _os.environ.get("I2M_
 _os.environ.setdefault("QWEN35_MOE_DN_SLOT", _os.environ.get("I2M_MOE_DN_SLOT", "1"))
 
 # I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
-# allocated L1 address (fast runtime mode does not check CB / L1-buffer clashes: an overlap hangs or corrupts)
+# allocated L1 address, CBs over an L1 tensor excluded (fast runtime mode does not check CB / L1-buffer clashes: an
+# overlap hangs or corrupts)
 if _os.environ.get("I2M_L1_CHECK") == "1":
     import traceback as _tb
 
@@ -55,9 +56,11 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
 
     def _checked(io, prog, *a, **k):
         dev = next((t.device() for t in io if t.device() is not None), None)
-        if dev is not None:
+        if dev is not None and hasattr(prog, "cbs"):  # (a MeshProgramDescriptor, e.g. tt/ccl.py's: not checked)
             per = {}
             for cb in prog.cbs:
+                if cb.has_buffer():  # (backed by an L1 tensor: its memory is that buffer's, not the CB region)
+                    continue
                 for r in cb.core_ranges.ranges():
                     for x in range(r.start.x, r.end.x + 1):
                         for y in range(r.start.y, r.end.y + 1):
@@ -65,7 +68,8 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
             cbs = max(per.values()) if per else 0
             base = _ttnn.get_allocator_base_address(dev, _ttnn.BufferType.L1)
             mv = _ttnn.get_memory_view(dev, _ttnn.BufferType.L1)
-            low = min((int(b["address"]) for b in mv.block_table
+            # (block_table addresses are offsets from the allocator base)
+            low = min((base + int(b["address"]) for b in mv.block_table
                        if str(b.get("allocated", "")).lower() in ("yes", "true", "1")), default=None)
             site = next((f"{f.filename.split('/')[-1]}:{f.lineno}" for f in reversed(_tb.extract_stack()[:-1])
                          if "thinkingmachines_inkling_2_mini/tt/" in f.filename), "?")
@@ -78,3 +82,25 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
         return _gen(io, prog, *a, **k)
 
     _ttnn.generic_op = _checked
+
+# I2M_RING_KB (default 32): the Tensix kernel-config ring (kernel binaries, runtime args, CB configs of the programs in
+# flight; 69 KB by default) grown by this many KB, the CB space below the L1 buffers shrunk by as much: a decode program
+# whose kernels do not fit beside the running ones waits for them, then loads with every core idle (aprep -> SDPA, the
+# SDPA's ~57 KB; pre -> attention gates; agate -> o_proj). Traced one die, position 300: B=1 / B=4 / 4-row verify
+# 17.68 / 28.71 / 31.24 -> 17.18 / 28.21 / 30.76 ms (+16 / +64 KB: B=1 17.32 / 17.07); logits bitwise (B=1, B=4,
+# verify). Every mesh this process opens without its own worker_l1_size gets it; the served profiles pass the same size
+# (tt-model.yaml additional_config tt.worker_l1_size, the &i2m_worker_l1 anchor: keep the two in step).
+RING_KB = int(_os.environ.get("I2M_RING_KB", "32"))
+WORKER_L1_DEFAULT = 1461248  # Blackhole: 1536 KB - the unreserved base (MEM_MAP_END + the 69 KB ring)
+WORKER_L1_SIZE = WORKER_L1_DEFAULT - RING_KB * 1024
+if RING_KB:
+    import ttnn as _ttnn_r
+
+    _open = _ttnn_r.open_mesh_device
+
+    def _open_ring(*a, **k):
+        if not k.get("worker_l1_size"):
+            k["worker_l1_size"] = WORKER_L1_SIZE
+        return _open(*a, **k)
+
+    _ttnn_r.open_mesh_device = _open_ring
