@@ -28,7 +28,7 @@ exec docker run -d --name ${SERVE_NAME:-i2m-serve} \
   --user "$(id -u):$(id -g)" -p ${PORT:-8000}:8000 \
   -e ARCH_NAME=blackhole -e HF_MODEL=thinkingmachines/Inkling-2-Mini -e MESH_DEVICE=$MESH -e HF_HUB_OFFLINE=1 \
   -e HOME=/tmp -e HF_HOME=/hf -e HF_HUB_CACHE=/hf/hub -e EXTRA_MODELS_DIR=/extra_models \
-  -e TT_METAL_LOGGER_LEVEL=Error -e TT_METAL_CACHE=/cache/tt -e TT_METAL_LOGS_PATH=/cache/logs -e I2M_WCACHE=/cache/wcache \
+  -e TT_METAL_LOGGER_LEVEL=Error -e TT_MESH_PASS_THROUGH_THREAD_POOL=1 -e TT_METAL_CACHE=/cache/tt -e TT_METAL_LOGS_PATH=/cache/logs -e I2M_WCACHE=/cache/wcache \
   -e VLLM_ENGINE_READY_TIMEOUT_S=7200 -e I2M_EXPERT_DT=${I2M_EXPERT_DT:-bfp8} -e I2M_KV_DT=${I2M_KV_DT:-bf16} \
   -e PYTHONPATH=/opt/tt-metal ${EXTRA} \
   --entrypoint bash "$IMG" -c "cd /tmp && exec vllm serve thinkingmachines/Inkling-2-Mini \

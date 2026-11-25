@@ -66,6 +66,11 @@ serve:
     ARCH_NAME: blackhole
     HF_MODEL: thinkingmachines/Inkling-2-Mini
     TT_METAL_LOGGER_LEVEL: Error
+    # 2 / 4 dies: mesh host -> device writes run on the calling thread. tt-metal's per-device dispatch and reader pool
+    # threads are pinned to the same CPU core per die, so each small decode-input write waited 1-5 ms for its pinned
+    # worker (caller ~0 CPU). Served TP2 speculative 9.90 -> 9.12 ms/token (pass 24.0 -> 21.1 ms), plain and TTFT
+    # unchanged, outputs identical. One die: no pool, no effect.
+    TT_MESH_PASS_THROUGH_THREAD_POOL: "1"
     VLLM_ENGINE_READY_TIMEOUT_S: "7200"
     I2M_EXPERT_DT: bfp8        # routed experts at bfp8 (the checkpoint's NVFP4 / MXFP8 dequantized): quality at the
     I2M_KV_DT: bf16            # fp32-vs-bf16 reference noise floor; bfp8 KV costs measurable KL
