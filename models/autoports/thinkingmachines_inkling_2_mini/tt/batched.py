@@ -563,19 +563,20 @@ class BatchedDecoder:
             ttnn.copy_host_to_device_tensor(ttnn.from_torch(t.contiguous(), dtype=dt, layout=lay, mesh_mapper=self.rep),
                                             dst)
 
-    def step(self):
-        """One decode step for all B slots from the persistent inputs -> logits [1, 1, B, Vp] fp32 (softcapped)."""
+    def step(self, out=None):
+        """One decode step for all B slots from the persistent inputs -> logits [1, 1, B, Vp] fp32 (softcapped; out: an
+        existing logits tensor to write them into)."""
         if not self.R:
-            return self._step()
+            return self._step(out)
         from . import bconv
 
         bconv.SEQ = (self.R, self.B // self.R, self.acc)
         try:
-            return self._step()
+            return self._step(out)
         finally:
             bconv.SEQ = None
 
-    def _step(self):
+    def _step(self, out=None):
         m, B, ops, cfg = self.m, self.B, self.m.ops, self.m.cfg
         self._msg = None  # (the current pass's message logits: _messages)
         e = ttnn.embedding(self.tokens, m.embed, layout=ttnn.TILE_LAYOUT)
@@ -603,12 +604,12 @@ class BatchedDecoder:
         x = self.materialize(x)
         self._msg = None
         if self.plan is None:
-            return m.head(x, blocks_n)
+            return m.head(x, blocks_n, out=out)
         h = self._mix(("head", -1), blocks_n, ids, D, ops.rms(x), m.final_Q, 1)[0]
         if not self.tap_at:
-            return m.head_tail(h)
+            return m.head_tail(h, out=out)
         hn = []
-        out = m.head_tail(h, normed=hn)
+        out = m.head_tail(h, normed=hn, out=out)
         tp = [ttnn.reshape(t, (1, 1, B, m.H)) for t in [self._tap[a] for a in self.tap_at] + hn]
         self.taps = ttnn.concat([ttnn.to_memory_config(t, ttnn.DRAM_MEMORY_CONFIG) for t in tp], dim=1)
         self._tap = {}
@@ -792,17 +793,20 @@ class TracedDecoder:
     def set_inputs(self, tokens, positions):
         self.dec.set_inputs(tokens, positions)
 
-    def capture(self, compile=True, post=None):
+    def capture(self, compile=True, post=None, out=None):
         """compile=False: the step's programs are already compiled (several widths: compile every width, THEN capture
         every trace; a program first compiled after a capture can be overwritten by that trace's replays).
-        post(logits): more device work captured into the same trace (its result: self.extra)."""
+        post(logits): more device work captured into the same trace (its result: self.extra).
+        out: the logits tensor the trace writes (allocated before the first capture of the mesh: a trace's live outputs
+        allocated after another trace's capture can sit on that trace's intermediates, which its replays overwrite;
+        post must then write into such tensors too)."""
         if compile:
-            out = self.dec.step()
+            o = self.dec.step(out=out)
             if post is not None:
-                post(out)
+                post(o)
         ttnn.synchronize_device(self.mesh)
         self.tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-        self.out = self.dec.step()
+        self.out = self.dec.step(out=out)
         self.extra = post(self.out) if post is not None else None
         ttnn.end_trace_capture(self.mesh, self.tid, cq_id=0)
         ttnn.synchronize_device(self.mesh)

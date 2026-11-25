@@ -19,6 +19,7 @@ Kernels: kernels/qpf_reader.cpp, qpf_compute.cpp, qpf_writer.cpp, qpf_rcb.hpp.""
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 import ttnn
@@ -50,26 +51,38 @@ def krow_mc(k, n):
                              ttnn.ShardSpec(dram_banks(), [k, n // 8], ttnn.ShardOrientation.ROW_MAJOR))
 
 
+def _untracked(dev):
+    """allocations outside the trace allocation tracker's accounting (a no-op without TT_METAL_TRACE_ALLOC_TRACKING)"""
+    scope = getattr(ttnn, "corruptible_allocation_scope", None)
+    return scope(dev) if scope is not None else contextlib.nullcontext()
+
+
 def krow_view(w, fn):
     """The no-copy view: run fn(view) with `view` a live WIDTH_SHARDED (K-row-major) tensor over w's own DRAM bytes ->
     (the interleaved tensor that replaces w: same address, same bytes; w itself is deallocated, ok: fn ran). Python has
     no API to alias a buffer with another spec, so the allocator is used: w's range is freed, the view allocated (DRAM
     is first fit, bottom up: it lands there unless a lower free hole fits; if not, fn is skipped and ok is False), fn
     queues its prefetch requests (the request keeps only the address), the view is freed and w's range re-taken.
-    Allocation never writes DRAM."""
+    Allocation never writes DRAM.
+    Trace safety: the range is the weight's from its load on (between the free and the re-take only the view, at the
+    same range, is allocated), so no trace's intermediates ever sit there and the re-taken weight is as safe as the
+    original. The allocations are outside the trace allocation tracker's accounting (they are new buffers made during
+    a later capture, which it would flag at every earlier trace's replay)."""
     dev, shape, dt = w.device(), w.shape, w.dtype
     a = w.buffer_address()
-    ttnn.deallocate(w)
-    v = ttnn.allocate_tensor_on_device(ttnn.Shape(list(shape)), dt, ttnn.TILE_LAYOUT, dev,
-                                       krow_mc(int(shape[-2]), int(shape[-1])))
+    with _untracked(dev):
+        ttnn.deallocate(w)
+        v = ttnn.allocate_tensor_on_device(ttnn.Shape(list(shape)), dt, ttnn.TILE_LAYOUT, dev,
+                                           krow_mc(int(shape[-2]), int(shape[-1])))
     ok = v.buffer_address() == a
     try:
         if ok:
             fn(v)
     finally:
-        ttnn.deallocate(v)
-        w2 = ttnn.allocate_tensor_on_device(ttnn.Shape(list(shape)), dt, ttnn.TILE_LAYOUT, dev,
-                                            ttnn.DRAM_MEMORY_CONFIG)
+        with _untracked(dev):
+            ttnn.deallocate(v)
+            w2 = ttnn.allocate_tensor_on_device(ttnn.Shape(list(shape)), dt, ttnn.TILE_LAYOUT, dev,
+                                                ttnn.DRAM_MEMORY_CONFIG)
         assert w2.buffer_address() == a, f"weight re-taken at {w2.buffer_address():#x}, not {a:#x}"
     return w2, ok
 

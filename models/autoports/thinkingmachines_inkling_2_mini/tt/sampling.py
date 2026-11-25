@@ -150,9 +150,10 @@ class DeviceTopK:
         self.rmax = RowMax(mesh, Vp) if TOPK_MAX else None
         self.rpack = RowPack(mesh, Vp) if TOPK_MAX and TOPK_DENSE else None
 
-    def device(self, lg, W: int):
+    def device(self, lg, W: int, outs=None):
         """Device half (traceable): lg [1, 1, W, Vp] fp32 TILE -> [(indices [1, 1, rows, K], logits - row max
-        [1, 1, rows, K] bf16, rows)] per group of <= 8 rows. Two fused top-k passes: the first's best bf16 value (within
+        [1, 1, rows, K] bf16, rows)] per group of <= 8 rows (outs: a previous call's result at this W, written in
+        place: a trace's live outputs allocated before any capture). Two fused top-k passes: the first's best bf16 value (within
         one bf16 ulp of the row max) shifts the fp32 row so the candidates sit near 0, where bf16 resolves them to
         ~1e-3 (softmax is shift-invariant; the arg max stays exact); a gather of the fp32 values would cost 3.5 ms."""
         lb = ttnn.typecast(lg, ttnn.bfloat16) if self.rmax is None else None
@@ -186,7 +187,14 @@ class DeviceTopK:
             if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
                 i2 = ttnn.all_gather(i2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N K]
                 v2 = ttnn.all_gather(v2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
-            if TOPK_DRAM:
+            if outs is not None:
+                i2d, v2d, _ = outs[len(parts)]
+                ttnn.copy(i2, i2d)
+                ttnn.copy(v2, v2d)
+                ttnn.deallocate(i2)
+                ttnn.deallocate(v2)
+                i2, v2 = i2d, v2d
+            elif TOPK_DRAM:
                 i2d, v2d = ttnn.to_memory_config(i2, ttnn.DRAM_MEMORY_CONFIG), ttnn.to_memory_config(v2, ttnn.DRAM_MEMORY_CONFIG)
                 ttnn.deallocate(i2)
                 ttnn.deallocate(v2)

@@ -748,13 +748,14 @@ class Inkling2Model:
         return ops.mixk(list(prev_src_n), [(lg, 4 * loop_idx, st) for lg in self._msg_lg], len(prev_src_n), 4,
                         out_mc=DRAM)
 
-    def head(self, x, blocks_n):
+    def head(self, x, blocks_n, out=None):
         """x [1,1,T,H] bf16 (layer 23's output) -> logits [1,1,T,Vp] fp32 (softcapped)."""
         ops = self.ops
-        return self.head_tail(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0])
+        return self.head_tail(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0], out=out)
 
-    def head_tail(self, h, normed=None):
-        """The final mix's output h -> logits (norm, LM head, softcap). normed: a list that gets the normed h."""
+    def head_tail(self, h, normed=None, out=None):
+        """The final mix's output h -> logits (norm, LM head, softcap). normed: a list that gets the normed h. out: a
+        logits tensor to write into (a trace's output allocated before any capture; the streamed head, <= 32 rows)."""
         ops = self.ops
         h = _bf(ops.rms(h, self.final_norm, out_dtype=ttnn.bfloat16))
         if normed is not None:
@@ -762,7 +763,7 @@ class Inkling2Model:
         if self.shead is not None:  # (one call per tile row of 32)
             T = int(h.shape[-2])
             if T <= 32:
-                return self.shead(h, self.lm_head, T)
+                return self.shead(h, self.lm_head, T, out=out)
             return ttnn.concat([self.shead(ttnn.slice(h, [0, 0, r, 0], [1, 1, min(T, r + 32), int(h.shape[-1])]),
                                            self.lm_head, min(32, T - r)) for r in range(0, T, 32)], dim=2)
         lg = dmm(h, self.lm_head, ops.ckc, dtype=ttnn.float32, memory_config=DRAM, linear=True)
@@ -857,6 +858,7 @@ class Inkling2Model:
         for t in getattr(self, "_msg_lg", None) or []:  # (the per-pass message logits: chunk-sized, not kept)
             ttnn.deallocate(t)
         self._msg_lg = self._msg_src = None
+        self._blk = None  # (the last block: a chunk temporary, not kept past the forward)
         if taps is not None:
             hn = _bf(ops.rms(ops.mix(blocks_n + [ops.rms(x)], self.final_Q, 1)[0], self.final_norm))
             if rs is not None:

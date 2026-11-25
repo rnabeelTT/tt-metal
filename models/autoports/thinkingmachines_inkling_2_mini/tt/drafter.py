@@ -886,18 +886,29 @@ class DSparkDrafter:
         ids = self._host(self.cand_id).reshape(self.d_max, TOPK)[:d].long()
         return ids, self._host(self.cand_lg).reshape(self.d_max, TOPK)[:d].float()
 
-    def capture(self, taps_buf=None, d: int = 3, commit: bool = True, sample: bool = False, out_tokens=None):
+    def precompile(self, taps_buf=None, d: int = 3, commit: bool = True, sample: bool = False, out_tokens=None):
+        """capture()'s programs, run once eagerly: call before the mesh's FIRST trace capture when capture() comes after
+        another trace's (a program first compiled after a capture has its binaries where that trace's replays write)."""
+        self.sample = sample
+        self._traced_body(taps_buf, d, commit, out_tokens)  # (its result dropped: d = 1 returns a view of prev[0])
+        ttnn.synchronize_device(self.mesh)
+
+    def capture(self, taps_buf=None, d: int = 3, commit: bool = True, sample: bool = False, out_tokens=None,
+                compile=True):
         """Trace ctrl [+ commit of RC rows of taps_buf ([1, 4, R >= RC, H] bf16 TILE, kept at its address)] + draft(d).
         The caller writes in_anchor / in_p0 / in_n (set_inputs) and the taps buffer before each replay(); sampled
         drafts (sample) also the noise (set_gumbel). out_tokens: a uint32 [1, d + 1] ROW_MAJOR device tensor (the
-        verify pass's tokens) the trace also writes [anchor, drafts] into."""
+        verify pass's tokens) the trace also writes [anchor, drafts] into; its own token output is then freed (not
+        kept live past the capture: tokens None). compile=False: precompile() ran (with the same arguments)."""
         assert not commit or taps_buf is not None
+        if compile:
+            self.precompile(taps_buf, d, commit, sample, out_tokens)
         self.sample = sample
-        self._traced_body(taps_buf, d, commit, out_tokens)  # (compile every program before the capture)
-        ttnn.synchronize_device(self.mesh)
         self.trace = ttnn.begin_trace_capture(self.mesh, cq_id=0)
         self.tokens = self._traced_body(taps_buf, d, commit, out_tokens)
         ttnn.end_trace_capture(self.mesh, self.trace, cq_id=0)
+        if out_tokens is not None:
+            self.tokens = None  # (dropped, not deallocated: d = 1 returns a view of prev[0])
         ttnn.synchronize_device(self.mesh)
         return self.trace
 

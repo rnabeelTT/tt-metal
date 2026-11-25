@@ -33,11 +33,13 @@ class StreamHead(DecodeLinear):
         # bitwise unchanged
         self.sc_rows = os.environ.get("I2M_HEAD_SC", "1") == "1"
 
-    def __call__(self, x, w, rows, out_memory_config=ttnn.DRAM_MEMORY_CONFIG):
-        """x [1, 1, rows, K] bf16 TILE (rows <= 32), w = weight([W]) -> softcapped logits [1, 1, rows, N] fp32 TILE."""
+    def __call__(self, x, w, rows, out_memory_config=ttnn.DRAM_MEMORY_CONFIG, out=None):
+        """x [1, 1, rows, K] bf16 TILE (rows <= 32), w = weight([W]) -> softcapped logits [1, 1, rows, N] fp32 TILE
+        (out: an existing tensor of that spec to write them into)."""
         assert 1 <= rows <= 32
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), ttnn.float32, ttnn.TILE_LAYOUT,
-                                             self.mesh_device, out_memory_config)
+        if out is None:
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), ttnn.float32, ttnn.TILE_LAYOUT,
+                                                 self.mesh_device, out_memory_config)
         cb_x, cb_w, cb_out = 0, 1, 16
         fmt = lambda i, dt, page, pages: ttnn.CBDescriptor(  # noqa: E731
             total_size=page * pages, core_ranges=self.cores,

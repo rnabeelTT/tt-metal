@@ -352,6 +352,15 @@ class Inkling2ForCausalLM:
             for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
                 self.m.reset()
                 self._host_logits(self.m.forward_packed(torch.zeros(n, dtype=torch.long), [(0, n, 0, n, 0, 0)]), 1)
+            if self.dr is not None:  # the speculative prefill's (the drafter taps, their slices into each commit)
+                for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
+                    self.m.reset()
+                    taps = []
+                    self.m.forward_packed(torch.zeros(n, dtype=torch.long), [(0, n, 0, n, 0, 0)], taps=taps)
+                    tp = ttnn.slice(taps[0], [0, 0, 0, 0], [1, 4, n, self.m.H])
+                    for v in range(64, n + 1, 64):
+                        self._dr_commit(tp, 0, v)
+                    del taps, tp
             # several sequences per chunk (every lane once), at every chunk size
             L = self.m.lanes
             for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD):
@@ -404,27 +413,36 @@ class Inkling2ForCausalLM:
         if not self.already_warmed_up_prefill:
             self.warmup_model_prefill()
         if self.trs and not self._captured:
+            # Trace safety: nothing a replay can overwrite may be allocated after the first capture and still be live at
+            # a replay: every program runs once here (its binaries are allocated at its first run), and each trace's
+            # live outputs (logits, top-k candidates) are this eager pass's, written in place by the captures
+            # (TT_METAL_TRACE_ALLOC_TRACKING=1 checks it at every replay)
             t0 = time.time()
+            res = {}
             for w in self.trs:  # every width's programs first (eager), then the captures
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
                 out = self.decs[w].step()
                 self._host_logits(out, w)  # (the readback untilize is a program too)
-                parts = self.topk.device(out, w)  # the device-sampling programs of this width
-                if self.ds is not None:
-                    self.ds.device(parts, self.decs[w].tokens, w)
+                parts = self._post(out, w)  # the device-sampling programs of this width
                 self.topk.host(parts)
-            if self.dr is not None:
-                self._spec_warm()
+                self._post(out, w, outs=parts)  # (in place: the captures' form)
+                res[w] = (out, parts)
+            for b in range(self.B):  # every slot's state load (a prefill's end: the row slices depend on the slot)
+                self.dec.load_slot(b, 0)
+            vres = self._spec_warm() if self.dr is not None else None
             ttnn.synchronize_device(self.mesh)
             if self.dr is not None:
                 R = SPEC + 1
                 self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
-                self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R))
-                # (its taps buffer: the verify trace's taps output; sampled drafts: zero noise = greedy)
-                self.dr.capture(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens)
+                vout, vparts = vres
+                self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R, outs=vparts), out=vout)
+                # (its taps buffer: the verify trace's taps output; sampled drafts: zero noise = greedy; the verify
+                # capture is the mesh's first, so its taps, allocated in it, are no other trace's intermediates)
+                self.dr.capture(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens, compile=False)
             for w, tr in self.trs.items():
                 self.decs[w].set_inputs(torch.zeros(w, dtype=torch.long), torch.full((w,), -1))
-                tr.capture(compile=False, post=lambda lg, w=w: self._post(lg, w))
+                out, parts = res[w]
+                tr.capture(compile=False, post=lambda lg, w=w, parts=parts: self._post(lg, w, parts), out=out)
             self._captured = True
             logger.info(f"decode traces captured (widths {self.widths}) in {time.time() - t0:.1f}s")
             if self.vt is not None:  # the largest image a request may hold must fit in what the captures left
@@ -438,9 +456,10 @@ class Inkling2ForCausalLM:
                                        f"I2M_VISION_MAX_TOKENS (or I2M_KV_POOL_TOKENS), or I2M_VISION=0: {e}") from e
                 logger.info(f"vision: images up to {n} tokens fit after the trace captures")
 
-    def _post(self, lg, w):
-        """The decode trace's tail: top-32 candidates (-> the host sampler) and the device sampler's token."""
-        parts = self.topk.device(lg, w)
+    def _post(self, lg, w, outs=None):
+        """The decode trace's tail: top-32 candidates (-> the host sampler; outs: written into these) and the device
+        sampler's token."""
+        parts = self.topk.device(lg, w, outs=outs)
         if self.ds is not None:
             self.ds.device(parts, self.decs[w].tokens, w)
         return parts
@@ -849,16 +868,21 @@ class Inkling2ForCausalLM:
 
     # ------------------------------------------------------------------ speculative decode
     def _spec_warm(self):
-        """Every eager program of speculative decode, compiled before the trace captures (the drafter warmed its own when
-        built)."""
+        """Every program of speculative decode, compiled before the trace captures (the drafter warmed its eager ones
+        when built; here its traced step's) -> the verify trace's outputs (logits, candidates) to capture into."""
         R = SPEC + 1
         self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
-        self.topk(self.ver.step(), R)
+        out = self.ver.step()
+        parts = self.topk.device(out, R)
+        self.topk.host(parts)
+        self.topk.device(out, R, outs=parts)
         for j in range(1, R):  # leaving speculative decode from row j
             self.ver.move_row(j, 0)
         toks = [ttnn.reshape(t, (1, 1, 1, 1)) for t in self.dr.prev[:SPEC]]
         toks = ttnn.concat(toks, dim=-1) if SPEC > 1 else toks[0]
         self.dr.write_tokens(toks, self.ver.tokens)  # (the drafter trace's token hand-off)
+        self.dr.precompile(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens)
+        return out, parts
 
     def _dr_commit(self, taps, p0, valid):
         """A prefill chunk's taps [1, 4, T, H] (rows past `valid`: padding) into the drafter, <= 512 rows per call."""
@@ -895,7 +919,7 @@ class Inkling2ForCausalLM:
         pre, s["pre"] = s.get("pre"), None
         if commit is None:  # (right after the prefill, whose commit is done)
             self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))  # (the drafter samples from its q at the request's T)
-            _, drafts = self.dr.draft(t, p, d=d, sample=True)
+            drafts = self.dr.draft(t, p, d=d, sample=True)[1]  # (its device tokens not kept: freed before the replay)
             self.vtr.set_inputs(torch.tensor([t] + drafts), torch.arange(p, p + R))
         else:
             if pre != (r, t, commit):
