@@ -311,12 +311,13 @@ class Inkling2ForCausalLM:
         max_seq_len = int(max_seq_len or 32768)
         B = int(max_batch_size)
         t0 = time.time()
-        from . import WORKER_L1_SIZE
+        from . import worker_l1_size
 
         wl1 = 1572864 - ttnn.get_allocator_base_address(mesh_device, ttnn.BufferType.L1)  # (Blackhole: 1536 KB L1)
-        (logger.info if wl1 == WORKER_L1_SIZE else logger.warning)(
+        want = worker_l1_size(mesh_device.get_num_devices())
+        (logger.info if wl1 == want else logger.warning)(
             f"{cls.__name__}: worker_l1_size {wl1} (kernel-config ring {(1572864 - wl1 - 0xA000) // 1024} KB; "
-            f"expected {WORKER_L1_SIZE}, I2M_RING_KB)")
+            f"expected {want}, I2M_RING_KB / I2M_RING_KB_TP2)")
         pool = kv_pool_tokens(mesh_device.get_num_devices(), max_seq_len, B)
         model = Inkling2Model(mesh_device, max_seq_len=max_seq_len + max(64, PREFILL_PAD), expert_dtype=DT[EXPERT_DT], kv_dtype=DT[KV_DT],
                               prefill_chunk=PREFILL_CHUNK, slots=B, kv_pool_tokens=pool)
