@@ -232,6 +232,9 @@ class HYV4FlashForConditionalGeneration:
         self._decode_steps = 0
         self.multi = bool(getattr(engine, "multi", False))
         self._row_slot = {}  # multi: vLLM batch row -> model slot
+        # multi: rows whose prompt the shared pool could not take (PoolFull past every eviction): the request is ended
+        # with EOS instead of the engine dying; each of its decode steps returns EOS until vLLM drops it
+        self._rejected = set()
         if self.multi:  # (a finished request's slot the engine evicted from the shared pool: no row maps to it)
             engine.on_evict = lambda s: [self._row_slot.pop(r) for r in [r for r, v in self._row_slot.items() if v == s]]
 
@@ -305,6 +308,23 @@ class HYV4FlashForConditionalGeneration:
     def allocate_kv_cache_per_layer(self, per_layer_specs):
         return [(None, None)] * len(per_layer_specs)
 
+    def release_request(self, slot):
+        """The plugin's lifecycle hook (TTModelRunner._release_model_request): vLLM finished or preempted the request
+        at this state slot (our row; the plugin calls it before the row is given to anyone else). Its engine slot is
+        finished now (kept for prefix reuse, else freed), so its pool extent is evictable as soon as vLLM counts its
+        tokens free. Without it a decoding request vLLM preempted to admit long prompts kept its extent until the next
+        decode step or a prefill on its row, and a prefill step meanwhile ended in "Hy4 pool full" (2026-11-25)."""
+        if not self.multi:
+            return
+        row = int(slot)
+        if os.environ.get("HY4_POOL_LOG", "0") == "1":
+            logger.info(f"Hy4 release_request row {row}: rows {self._row_slot}, seqs {sorted(self._engine.seqs)}, "
+                        f"cp {sorted(self._engine.cp)}")
+        self._rejected.discard(row)
+        s = self._row_slot.pop(row, None)
+        if s is not None and s not in self._row_slot.values():
+            self._engine.finish(s)
+
     # ------------------------------------------------------------------ warm-up
     def warmup_model_prefill(self, kv_cache, enable_trace, *args, **kwargs):
         if getattr(self, "vit", None) is not None and not self._warmed:
@@ -328,6 +348,23 @@ class HYV4FlashForConditionalGeneration:
         for r in [r for r, s in self._row_slot.items() if s == slot and r != row]:
             del self._row_slot[r]
         self._row_slot[row] = slot
+        self._rejected.discard(row)
+
+    def _reject(self, row, slot, err):
+        """Last resort for a prompt the shared pool cannot take (vLLM's token budget should have queued it; PoolFull
+        means the engine's extents and vLLM's count disagree): the request ends with EOS, the server keeps running."""
+        logger.error(f"Hy4: request on row {row} rejected (ended with EOS): {err}")
+        self._engine.finish(slot)
+        if self._row_slot.get(row) == slot:
+            del self._row_slot[row]
+        self._rejected.add(row)
+        self._engine.stats["rejected"] = self._engine.stats.get("rejected", 0) + 1
+        return int(min(self._engine.eos))
+
+    def _eos_logits(self, V):
+        lg = torch.full((V,), float("-inf"), dtype=torch.float32)
+        lg[int(min(self._engine.eos))] = 0.0
+        return lg
 
     def _parts(self, N, kwargs):
         """(start positions, intermediate flags) of a prefill step's rows. A row is an intermediate part of its prompt
@@ -404,10 +441,15 @@ class HYV4FlashForConditionalGeneration:
         (its slot: the row's prompt in parts, else a new one), the whole short prompts packed as before. A prompt in
         parts that this step does not continue was preempted / aborted: dropped (its computed positions kept for
         prefix reuse). Image prompts: nothing until their last part, then one whole prefill."""
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolFull
+
         N = int(tokens.shape[0])
         eng = self._engine
         V = int(eng.V)
         part = [u for u in range(N) if (inter[u] or start[u] > 0) and mms[u] is None]
+        if os.environ.get("HY4_POOL_LOG", "0") == "1":
+            logger.info(f"Hy4 parts step: rows {rows} start {list(start)} inter {list(inter)} plens {plens} "
+                        f"row_slot {self._row_slot} cp {sorted(eng.cp)} seqs {sorted(eng.seqs)}")
         cont = {}
         for u in part:  # continuations: the slot holding the prompt's earlier parts (the plugin may move its row)
             if start[u] > 0:
@@ -447,8 +489,17 @@ class HYV4FlashForConditionalGeneration:
                 slot = eng.alloc(taken=[self._row_slot[rows[w]] for w in whole] + list(cont.values()),
                                  ids=tokens[u, : plens[u]].tolist(), part=bool(inter[u]))
                 self._bind(row, slot)
-            tok = eng.prefill_part(slot, tokens[u, : plens[u]].tolist(), final=not inter[u],
-                                   sampling=_mtp_sampling(sp, u))
+            try:
+                tok = eng.prefill_part(slot, tokens[u, : plens[u]].tolist(), final=not inter[u],
+                                       sampling=_mtp_sampling(sp, u))
+            except PoolFull as e:
+                if inter[u]:  # an intermediate part: dropped; the prompt is computed again from its next part on
+                    logger.warning(f"Hy4: prompt part on row {row} deferred (pool full): {e}")
+                    eng.finish(slot)
+                    continue
+                out[u] = self._reject(row, slot, e)
+                logits[u, 0, :] = self._eos_logits(V)
+                continue
             if not inter[u]:
                 out[u] = tok
                 if sp is None:
@@ -479,24 +530,41 @@ class HYV4FlashForConditionalGeneration:
                 ids = reqs[-1][1]
                 logger.info(f"Hy4 prompt row {row} slot {slot}: {len(ids)} tok, hash {hash(tuple(ids)) & 0xFFFFFFFF:08x}, "
                             f"head {ids[:12]}, tail {ids[-16:]}, sampling {reqs[-1][2]}")
-        if mms is not None and any(m is not None for m in mms):  # image prompts one by one, the text ones packed
-            txt = [i for i, m in enumerate(mms) if m is None]
-            out = [None] * len(reqs)
+        from models.autoports.tencent_hy4_flash.tt.pool import PoolFull
+
+        rej = set()
+
+        def one(i):  # (PoolFull fallback: one prompt at a time; a prompt this call already prefilled keeps its token)
+            slot, ids, smp = reqs[i]
+            if slot in eng.seqs:
+                return eng.seqs[slot]["tok"]
+            try:
+                return eng.prefill(slot, ids, smp, mm=None if mms is None else mms[i])
+            except PoolFull as e:
+                rej.add(i)
+                return self._reject(rows[i], slot, e)
+
+        out = [None] * len(reqs)
+        txt = [i for i in range(len(reqs)) if mms is None or mms[i] is None]
+        try:  # simultaneous short prompts: one packed prefill pass
             for i, t in zip(txt, eng.prefill_many([reqs[i] for i in txt]) if txt else []):
                 out[i] = t
-            for i, m in enumerate(mms):
-                if m is not None:
-                    slot, ids, smp = reqs[i]
-                    out[i] = eng.prefill(slot, ids, smp, mm=m)
-        else:
-            out = eng.prefill_many(reqs)  # simultaneous short prompts: one packed prefill pass
+        except PoolFull as e:
+            logger.warning(f"Hy4: {len(txt)} prompts one at a time (pool full for them together): {e}")
+            for i in txt:
+                out[i] = one(i)
+        for i in range(len(reqs)):  # image prompts one by one
+            if out[i] is None:
+                out[i] = one(i)
         if sp is not None:
             return torch.tensor(out, dtype=torch.int64).reshape(N, 1)
-        for slot in slots:
-            eng.seqs[slot]["adopt"] = True
         V = int(eng.V)
         logits = torch.full((N, 1, V), float("-inf"), dtype=torch.float32)
         for u, slot in enumerate(slots):
+            if u in rej:
+                logits[u, 0, :] = self._eos_logits(V)
+                continue
+            eng.seqs[slot]["adopt"] = True
             logits[u, 0, :] = eng.last_logits[slot][:V]
         return logits
 
@@ -513,18 +581,22 @@ class HYV4FlashForConditionalGeneration:
     # ------------------------------------------------------------------ decode
     def _remap(self, mapping):
         """vLLM batch condense: mapping[new row] = old row (None / -1: empty)."""
-        old = dict(self._row_slot)
-        self._row_slot = {}
+        old, rej = dict(self._row_slot), self._rejected
+        self._row_slot, self._rejected = {}, set()
         for new, o in enumerate(torch.as_tensor(mapping).reshape(-1).tolist() if not isinstance(mapping, (list, tuple))
                                 else list(mapping)):
             if o is not None and int(o) >= 0 and int(o) in old:
                 self._row_slot[new] = old[int(o)]
+            if o is not None and int(o) >= 0 and int(o) in rej:
+                self._rejected.add(new)
         for slot in set(old.values()) - set(self._row_slot.values()):
             self._engine.finish(slot)
 
     def _decode_multi(self, tokens, pos, sp, kwargs):
         eng = self._engine
         live = [i for i in range(pos.numel()) if int(pos[i]) >= 0]
+        rej = [i for i in live if i in self._rejected]  # (requests the pool could not take: EOS until vLLM drops them)
+        live = [i for i in live if i not in self._rejected]
         # (a row off this step keeps its slot: freed only when the row is prefilled again; rows <= slots, so no leak)
         # slots of rows not in this step (finished / preempted in vLLM): evictable when the shared pool runs short
         eng.idle = {s for r, s in self._row_slot.items() if r not in live}
@@ -539,8 +611,12 @@ class HYV4FlashForConditionalGeneration:
             res = eng.step_logits({self._row_slot[i]: (int(tokens[i]), int(pos[i])) for i in live}) if live else {}
             for i in live:
                 logits[i, 0, :] = res[self._row_slot[i]][:V]
+            for i in rej:
+                logits[i, 0, :] = self._eos_logits(V)
             return logits
         out = torch.full((tokens.numel(), SPEC_K + 1 if SPEC_K > 0 else 1), -1, dtype=torch.int32)
+        for i in rej:
+            out[i, 0] = int(min(eng.eos))
         if not live:
             return out
         auth = bool(kwargs.get("reload_inputs", False) or kwargs.get("reset_batch", False))

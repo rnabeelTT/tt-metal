@@ -268,6 +268,16 @@ class Hy4BatchEngine:
                 self._free(victims[0][1])
                 self.pool_stats["evicted"] += 1
                 continue
+            # prompts in parts still inside their slot's kept sequence (not started: prefix reuse pending) hold the
+            # whole kept extent while vLLM counts only the prompt sent so far: their reuse dropped, they compute from
+            # the start once their next part comes (2026-11-25: two such slots held ~117K tokens past vLLM's count)
+            waiting = [u for u, st in self.cp.items() if not st["go"] and u in m.ext and u != slot
+                       and u not in self._pinned]
+            if waiting:
+                for u in waiting:
+                    self._free(u)
+                self.pool_stats["evicted"] += len(waiting)
+                continue
             zombies = [u for u in self.seqs if u in self.idle and u != slot and u not in self._pinned
                        and u not in self.cp]
             if zombies:  # (finished in vLLM, its pool tokens already counted free there)
@@ -327,6 +337,17 @@ class Hy4BatchEngine:
             if u == exclude or e is None:
                 continue
             keep = min(rup(q["pos"] + self.k + 3 + self.SLACK), m.ext_rows)
+            if keep < e[1]:
+                m.ext[u] = (e[0], keep)
+                cut = True
+        # prompts in parts between their parts: the computed rows + lookahead (their last part's padded rows and soft
+        # headroom are never read; the next part re-reserves its rows). Untrimmed, several long prompts in parts held
+        # ~2.5K tokens each past vLLM's count of them: PoolFull with the vLLM budget not spent (2026-11-25).
+        for u, st in self.cp.items():
+            e = m.ext.get(u)
+            if u == exclude or e is None or not st["go"]:
+                continue
+            keep = min(rup(st["done"] + self.SLACK), m.ext_rows)
             if keep < e[1]:
                 m.ext[u] = (e[0], keep)
                 cut = True
@@ -485,9 +506,9 @@ class Hy4BatchEngine:
         """A text prompt prefilled in parts with other sequences' decode steps in between (vLLM chunked prefill):
         ids = its tokens known so far (positions 0 .. e), final: e is its end. Computes up to the last fresh-prefill
         chunk boundary <= e (final: to the end): every chunk runs exactly as in prefill() of the whole prompt (same
-        positions, rows, programs: bit-identical caches and logits). Between parts the slot is pinned (never allocated,
-        trimmed or evicted); other slots' decode passes never address its caches; its model / indexer state is kept by
-        set_slot; the prefill ring's window before its next part by _swa_yield / swa_resume; the prefill constants are
+        positions, rows, programs: bit-identical caches and logits). Between parts the slot is pinned (never allocated
+        or evicted; under pool pressure its extent is cut to the computed rows, _trim); other slots' decode passes
+        never address its caches; its model / indexer state is kept by set_slot; the prefill ring's window before its next part by _swa_yield / swa_resume; the prefill constants are
         released after every part (before any decode replay). Prefix reuse: a first part the slot's kept sequence
         already holds is not started until the prompt leaves it (the reuse then reaches as far as prefill()'s).
         -> the first token (final), else None."""
@@ -540,6 +561,8 @@ class Hy4BatchEngine:
             return None
         st["t"] += time.time() - t0
         self.cp.pop(slot)
+        # live from here: not a zombie (_ensure) because the last decode step, before this prompt ended, did not list it
+        self.idle.discard(slot)
         m._swa_hold.discard(slot)
         r = st["r"]
         if self.pc_on:
