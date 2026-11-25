@@ -436,7 +436,13 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
                                 one_min=one)
         o = ttnn.reshape(o, (1, 1, B, NH * HD))
         o = _bf(ttnn.multiply(_f32(o), ttnn.sigmoid(_f32(g))))
-    out = proj(w, "o", o)
+    out = None
+    if getattr(w, "opf", None) is not None:  # (its weight prefetched: tt/prefetch.py GcbO)
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch import o_proj as pf_o
+
+        out = pf_o(w, o, B)
+    if out is None:
+        out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, B, w.H))
     return all_reduce(out, w.mesh, tt_ccl, site="mixer", packed_out=packed_out) if N > 1 else out

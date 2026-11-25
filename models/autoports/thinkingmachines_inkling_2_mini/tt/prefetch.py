@@ -35,6 +35,14 @@ ON = os.environ.get("I2M_PREFETCH", "1") == "1"
 DIES = int(os.environ.get("I2M_PREFETCH_DIES", "2"))
 KBQ = int(os.environ.get("I2M_PREFETCH_KBQ", "24"))
 RING = int(os.environ.get("I2M_PREFETCH_RING", "0"))  # (GCB pages; 0: the whole q)
+# I2M_PF_O (default 1): the o_proj weight prefetched too (GcbO), requested right after the q|k|v consumer: it streams
+# during the conv / prep / SDPA / output gate; I2M_OPF_H32 (debug): 32-row activation tiles
+O_ON = os.environ.get("I2M_PF_O", "1") == "1"
+# I2M_PF_O_SLOTS (default 8 on one die, 16 on two): only for models of up to this many slots: the o global CB (~104 KB
+# of L1 on every core, one die) does not fit beside one die's 16-row MoE gate|up (1008 KB of CBs: 6 KB short)
+O_SLOTS = int(os.environ.get("I2M_PF_O_SLOTS", "0"))
+SLOTS = 1  # (the model being built: set by Inkling2Model before its layers)
+OPF_H32 = os.environ.get("I2M_OPF_H32", "0") == "1"
 
 
 RCB = 31
@@ -219,7 +227,7 @@ class GcbQKV:
                 ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_reader.cpp"), core_ranges=cores, compile_time_args=rd_ct + [ack],
                                       runtime_args=rt_for(rd, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
-                ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_writer.cpp"), core_ranges=cores, compile_time_args=wr_ct + [ack, RCB, 1 if drain else 0],
+                ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_writer.cpp"), core_ranges=cores, compile_time_args=wr_ct + [ack, RCB, 1 if drain else 0, 4096],
                                       runtime_args=rt_for(wr, cores),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
             ]
@@ -230,6 +238,84 @@ class GcbQKV:
         io = [xs[0], xs[1], xs[2], ws[1], ws[2]] + outs
         ttnn.generic_op(io, ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
         return outs
+
+
+class GcbO(GcbQKV):
+    """The decode o_proj with its weight prefetched into a global CB (I2M_PF_O): one column per receiver (R | the bank's
+    columns), bitwise ttnn.linear's 1D decode matmul (kernels/opf_compute.cpp: its K blocks, packer L1 accumulation
+    and reload); kernels/qpf_reader.cpp / qpf_writer.cpp move the pages / activation / output."""
+
+    def __init__(self, mesh, k, n, R, kbq, lin, fidelity):
+        super().__init__(mesh, k, n, 256, R=R, kvr=1, kbq=kbq, kv_split=False, fidelity=fidelity)
+        self.n, self.lin = n, lin
+
+    def __call__(self, x, w, rows, drain=False, out_mc=ttnn.DRAM_MEMORY_CONFIG):
+        """x [1, 1, rows, K] bf16 (interleaved); w: the o weight (its bytes come through the GCB) -> [1, 1, rows, n]
+        bf16. drain: only pop the GCB (an orphan request)."""
+        # (16-row tiles at <= 16 rows: bitwise ttnn.linear; 4 / 8-row tiles are not: the FP32 partial's reload)
+        h = 16 if rows <= 16 and not OPF_H32 else 32
+        kt, npr = self.kt, self.npr
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                             self.mesh, out_mc)
+        cb_x, cb_wq, cb_part, cb_oq = 0, 2, 3, 16
+        fmt = lambda i, d, page, pages, th=32: ttnn.CBDescriptor(  # noqa: E731
+            total_size=page * pages, core_ranges=self.cores,
+            format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=d, page_size=page,
+                                                        tile=ttnn.TileDescriptor(th, 32) if th < 32 else None)])
+        gq = ttnn.CBDescriptor()
+        gq.total_size = self.ring_blocks * self.page
+        gq.core_ranges = self.cores
+        gq.format_descriptors = [ttnn.CBFormatDescriptor(buffer_index=cb_wq, data_format=ttnn.bfloat8_b, page_size=1088)]
+        gq.remote_format_descriptors = [ttnn.CBFormatDescriptor(buffer_index=RCB, data_format=ttnn.bfloat8_b,
+                                                                page_size=self.page)]
+        gq.set_global_circular_buffer(self.gcb)
+        cbs = [fmt(cb_x, ttnn.bfloat16, 64 * h, kt, h), gq, fmt(cb_part, ttnn.float32, 128 * h, npr, h),
+               fmt(cb_oq, ttnn.bfloat16, 64 * h, 2 * npr, h)]
+        rd_ct = [cb_wq, cb_wq, kt, 1088, 1, 2, 1, 1, self.qblk, RCB, 1 if drain else 0]
+        wr_ct = [cb_x, cb_oq, cb_oq, kt, rows, h]
+        wr_ct += ttnn.TensorAccessorArgs(x).get_compile_time_args()
+        wr_ct += ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        cp_ct = [cb_x, cb_wq, cb_part, cb_oq, kt, self.kbq, npr, self.lin]
+        rd, wr, cp = {}, {}, ttnn.RuntimeArgs()
+        for (cx, cy), (b, r) in self.assign.items():
+            rd[(cx, cy)] = [self.nqb, b, 0, 0] + [0] * 6
+            segs = [] if drain else [x.buffer_address(), out.buffer_address(), b + 8 * r * npr, npr, 0]
+            wr[(cx, cy)] = ([1] if segs else [0]) + segs
+            wr[(cx, cy)] += [0] * (16 - len(wr[(cx, cy)])) + [self.nqb]
+            cp[cx][cy] = [0 if drain else 1]
+
+        def rt_for(args, cores):
+            rt = ttnn.RuntimeArgs()
+            for c in ttnn.corerange_to_cores(cores, row_wise=True):
+                rt[c.x][c.y] = args[(c.x, c.y)]
+            return rt
+
+        n1 = [ttnn.CoreCoord(cx, cy) for (cx, cy), (b, _) in self.assign.items() if b in self.noc1_banks]
+        n0 = [ttnn.CoreCoord(cx, cy) for (cx, cy), (b, _) in self.assign.items() if b not in self.noc1_banks]
+        dm = ttnn.DataMovementConfigDescriptor
+        kernels = []
+        for cl, rnoc, wnoc in ((n0, ttnn.NOC.NOC_0, ttnn.NOC.NOC_1), (n1, ttnn.NOC.NOC_1, ttnn.NOC.NOC_0)):
+            if not cl:
+                continue
+            cores = _range_set(cl)
+            ack = 1 if rnoc == ttnn.NOC.NOC_1 else 0
+            kernels += [
+                ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_reader.cpp"), core_ranges=cores,
+                                      compile_time_args=rd_ct + [ack], runtime_args=rt_for(rd, cores),
+                                      config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
+                ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_writer.cpp"), core_ranges=cores,
+                                      compile_time_args=wr_ct + [ack, RCB, 1 if drain else 0, 2048],
+                                      runtime_args=rt_for(wr, cores),
+                                      config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
+            ]
+        u2d = [ttnn.UnpackToDestMode.Default] * 64
+        u2d[cb_part] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=self.fidelity, fp32_dest_acc_en=True, math_approx_mode=False)
+        cfg.unpack_to_dest_mode = u2d
+        kernels.append(ttnn.KernelDescriptor(kernel_source=str(KDIR / "opf_compute.cpp"), core_ranges=self.cores,
+                                             compile_time_args=cp_ct, runtime_args=cp, config=cfg))
+        ttnn.generic_op([x, out], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        return out
 
 
 _STATE = {}  # id(mesh) -> {"mesh", "objs": {key: GcbQKV}, "cap": capturing a trace}
@@ -255,6 +341,7 @@ def _hook_capture():
     def _begin(mesh, *a, **k):
         st = _STATE.get(id(mesh))
         if st is not None:
+            drain_pending(st)
             for pf in st["objs"].values():  # (an orphan left in the FIFO would shift every replay's weights)
                 resync(pf)
                 pf.cap_bal = 0
@@ -290,13 +377,33 @@ def qkv_prefetch(mesh, k, nq, nkv, fidelity):
     st = _STATE.get(id(mesh))
     if st is None:
         ttnn.experimental.start_tensor_prefetcher(mesh)
-        st = _STATE[id(mesh)] = {"mesh": mesh, "objs": {}, "cap": False}
+        st = _STATE[id(mesh)] = {"mesh": mesh, "objs": {}, "cap": False, "opend": None}
     key = (k, nq, nkv, fidelity)
     if key not in st["objs"]:
         kt = k // 32
         kbq = KBQ if kt % KBQ == 0 else kt
         pf = GcbQKV(mesh, k, nq, nkv, R=R, kvr=ckv, kbq=kbq, ring_blocks=RING or None, kv_split=True,
                     fidelity=fidelity)
+        pf.orphans, pf.cap_bal, pf.last = 0, 0, None
+        st["objs"][key] = pf
+    return st["objs"][key]
+
+
+def o_prefetch(mesh, k, n, fidelity):
+    """The shared prefetching o_proj for these shapes (after qkv_prefetch started the prefetcher), or None"""
+    st = _STATE.get(id(mesh))
+    cap = O_SLOTS or (8 if mesh.get_num_devices() == 1 else 16)
+    if not O_ON or SLOTS > cap or st is None or n % 256 or k % 32:
+        return None
+    kt, cn = k // 32, n // 256
+    R = max(d for d in range(1, 14) if cn % d == 0)
+    if cn // R > 4:
+        return None
+    key = ("o", k, n, fidelity)
+    if key not in st["objs"]:
+        kbq = KBQ if kt % KBQ == 0 else kt
+        lin = next(d for d in range(8, 0, -1) if kt % d == 0)  # (dmm's in0_block_w: tp_common._find_largest_divisor)
+        pf = GcbO(mesh, k, n, R, kbq, lin, fidelity)
         pf.orphans, pf.cap_bal, pf.last = 0, 0, None
         st["objs"][key] = pf
     return st["objs"][key]
@@ -311,7 +418,10 @@ def resync(pf):
         pf.dummy = [ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, pf.k]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                                                    pf.mesh, ttnn.DRAM_MEMORY_CONFIG) for _ in range(3)]
     while pf.orphans:
-        pf(pf.dummy, pf.last, 1, drain=True)
+        if isinstance(pf, GcbO):
+            pf(pf.dummy[0], None, 1, drain=True)
+        else:
+            pf(pf.dummy, pf.last, 1, drain=True)
         pf.orphans -= 1
 
 
@@ -319,19 +429,27 @@ def stop(mesh):
     """Stop the mesh's prefetcher (teardown, after the last consumer; orphan requests drained first)."""
     st = _STATE.pop(id(mesh), None)
     if st is not None:
+        drain_pending(st)
         for pf in st["objs"].values():
             resync(pf)
         ttnn.synchronize_device(mesh)
         ttnn.experimental.stop_tensor_prefetcher(mesh)
 
 
-def qkv(pf, w, xs, rows):
-    """One q|k|v application: queue its q prefetch (through the no-copy view; w.w_q is re-taken at the same address),
-    then run the consumer -> [q fp32, k bf16, v bf16]; today's DRAM path if the request cannot be queued."""
-    st = _STATE.get(id(pf.mesh))
-    cap = st is not None and st["cap"]
-    if not cap:
-        resync(pf)
+def drain_pending(st):
+    """An o request whose consumer never ran (an eager step cut short): counted as its GCB's orphan, drained (a capture
+    never leaves one: it would end unbalanced)."""
+    p = st.get("opend")
+    if p is not None:
+        st["opend"] = None
+        if not st["cap"]:
+            p.opf.orphans += 1
+            resync(p.opf)
+
+
+def _request(pf, w, cap, orphan=True, attr="w_q"):
+    """queue w's q (attr w_q) or o (w_o) prefetch into pf's GCB (through the no-copy view) -> True if queued. orphan:
+    count it as one until its consumer runs (eager; an o request is tracked as the mesh's pending one instead)"""
     queued = []
 
     def req(v):
@@ -340,18 +458,49 @@ def qkv(pf, w, xs, rows):
         pf.last = list(w.ms_w)  # (the k / v weights a drain call can name)
         if cap:
             pf.cap_bal += 1
-        else:
+        elif orphan:
             pf.orphans += 1
 
     try:
-        w.w_q, _ = krow_view(w.w_q, req)
+        t, _ = krow_view(getattr(w, attr), req)
+        setattr(w, attr, t)
     finally:
         w.ms_w[0] = w.w_q
-    if not queued:  # (the view did not land on the weight: no request, today's path)
+    return bool(queued)
+
+
+def qkv(pf, w, xs, rows):
+    """One q|k|v application: queue its q prefetch (through the no-copy view; w.w_q is re-taken at the same address),
+    then run the consumer -> [q fp32, k bf16, v bf16]; today's DRAM path if the request cannot be queued. Then its o
+    request (I2M_PF_O; FIFO: before the next application's q), consumed by o_proj()."""
+    st = _STATE.get(id(pf.mesh))
+    cap = st is not None and st["cap"]
+    if st is not None:
+        drain_pending(st)
+    if not cap:
+        resync(pf)
+    if not _request(pf, w, cap):  # (the view did not land on the weight: no request, today's path)
         return w.ms(xs, w.ms_w, rows)
     out = pf(xs, w.ms_w, rows)
     if cap:
         pf.cap_bal -= 1
     else:
         pf.orphans -= 1
+    if getattr(w, "opf", None) is not None and st is not None and _request(w.opf, w, cap, orphan=False, attr="w_o"):
+        st["opend"] = w
+    return out
+
+
+def o_proj(w, x, rows):
+    """The o_proj of the application whose o request is pending (queued by its q|k|v call) -> [1, 1, rows, n] bf16 in
+    DRAM; None: no request (the caller's DRAM path)"""
+    st = _STATE.get(id(w.mesh)) if getattr(w, "opf", None) is not None else None
+    if st is None or st.get("opend") is not w:
+        return None
+    st["opend"] = None
+    if x.is_sharded():
+        x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
+    out = w.opf(x, w.w_o, rows)
+    if st["cap"]:
+        w.opf.cap_bal -= 1
     return out

@@ -508,6 +508,9 @@ class Inkling2Model:
         from models.autoports.thinkingmachines_inkling_2_mini.tt import ccl as _ccl
 
         _ccl.prepare(mesh, cfg.hidden_size)  # (decode all-reduce scratch: before any trace capture)
+        from models.autoports.thinkingmachines_inkling_2_mini.tt import prefetch as _pf
+
+        _pf.SLOTS = slots  # (the o prefetch only up to I2M_PF_O_SLOTS slots: its L1)
         lids = range(cfg.num_hidden_layers) if layers is None else layers
         self.layers = {}
         for li in lids:

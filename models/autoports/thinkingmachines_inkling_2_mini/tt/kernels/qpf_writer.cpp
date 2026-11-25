@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Buffer-fed streamed decode projection, activation in + output out (BRISC): kernels/mstream_writer.cpp with the output
-// CB / tile size per segment (kind 0: cb_oq FP32, kind 1: cb_o BF16). Output column i of a segment goes to page
+// CB / tile size per segment (kind 0: cb_oq, FP32 q or BF16 o, kind 1: cb_o BF16). Output column i of a segment goes to page
 // col0 + 8 i (an interleaved weight's bank columns, n = bank + 8 c).
 //
 // runtime args: [nseg, then per segment: x_addr, out_addr, col0, ncols, kind; padded to 16, then nq (q blocks)]
@@ -27,6 +27,8 @@ void kernel_main() {
     constexpr uint32_t ack_w = get_compile_time_arg_val(o_args.next_compile_time_args_offset());
     constexpr uint32_t rcb = get_compile_time_arg_val(o_args.next_compile_time_args_offset() + 1);
     constexpr uint32_t drain = get_compile_time_arg_val(o_args.next_compile_time_args_offset() + 2);
+    // oqb: a kind-0 output tile's bytes (FP32 q: 4096; BF16 o_proj: 2048)
+    constexpr uint32_t oqb = get_compile_time_arg_val(o_args.next_compile_time_args_offset() + 3);
     const uint32_t nq = get_arg_val<uint32_t>(16);
     if constexpr (ack_w && drain) {
         for (uint32_t i = 0; i < nq; ++i) {
@@ -66,7 +68,7 @@ void kernel_main() {
 
     for (uint32_t s = 0; s < nseg; ++s) {
         const uint32_t kind = get_arg_val<uint32_t>(5 + 5 * s);
-        const uint32_t OB = kind == 0 ? 4096 : 2048;
+        const uint32_t OB = kind == 0 ? oqb : 2048;
         const uint32_t cb_out = kind == 0 ? cb_oq : cb_o;
         const auto s_o = TensorAccessor(o_args, get_arg_val<uint32_t>(2 + 5 * s), OB);
         const uint32_t col0 = get_arg_val<uint32_t>(3 + 5 * s);
