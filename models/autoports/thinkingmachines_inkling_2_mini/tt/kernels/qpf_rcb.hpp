@@ -20,4 +20,3 @@ FORCE_INLINE bool remote_avail(uint32_t cb_id, uint32_t num_pages) {
     invalidate_l1_cache();
     return *sent - *acked >= need;
 }
-
