@@ -82,30 +82,36 @@ serve_profiles:
     hardware: p300x2
     mesh_device: P300x2
     max_model_len: 1048576
+    # the traces take 39 MB of the trace region: 128 MB frees 172 MB per die for the drafter's caches to 64K (+185 MB)
+    additional_config: {tt: {trace_region_size: 134217728}}
     # 2048-row prefill chunks: +14% prefill; speculative decoding (DSpark drafter, 3 drafts per pass): the pool 2.06M ->
     # 1.7M tokens
-    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p150x4
     description: Four p150 boards (4 dies), same configuration as p300x2. Not run on p150 boards (the identical (1,4) mesh).
     hardware: p150x4
     mesh_device: P150x4
     max_model_len: 1048576
-    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000"}
+    additional_config: {tt: {trace_region_size: 134217728}}
+    env: {I2M_PREFILL_CHUNK: "2048", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "1700000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p300
     description: One p300 board (2 dies, tensor parallel 2), 16 sequences sharing a 491,520-token context.
     hardware: p300
     mesh_device: P300
     max_num_seqs: 16
     max_model_len: 491520
+    # the traces take 33 MB of the trace region: 96 MB frees 204 MB per die for the drafter's caches to 64K (+185 MB)
+    additional_config: {tt: {trace_region_size: 100663296}}
     # fabric init needs every visible chip in the mesh; speculative decoding: the pool 647K -> 520K tokens
-    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p150x2
     description: Two p150 boards (2 dies), same configuration as p300. Not run on p150 boards (the identical (1,2) mesh).
     hardware: p150x2
     mesh_device: P150x2
     max_num_seqs: 16
     max_model_len: 491520
-    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000"}
+    additional_config: {tt: {trace_region_size: 100663296}}
+    env: {TT_VISIBLE_DEVICES: "0,1", I2M_SPEC: "3", I2M_KV_POOL_TOKENS: "520000", I2M_SPEC_MAX_LEN: "65536"}
   - name: p150
     description: One p150 (1 die), 8 sequences sharing a 32,768-token context, speculative decoding
       at every length (the bfp8 experts take 27 of the die's 31.5 GiB). p150-long has a larger context, text only, without it.
@@ -113,7 +119,7 @@ serve_profiles:
     mesh_device: P150
     max_num_seqs: 8
     max_model_len: 32768
-    # the one-die traces take 18-24 MB of the trace region: 64 MB frees 236 MB for the drafter's 32K caches
+    # the traces take 24 MB of the trace region: 64 MB frees 236 MB for the drafter's 32K caches
     additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1, trace_region_size: 67108864}}
     # 512-row prefill chunks (one pass over the experts per 512 rows), the sliding layers' rings sized for 256 rows (their
     # KV writes + SDPA in 256-row sub-chunks): 1K TTFT 1.47 -> 0.83 s; 1024-row chunks do not fit beside 8 slots.
@@ -122,16 +128,18 @@ serve_profiles:
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_SPEC: "3",
           I2M_KV_POOL_TOKENS: "32768", I2M_SPEC_MAX_LEN: "32768"}
   - name: p150-long
-    description: One p150 (1 die), 8 sequences sharing a 49,152-token context, text only, no
+    description: One p150 (1 die), 8 sequences sharing a 57,344-token context, text only, no
       speculative decoding.
     hardware: p150
     mesh_device: P150
     max_num_seqs: 8
-    max_model_len: 49152
-    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1}}
-    # no vision tower and a 49K pool: the prefill's transients need the room
+    max_model_len: 57344
+    # the traces take 19 MB of the trace region: 64 MB frees 236 MB, +8K tokens of KV (0.43 GiB free after the
+    # captures, 0.45 at 49K with 300 MB); the drafter does not fit even at 8K
+    additional_config: {tt: {fabric_config: DISABLED, worker_l1_size: *i2m_worker_l1, trace_region_size: 67108864}}
+    # no vision tower: the prefill's transients need the room
     env: {I2M_PREFILL_CHUNK: "512", I2M_PREFILL_PAD: "256", I2M_RING_CHUNK: "256", I2M_VISION: "0",
-          I2M_KV_POOL_TOKENS: "49152"}
+          I2M_KV_POOL_TOKENS: "57344"}
 default_profile: p300
 
 verify:
@@ -271,8 +279,8 @@ card:
   limitations: |
     - Prefill runs about 2,000-2,100 prompt tokens/s on 4 dies, 2,300-2,400 on 2 and 1,450 on 1 (4K and 16K-token
       prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
-    - Speculative decoding applies only while one request is decoding and its sequence is under 32,768 tokens; with
-      several users, or past that length, every request decodes one token per step.
+    - Speculative decoding applies only while one request is decoding and its sequence is under 65,536 tokens (32,768 on
+      `p150`; not on `p150-long`); with several users, or past that length, every request decodes one token per step.
     - A profile's sequences share its KV cache (1.7M tokens on 4 dies; the context on 2 and 1 die): one request may use
       the whole context, and requests that do not fit beside the running ones wait.
     - Sampling at temperature > 0 draws from the 32 most likely tokens; top_k above 32 acts as 32. Requests with
