@@ -6,7 +6,8 @@
 // -> each row's token = argmax_j (logit_j + tg[row, j]) over the candidates with id < V, first j on ties, into
 // tokens[G0 + row] (uint32 [1, W] ROW_MAJOR: the next step's token input). Indices uint32 or (a slice of <= 65536
 // columns) uint16: IB bytes. tg = T * Gumbel noise written by the host
-// (zeros: greedy). NT > 1: the dies' candidates merged first like DeviceTopK.host (top K by logit, ties: lowest id).
+// (zeros: greedy). NT > 1: the dies' candidates merged first like DeviceTopK.host (top K by logit, ties: lowest id), on
+// integer keys (no soft-float compares): one row 233 -> ~10 us on 4 dies, 107 -> ~5 on 2; tokens bitwise.
 //
 // runtime args: idx_addr, val_addr, tg_addr, tok_addr
 
@@ -54,39 +55,59 @@ void kernel_main() {
         float f;
     } cv;
     for (uint32_t r = 0; r < ROWS; ++r) {
-        // (the merged candidates in L1 scratch, not on the small kernel stack)
-        volatile tt_l1_ptr uint32_t* cid = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(lc);
-        volatile tt_l1_ptr float* clg = reinterpret_cast<volatile tt_l1_ptr float*>(lc + NT * K * 4);
+        // (the merged candidates in L1 scratch, not on the small kernel stack). The merge compares integer keys: a bf16
+        // value's bits mapped so unsigned order = float order (-0 as +0)
+        uint32_t* cid = reinterpret_cast<uint32_t*>(lc);
+        uint32_t* ckey = reinterpret_cast<uint32_t*>(lc + NT * K * 4);
         for (uint32_t t = 0; t < NT; ++t) {
             for (uint32_t c = 0; c < K; ++c) {
                 const uint32_t e = ((r >> 4) * 2 + (c >> 4)) * 256 + (r & 15) * 16 + (c & 15);
                 cid[t * K + c] = (IB == 4 ? ids[t * 1024 + e] : static_cast<uint32_t>(ids16[t * 1024 + e])) + t * VP;
-                cv.u = static_cast<uint32_t>(vals[t * 2048 / 2 + e]) << 16;
-                clg[t * K + c] = cv.f;
+                uint32_t u = static_cast<uint32_t>(vals[t * 2048 / 2 + e]) << 16;
+                u = (u << 1) == 0 ? 0 : u;
+                ckey[t * K + c] = (u & 0x80000000u) ? ~u : (u | 0x80000000u);
             }
         }
         uint32_t oid[K];
         float olg[K];
-        if constexpr (NT == 1) {
-            for (uint32_t j = 0; j < K; ++j) {
-                oid[j] = cid[j];
-                olg[j] = clg[j];
-            }
-        } else {  // top K over the dies (logit descending, ties: lowest id)
-            for (uint32_t j = 0; j < K; ++j) {
-                uint32_t b = 0xFFFFFFFFu;
-                for (uint32_t q = 0; q < NT * K; ++q) {
-                    if (cid[q] == 0xFFFFFFFFu) {
-                        continue;
+        // top K over the dies (logit descending, ties: lowest id): each die's K sorted in that order (insertion sort:
+        // the top-k output is nearly sorted), then an NT-way merge
+        if constexpr (NT > 1) {
+            for (uint32_t t = 0; t < NT; ++t) {
+                uint32_t* ks = ckey + t * K;
+                uint32_t* is = cid + t * K;
+                for (uint32_t c = 1; c < K; ++c) {
+                    const uint32_t kc = ks[c], ic = is[c];
+                    uint32_t d = c;
+                    while (d > 0 && (ks[d - 1] < kc || (ks[d - 1] == kc && is[d - 1] > ic))) {
+                        ks[d] = ks[d - 1];
+                        is[d] = is[d - 1];
+                        --d;
                     }
-                    if (b == 0xFFFFFFFFu || clg[q] > clg[b] || (clg[q] == clg[b] && cid[q] < cid[b])) {
-                        b = q;
-                    }
+                    ks[d] = kc;
+                    is[d] = ic;
                 }
-                oid[j] = cid[b];
-                olg[j] = clg[b];
-                cid[b] = 0xFFFFFFFFu;
             }
+        }
+        uint32_t head[NT];
+        for (uint32_t t = 0; t < NT; ++t) {
+            head[t] = t * K;
+        }
+        for (uint32_t j = 0; j < K; ++j) {
+            uint32_t b = 0xFFFFFFFFu;
+            for (uint32_t t = 0; t < NT; ++t) {
+                const uint32_t q = head[t];
+                if (q == (t + 1) * K) {  // (this die's K all taken)
+                    continue;
+                }
+                if (b == 0xFFFFFFFFu || ckey[q] > ckey[b] || (ckey[q] == ckey[b] && cid[q] < cid[b])) {
+                    b = q;
+                }
+            }
+            ++head[b / K];
+            oid[j] = cid[b];
+            cv.u = (ckey[b] & 0x80000000u) ? (ckey[b] & 0x7FFFFFFFu) : ~ckey[b];
+            olg[j] = cv.f;
         }
         uint32_t best = 0xFFFFFFFFu;
         float bv = 0.0f;

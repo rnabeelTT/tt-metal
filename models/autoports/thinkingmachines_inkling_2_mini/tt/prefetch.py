@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""I2M_PREFETCH (default 1; meshes of up to I2M_PREFETCH_DIES dies, default 2): the decode q|k|v with the q | r | s | g weight streamed ahead by the DRISC
+"""I2M_PREFETCH (default 1; meshes of up to I2M_PREFETCH_DIES dies, default 4): the decode q|k|v with the q | r | s | g weight streamed ahead by the DRISC
 tensor prefetcher into a global CB (ttnn.experimental.start_tensor_prefetcher), during the glue before the MoE.
 
 * No copy of the weight: the model's interleaved [K, N] q weight (N / 32 % 8 == 0) is byte-identical to a legacy
@@ -30,9 +30,10 @@ from .head import KDIR
 
 # one die, traced (I2M_PREFETCH 0 -> 1, logits bitwise): B=1 17.28 -> 16.12 ms, B=4 24.91 -> 23.98, verify 28.63 -> 27.38
 # (q|k|v 51.3 -> 20.5 us per call with q prefetched); TP2 traced (dies 2+3, logits bitwise): B=1 11.89 -> 11.58 ms,
-# B=4 16.08 -> 15.86, verify 18.21 -> 17.88
+# B=4 16.08 -> 15.86, verify 18.21 -> 17.88; TP4 (dies 0-3, logits bitwise): B=1 9.02 -> 8.97, B=4 13.24 -> 13.14,
+# verify 13.40 -> 13.34
 ON = os.environ.get("I2M_PREFETCH", "1") == "1"
-DIES = int(os.environ.get("I2M_PREFETCH_DIES", "2"))
+DIES = int(os.environ.get("I2M_PREFETCH_DIES", "4"))
 KBQ = int(os.environ.get("I2M_PREFETCH_KBQ", "24"))
 RING = int(os.environ.get("I2M_PREFETCH_RING", "0"))  # (GCB pages; 0: the whole q)
 # I2M_PF_O (default 1): the o_proj weight prefetched too (GcbO), requested right after the q|k|v consumer: it streams
@@ -368,7 +369,7 @@ def qkv_prefetch(mesh, k, nq, nkv, fidelity):
     """The shared prefetching q|k|v for these shapes (starts the mesh's prefetcher once), or None (unsupported)."""
     nd = mesh.get_num_devices()
     cq, ckv = nq // 256, nkv // 256
-    if nd > min(DIES, 2) or nq % 256 or nkv % 256 or not ttnn.experimental.is_tensor_prefetcher_supported(mesh):
+    if nd > DIES or nq % 256 or nkv % 256 or not ttnn.experimental.is_tensor_prefetcher_supported(mesh):
         return None
     R = max(d for d in range(1, 14) if cq % d == 0)
     if 2 * ckv > R:
