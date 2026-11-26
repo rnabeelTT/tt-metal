@@ -247,6 +247,66 @@ class TailX:
         return oi, ov
 
 
+# I2M_TOPK_HEAD (default 1): logits from the streamed LM head (tt/head.py HEAD_TOPK) take their candidates from its
+# per-core lists (HeadTopK) instead of the dense copy / shift / cast / RowsTopK passes over the logits: the same candidates,
+# values and order (bitwise)
+TOPK_HEAD = __import__("os").environ.get("I2M_TOPK_HEAD", "1") == "1"
+
+
+class HeadTopK:
+    """A row group's candidates from the head's lists (tt/kernels/lhmerge.cpp): one core per row merges the cores'
+    lists (fp32 order) into the top K of bf16(x - m) as RowsTopK writes them; dmax: the rows' bf16(max) tile for the
+    die exchange."""
+
+    def __init__(self, mesh):
+        self.mesh = mesh
+        g = mesh.compute_with_storage_grid_size()
+        self.cores = [ttnn.CoreCoord(i % g.x, i // g.x) for i in range(GROUP)]
+
+    def _run(self, head, lg, g0, rows, outs, mt, dmax):
+        import hashlib
+        from pathlib import Path
+
+        lists = head.lists
+        nc = len(head.slots)
+        ib = 4 if head.n > 65536 else 2
+        io = [lists, lg] + list(outs) + [mt]
+        ct = [0, nc, ib, rows]
+        for t in io:
+            ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        slots = [v for s in head.slots for v in s]
+        cores = self.cores[:1] if dmax else self.cores[:rows]
+        crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in cores])
+        rt = ttnn.RuntimeArgs()
+        for r, c in enumerate(cores):
+            rt[c.x][c.y] = [t.buffer_address() for t in io] + [g0 + r if not dmax else g0, r] + slots
+        k = ttnn.KernelDescriptor(
+            kernel_source=str(Path(__file__).parent / "kernels" / "lhmerge.cpp"), core_ranges=crs, compile_time_args=ct,
+            runtime_args=rt, defines=[("LH_DMAX", str(int(dmax))), ("LH_MT", str(int(mt is not outs[0] and not dmax)))],
+            config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
+        nb = rows * nc * 64 + 4096 if dmax else nc * 576 + 256 + 32 * 128 + (2 * K + 1 + nc) * 4
+        fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[
+            ttnn.CBDescriptor(total_size=nb, core_ranges=crs, format_descriptors=[fmt])])
+        key = ("i2m_lhmerge", tuple(ct), dmax, mt is not outs[0])
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        ttnn.generic_op(io, prog)
+
+    def dmax(self, head, lg, g0, rows):
+        top = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, 1]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
+                                             ttnn.L1_MEMORY_CONFIG)
+        self._run(head, lg, g0, rows, [top, top], top, True)
+        return top
+
+    def __call__(self, head, lg, g0, rows, top=None):
+        """-> (values bf16, indices uint16 / uint32) [1, 1, 32, K] L1 TILE, as RowsTopK (top: the shift tile)."""
+        mk = lambda dt: ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, K]), dt, ttnn.TILE_LAYOUT,  # noqa: E731
+                                                       self.mesh, ttnn.L1_MEMORY_CONFIG)
+        v, i = mk(ttnn.bfloat16), mk(ttnn.uint32 if head.n > 65536 else ttnn.uint16)
+        self._run(head, lg, g0, rows, [v, i], top if top is not None else v, False)
+        return v, i
+
+
 class DeviceTopK:
     def __init__(self, mesh, Vp: int, V: int, sharded: bool = False):
         """Vp: one die's logits columns. sharded: the LM head is split over the vocab (die d holds columns
@@ -262,6 +322,16 @@ class DeviceTopK:
         self.rpack = RowPack(mesh, Vp) if TOPK_MAX and TOPK_DENSE else None
         self.dense_w = DENSE_W or {1: 8, 2: 4}.get(self.N if self.sharded else 1, 1)
         self.x = TailX(mesh, 4 if self.rtk.wide else 2) if self.sharded and TOPK_X and mesh.get_num_devices() in (2, 4) else None
+        self.htk = HeadTopK(mesh) if TOPK_HEAD and (not self.sharded or self.x is not None) else None
+
+    def _head(self, lg, W):
+        """the streamed head that wrote lg (W rows) with its lists, else None"""
+        if self.htk is None:
+            return None
+        from .head import LISTS
+
+        h = LISTS.get(lg.buffer_address())
+        return h[0] if h is not None and h[1] == W and h[0].n == self.Vp else None
 
     def device(self, lg, W: int, outs=None):
         """Device half (traceable): lg [1, 1, W, Vp] fp32 TILE -> [(indices [1, 1, rows, K], logits - row max
@@ -269,10 +339,16 @@ class DeviceTopK:
         place: a trace's live outputs allocated before any capture). Two fused top-k passes: the first's best bf16 value (within
         one bf16 ulp of the row max) shifts the fp32 row so the candidates sit near 0, where bf16 resolves them to
         ~1e-3 (softmax is shift-invariant; the arg max stays exact); a gather of the fp32 values would cost 3.5 ms."""
-        lb = ttnn.typecast(lg, ttnn.bfloat16) if self.rmax is None else None
+        head = self._head(lg, W)
+        lb = ttnn.typecast(lg, ttnn.bfloat16) if self.rmax is None and head is None else None
         parts = []
         for g0 in range(0, W, GROUP):
             rows = min(GROUP, W - g0)
+            if head is not None:
+                top = self.x.max(self.htk.dmax(head, lg, g0, rows), rows) if self.sharded else None
+                v2, i2 = self.htk(head, lg, g0, rows, top)
+                self._emit(parts, i2, v2, rows, outs)
+                continue
             part_f = lg if W <= GROUP else ttnn.slice(lg, [0, 0, g0, 0], [1, 1, g0 + rows, self.Vp])
             dense = self.rpack is not None and rows <= self.dense_w
             if dense:  # (the dense copy and the shift in one program)
@@ -299,31 +375,35 @@ class DeviceTopK:
             else:
                 shifted = ttnn.typecast(ttnn.subtract(part_f, top), ttnn.bfloat16)
             v2, i2 = self.rtk(shifted, rows)
-            if self.sharded and GATHER and self.x is not None:
-                gi, gv = self.x.cand(i2, v2, rows, ttnn.DRAM_MEMORY_CONFIG if TOPK_DRAM else ttnn.L1_MEMORY_CONFIG,
-                                     out=outs[len(parts)][:2] if outs is not None else None)
-                ttnn.deallocate(i2)
-                ttnn.deallocate(v2)
-                parts.append((gi, gv, rows))
-                continue
-            i2, v2 = ttnn.slice(i2, [0, 0, 0, 0], [1, 1, rows, K]), ttnn.slice(v2, [0, 0, 0, 0], [1, 1, rows, K])
-            if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
-                i2 = ttnn.all_gather(i2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N K]
-                v2 = ttnn.all_gather(v2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
-            if outs is not None:
-                i2d, v2d, _ = outs[len(parts)]
-                ttnn.copy(i2, i2d)
-                ttnn.copy(v2, v2d)
-                ttnn.deallocate(i2)
-                ttnn.deallocate(v2)
-                i2, v2 = i2d, v2d
-            elif TOPK_DRAM:
-                i2d, v2d = ttnn.to_memory_config(i2, ttnn.DRAM_MEMORY_CONFIG), ttnn.to_memory_config(v2, ttnn.DRAM_MEMORY_CONFIG)
-                ttnn.deallocate(i2)
-                ttnn.deallocate(v2)
-                i2, v2 = i2d, v2d
-            parts.append((i2, v2, rows))
+            self._emit(parts, i2, v2, rows, outs)
         return parts
+
+    def _emit(self, parts, i2, v2, rows, outs):
+        """a group's [1, 1, 32, K] candidates -> parts (gathered over the dies / into outs / DRAM)"""
+        if self.sharded and GATHER and self.x is not None:
+            gi, gv = self.x.cand(i2, v2, rows, ttnn.DRAM_MEMORY_CONFIG if TOPK_DRAM else ttnn.L1_MEMORY_CONFIG,
+                                 out=outs[len(parts)][:2] if outs is not None else None)
+            ttnn.deallocate(i2)
+            ttnn.deallocate(v2)
+            parts.append((gi, gv, rows))
+            return
+        i2, v2 = ttnn.slice(i2, [0, 0, 0, 0], [1, 1, rows, K]), ttnn.slice(v2, [0, 0, 0, 0], [1, 1, rows, K])
+        if self.sharded and GATHER:  # every die's candidates on every die: the host reads one die (2 reads, not 2 N)
+            i2 = ttnn.all_gather(i2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)  # [1, 1, rows, N K]
+            v2 = ttnn.all_gather(v2, dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
+        if outs is not None:
+            i2d, v2d, _ = outs[len(parts)]
+            ttnn.copy(i2, i2d)
+            ttnn.copy(v2, v2d)
+            ttnn.deallocate(i2)
+            ttnn.deallocate(v2)
+            i2, v2 = i2d, v2d
+        elif TOPK_DRAM:
+            i2d, v2d = ttnn.to_memory_config(i2, ttnn.DRAM_MEMORY_CONFIG), ttnn.to_memory_config(v2, ttnn.DRAM_MEMORY_CONFIG)
+            ttnn.deallocate(i2)
+            ttnn.deallocate(v2)
+            i2, v2 = i2d, v2d
+        parts.append((i2, v2, rows))
 
     def host(self, parts):
         """-> host (indices [W, K] int64, logits [W, K] fp32) by row, sorted descending (sharded head: the dies'

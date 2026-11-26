@@ -4,12 +4,17 @@
 // Inkling LM head, activation in + logits out (BRISC; tt/head.py StreamHead): rows 0 .. rows-1 of the kt BF16
 // activation tiles into cb_x (rows <= 16: faces 0 / 1, the other rows are don't-care; else whole tiles), then each FP32 output column tile the
 // compute packs to logits page out_col0 + i (columns past n_tiles: bank padding, not written).
+// HEAD_TOPK: also each live row's candidate list of this core's columns (lhlist.hpp) as the tiles stream, written at
+// the end as page SLOT * 32 + row of `lists`.
 //
-// runtime args: [x_addr, out_addr, out_col0, ncols]
+// runtime args: [x_addr, out_addr, out_col0, ncols(, lists_addr, slot)]
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
+#include "lhkey.hpp"
+#include "lhlist.hpp"
+
 
 void kernel_main() {
     const uint32_t x_addr = get_arg_val<uint32_t>(0);
@@ -31,6 +36,18 @@ void kernel_main() {
     if (ncols == 0) {
         return;
     }
+#if HEAD_TOPK
+    constexpr uint32_t cb_l = get_compile_time_arg_val(o_args.next_compile_time_args_offset());
+    constexpr auto l_args = TensorAccessorArgs<o_args.next_compile_time_args_offset() + 1>();
+    // cb_l: the rows' buffers, the compaction scratch, the rows' list pages (off the small kernel stack)
+    const uint32_t lbase = get_write_ptr(cb_l);
+    auto row = [&](uint32_t r) { return reinterpret_cast<LhRow*>(lbase + r * LH_ROW_WORDS * 4); };
+    int32_t* scratch = reinterpret_cast<int32_t*>(lbase + rows * LH_ROW_WORDS * 4);
+    const uint32_t pages = lbase + rows * LH_ROW_WORDS * 4 + LH_CAP * 4;
+    for (uint32_t r = 0; r < rows; ++r) {
+        lh_row_init(row(r));
+    }
+#endif
     cb_reserve_back(cb_x, kt);
     const uint32_t xl1 = get_write_ptr(cb_x);
     const auto s_x = TensorAccessor(x_args, x_addr, 2048);
@@ -51,9 +68,55 @@ void kernel_main() {
         cb_wait_front(cb_out, 1);
         if (out_col0 + i < n_tiles) {
             noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i), OB);
-            noc_async_writes_flushed();
         }
+#if HEAD_TOPK
+        invalidate_l1_cache();
+        const uint32_t base = get_read_ptr(cb_out);
+        const uint32_t col0 = (out_col0 + i) * 32;
+        for (uint32_t r = 0; r < rows; ++r) {
+            LhRow* lr = row(r);
+            for (uint32_t f = 0; f < 2; ++f) {
+                const uint32_t* p = reinterpret_cast<const uint32_t*>(base + ((r >> 4) * 2 + f) * 1024 + (r & 15) * 64);
+                const int32_t t = lr->thr();
+                // prefilter: the OR of (t / 2 - 1 - v / 2) has its sign set if some value may pass (halved: no wrap)
+                uint32_t any = 0;
+                if (t >= 0) {  // (the raw bits order the passing values)
+                    const int32_t h = (t >> 1) - 1;
+#pragma GCC unroll 16
+                    for (uint32_t j = 0; j < 16; ++j) {
+                        any |= static_cast<uint32_t>(h - (static_cast<int32_t>(p[j]) >> 1));
+                    }
+                } else {  // (on halved unsigned orders)
+                    const uint32_t h = ((static_cast<uint32_t>(t) ^ 0x80000000u) >> 1) - 1;
+#pragma GCC unroll 16
+                    for (uint32_t j = 0; j < 16; ++j) {
+                        any |= h - ((static_cast<uint32_t>(lh_sord(p[j])) ^ 0x80000000u) >> 1);
+                    }
+                }
+                if ((any & 0x80000000u) == 0) {
+                    continue;
+                }
+                const uint32_t c0 = col0 + f * 16;
+                for (uint32_t j = 0; j < 16; ++j) {
+                    const int32_t v = lh_sord(p[j]);
+                    if (v > lr->thr()) {
+                        lh_row_add(lr, v, c0 + j, scratch);
+                    }
+                }
+            }
+        }
+#endif
+        noc_async_writes_flushed();
         cb_pop_front(cb_out, 1);
     }
+#if HEAD_TOPK
+    const auto s_l = TensorAccessor(l_args, get_arg_val<uint32_t>(4), LH_PAGE);
+    const uint32_t slot = get_arg_val<uint32_t>(5);
+    for (uint32_t r = 0; r < rows; ++r) {
+        uint32_t* pg = reinterpret_cast<uint32_t*>(pages + r * LH_PAGE);
+        lh_row_finish(row(r), scratch, pg);
+        noc_async_write(reinterpret_cast<uint32_t>(pg), s_l.get_noc_addr(slot * 32 + r), LH_PAGE);
+    }
+#endif
     noc_async_write_barrier();
 }
