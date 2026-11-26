@@ -24,7 +24,8 @@ import torch
 import ttnn
 
 from .dmm import dmm
-from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import all_reduce, packed_rows
+from models.autoports.thinkingmachines_inkling_2_mini.tt import ccl
+from models.autoports.thinkingmachines_inkling_2_mini.tt.ccl import PackedAR, all_reduce, packed_rows
 from models.autoports.minimaxai_minimax_m2_7.tt.moe import sparse_matmul_program_config
 from models.autoports.thinkingmachines_inkling_2_mini.tt.wload import cached
 
@@ -197,7 +198,14 @@ class MoE:
 
             raw = (len(self.fe.subs) == 1 or NOCLONE) and ((self.N > 1 and packed_rows(T))
                                                             or (self.N == 1 and packed_out and (T == 1 or INPLACE)))
-            out = self.fe.forward(x, logits=logits, dup=dup, raw=raw)
+            push = ccl._packed(self.mesh, T) if raw and self.N in (2, 4) and "mlp" in ccl.PUSH and ccl.PACK else None
+            out = self.fe.forward(x, logits=logits, dup=dup, raw=raw, push=push)
+            if isinstance(out, PackedAR):  # (the all-reduce ran in the down's program: tt/arpush.py)
+                if packed_out:
+                    return out
+                u = out.unpack()
+                ttnn.deallocate(out.t)
+                return u
             rows = T if raw else None
         elif self.fused and T <= 2 * self.fe.rows_max and SPLIT_DECODE:
             # 17 .. 32 decode rows: two fused calls of <= 16 rows (the fused kernels' row limit) instead of the sorted

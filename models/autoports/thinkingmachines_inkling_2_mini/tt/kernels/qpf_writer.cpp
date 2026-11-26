@@ -5,7 +5,13 @@
 // CB / tile size per segment (kind 0: cb_oq, FP32 q or BF16 o, kind 1: cb_o BF16). Output column i of a segment goes to page
 // col0 + 8 i (an interleaved weight's bank columns, n = bank + 8 c).
 //
+// ARP_T (one kind-0 BF16 segment: the o_proj; tt/arpush.py): the output goes into the fused all-reduce instead
+// (tt/ccl.py push): each column's ARP_T live rows into this die's slot on the shard cores and the link senders' payload,
+// packed as arpack.cpp (tile n's chunk at 64 T n: face 0's T rows, then face 1's), then one increment per touched shard
+// core / sender.
+//
 // runtime args: [nseg, then per segment: x_addr, out_addr, col0, ncols, kind; padded to 16, then nq (q blocks)]
+// (ARP_T: + slot, K, shard noc (x, y) x K, sender noc (x, y) x links)
 
 #include <stdint.h>
 
@@ -66,6 +72,58 @@ void kernel_main() {
     noc_async_read_barrier();
     cb_push_back(cb_x, kt * nseg);
 
+#ifdef ARP_T
+    static_assert(H < 32 && ARP_T <= rows, "tiny output tiles");
+    constexpr uint32_t PA = 17;
+    const uint32_t slot = get_arg_val<uint32_t>(PA);
+    const uint32_t K = get_arg_val<uint32_t>(PA + 1);
+    auto shard_noc = [&](uint32_t k, uint32_t addr) {
+        return get_noc_addr(get_arg_val<uint32_t>(PA + 2 + 2 * k), get_arg_val<uint32_t>(PA + 3 + 2 * k), addr);
+    };
+    auto send_noc = [&](uint32_t l, uint32_t addr) {
+        return get_noc_addr(
+            get_arg_val<uint32_t>(PA + 2 + 2 * K + 2 * l), get_arg_val<uint32_t>(PA + 3 + 2 * K + 2 * l), addr);
+    };
+    const uint32_t tx = get_write_ptr(ARP_CB_TX);
+    auto put = [&](uint32_t s, uint32_t b, uint32_t n) {  // (a run may cross a shard tile)
+        while (n > 0) {
+            const uint32_t k = b / 2048, o = b % 2048, m = 2048 - o < n ? 2048 - o : n;
+            noc_async_write(s, shard_noc(k, slot + o), m);
+            noc_async_write(s, send_noc(k / ARP_KPL, tx + (k % ARP_KPL) * 2048 + o), m);
+            b += m;
+            s += m;
+            n -= m;
+        }
+    };
+    {
+        const uint32_t col0 = get_arg_val<uint32_t>(3);
+        const uint32_t ncols = get_arg_val<uint32_t>(4);
+        for (uint32_t i = 0; i < ncols; ++i) {
+            cb_wait_front(cb_oq, 1);
+            const uint32_t n = col0 + i * 8;
+            put(get_read_ptr(cb_oq), 64 * ARP_T * n, 32 * ARP_T);
+            put(get_read_ptr(cb_oq) + H * 32, 64 * ARP_T * n + 32 * ARP_T, 32 * ARP_T);
+            noc_async_writes_flushed();
+            cb_pop_front(cb_oq, 1);
+        }
+        noc_async_write_barrier();
+        uint32_t lk = 0xffffffff, ll = 0xffffffff;
+        for (uint32_t i = 0; i < ncols; ++i) {  // (ascending n: the touched shard tiles / links ascend)
+            const uint32_t b = 64 * ARP_T * (col0 + i * 8);
+            for (uint32_t k = b / 2048; k <= (b + 64 * ARP_T - 1) / 2048; ++k) {
+                if (k != lk) {
+                    noc_semaphore_inc(shard_noc(k, get_semaphore(ARP_SEM_SH)), 1);
+                    lk = k;
+                }
+                if (k / ARP_KPL != ll) {
+                    ll = k / ARP_KPL;
+                    noc_semaphore_inc(send_noc(ll, get_semaphore(ARP_SEM_TX)), 1);
+                }
+            }
+        }
+        noc_async_atomic_barrier();
+    }
+#else
     for (uint32_t s = 0; s < nseg; ++s) {
         const uint32_t kind = get_arg_val<uint32_t>(5 + 5 * s);
         const uint32_t OB = kind == 0 ? oqb : 2048;
@@ -88,6 +146,7 @@ void kernel_main() {
         }
     }
     noc_async_write_barrier();
+#endif
     if constexpr (ack_w) {
         if (nq) {  // (every output written: compute has popped every q block)
             experimental::remote_cb_pop_front(rcb, nq);

@@ -226,9 +226,10 @@ class FusedExperts:
         sum runs over its own experts in the same order, so the halves are bitwise the whole call)."""
         return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None
 
-    def forward(self, x, logits=None, dup=False, raw=False):
+    def forward(self, x, logits=None, dup=False, raw=False, push=None):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
-        tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards)."""
+        tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards). push: the packed all-reduce, run in the
+        down's program (tt/arpush.py; one sub-shard) -> its PackedAR."""
         assert int(x.shape[-2]) <= self.rows_max
         M = int(x.shape[-2])
         if self._halves(M):
@@ -268,6 +269,13 @@ class FusedExperts:
             act = act_buffer(self.mesh, W, self.moe.E, self.moe.k, m, subs=op.subs)
             gu(xr, b0.table, b0.identity, ug, ug, act, ep_offset=None,
                **({"rem_w": self.rem_w} if self.rem_w is not None else {}))
+            if push is not None and len(self.subs) == 1:
+                from .arpush import down_push
+
+                r = down_push(dnop, act, b0.table, dn, push, "mlp", M)
+                if r is not None:
+                    ttnn.deallocate(act)
+                    return r
             dnop(act, b0.table, dn, dn, b.out, ep_offset=None)
             ttnn.deallocate(act)
             if acc is None:  # (one sub-shard: the shared out buffer itself, consumed before the next layer's MoE)

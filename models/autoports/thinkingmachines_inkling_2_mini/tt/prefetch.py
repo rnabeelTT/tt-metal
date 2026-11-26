@@ -250,14 +250,31 @@ class GcbO(GcbQKV):
         super().__init__(mesh, k, n, 256, R=R, kvr=1, kbq=kbq, kv_split=False, fidelity=fidelity)
         self.n, self.lin = n, lin
 
-    def __call__(self, x, w, rows, drain=False, out_mc=ttnn.DRAM_MEMORY_CONFIG):
+    def __call__(self, x, w, rows, drain=False, out_mc=ttnn.DRAM_MEMORY_CONFIG, push=None):
         """x [1, 1, rows, K] bf16 (interleaved); w: the o weight (its bytes come through the GCB) -> [1, 1, rows, n]
-        bf16. drain: only pop the GCB (an orphan request)."""
+        bf16. drain: only pop the GCB (an orphan request). push: the packed all-reduce (tt/ccl.py _Packed), run in this
+        program (the writers put the packed rows into it: tt/arpush.py) -> its PackedAR, or None (not possible: the
+        caller runs the plain call)."""
         # (16-row tiles at <= 16 rows: bitwise ttnn.linear; 4 / 8-row tiles are not: the FP32 partial's reload)
         h = 16 if rows <= 16 and not OPF_H32 else 32
         kt, npr = self.kt, self.npr
+        if push is not None:
+            from .arpush import run_push
+
+            if h == 32 or drain:
+                return None
+            tiles = {xy: [b + 8 * (r * npr + i) for i in range(npr)] for xy, (b, r) in self.assign.items()}
+            return run_push(push, "mixer", rows, tiles,
+                            lambda out, pa, pd: self._program(x, out, rows, h, False, pa, pd), [x])
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, rows, self.n]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
                                              self.mesh, out_mc)
+        kernels, cbs = self._program(x, out, rows, h, drain)
+        ttnn.generic_op([x, out], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
+        return out
+
+    def _program(self, x, out, rows, h, drain, pa=(), pdefs=()):
+        """-> (kernels, cbs); pa / pdefs: the push args / defines of the writers (tt/arpush.py)"""
+        kt, npr = self.kt, self.npr
         cb_x, cb_wq, cb_part, cb_oq = 0, 2, 3, 16
         fmt = lambda i, d, page, pages, th=32: ttnn.CBDescriptor(  # noqa: E731
             total_size=page * pages, core_ranges=self.cores,
@@ -282,7 +299,7 @@ class GcbO(GcbQKV):
             rd[(cx, cy)] = [self.nqb, b, 0, 0] + [0] * 6
             segs = [] if drain else [x.buffer_address(), out.buffer_address(), b + 8 * r * npr, npr, 0]
             wr[(cx, cy)] = ([1] if segs else [0]) + segs
-            wr[(cx, cy)] += [0] * (16 - len(wr[(cx, cy)])) + [self.nqb]
+            wr[(cx, cy)] += [0] * (16 - len(wr[(cx, cy)])) + [self.nqb] + list(pa)
             cp[cx][cy] = [0 if drain else 1]
 
         def rt_for(args, cores):
@@ -306,7 +323,7 @@ class GcbO(GcbQKV):
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
                 ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_writer.cpp"), core_ranges=cores,
                                       compile_time_args=wr_ct + [ack, RCB, 1 if drain else 0, 2048],
-                                      runtime_args=rt_for(wr, cores),
+                                      runtime_args=rt_for(wr, cores), defines=list(pdefs),
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
             ]
         u2d = [ttnn.UnpackToDestMode.Default] * 64
@@ -315,8 +332,7 @@ class GcbO(GcbQKV):
         cfg.unpack_to_dest_mode = u2d
         kernels.append(ttnn.KernelDescriptor(kernel_source=str(KDIR / "opf_compute.cpp"), core_ranges=self.cores,
                                              compile_time_args=cp_ct, runtime_args=cp, config=cfg))
-        ttnn.generic_op([x, out], ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs))
-        return out
+        return kernels, cbs
 
 
 _STATE = {}  # id(mesh) -> {"mesh", "objs": {key: GcbQKV}, "cap": capturing a trace}
@@ -492,7 +508,7 @@ def qkv(pf, w, xs, rows):
     return out
 
 
-def o_proj(w, x, rows):
+def o_proj(w, x, rows, push=None):
     """The o_proj of the application whose o request is pending (queued by its q|k|v call) -> [1, 1, rows, n] bf16 in
     DRAM; None: no request (the caller's DRAM path)"""
     st = _STATE.get(id(w.mesh)) if getattr(w, "opf", None) is not None else None
@@ -501,7 +517,9 @@ def o_proj(w, x, rows):
     st["opend"] = None
     if x.is_sharded():
         x = ttnn.sharded_to_interleaved(x, ttnn.L1_MEMORY_CONFIG)
-    out = w.opf(x, w.w_o, rows)
+    out = w.opf(x, w.w_o, rows, push=push)
+    if out is None:  # (push not possible here: the plain call)
+        out = w.opf(x, w.w_o, rows)
     if st["cap"]:
         w.opf.cap_bal -= 1
     return out

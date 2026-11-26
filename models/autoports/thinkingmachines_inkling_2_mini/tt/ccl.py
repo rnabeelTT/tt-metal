@@ -28,6 +28,11 @@ FUSED = os.environ.get("I2M_AR_FUSED")
 # I2M_AR_FUSED_TP: x tiles per packer core (default max(2, 8 // T): traced, 2 dies, 9 packers at T = 1 5.1 us vs 36
 # 6.4; T >= 2 2 or 4 tiles per packer the same)
 FUSED_TP = int(os.environ.get("I2M_AR_FUSED_TP", "0"))
+# I2M_AR_PUSH (default mlp,mixer; "" off): sites whose producer program does the packed all-reduce itself (tt/arpush.py:
+# "mlp" the MoE down, "mixer" the prefetched o_proj): its output cores write their packed rows into the exchange, the
+# sender / shard / add kernels run in that program (bitwise). Traced TP2 B1 11.15 -> 11.03 ms, V4 18.47 -> 18.35; the
+# mixer site carries most of it (the mlp all-reduce mostly waits out the dies' MoE skew, which stays)
+PUSH = [s for s in os.environ.get("I2M_AR_PUSH", "mlp,mixer").split(",") if s]
 PACK_SITES = os.environ.get("I2M_AR_PACK_SITES", "mixer,mlp").split(",")
 PACK_K = ((1, 3, (3, 1)), (4, 9, (9, 1)), (8, 18, (9, 2)))  # (rows <=, tiles, shard grid)
 CORES = (9, 2)  # 18 cores: H 2304 = 72 tiles -> 4 per core
@@ -62,15 +67,20 @@ class _Packed:
         self.mesh, self.K, self.cx, self.cy = mesh, K, grid[0], grid[1]
         n = grid[0] * grid[1]
         self.KJ = K // n
-        mk = lambda w: ttnn.create_sharded_memory_config(  # noqa: E731
-            shape=(32, w // n), core_grid=ttnn.CoreGrid(x=grid[0], y=grid[1]), strategy=ttnn.ShardStrategy.WIDTH,
-            orientation=ttnn.ShardOrientation.ROW_MAJOR, use_height_and_width_as_shard_shape=True)
+        # the shard grid's rows (PUSH: rows free of the producers' cores, tt/arpush.py free_rows)
+        self.rows = rows = shard_rows(mesh)[:grid[1]]
+        self.crs = ttnn.CoreRangeSet([ttnn.CoreRange(ttnn.CoreCoord(0, y), ttnn.CoreCoord(grid[0] - 1, y)) for y in rows])
+        mk = lambda w: ttnn.MemoryConfig(  # noqa: E731
+            ttnn.TensorMemoryLayout.WIDTH_SHARDED, ttnn.BufferType.L1,
+            ttnn.ShardSpec(self.crs, (32, w // n), ttnn.ShardOrientation.ROW_MAJOR))
         g = mesh.compute_with_storage_grid_size()
         sem_cores = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(g.x - 1, g.y - 1))})
         self.mc = mk(32 * K)
         self.sites = {s: (ttnn.empty([1, 1, 32, 32 * K * N], ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh, mk(32 * K * N)),
                           ttnn.create_global_semaphore(mesh, sem_cores, 0)) for s in ("mixer", "mlp")}
-        self.crs = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(grid[0] - 1, grid[1] - 1))})
+
+    def moved(self):
+        return self.rows != list(range(len(self.rows)))
 
     def _move(self, pack, t, shard, T):
         import hashlib
@@ -79,8 +89,9 @@ class _Packed:
 
         Ht = int(t.shape[-1]) // 32
         ct = [T, self.KJ, 2 * T * Ht, self.cx] + ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        org = [("ARP_R0", str(self.rows[0])), ("ARP_R1", str(self.rows[-1]))] if self.moved() else []
         kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "arpack.cpp"), core_ranges=self.crs, compile_time_args=ct,
-                                   defines=[("ARP_PACK", "1")] if pack else [],
+                                   defines=([("ARP_PACK", "1")] if pack else []) + org,
                                    config=ttnn.DataMovementConfigDescriptor(
                                        processor=ttnn.DataMovementProcessor.RISCV_1 if pack else
                                        ttnn.DataMovementProcessor.RISCV_0,
@@ -110,7 +121,7 @@ class _Packed:
         scratch, sem = self.sites[site]
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, 32 * K]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
                                              self.mc)
-        shard = [ttnn.CoreCoord(i % self.cx, i // self.cx) for i in range(K)]
+        shard = [ttnn.CoreCoord(i % self.cx, self.rows[i // self.cx]) for i in range(K)]
         links = min(LINKS or (2 if N == 4 else 1), K)
         kpl = -(-K // links)
         links = -(-K // kpl)
@@ -121,7 +132,9 @@ class _Packed:
         TP = FUSED_TP or max(2, 8 // T)
         G = -(-Ht // TP)
         pcx = 9
-        pcrs = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(pcx - 1, -(-G // pcx) - 1))})
+        nr = -(-G // pcx)
+        py0 = next(y for y in range(g.y - nr + 1) if not set(range(y, y + nr)) & set(self.rows))
+        pcrs = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, py0), ttnn.CoreCoord(pcx - 1, py0 + nr - 1))})
         send_crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in senders])
         allc = pcrs.merge(self.crs).merge(send_crs)
         # the increments each shard core / sender gets: one per (packer, shard tile) / (packer, link) touched
@@ -151,7 +164,8 @@ class _Packed:
             slot = scratch.buffer_address() + idx * 2048
             pack_k = ttnn.KernelDescriptor(
                 kernel_source=_ks(KDIR, "arfuse_pack.cpp"), core_ranges=pcrs, compile_time_args=pack_ct,
-                runtime_args=[], config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1))
+                runtime_args=[], defines=[("ARF_Y0", str(py0))] if py0 else [],
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_1))
             pack_k.common_runtime_args = [x.buffer_address(), slot, K, links] + noc_args
             shard_k = ttnn.KernelDescriptor(
                 kernel_source=_ks(KDIR, "arfuse_shard.cpp"), core_ranges=self.crs, compile_time_args=[N, 1, 1],
@@ -191,6 +205,99 @@ class _Packed:
             mesh_prog[ttnn.MeshCoordinateRange(coord, coord)] = prog
         ttnn.generic_op([x, scratch, out], mesh_prog)
         return PackedAR(out, T, int(x.shape[-1]), self)
+
+    def push(self, site, T, tiles_of, busy):
+        """The exchange of the fused all-reduce for a producer program whose cores write their own packed rows
+        (tt/kernels/dnp_writer.cpp ARP_T): tiles_of {(x, y): ascending [H tiles]} of those cores, busy: (x, y) cores the
+        producer uses. -> (out, args, per_die, defines, io) or None (the cores collide): args(idx): die idx's push args
+        (appended to the producer cores' writer runtime args); per_die(idx, prog): adds the shard / add / sender kernels
+        (semaphores 0 / 1, CBs 20 .. 22) and the fabric connections to die idx's program (its kernels already in);
+        defines: the writer's; io: the extra io tensors."""
+        from .bconv import KDIR, _cb
+
+        mesh, N, K = self.mesh, self.mesh.get_num_devices(), self.K
+        assert N % 2 == 0 and self.KJ == 1
+        scratch, sem = self.sites[site]
+        shard = [ttnn.CoreCoord(i % self.cx, self.rows[i // self.cx]) for i in range(K)]
+        g = mesh.compute_with_storage_grid_size()
+        links = min(LINKS or (2 if N == 4 else 1), K)
+        kpl = -(-K // links)
+        links = -(-K // kpl)
+        free = [ttnn.CoreCoord(g.x - 1, y) for y in range(g.y) if (g.x - 1, y) not in busy]
+        if any((c.x, c.y) in busy for c in shard) or len(free) < links:
+            return None
+        senders = free[:links]
+        snoc = [mesh.worker_core_from_logical_core(c) for c in senders]
+        shnoc = [mesh.worker_core_from_logical_core(c) for c in shard]
+        nk, nl = [0] * K, [0] * links
+        for ts in tiles_of.values():
+            ks = sorted({k for n in ts for k in range(64 * T * n // 2048, (64 * T * n + 64 * T - 1) // 2048 + 1)})
+            for k in ks:
+                nk[k] += 1
+            for l in sorted({k // kpl for k in ks}):
+                nl[l] += 1
+        sem_addr = ttnn.get_global_semaphore_address(sem)
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, 32 * K]), ttnn.bfloat16, ttnn.TILE_LAYOUT, mesh,
+                                             self.mc)
+        prod = [ttnn.CoreCoord(x, y) for x, y in tiles_of]
+        send_crs = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in senders])
+        allc = self.crs.merge(send_crs)
+        for c in prod:
+            allc = allc.merge(ttnn.CoreRangeSet([ttnn.CoreRange(c, c)]))
+        noc_args = [v for c in shnoc for v in (c.x, c.y)] + [v for c in snoc for v in (c.x, c.y)]
+        shard_rt = ttnn.RuntimeArgs()
+        for k, c in enumerate(shard):
+            shard_rt[c.x][c.y] = [nk[k]]
+        dm = ttnn.DataMovementConfigDescriptor
+
+        def tensor_cb(i, t):
+            cb = ttnn.cb_descriptor_from_sharded_tensor(i, t)
+            cb.format_descriptors = [ttnn.CBFormatDescriptor(buffer_index=i, data_format=ttnn.bfloat16, page_size=2048)]
+            return cb
+
+        def args(idx):
+            return [scratch.buffer_address() + idx * 2048, K] + noc_args
+
+        def per_die(idx, prog):
+            slot = scratch.buffer_address() + idx * 2048
+            shard_k = ttnn.KernelDescriptor(
+                kernel_source=_ks(KDIR, "arfuse_shard.cpp"), core_ranges=self.crs, compile_time_args=[N, 1, 21],
+                runtime_args=shard_rt, config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
+            shard_k.common_runtime_args = [sem_addr]
+            add_k = ttnn.KernelDescriptor(
+                kernel_source=_ks(KDIR, "arfuse_add.cpp"), core_ranges=self.crs, compile_time_args=[21, 22, N, 1],
+                runtime_args=[], config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4,
+                                                                     fp32_dest_acc_en=False, math_approx_mode=False))
+            fwd, bwd = N - 1 - idx, idx
+            send_rt = ttnn.RuntimeArgs()
+            for l, c in enumerate(senders):
+                mine = shnoc[l * kpl:(l + 1) * kpl]
+                send_rt[c.x][c.y] = [slot, sem_addr, len(mine), nl[l]] + [p.x for p in mine] + [p.y for p in mine]
+            send_k = ttnn.KernelDescriptor(
+                kernel_source=_ks(KDIR, "arfuse_send.cpp"), core_ranges=send_crs,
+                compile_time_args=[2048, fwd, bwd, 20], runtime_args=send_rt,
+                config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
+            si = len(prog.kernels) + 2
+            prog.kernels = list(prog.kernels) + [shard_k, add_k, send_k]
+            prog.semaphores = list(prog.semaphores) + [ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER, allc, 0),
+                                                       ttnn.SemaphoreDescriptor(1, ttnn.CoreType.WORKER, allc, 0)]
+            prog.cbs = list(prog.cbs) + [_cb(allc, 20, ttnn.bfloat16, 2048, kpl), tensor_cb(21, scratch),
+                                         tensor_cb(22, out)]
+            src = mesh.get_fabric_node_id(ttnn.MeshCoordinate(0, idx))
+            for l, c in enumerate(senders):
+                fab = []
+                for step, hops in ((1, fwd), (-1, bwd)):
+                    fab.append(1 if hops > 0 else 0)
+                    if hops > 0:
+                        fab += ttnn.setup_fabric_connection(
+                            src_fabric_node_id=src, dst_fabric_node_id=mesh.get_fabric_node_id(
+                                ttnn.MeshCoordinate(0, idx + step)),
+                            link_idx=l, program_descriptor=prog, worker_core=c)
+                prog.kernels[si].runtime_args[c.x][c.y].extend(fab)
+
+        defines = [("ARP_T", str(T)), ("ARP_KPL", str(kpl)), ("ARP_CB_TX", "20"), ("ARP_SEM_TX", "0"),
+                   ("ARP_SEM_SH", "1")]
+        return out, args, per_die, defines, [scratch]
 
     def unpack(self, r, T, H):
         out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, H]), ttnn.bfloat16, ttnn.TILE_LAYOUT, self.mesh,
@@ -237,6 +344,19 @@ class PackedAR:
 def unpacked(x):
     """A tensor from an all-reduce result (unpacks a PackedAR)."""
     return x.unpack() if isinstance(x, PackedAR) else x
+
+
+def shard_rows(mesh):
+    """the packed all-reduce shard grid's rows: 0, 1; with PUSH the first two rows free of its producers' cores"""
+    key = (id(mesh), "rows")
+    if key not in _STATE:
+        rows = [0, 1]
+        if PUSH:
+            from .arpush import free_rows
+
+            rows = (free_rows(mesh) + rows)[:2]
+        _STATE[key] = sorted(rows)
+    return _STATE[key]
 
 
 def _packed(mesh, T):

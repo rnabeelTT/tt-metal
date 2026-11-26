@@ -21,7 +21,11 @@ void kernel_main() {
     constexpr uint32_t cb_stage = get_compile_time_arg_val(5);
     constexpr uint32_t cb_tx = get_compile_time_arg_val(6);
     constexpr auto t_args = TensorAccessorArgs<7>();
+#ifdef ARF_Y0  // (the packers' first row: off the shard rows, tt/ccl.py)
+    const uint32_t p = ((uint32_t)get_absolute_logical_y() - ARF_Y0) * CX + (uint32_t)get_absolute_logical_x();
+#else
     const uint32_t p = (uint32_t)get_absolute_logical_y() * CX + (uint32_t)get_absolute_logical_x();
+#endif
     const uint32_t t0 = p * TP;
     if (t0 >= HT) {
         return;

@@ -54,7 +54,8 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
     _gen = _ttnn.generic_op
     _seen = set()
 
-    def _checked(io, prog, *a, **k):
+    def l1_check(io, prog):
+        """the check on one program (tt/arpush.py calls it on a mesh program's die 0 program)"""
         dev = next((t.device() for t in io if t.device() is not None), None)
         if dev is not None and hasattr(prog, "cbs"):  # (a MeshProgramDescriptor, e.g. tt/ccl.py's: not checked)
             per = {}
@@ -72,13 +73,17 @@ if _os.environ.get("I2M_L1_CHECK") == "1":
             low = min((base + int(b["address"]) for b in mv.block_table
                        if str(b.get("allocated", "")).lower() in ("yes", "true", "1")), default=None)
             site = next((f"{f.filename.split('/')[-1]}:{f.lineno}" for f in reversed(_tb.extract_stack()[:-1])
-                         if "thinkingmachines_inkling_2_mini/tt/" in f.filename), "?")
+                         if "thinkingmachines_inkling_2_mini/tt/" in f.filename
+                         and not f.filename.endswith("tt/__init__.py")), "?")
             key = (site, cbs, low)
             if key not in _seen:
                 _seen.add(key)
                 over = low is not None and base + cbs > low
                 print(f"L1CHECK {'OVERLAP ' if over else ''}{site}: CBs {cbs / 1024:.0f} KB from {base:#x} -> "
                       f"{base + cbs:#x}, lowest L1 buffer {low if low is None else hex(low)}", flush=True)
+
+    def _checked(io, prog, *a, **k):
+        l1_check(io, prog)
         return _gen(io, prog, *a, **k)
 
     _ttnn.generic_op = _checked

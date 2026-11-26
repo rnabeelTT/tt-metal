@@ -446,8 +446,17 @@ def _attn_out(w, c, ba, q, rq, sk, g, pos_sdpa, B, tt_ccl, pq=None, g0=None, pac
     out = None
     if getattr(w, "opf", None) is not None:  # (its weight prefetched: tt/prefetch.py GcbO)
         from models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch import o_proj as pf_o
+        from . import ccl
 
-        out = pf_o(w, o, B)
+        push = ccl._packed(w.mesh, B) if N in (2, 4) and "mixer" in ccl.PUSH and ccl.PACK and ccl.packed_rows(B) \
+            else None
+        out = pf_o(w, o, B, push=push)
+        if isinstance(out, ccl.PackedAR):  # (the all-reduce ran in the o_proj's program: tt/arpush.py)
+            if packed_out:
+                return out
+            u = out.unpack()
+            ttnn.deallocate(out.t)
+            return u
     if out is None:
         out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:

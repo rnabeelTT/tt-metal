@@ -19,7 +19,11 @@ void kernel_main() {
     constexpr uint32_t NCH = get_compile_time_arg_val(2);  // live chunks (2 T Ht)
     constexpr uint32_t CX = get_compile_time_arg_val(3);
     constexpr auto t_args = TensorAccessorArgs<4>();
+#ifdef ARP_R0  // (the shard grid's rows ARP_R0 / ARP_R1: tt/ccl.py shard_rows)
+    const uint32_t j = ((uint32_t)get_absolute_logical_y() == ARP_R0 ? 0 : CX) + (uint32_t)get_absolute_logical_x();
+#else
     const uint32_t j = (uint32_t)get_absolute_logical_y() * CX + (uint32_t)get_absolute_logical_x();
+#endif
     const auto at = TensorAccessor(t_args, get_common_arg_val<uint32_t>(0), 2048);
     const uint32_t shard = get_common_arg_val<uint32_t>(1);
     const uint32_t c0 = j * KJ * 64;
