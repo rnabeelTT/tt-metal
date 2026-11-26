@@ -278,6 +278,93 @@ from 0.9677 / 0.9954 / 0.0212, the eval's noise). Tried and dropped: one fused-M
 0.9998, but slower than two 16-row calls: the MoE is bandwidth-bound at these widths, and TP4's 288-column expert slices
 are stored padded to 384); the MoE rows kernels at one row (still route the sigb router wrongly).
 
+## Decode, 2026-11-25 round (4b1213814db..b318c18862a; traced step at position 300, host-timed, ms)
+
+Floor (B=1, 512 GB/s per die): ~5.1 GB read per step (48 applications x (attention ~30 MB + 8 experts ~68 MB) + LM
+head ~0.5 GB) -> one die ~10.0 ms, TP2 ~5.0 ms / die, TP4 ~2.5 ms / die.
+
+| | round start | now (b318c18862a) | % of floor |
+|---|---:|---:|---:|
+| one die B=1 | 16.22 | 15.48 | 65 % |
+| TP2 B=1 | 11.82 | 10.91 | 46 % / die |
+| TP4 B=1 | 9.58 | 8.85 | 28 % / die |
+| one die / TP2 / TP4 B=8 | | 44.3 / 26.5 / - | |
+
+B>1 floors depend on the expert union per layer (not computed). Served (p300x2 = TP4, real text, T=1, tok/s): 1 user
+spec ~116 (929076d256e) -> 149.8, plain 112.6 (8.88 ms); 4 users 13.78 ms/tok; 32 users ~452 total. p300 spec 104.5,
+plain 89.9. Long docs (edbd3ae517c, spec to 64K): 40K doc p300 58.6 -> 97.8, p300x2 81.3 -> 132.0.
+
+Per commit (each "before -> after" is vs its parent, measured in the same session):
+
+| commit | change | one die B=1 | TP2 B=1 | TP4 B=1 | other |
+|---|---|---|---|---|---|
+| 4b1213814db | trace-capture safety (below) | | | | fixes NaN drafter taps (TP2, chunk 256); boot +0.6-8.1 s |
+| f149426a02e | prefill host dispatch: cached descriptors, one tau upload per chunk | | | | 4K prefill TP4 676.5 -> 654.4 ms, TP2 1202 -> 1145 |
+| cc7ac7ce5e1 | RowNorm rows frozen after first capture | | | | fixes wrong drafter taps after the first prompt |
+| 14d4d9f8050 | sampling tail: cross-die candidate exchange (TailX), dense tail for multi-row widths | | 11.821 -> 11.766 | 9.580 -> 9.528 | tail one die W=4 642 -> 504 us |
+| de29077a759 | p150 spec over the whole 32K context (64 MB trace region) | | | | 11K doc 56 -> 92 tok/s |
+| 8e6b1a8cf8b | glue fusion: gate2 fuses up to 4 rows, single-pass pre for one row, lgx | 16.02 -> 15.82 | 11.56 -> 11.31 | 9.18 -> 8.90 | B=4 27.27 -> 27.11 |
+| 83340952303 | o_proj weight prefetch into a second global CB (one die, TP2) | 16.01 -> 15.55 | 11.56 -> 11.34 | = | o_proj 24.5 -> 13.5 us / call |
+| edbd3ae517c | trace region sized to the measured traces | | | | spec 32K -> 64K on p300 / p300x2 |
+| 19133383f13 | kernel-config ring +64 KB on TP2 | | 11.34 -> 11.19 | | ring stall before SDPA / gates |
+| 73a3a1fef53 | sampler merges dies' candidates on integer keys; q\|k\|v + o prefetch on 4 dies | | 11.17 -> 11.07 | 9.243 -> 8.970 | TP4 B=4 14.14 -> 13.14 |
+| 5c363c8d4a7 | ring +64 KB on TP4 | | | 8.970 -> 8.845 | B=4 13.14 -> 13.02 |
+| 8caab7e2eaa | block-mix logits read in place (8 lgx expand programs gone) | 15.575 -> 15.477 | 10.97 -> 10.91 | | |
+| c46f68b7246 | serve with TT_MESH_PASS_THROUGH_THREAD_POOL=1 | | | | p300x2 spec 140.7 -> 149.8 tok/s |
+| b318c18862a | verify rows bitwise equal to one-row decode | = | = | = | verify one die 28.15 -> 28.04, TP4 +0.1; spec greedy == plain greedy |
+
+Quality: every step is bitwise on decode logits / sampled tokens vs its parent (one die, TP2, TP4 at the widths in each
+commit message), so the teacher-forced evals stand (one die decode 0.9686 / 0.9964 / 0.0157; TP4 0.9711 / 0.9955 /
+0.0165). b318c18862a changes only the verify rows (now bitwise the W=1 decode). Each step: L1 check and
+TT_METAL_TRACE_ALLOC_TRACKING clean, served texts read.
+
+Per application, one die B=1 (us; device profile at 14d4d9f8050, ~/inkling2-work/fz/PROFILE.md; 663 programs, 16.41 ms
+device step, dispatch gaps 0.42 ms):
+
+| op | before | after | bound |
+|---|---:|---:|---:|
+| MoE gate\|up + down + route | 151 | 151 | 132 |
+| q\|k\|v (q prefetched) | 20.6 | 20.6 | at bound with pre |
+| o_proj | 24.5 | 13.5 (post +1) | 14.7 |
+| SDPA (+ ring stall gap) | 18.9 + 3.6 | same on one die | latency |
+| glue: pre / post / gates / convs / aprep / agate / mix logits / misc | ~96 | ~94 (lgx gone) | latency |
+| LM head (per step) | 1057 | 1057 | 961 |
+
+TP4 per die (~/inkling2-work/mp/PROFILE_MESH.md, 9.83 ms device step): MoE 1.94 ms (at floor), the replicated glue
+~4.4 ms (45 %: same us per call as one die), 96 all-reduces 0.52 ms, tsample 233 us (now integer-key merge), ring gaps
+~150 us. The glue is why TP2 / TP4 sit at 46 / 28 % of their floors.
+
+Findings to keep:
+* Multi-die host write stall: each small mesh input write waited 1.5-5 ms for its per-die dispatch thread (pinned to
+  the reader thread's core), never for the device. TT_MESH_PASS_THROUGH_THREAD_POOL=1 writes on the calling thread.
+* Verify vs W=1 parity: verify had matched the 4-wide decoder, so spec and plain T=0 texts split on near ties (TP2 8K
+  doc looped). Glue reductions use the one-row partial count, verify SDPA splits K/V like one-row decode
+  (I2M_SDPA_VROWS 1), and a one-slot pass crossing a 256-key chunk boundary accepts drafts only up to it.
+* dl_reader one-packet race: with one packet per column the newest trid's count can read 0 right after issue, so the
+  column passes unread. StreamHead K=256 buffers=2: 3998 of 4000 replays mismatched; buffers 3 / 4 and K=2304 (6
+  packets per column, the served head) clean. Guard (wait on the issued-read count for the newest trid):
+  ~/inkling2-work/rc/rc_5c363c8d4a71.patch, 0 mismatches; not in the tree yet. buffers=3 at K=2304 is 2x slower
+  (1075 -> 2007 us): keep 2.
+* Trace-capture safety: compile every program and allocate every persistent buffer (views included) before the first
+  capture; trace outputs written into the eager warm-up pass's tensors; temporaries freed before replays; nothing
+  cached lazily after a capture (RowNorm rows). Check with TT_METAL_TRACE_ALLOC_TRACKING.
+
+Measured slower or neutral, dropped:
+
+| change | result |
+|---|---|
+| glue program merges: post + mlp gate | +0.125 ms |
+| pre + attention gates | +0.24 ms |
+| conv + aprep, route in its producer | neutral (per-program fixed cost ~0 once the ring is warm) |
+| phase-2 norm / projection round merges | not bitwise; B=1 15.151 -> 15.18-15.21, B=4 / V4 mixed |
+| prefill row gather in the gmm reader (C v1) | bitwise, gate\|up TP4 1.0 -> 5.0 ms / call (32-byte reads ~150 ns each); ~/inkling2-work/pr/NOTES_C.txt |
+| LM-head top-k dense tail at mesh widths > 1 | slower; W=1 on mesh, W<=4 one die (pending commit) |
+| mlp-site all-reduce push into its producer | TP2 -26 us: die skew absorbs it |
+| all-reduce folded into post / pre (I2M_AR_MERGE, earlier) | TP2 12.75 -> 12.98 |
+| ring +64 KB on one die | 15.55 -> 15.35, but p150 L1 margin 38 -> 6 KB: not taken |
+| o_proj on 72 / 120 cores; o activation reads all in flight (trids) | 24.5 -> 25.2 us; 13.5 -> 32.6 us |
+| q prefetch request one application earlier | no change (already hidden) |
+
 ## Prefill, this round (TP4, one 1,024-token chunk, tools/bench_prefill.py wall time)
 
 | change | ms | tok/s |
@@ -544,8 +631,11 @@ One-die bench of the per-die shards, us gate|up / down (floor at 512 GB/s): TP2 
 
 ## Next
 
-1. Decode glue: the pre / post / gate cross-core rounds (~5 us each, ~9 per application) are now the dominant glue;
-   the streamed q|k|v run at ~58 % of bandwidth (72 vs ~42 us, ~1.4 ms one die).
-2. Prefill: long-context SDPA past 4 items per stream (smaller CBs: single-buffered tables), 2048-token chunks in the served config (pool cap),
-   the block-mix logits once per block (MixPlan for prefill), the gate head (rms / concat / matmuls).
-3. DSpark speculative decoding (acceptance 1.2 per pass measured: low priority).
+1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
+   gates, not fewer programs (merges measured neutral or slower once the ring is warm).
+2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not
+   landed); 96 x 5.4 us on TP4.
+3. One-die kernel-config ring +64 KB (-0.2 ms) needs L1 room at p150 first.
+4. Land the dl_reader one-packet guard and the mesh LM-head top-k width (W=1).
+5. Prefill: the gmm row gather v2 (tilize in the compute; est. -0.3 ms per call, ~/inkling2-work/pr/NOTES_C.txt),
+   long-context SDPA past 4 items per stream, 2048-token chunks in the served config (pool cap), MixPlan for prefill.
