@@ -31,6 +31,13 @@ LIST_PAGE, LIST_CAP = 576, 192  # (lhlist.hpp LH_PAGE, LH_CAP)
 # tiles the writer may lag behind the compute (its list work comes in bursts at the start)
 TOPK_HEAP = os.environ.get("I2M_HEAD_TOPK_HEAP", "1")
 OUT_PAGES = int(os.environ.get("I2M_HEAD_OUT_PAGES", "8"))
+# I2M_HEAD_LIVE (default 1): the logits pages get their live rows only (every consumer reads rows < rows: the top-k
+# programs, the host readback's untilize_with_unpadding; the other rows were don't-care values already)
+LIVE = os.environ.get("I2M_HEAD_LIVE", "1") == "1"
+# I2M_HEAD_STAGE: with LIVE, the live rows staged in L1 and written this many tiles at a time (0: a write per tile);
+# default 64 tiles up to 8 rows, 16 up to 16 (<= 64 KB of L1), none above (one die head + tail, per tile -> staged:
+# W1 1107 -> 1071 us, W2 1183 -> 1143, W4 1352 -> 1334, W8 1903 -> 1851, W16 3231 -> 3224)
+STAGE = int(os.environ.get("I2M_HEAD_STAGE", "-1"))
 # the lists of the last head call per logits buffer address: {address: (head, rows)} (the tail looks its logits up)
 LISTS = {}
 
@@ -75,6 +82,9 @@ class StreamHead(DecodeLinear):
             format_descriptors=[ttnn.CBFormatDescriptor(buffer_index=i, data_format=dt, page_size=page)])
         cbs = [fmt(cb_x, ttnn.bfloat16, 2048, self.kt), fmt(cb_w, self.weight_dtype, self.tile_bytes, self.buffers * self.kt),
                fmt(cb_out, ttnn.float32, 4096, OUT_PAGES if topk else 2)]
+        stage = 0 if not LIVE or rows > 16 else (STAGE if STAGE >= 0 else 64 if rows <= 8 else 16)
+        if stage:
+            cbs.append(fmt(3, ttnn.float32, stage * 2 * rows * 64, 1))
         if topk:
             lists = self.alloc_lists()
             cbs.append(fmt(cb_l, ttnn.float32, rows * ((2 * LIST_CAP + 16) * 4 + LIST_PAGE) + LIST_CAP * 4, 1))
@@ -110,7 +120,7 @@ class StreamHead(DecodeLinear):
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
                 ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "head_writer.cpp"), core_ranges=cores,
                                       compile_time_args=wr_ct, runtime_args=rt_for(wr_args, cores),
-                                      defines=[("HEAD_TOPK", "1"), ("LH_HEAP", TOPK_HEAP)] if topk else [],
+                                      defines=([("HEAD_TOPK", "1"), ("LH_HEAP", TOPK_HEAP)] if topk else []) + [("HEAD_LIVE", str(int(LIVE))), ("HEAD_STAGE", str(stage))],
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=wnoc)),
             ]
         kernels.append(ttnn.KernelDescriptor(

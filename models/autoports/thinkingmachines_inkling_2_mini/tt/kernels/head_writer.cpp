@@ -3,7 +3,8 @@
 //
 // Inkling LM head, activation in + logits out (BRISC; tt/head.py StreamHead): rows 0 .. rows-1 of the kt BF16
 // activation tiles into cb_x (rows <= 16: faces 0 / 1, the other rows are don't-care; else whole tiles), then each FP32 output column tile the
-// compute packs to logits page out_col0 + i (columns past n_tiles: bank padding, not written).
+// compute packs to logits page out_col0 + i (columns past n_tiles: bank padding, not written; HEAD_LIVE: only its live
+// rows, the others are don't-care like the activation's).
 // HEAD_TOPK: also each live row's candidate list of this core's columns (lhlist.hpp) as the tiles stream, written at
 // the end as page SLOT * 32 + row of `lists`.
 //
@@ -64,10 +65,54 @@ void kernel_main() {
     cb_push_back(cb_x, kt);
 
     const auto s_o = TensorAccessor(o_args, out_addr, OB);
+#if HEAD_STAGE
+    static_assert(rows <= 16, "staged: faces 0 / 1");
+    constexpr uint32_t cb_s = 3;
+    const uint32_t stage = get_write_ptr(cb_s);
+    uint32_t ns = 0, sp0 = out_col0;  // (the staged tiles are consecutive pages from sp0)
+    auto flush_stage = [&]() {
+        noc_async_write_barrier();  // (the local copies landed)
+        for (uint32_t k = 0; k < ns; ++k) {
+            const uint32_t src = stage + k * 2 * rows * 64;
+            const uint64_t dst = s_o.get_noc_addr(sp0 + k);
+            noc_async_write(src, dst, rows * 64);
+            noc_async_write(src + rows * 64, dst + 1024, rows * 64);
+        }
+        sp0 += ns;
+        ns = 0;
+        noc_async_writes_flushed();  // (the staging buffer read out before it is refilled)
+    };
+#endif
     for (uint32_t i = 0; i < ncols; ++i) {
         cb_wait_front(cb_out, 1);
         if (out_col0 + i < n_tiles) {
+#if HEAD_STAGE
+            // the live rows copied (on the NOC) into a staging buffer and written HEAD_STAGE tiles at a time: the
+            // weight stream's banks see a few write bursts instead of a write per tile
+            {
+                const uint32_t a = get_read_ptr(cb_out);
+                const uint32_t d = stage + ns * 2 * rows * 64;
+                noc_async_write(a, get_noc_addr(d), rows * 64);  // (a local copy on the NOC)
+                noc_async_write(a + 1024, get_noc_addr(d + rows * 64), rows * 64);
+                if (++ns == HEAD_STAGE) {
+                    flush_stage();
+                }
+            }
+#elif HEAD_LIVE
+            // the live rows only (faces 0 / 1 rows 0 .. rows-1; past 16 rows faces 0 / 1 whole, faces 2 / 3 the rest)
+            const uint32_t src = get_read_ptr(cb_out);
+            const uint64_t dst = s_o.get_noc_addr(out_col0 + i);
+            if constexpr (rows > 16) {
+                noc_async_write(src, dst, 2048);
+                noc_async_write(src + 2048, dst + 2048, (rows - 16) * 64);
+                noc_async_write(src + 3072, dst + 3072, (rows - 16) * 64);
+            } else {
+                noc_async_write(src, dst, rows * 64);
+                noc_async_write(src + 1024, dst + 1024, rows * 64);
+            }
+#else
             noc_async_write(get_read_ptr(cb_out), s_o.get_noc_addr(out_col0 + i), OB);
+#endif
         }
 #if HEAD_TOPK
         invalidate_l1_cache();
@@ -116,6 +161,11 @@ void kernel_main() {
         uint32_t* pg = reinterpret_cast<uint32_t*>(pages + r * LH_PAGE);
         lh_row_finish(row(r), scratch, pg);
         noc_async_write(reinterpret_cast<uint32_t>(pg), s_l.get_noc_addr(slot * 32 + r), LH_PAGE);
+    }
+#endif
+#if HEAD_STAGE
+    if (ns) {
+        flush_stage();
     }
 #endif
     noc_async_write_barrier();
