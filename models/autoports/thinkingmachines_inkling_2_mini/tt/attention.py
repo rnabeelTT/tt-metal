@@ -390,6 +390,10 @@ def _rms_unweighted(x, eps):
 # I2M_PREFILL_PREP (default 1): a prefill chunk's q / r / sink prep and K / V cache writes in one program (tt/aprep.py
 # with the chunk's rows as its units): the slices, l2 clips, RMS, tau, casts, transposes and paged_fill_cache
 PREFILL_PREP = __import__("os").environ.get("I2M_PREFILL_PREP", "1") == "1"
+# I2M_PGATE (default 1): the packed prefill's output gate in one program reading the gate columns of the fp32 q
+# projection output (tt/agate.py PrefillGate) instead of a slice, typecasts, sigmoid and multiply; bitwise
+PGATE = __import__("os").environ.get("I2M_PGATE", "1") == "1"
+_PGATE = {}
 # I2M_PF_TAU1 (default 1): a packed chunk's log-scaling rows uploaded once per chunk (PackedCtx.tau), not per global
 # application (8 x a [1, T, 1, 1] TILE fp32 host tilize + upload: ~4.7 ms each at 2048 rows); the same values
 TAU1 = __import__("os").environ.get("I2M_PF_TAU1", "1") == "1"
@@ -627,8 +631,9 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
         r = ttnn.slice(pq, (0, 0, 0, o0 + w.qd), (1, 1, T, o0 + w.qd + w.rd))
         s = ttnn.slice(pq, (0, 0, 0, o0 + w.qd + w.rd), (1, 1, T, o0 + w.qd + w.rd + NH))
     o0 = w.qd + w.rd + w.sd
-    g = ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))
-    if not prep:
+    pg = PGATE and pq.dtype == ttnn.float32 and T % 32 == 0 and o0 % 32 == 0 and w.gd == NH * HD
+    g = (pq, o0) if pg else ttnn.slice(pq, (0, 0, 0, o0), (1, 1, T, o0 + w.gd))  # (pg: pq lives until the gate)
+    if not prep and not pg:
         ttnn.deallocate(pq)
     sk_ = [(row0, R, valid, lanes[lane][0]) for row0, R, p0, valid, slot, lane in ctx.segs]
     sv_ = [(row0, R, valid, lanes[lane][1]) for row0, R, p0, valid, slot, lane in ctx.segs]
@@ -653,12 +658,12 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
             for t in (ps, ks, vs):
                 ttnn.deallocate(t)
             os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0))
-        for t in (pq, k, v):
+        for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
         return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl)
     if prep:  # the q / r / sink prep and the K / V writes in one program
         q, rq, sk = _prefill_prep(w, c, pq, k, v, None if w.sliding else ctx.tau(w), ctx.fill[w.sliding])
-        for t in (pq, k, v):
+        for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
         return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
     q = _l2clip(f32(ttnn.reshape(q, (1, T, NH, HD))), w.qk_clip, w.q_scale)
@@ -705,9 +710,19 @@ def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
 def _packed_out(w, o, g, T, tt_ccl):
     """The output gate, o_proj and all-reduce of the SDPA output o [1, 1, T, NH * HD]."""
     N = w.N
-    f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
-    bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
-    o = bf(ttnn.multiply(f32(o), ttnn.sigmoid(f32(g))))
+    if isinstance(g, tuple):  # (PGATE: g = (pq, the gate's first column))
+        if w.mesh not in _PGATE:
+            from .agate import PrefillGate
+
+            _PGATE[w.mesh] = PrefillGate(w.mesh)
+        go = _PGATE[w.mesh](o, *g)
+        ttnn.deallocate(g[0])
+        ttnn.deallocate(o)
+        o = go
+    else:
+        f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731
+        bf = lambda t: ttnn.typecast(t, ttnn.bfloat16)  # noqa: E731
+        o = bf(ttnn.multiply(f32(o), ttnn.sigmoid(f32(g))))
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, T, w.H))
