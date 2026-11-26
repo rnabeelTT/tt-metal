@@ -92,6 +92,20 @@ ALWI void split_rows(uint32_t x, uint32_t hi, uint32_t lo) {
 ALWI void clip_rows(uint32_t idst, uint32_t thr, uint32_t tau) {
     MATH((SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_aprep_clip, (RIT), idst, VectorMode::R, thr, tau)));
 }
+// SFPU_ROWS: the head groups' rsqrt (and v's scalar ops) on their rows only too (the same per-element code)
+#ifndef SFPU_ROWS
+#define SFPU_ROWS 0
+#endif
+ALWI void rsqrt_rows(uint32_t d) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_rsqrt, (APPROX, RIT, DST_ACCUM_MODE, false, false), d,
+                         VectorMode::R));
+}
+ALWI void scalar_rows(uint32_t d, uint32_t mul_s, uint32_t add_s) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                         (APPROX, ckernel::MUL_UNARY, RIT, DST_ACCUM_MODE), d, VectorMode::R, mul_s));
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                         (APPROX, ckernel::ADD_UNARY, RIT, DST_ACCUM_MODE), d, VectorMode::R, add_s));
+}
 ALWI void sfpu_drain() {
 #ifdef TRISC_MATH
     TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
@@ -214,15 +228,28 @@ void kernel_main() {
         for (uint32_t c = 0; c < 2 * nt; ++c) {
             matmul_tiles(cb_sq, cb_ones, c, 0, 0);  // row sums (hi + lo), in every column
         }
+        const bool rows = SFPU_ROWS && trim;
         if (type == 3) {
             binop_with_scalar_tile_init();
-            mul_unary_tile(0, inv_hd);
-            add_unary_tile(0, eps);
+            if (rows) {
+                scalar_rows(0, inv_hd, eps);
+            } else {
+                mul_unary_tile(0, inv_hd);
+                add_unary_tile(0, eps);
+            }
             rsqrt_tile_init<false>();
-            rsqrt_tile<false>(0);
+            if (rows) {
+                rsqrt_rows(0);
+            } else {
+                rsqrt_tile<false>(0);
+            }
         } else {
             rsqrt_tile_init<false>();
-            rsqrt_tile<false>(0);
+            if (rows) {
+                rsqrt_rows(0);
+            } else {
+                rsqrt_tile<false>(0);
+            }
             binop_with_scalar_tile_init();
             if (trim) {
                 clip_rows(0, qk_clip, tau);

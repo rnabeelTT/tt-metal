@@ -138,14 +138,54 @@ ALWI void pack_to(uint32_t d, uint32_t cb) {
     pack_cfg(cb);
     pack_tile(d, cb);
 }
+// (SFPU_ROWS: the scalar ops and the rsqrt on the live rows only, VectorMode::R x RIT iterations: the same per-element
+// code as the whole-tile calls; rows past ROWS are never read)
+#ifndef SFPU_ROWS
+#define SFPU_ROWS 0
+#endif
+ALWI void rmul_s(uint32_t d, uint32_t s) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                         (APPROX, ckernel::MUL_UNARY, RIT, DST_ACCUM_MODE), d, VectorMode::R, s));
+}
+ALWI void radd_s(uint32_t d, uint32_t s) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binop_with_scalar,
+                         (APPROX, ckernel::ADD_UNARY, RIT, DST_ACCUM_MODE), d, VectorMode::R, s));
+}
+ALWI void rrsqrt(uint32_t d) {
+    MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_rsqrt, (APPROX, RIT, DST_ACCUM_MODE, false, false), d,
+                         VectorMode::R));
+}
+ALWI void rmax(uint32_t a, uint32_t b, uint32_t o) {
+    if constexpr (SFPU_ROWS) {
+        MATH((SFPU_BINARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_binary_max_min, (true, RIT), a, b, o,
+                               VectorMode::R)));
+    } else {
+        binary_max_tile(a, b, o, VectorMode::R);
+    }
+}
+ALWI void rrecip(uint32_t d) {
+    if constexpr (SFPU_ROWS) {
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_reciprocal, (APPROX, DST_ACCUM_MODE, RIT, true), d,
+                             VectorMode::R));
+    } else {
+        recip_tile(d, VectorMode::R);
+    }
+}
 // rsqrt(total / H + eps) in DST d
 ALWI void rnorm(uint32_t d, uint32_t inv_h, uint32_t eps) {
     drain();
     binop_with_scalar_tile_init();
-    mul_unary_tile(d, inv_h);
-    add_unary_tile(d, eps);
-    rsqrt_tile_init<false>();
-    rsqrt_tile<false>(d);
+    if constexpr (SFPU_ROWS) {
+        rmul_s(d, inv_h);
+        radd_s(d, eps);
+        rsqrt_tile_init<false>();
+        rrsqrt(d);
+    } else {
+        mul_unary_tile(d, inv_h);
+        add_unary_tile(d, eps);
+        rsqrt_tile_init<false>();
+        rsqrt_tile<false>(d);
+    }
 }
 }  // namespace
 
@@ -460,7 +500,7 @@ void kernel_main() {
             drain();
             binary_max_tile_init();
             for (uint32_t b = 0; b < NB; ++b) {
-                binary_max_tile(0, 1 + b, 0, VectorMode::R);
+                rmax(0, 1 + b, 0);
             }
         }
         drain();
@@ -482,7 +522,7 @@ void kernel_main() {
             }
             drain();
             recip_tile_init();
-            recip_tile(7, VectorMode::R);
+            rrecip(7);
             sinit();
             for (uint32_t i = 0; i < n; ++i) {
                 mul(1 + i, 7, 1 + i);
@@ -551,7 +591,7 @@ void kernel_main() {
                 drain();
                 binary_max_tile_init();
                 for (uint32_t b = 0; b < NB; ++b) {
-                    binary_max_tile(0, 1 + b, 0, VectorMode::R);
+                    rmax(0, 1 + b, 0);
                 }
             }
             drain();
@@ -569,7 +609,7 @@ void kernel_main() {
             for (uint32_t b = 0; b < NB; ++b) {
                 cp(cb_d, b * NQ + q, 1);
                 binary_max_tile_init();
-                binary_max_tile(0, 1, 0, VectorMode::R);
+                rmax(0, 1, 0);
             }
             for (uint32_t i = 0; i < n; ++i) {
                 if (i < NB) {
@@ -592,7 +632,7 @@ void kernel_main() {
                 }
                 drain();
                 recip_tile_init();
-                recip_tile(7, VectorMode::R);
+                rrecip(7);
                 sinit();
                 for (uint32_t i = 0; i < n; ++i) {
                     mul(1 + i, 7, 1 + i);

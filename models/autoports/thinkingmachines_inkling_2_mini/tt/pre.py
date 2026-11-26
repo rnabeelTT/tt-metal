@@ -12,7 +12,7 @@ import hashlib
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import BF, CX, CY, C, F32, MR, WS, ZDEFER, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, red_pack, tile_rows
+from .post import BF, CX, CY, C, F32, MR, SFPU_ROWS, WS, ZDEFER, RD_STAGED, SOFT_BATCH, _bits, cbt, red_k, red_pack, tile_rows
 from .bconv import _ks
 from . import lgx
 
@@ -130,11 +130,12 @@ class PreKernel:
                                   runtime_args=_rt(pk.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("PRE_RN1", str(int(RN1))), ("SOFT_BATCH", str(int(SOFT_BATCH))),
                                            ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("PRE_PACK", str(int(pack))),
-                                           ("PRE_P1B", str(int(p1b))), ("PRE_FUSE", str(int(FUSE))), ("PRE_CSQ", str(int(csq)))]),
+                                           ("PRE_P1B", str(int(p1b))), ("PRE_FUSE", str(int(FUSE))), ("PRE_CSQ", str(int(csq))),
+                                           ("SFPU_ROWS", str(int(SFPU_ROWS)))]),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", lgx.FOLD, T, red_k(T), th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
+        key = ("i2m_pre", SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

@@ -16,7 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import MR, RSPLIT, WS, ZDEFER, ZLAZY, red_k, red_pack, red_sel
+from .post import SFPU_ROWS, MR, RSPLIT, WS, ZDEFER, ZLAZY, red_k, red_pack, red_sel
 from .bconv import _ks
 
 F32, BF = 4096, 2048
@@ -220,9 +220,10 @@ class GateKernel2:
             ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "gate2_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(rc.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))),
-                                           ("G2_PACK", str(int(pack))), ("G2_FUSE", str(int(G2_FUSE)))]),
+                                           ("G2_PACK", str(int(pack))), ("G2_FUSE", str(int(G2_FUSE))),
+                                           ("SFPU_ROWS", str(int(SFPU_ROWS)))]),
         ]
-        key = (T, red_k(T), th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
+        key = (SFPU_ROWS, T, red_k(T), th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
                tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
             + ([lg] if rt else [])

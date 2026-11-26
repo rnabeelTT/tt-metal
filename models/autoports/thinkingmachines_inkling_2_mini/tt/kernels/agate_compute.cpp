@@ -17,6 +17,9 @@
 #define AG_ROWS 16
 #endif
 constexpr int RIT = 2 * ((AG_ROWS + 3) / 4);
+#ifndef SFPU_ROWS
+#define SFPU_ROWS 0
+#endif
 
 #ifdef TRISC_MATH
 namespace ckernel::sfpu {
@@ -53,7 +56,12 @@ void kernel_main() {
         copy_init(cb_o);
         copy_tile(cb_o, 0, 1);
         sigmoid_tile_init<false>();
+#if SFPU_ROWS  // (the live rows only: the same per-element code)
+        MATH(SFPU_UNARY_CALL(DST_SYNC_MODE, DST_ACCUM_MODE, calculate_sigmoid, (false, DST_ACCUM_MODE, RIT), 0,
+                             VectorMode::R));
+#else
         sigmoid_tile<VectorMode::R, false>(0);
+#endif
 #ifdef TRISC_MATH
         TTI_STALLWAIT(p_stall::STALL_MATH, p_stall::WAIT_SFPU);
 #endif

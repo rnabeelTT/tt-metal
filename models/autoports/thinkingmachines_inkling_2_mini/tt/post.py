@@ -71,6 +71,9 @@ CSQ = __import__("os").environ.get("I2M_POST_CSQ", "0") == "1"
 # rounds of 1 < T rows with red_k(T) T <= 8: every core's T rows in its gather group's spare rows, one root (core 0)
 # reducing all rows at once (red.hpp TR): one write per part and face, no relay. I2M_RED_PACK: the programs (pre, postl:
 # post without a router round, gate: gate2 / multi without one; 1 all, 0 none)
+# the compute's scalar ops, rsqrt and reciprocals on the live rows only (VectorMode::R x RIT, the same per-element code;
+# pre / post / gate2). I2M_SFPU_ROWS
+SFPU_ROWS = __import__("os").environ.get("I2M_SFPU_ROWS", "1") == "1"
 _PK = __import__("os").environ.get("I2M_RED_PACK", "1")
 PACK = {"pre", "postl", "gate"} if _PK == "1" else set() if _PK == "0" else set(_PK.split(","))
 
@@ -238,11 +241,11 @@ class PostKernel:
             dm("post_writer.cpp", wr_ct, wr_common, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_0),
             ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "post_compute.cpp"), core_ranges=crs, compile_time_args=cp_ct,
                                   runtime_args=_rt(self.cores, [[i] for i in range(C)]), config=cfg,
-                                  defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH))), ("POST_FUSE", str(int(POST_FUSE))), ("POST_MSQ", str(int(POST_MSQ)))] + rdefs),
+                                  defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH))), ("POST_FUSE", str(int(POST_FUSE))), ("POST_MSQ", str(int(POST_MSQ))), ("SFPU_ROWS", str(int(SFPU_ROWS)))] + rdefs),
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

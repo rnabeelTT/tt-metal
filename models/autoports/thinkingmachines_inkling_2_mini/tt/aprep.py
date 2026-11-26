@@ -31,6 +31,7 @@ QG = __import__("os").environ.get("I2M_APREP_QG", "1") == "1"
 # the ones tile made by the compute (off the reader's path). Outputs bitwise unchanged
 LEAN = __import__("os").environ.get("I2M_APREP_LEAN", "1") == "1"
 PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
+from .post import SFPU_ROWS  # noqa: E402
 
 
 def _bits(x: float) -> int:
@@ -149,7 +150,8 @@ class AttnPrep:
         ud = [("APREP_QN", str(self.QN)), ("APREP_HG", str(self.HG)), ("APREP_KN", str(KN)),
               ("APREP_KG", str(KG)), ("APREP_NH", str(w.NH)), ("APREP_NKVH", str(w.NKV)),
               ("APREP_NOZERO", str(int(LEAN))), ("APREP_WB1", str(int(LEAN))), ("APREP_ONES_C", str(int(LEAN))),
-              ("APREP_KVW", str(int(kv is not None and fill is None)))] + ([("APREP_CARGS", "1")] if carg else [])
+              ("APREP_KVW", str(int(kv is not None and fill is None)))] + ([("APREP_CARGS", "1")] if carg else []) \
+            + [("SFPU_ROWS", str(int(SFPU_ROWS)))]
         if LEAN and not prefill and self.QN > 1 and (KN > 1 or (kv is not None and fill is None)):
             ud.append(("APREP_RB", str(max(self.HG, KG))))  # (head groups at row 0, SFPU on their rows only)
         dm = lambda src, ct, rt, riscv, noc, defs=(): ttnn.KernelDescriptor(  # noqa: E731
@@ -167,7 +169,7 @@ class AttnPrep:
         key = ("i2m_aprep", B, nc, self.HG, KG, w.NH, w.NKV, w.HD, glob, w.qk_clip, w.rel_clip, repr(pq.memory_config()),
                repr(k.memory_config()), repr(tau_t.memory_config()), repr(self.kv_mc), int(pq.shape[-1]),
                tuple(wr_defs), tuple((repr(t.memory_config()), tuple(t.shape)) for t in (kv or ())), prefill,
-               tuple(pq.shape), tuple(k.shape), LEAN) + (("cargs",) if carg else ())
+               tuple(pq.shape), tuple(k.shape), LEAN, SFPU_ROWS) + (("cargs",) if carg else ())
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         if carg:
             self._pc[ckey] = (kernels[0], kernels[1], kernels[2], cbs, prog.custom_program_hash)

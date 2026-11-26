@@ -12,6 +12,7 @@ import ttnn
 
 from .bconv import KDIR, _cb, _range_set
 from .bconv import _ks
+from .post import SFPU_ROWS
 
 
 class AttnGate:
@@ -41,7 +42,7 @@ class AttnGate:
         cb_o, cb_g, cb_out = 0, 1, 2
         cbs = [_cb(self.crs, cb_o, ttnn.bfloat16, 2048, 2), _cb(self.crs, cb_g, ttnn.float32, 4096, 2),
                _cb(self.crs, cb_out, ttnn.bfloat16, 2048, 2)]
-        defs = [("AG_ROWS", str(B)), ("AG_J", str(self.J))]
+        defs = [("AG_ROWS", str(B)), ("AG_J", str(self.J)), ("SFPU_ROWS", str(int(SFPU_ROWS)))]
         rd = ttnn.KernelDescriptor(
             kernel_source=_ks(KDIR, "agate_reader.cpp"), core_ranges=self.crs,
             compile_time_args=[cb_o, cb_g, self.DT, g0 // 32, self.CX] + ttnn.TensorAccessorArgs(o).get_compile_time_args()
@@ -61,7 +62,7 @@ class AttnGate:
         cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "agate_compute.cpp"), core_ranges=self.crs,
                                    compile_time_args=[cb_o, cb_g, cb_out], defines=defs, config=cfg)
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
-        key = ("i2m_agate", B, self.NH, self.HD, g0, self.J, repr(o.memory_config()), repr(pq.memory_config()), repr(out_mc))
+        key = ("i2m_agate", SFPU_ROWS, B, self.NH, self.HD, g0, self.J, repr(o.memory_config()), repr(pq.memory_config()), repr(out_mc))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         ttnn.generic_op([o, pq, out], prog)
         return out
