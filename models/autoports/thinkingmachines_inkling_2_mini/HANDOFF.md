@@ -817,12 +817,32 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
 * Verify pass (4 rows of one slot) vs B=1, traced (tools/trace_prof.py VERIFY=4; csv ~/.cache/inkling2/tprof_v{4,0}_tp{4,2}.csv,
   ~/inkling2-work/dec/an/sitediff.py): TP4 8.65 -> 12.07 ms span, TP2 11.89 -> 16.72; 615 -> 620 programs, every site the
   same fused program (no unfused fallback at 4 rows). TP4 growth (kernel us): MoE +1537 (expert union of 4 rows), down
-  push +906 (waits out the MoE skew), SDPA +263 (16.8 -> 22.3 us / application), post +252, pre +227, gates +163.
+  push +906 (the down's union bytes, see below), SDPA +263 (16.8 -> 22.3 us / application), post +252, pre +227, gates +163.
+* Verify pass, where the growth goes (2026-11-27 round 008; logs ~/inkling2-work/dlogs/{zv1,zv2,zs1,zp1,glp1,vp2}_*):
+  - MoE at 4 rows is at the DRAM floor per union expert. tools/zones_verify.py (traced replay, rows kernels' marks
+    QWEN35_MOE_ZONES=1, per die): fit vs union (D_WA chunk counts, ~19.3 experts per layer on this replay) gate|up
+    2.70-2.89 us / expert + 1.7-3.0, down 1.34-1.38 us / expert + 1.5-2.2; floor per die (TP4 bfp8 slice: 1.41 MB gate|up,
+    0.705 MB down per expert at 512 GB/s) 2.75 / 1.377: gate|up + down 83.3 us per layer vs floor 79.7 (96 %).
+  - down_push's growth is not skew: down compute (D_WU -> last D_WO) 12.7 us (B=1, 8 experts) -> 27.9 (v4), identical
+    on all 4 dies; AR tail (last D_WO -> program end) B=1 2.7-4.6 -> v4 3.1-5.8 us; arrival spread between dies 2.19 ->
+    3.12 us / layer (+45 us / pass; last die not stable: die 1 at B=1, die 3 (gate|up slope +7 %) at v4). Every die
+    streams the same union over all 8 banks: no balance lever.
+  - SDPA (tools/zones_sdpa.py R=4, one die TP4 shapes): kernel 14.0 -> 17.5 us; bias matmul per row (S_C_BIAS 1.0 ->
+    4.5) and the per-row Q placement (S_R_Q 0.6 -> 3.0). Dropped: the prefill row-pair bias tables on verify rows
+    (I2M_SDPA_VPAIR, bitwise on live rows): SDPA -0.6 us / application, but the concurrent o_proj prefetch program
+    (tt/prefetch.py:268) grew 472 -> 2203 us: traced verify TP4 12.09 -> 13.82 ms, TP2 16.76 -> 17.93 (not debugged;
+    check tool ~/inkling2-work/dec/attic/vpair_check.py).
+  - post +6.5 us / call: without the router round only +1.4 (tools/zones_post.py T=4 I2M_RED_K=8); with router + route
+    (tools/glz_timeline.py OP=post ROUTER=1 ROUTE=1): ~+1.6 earlier phases, +1.4 router gather (each core writes T x 2 ET
+    rows to T x ET roots), ~+2 the per-row route merge tail. Verify rows must stay bitwise to one-row decode (ROWX:
+    8 partials per group), so the packed reductions do not apply; no single piece is worth > ~70 us / pass.
 
 ## Next
 
-0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): SDPA / post / pre each ~+0.25 ms of row scaling inside the fused
-   kernels; the MoE union (+1.5 ms) is expert-count bound. Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
+0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): the MoE (+2.4 ms incl. the down) is at its DRAM floor per
+   union expert; the rest is row scaling in latency chains (post router gather / route merge, SDPA bias, pre), each
+   <= ~0.1 ms reachable bitwise. Bigger lever is policy: a shorter verify (R = 3, d = 2) reads ~16 instead of ~19 union
+   experts (~-0.6 ms TP4); needs accepted tokens per pass at d = 2 vs 3 (tools/acc_ab.py) before deciding. Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
    gates, not fewer programs (merges measured neutral or slower once the ring is warm).
 2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not
