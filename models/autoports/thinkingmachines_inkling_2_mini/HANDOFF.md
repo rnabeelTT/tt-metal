@@ -654,6 +654,45 @@ One-die bench of the per-die shards, us gate|up / down (floor at 512 GB/s): TP2 
 67.8 / 36.4 -> 63.8 / 33.8 (55 / 27.5); TP1 unchanged. Traced TP2 B=1 12.7 -> 12.4 ms. Left: the route program
 (7.2 us x 48 = 0.35 ms/step), gate|up / down prologue + tail ~3 us each.
 
+## Decode round 2026-11-27 (lane i2m-decode, ~/inkling2-work/plan/DECODE_PLAN.md; logs ~/inkling2-work/dlogs)
+
+Baseline at 5b98fd30cef (traced, test_batched D=4): TP4 B=1 / 16 / 32 8.084 / 25.571 / 53.511 ms, TP2 B=1 / 16 10.345 /
+46.673, TP1 B=1 14.687. Drafter traced (tools/drafter_prof.py MESH=N TRACED=1, d=3): TP4 2.010, TP2 2.216, TP1 2.910 ms
+(~1.5 ms of it hides under the served pass's host time on TP4: drafter fusion is worth <= ~0.5 ms per pass).
+
+Real-text expert union per application (tools/route_dump.py, 8 held-out texts): B 1 / 2 / 4 / 8 / 16 / 32 rows from
+different texts 8.0 / 14.9 / 27.4 / 47.0 / 71.1 / 95.6 experts; union(32) / (union(16) + union(16)) = 0.667. Verify rows
+(consecutive tokens) R 2 / 4 / 6 / 8: 12.6 / 19.3 / 24.8 / 29.1.
+
+| change | TP4 B=16 | TP4 B=32 | TP2 B=16 | served |
+|---|---:|---:|---:|---|
+| start | 25.571 | 53.511 | 46.673 | p300x2 32u 483.7 tok/s (TPOT 57.8); p300 16u 300.2 (48.0) |
+| 7fdf49fe21d multi-row MoE skips row groups with no routed row (QWEN35_MOE_ROWS_SKIP) + one 32-row call on 4 dies | 24.505 | 42.615 | = | p300x2 32u 581.8 (46.7) |
+| fbab479cf2e TP2 9..16 rows as one MoE call (I2M_MOE_HALVES=0) | = | = | 35.152 | p300 16u 372.3 (37.4) |
+
+B=1 and B<=8 unchanged (one row group; B=1 TP4 8.085 bitwise). 7fdf49fe21d is bitwise on decode rows (skip vs no skip;
+one vs two calls: every slot whose prefill had no 17..32-row MoE call). fbab479cf2e changes TP2 numerics at 9..16 rows:
+teacher-forced decode TP2 B=16 x 736 .9694 / .9954 / .0161 -> .9686 / .9943 / .0195 (nll 1.7513 -> 1.7512): flagged for
+review; I2M_MOE_HALVES=1 restores it.
+
+Why one 32-row call lost before (I2M_MOE_ROWS_MAX=32: 56.8 ms): gate|up computed 4 row groups per union slot (3.5 us per
+expert, compute-bound) and each of the 72 down cores read 4 groups x 96 slots x 10 activation tiles (~2 MB of 512-byte L1
+reads per core). ~half of the (slot, group) pairs have no routed row at 32 rows; the skip drops them in both kernels
+(masks from the route table, 4 bits per slot, to the compute threads through the mailboxes after the slot count).
+
+TP4 B=32 after (prof_tp4_b32_skip.log, 43.39 ms profiled, 2829 programs): MoE 17.17 ms (gate|up 213 us / call = 2.2 us per
+union expert, down 128); the rest is the > 16-row glue fallbacks: message gates on the old GateKernel 5.67 ms (59 us per
+call), block mix unfused 4.52 (_mix: generic 3.80 + matmul 0.73), attention projections as ttnn.linear 2.25, SDPA 2.47,
+unpacked all_reduce_async (MoE + attention out) 1.46, reshape / rms_norm / typecast ~3. Next lever for 32 users: the
+fused glue at 17..32 rows (two 16-row groups per program, or the 16-row programs with a row offset into the slot state).
+
+Per application TP4 B=1 (profiled us): MoE gate|up 29.4 + route/duprow 5.4 + down+push 22.5 (floor 33); q|k|v 17.7, o+push
+16, SDPA 16.3; glue: pre 16.5, post 17.9, message gates 24.2 avg (multi 28 + mlp 20 on 24 apps), aprep / convs 10.4,
+agate 2.3. The glue is fixed-latency phases and rounds (zones_post / zones_gate2: 2-5 us each), and Inkling-specific math
+(block mix, 4 message gates, output convs) Ornith does not have; the AR exchange is already in the producer / consumer.
+Ornith-class glue (~18 us / application) is not reachable by program fusion alone. Not done: route inside gate|up at
+B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 columns).
+
 ## Next
 
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
