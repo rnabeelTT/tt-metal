@@ -717,7 +717,7 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
   size; TP4 B=1 8.019 -> 7.903 ms with it.
 * Served p300x2 b8acc359b6c -> 49e4f35308a (bench_card 128:128): 1 user 113.3 -> 118.4 tok/s, 32 users total 592.1 ->
   631.2 tok/s (TPOT 45.7 -> 42.3); real-text T=1 mean of 6 154.3 -> 155.8 (speculation noise).
-* I2M_POST_WIDE (default off pending its teacher-forced eval): the post-attention program at 17..32 rows as two 16-row
+* I2M_POST_WIDE (default on; teacher-forced TP4 B=32 .9715 / .9957 / .0144 -> .9691 / .9956 / .0146, nll 1.7589 -> 1.7516): the post-attention program at 17..32 rows as two 16-row
   programs (POST_ROW0); bitwise per half (tools/postwide_check.py); TP4 B=32 38.573 -> 38.183, B=24 36.989 -> 36.131.
 * Next for 17..32 rows: pre the same way (its Tail / q|k|v norm outputs), then the q|k|v prefetch above
   16 rows (I2M_PF_ROWS) and the o prefetch for 32-slot models (I2M_PF_O_SLOTS: on p300x2 with 32 slots the o prefetch is

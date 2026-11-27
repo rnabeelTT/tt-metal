@@ -57,7 +57,7 @@ G2_WIDE = __import__("os").environ.get("I2M_G2_WIDE", "1") == "1"
 PF_ROWS = int(__import__("os").environ.get("I2M_PF_ROWS", "16"))
 # 17..32-row decoders: the fused post-attention section (tt/post.py) as two 16-row programs (rows 16.. in faces 2 / 3)
 # instead of the conv / add / norm / mix ops. I2M_POST_WIDE
-POST_WIDE = __import__("os").environ.get("I2M_POST_WIDE", "0") == "1"
+POST_WIDE = __import__("os").environ.get("I2M_POST_WIDE", "1") == "1"
 KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 # I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
 # _messages; per layer only the mix program)
