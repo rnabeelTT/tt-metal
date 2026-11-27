@@ -60,8 +60,14 @@ def run_post(mesh, n, T):
     up = lambda t: ttnn.from_torch(t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh)  # noqa: E731
     rt = (up(torch.randn(1, 1, H, E) * 0.02), up(torch.randn(1, 1, H, E) * 1e-4)) if os.environ.get("ROUTER", "1") == "1" \
         else None
+    route = None
+    if os.environ.get("ROUTE") == "1" and rt is not None:  # (the routing in the program: post_route.hpp)
+        from models.demos.blackhole.qwen36.tt.moe_decode.union import upload_selection_bias
+        tab = ttnn.from_torch(torch.zeros(max(T, 2), 32, dtype=torch.int32), dtype=ttnn.uint16,
+                              layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=ttnn.L1_MEMORY_CONFIG)
+        route = (tab, upload_selection_bias(mesh, torch.randn(E) * 0.05), 8)
     for _ in range(n):
-        k(att, x, conv, q, blocks, lg, nw=nw, router=rt, dup=T == 1)
+        k(att, x, conv, q, blocks, lg, nw=nw, router=rt, dup=T == 1, route=route)
 
 
 def main():

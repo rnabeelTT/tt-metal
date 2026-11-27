@@ -235,6 +235,16 @@ class FusedExperts:
         sum runs over its own experts in the same order, so the halves are bitwise the whole call)."""
         return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None and HALVES
 
+    def route_target(self, M):
+        """(table, bias, k) a producer program writes the routing of M decode rows into (post / gate2 POST_ROUTE), or
+        None where forward() would not read that table as is (the halves split)."""
+        if M > self.rows_max or self._halves(M) or (M == 1 and ROW1):
+            return None
+        op0 = self.subs[0][0]
+        if op0.bias is None:
+            return None
+        return op0.rows_ops(max(M, 2))[3].table, op0.bias, self.moe.k
+
     def forward(self, x, logits=None, dup=False, raw=False, push=None):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
         tt/moe.py) -> this die's partial [1, 1, M, H] bf16 (summed sub-shards). push: the packed all-reduce, run in the
@@ -268,10 +278,15 @@ class FusedExperts:
 
         op0 = self.subs[0][0]
         route, _, _, b0 = op0.rows_ops(m)
-        own = logits is None
-        logits = self._logits(xr) if own else logits
-        route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
-        ttnn.deallocate(logits)
+        from .post import Routed
+
+        if isinstance(logits, Routed):  # (routed by the producer program into this table: tt/kernels/post_route.hpp)
+            assert logits.table is b0.table
+        else:
+            own = logits is None
+            logits = self._logits(xr) if own else logits
+            route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
+            ttnn.deallocate(logits)
         acc = None
         for (op, ug, dn), (_, W) in zip(self.subs, self.widths):
             _, gu, dnop, b = op.rows_ops(m)

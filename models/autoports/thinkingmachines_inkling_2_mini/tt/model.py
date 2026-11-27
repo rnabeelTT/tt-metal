@@ -350,7 +350,7 @@ class MessageGate:
             return None
         return hf, mf, self.wd, self.wfg_bf, nw_rows
 
-    def fused_norm(self, h, m, nw_rows, router=None, dup=False):
+    def fused_norm(self, h, m, nw_rows, router=None, dup=False, route=None):
         """The gate + the following RMS norm (nw_rows: [1, 1, 32, H] fp32) in one program, with the router logits
         (router: bf16 hi / lo [1, 1, H, E]) -> (bf16 normed x, logits | None). None: not available here."""
         o = self.ops
@@ -360,7 +360,8 @@ class MessageGate:
             return None
         if router is not None and int(hf.shape[-2]) > o.gate2k.ROUTER_ROWS:
             router = None
-        return o.gate2k(hf, mf, self.wd, self.wfg_bf, nw=nw_rows, router=router, dup=dup)
+        return o.gate2k(hf, mf, self.wd, self.wfg_bf, nw=nw_rows, router=router, dup=dup,
+                        route=route if router is not None else None)
 
     def pf_ok(self, h):
         """the prefill gate path (I2M_PF_GATEF): rows > 32 in whole tiles"""

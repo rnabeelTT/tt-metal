@@ -831,7 +831,8 @@ class BatchedDecoder:
             if messages is None and GATE_NORM == 2 and POST_ROUTER and getattr(L.moe, "fused", False):
                 # + the router logits (and the row duplicated for the one-row MoE) in the same program
                 resid, o, lg = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
-                                         nw=self.nw_rows[li], router=L.moe.router_hl, dup=T == 1)
+                                         nw=self.nw_rows[li], router=L.moe.router_hl, dup=T == 1,
+                                         route=L.moe.fe.route_target(T))
                 dup = lg is not None and T == 1
             else:
                 resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
@@ -840,7 +841,9 @@ class BatchedDecoder:
                 # the gate + the MoE-input norm (+ the router logits) in one program (tt/gate.py GateKernel2)
                 T = int(o.shape[-2])
                 rt = L.moe.router_hl if GATE_NORM == 2 and getattr(L.moe, "fused", False) else None
-                f = L.gates["mlp"].fused_norm(o, messages[3], self.nw_rows[li], rt, dup=T == 1) if GATE_NORM else None
+                f = L.gates["mlp"].fused_norm(o, messages[3], self.nw_rows[li], rt, dup=T == 1,
+                                              route=L.moe.fe.route_target(T) if rt is not None else None) \
+                    if GATE_NORM else None
                 if f is not None:
                     (mn, lg), dup = f, T == 1
                 else:

@@ -42,6 +42,16 @@ def red_k(T):
     return int(_RK) if _RK else (2 if T > 1 and not ROWX else 8)
 
 ROUTER_ROWS = int(__import__("os").environ.get("I2M_POST_ROUTER_ROWS", "4"))
+# the MoE routing (top-k, weights, route table) in the router-round program's roots (post / gate2:
+# tt/kernels/post_route.hpp), not in its own program after the logits round trip. I2M_ROUTE_IN
+ROUTE = __import__("os").environ.get("I2M_ROUTE_IN", "1") == "1"
+
+
+class Routed:
+    """In place of the router logits: the routing already written into the MoE's route table."""
+
+    def __init__(self, table):
+        self.table = table
 # the reader pushes the round-1 inputs, then the mix inputs, then the router weights (needed only after round 2), each
 # after its own barrier, instead of all after one. I2M_RD_STAGED (pre / post)
 RD_STAGED = __import__("os").environ.get("I2M_RD_STAGED", "1") == "1"
@@ -148,10 +158,13 @@ class PostKernel:
         return ttnn.from_torch(t.reshape(1, 1, 1, -1).expand(1, 1, 32, -1).contiguous(), dtype=ttnn.float32,
                                layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=self.rep)
 
-    def __call__(self, att, x, conv, q, blocks, logits, nw=None, out_mc=ttnn.L1_MEMORY_CONFIG, router=None, dup=False):
+    def __call__(self, att, x, conv, q, blocks, logits, nw=None, out_mc=ttnn.L1_MEMORY_CONFIG, router=None, dup=False,
+                 route=None):
         """att / x [1, 1, T, H] bf16 (x None: a block boundary, resid = y), conv: the BatchedConv (states / taps),
         q: the query as rows ([1, 1, 32, H] fp32, rows_weight), blocks n fp32 [1, 1, T, H] with logits [(tensor, tile)], nw: the norm weight rows
-        ([1, 1, 32, H] fp32; None: return the mix output) -> (resid fp32, out bf16 | fp32)."""
+        ([1, 1, 32, H] fp32; None: return the mix output) -> (resid fp32, out bf16 | fp32).
+        route (with router): (table, selection bias (Q23, one page), k) of the MoE's RouteRows -> the routing done here (tt/kernels/post_route.hpp:
+        the route table written, the same bits), Routed(table) returned in place of the logits."""
         from .ccl import PackedAR
 
         packed = isinstance(att, PackedAR)  # (att: the packed all-reduce rows, read in place)
@@ -167,6 +180,7 @@ class PostKernel:
         pack = not rt and red_pack(T, "postl")
         mr = "post" in MR and 1 < T <= 8 and not pack  # (2 T roots among the first 16 cores)
         assert not (rt and RSPLIT) or T * ET <= 16, (T, ET)
+        rk = int(route[2]) if rt and RSPLIT and route is not None and ROUTE else 0  # (the routing here: k)
         resid = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
                                                out_mc)
         odt = ttnn.bfloat16 if norm else ttnn.float32
@@ -191,10 +205,13 @@ class PostKernel:
             cbs += [_cb(crs, cb_rw, bf, BF, 2 * PER * ET), r(cb_xb, bf, PER), r(cb_p3, f32, 2 * ET),
                     _cb(crs, cb_g3, f32, F32, 2 * ET * NQ), r(cb_t3, f32, ET)]
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
-                                            self.mesh, out_mc) if rt else None
+                                            self.mesh, out_mc) if rt and not rk else None
+        cb_rs = 34
+        if rk:
+            cbs.append(_cb(crs, cb_rs, ttnn.uint32, -(-4 * 32 * ET // 64) * 64 + 64 + 64 * ET + 64, 1))  # (post_route.hpp)
         rdefs = [("POST_RT", str(ET)), ("POST_RD_STAGED", str(int(RD_STAGED))), ("POST_ZLAZY", str(int(ZLAZY))), ("POST_RSPLIT", str(int(RSPLIT and rt))), ("POST_DUP", str(int(dup))), ("POST_MR", str(int(mr))), ("POST_PACK", str(int(pack))), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("POST_CSQ", str(int(CSQ))), ("POST_CB_RW", str(cb_rw)),
                  ("POST_CB_XB", str(cb_xb)), ("POST_CB_P3", str(cb_p3)), ("POST_CB_G3", str(cb_g3)),
-                 ("POST_CB_T3", str(cb_t3))]
+                 ("POST_CB_T3", str(cb_t3)), ("POST_ROUTE", str(rk)), ("POST_CB_RS", str(cb_rs)), ("RT_E", str(32 * ET))]
         k = conv.kernel
         taps = list(k.w) + [k.wc]
         xa = x if x is not None else att
@@ -213,10 +230,11 @@ class PostKernel:
         rd_common += [acc.buffer_address()] if acc else []
         wr_ct = [cb_so, cb_rout, cb_part, cb_gath, cb_part2, cb_gath2, cb_out, PER, C, int(norm), BF if norm else F32,
                  T, NQ, cb_tout, cb_tot, cb_tot2, cb_zero]
-        for t in (conv.s[0], resid, out, self.zeros) + ((lg,) if rt else ()):
+        for t in (conv.s[0], resid, out, self.zeros) + ((lg if not rk else route[0],) if rt else ()) + ((route[0],) if rk else ()):
             wr_ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
         wr_common = [s.buffer_address() for s in conv.s] + [resid.buffer_address(), out.buffer_address()] + self.mc \
-            + [self.zeros.buffer_address(), lg.buffer_address() if rt else 0] \
+            + [self.zeros.buffer_address(), lg.buffer_address() if rt and not rk else 0] \
+            + ([route[0].buffer_address(), route[1].buffer_address()] if rk else [0, 0]) \
             + self.roots[:2 * max(T * ET if RSPLIT and rt else T, 2 * T if mr else T)]
         cp_ct = [cb_att, cb_x, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_y16, cb_so, cb_res, cb_rmm, cb_rout,
                  cb_sq, cb_part, cb_gath, cb_red, cb_wt, cb_mi, cb_part2, cb_gath2, cb_out, PER, NB, C, int(add),
@@ -243,18 +261,19 @@ class PostKernel:
                                   runtime_args=_rt(self.cores, [[i] for i in range(C)]), config=cfg,
                                   defines=[("ROWS", str(T)), ("SOFT_BATCH", str(int(SOFT_BATCH))), ("POST_FUSE", str(int(POST_FUSE))), ("POST_MSQ", str(int(POST_MSQ))), ("SFPU_ROWS", str(int(SFPU_ROWS)))] + rdefs),
         ]
-        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(8 if rk else 5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", rk, SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()
         for t in [att, xa] + list(conv.s) + taps + [q, self.ones, sel, self.zeros] + ([nw] if norm else []) + list(blocks) \
-                + [g for g, _ in logits] + [resid, out] + (list(router) + [lg] if rt else []) + ([acc] if acc else []):
+                + [g for g, _ in logits] + [resid, out] + (list(router) + ([lg] if not rk else list(route[:2])) if rt else []) \
+                + ([acc] if acc else []):
             if id(t) not in seen:
                 seen.add(id(t))
                 io.append(t)
         ttnn.generic_op(io, prog)
         if router is not None:
-            return resid, out, lg
+            return resid, out, (Routed(route[0]) if rk else lg)
         return resid, out

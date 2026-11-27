@@ -6,12 +6,20 @@
 // [k][t], gain [k][t]), the ones tile and the selection tiles; NORM: its norm weight rows ([1, 1, 32, H] fp32); ROUTER:
 // its rows of the router weight's bf16 hi / lo halves ([H, E] each; tiles [half][t][e]).
 //
-// common args: h, m, wd, wfg, ones, sel, nw, router hi, router lo
+// common args: h, m, wd, wfg, ones, sel, nw, router hi, router lo, route bias (G2_ROUTE: post_route.hpp)
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 #include "glz.hpp"
+#ifndef G2_ROUTE
+#define G2_ROUTE 0
+#endif
+#if G2_ROUTE
+#define ROUTE_FAST 1
+#include "models/demos/blackhole/qwen36/tt/moe_decode/kernels/router_topk.hpp"
+#include "post_route.hpp"
+#endif
 #include "tools/profiler/kernel_profiler.hpp"
 
 // rows 0 .. T-1 of a tile (faces 0 / 1) into a TH x 32 CB tile (faces min(TH, 16) x 16)
@@ -138,5 +146,12 @@ void kernel_main() {
         noc_async_read_barrier();
         GLZ("R_B");
         cb_push_back(cb_rw, 2 * PER * ET);
+#if G2_ROUTE && G2_RSPLIT  // (root (t, e)'s upper 16 experts)
+        if (c < T * ET) {
+            route_reader<G2_ROUTE>((TH < 16 ? TH : 16) * 64, get_write_ptr(G2_CB_RS), c % ET,
+                                   reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(5)),
+                                   reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(6)));
+        }
+#endif
     }
 }

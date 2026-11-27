@@ -15,6 +15,14 @@
 #endif
 #include "glz.hpp"
 #include "lgpk.hpp"
+#ifndef POST_ROUTE
+#define POST_ROUTE 0
+#endif
+#if POST_ROUTE
+#define ROUTE_FAST 1
+#include "models/demos/blackhole/qwen36/tt/moe_decode/kernels/router_topk.hpp"
+#include "post_route.hpp"
+#endif
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -231,6 +239,13 @@ void kernel_main() {
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {
         cb_push_back(cb_nw, PER);
+    }
+#endif
+#if POST_ROUTE  // (root (t, e)'s upper 16 experts: post_route.hpp)
+    if (c < T * POST_RT) {
+        route_reader<POST_ROUTE>((TH < 16 ? TH : 16) * 64, get_write_ptr(POST_CB_RS), c % POST_RT,
+                                 reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(5)),
+                                 reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(6)));
     }
 #endif
 }
