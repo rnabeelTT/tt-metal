@@ -790,11 +790,39 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
 
   B=32 per application: MoE 399 us (gate|up 206, down 122, route 41), glue 213 (pre 71, post 65, gates 56), attention 171.
 
+### Decode round 2026-11-27, part 5 (tensor-parallel drafter, merge exchange, verify vs B1)
+
+* Tensor-parallel drafter block on 2 / 4 dies (DRAFT_TP, default 1 there; 0 = replicated block): die d holds query heads
+  / KV heads / MLP columns block d (its caches only its KV heads), o / down row-parallel + the packed decode all-reduce
+  (tt/ccl.py sites mixer / mlp, 8 rows), the commit's k / v_ctx column-parallel. Greedy drafts identical to the
+  replicated block (test_drafter_device 48 / 48 anchors, 144 / 144 tokens, TP4 and TP2; sampled zero-noise top-8 ids
+  identical on 16 / 48 (TP4), 19 / 48 (TP2): bf16 all-reduce order, max |top-8 logit diff| 0.32 / 0.57). acc_ab on the
+  mesh, greedy: TP4 2.045 -> 2.045 kept / pass (378 passes), TP2 2.405 -> 2.405 (338). T=1 at 9 prompts is noise (one run's
+  host vs device on the same drafter differ by 0.23). DrafterSnapshots save / restore per die checked
+  (tests/snap_tp_check.py, TP4: restored rows equal on every die).
+* Vocab-merge exchange inside the merge program (DRAFT_MX, default 1 with DRAFT_TP; kernels/dsp_merge.cpp DSP_X: fabric
+  multicast of the die's 2 K pairs into a per-step DRAM page + global semaphore, no all_gather; bitwise). A probe that
+  skipped the 3 all_gathers (DRAFT_NOGATHER=1, wrong tokens) bounded them at TP4 0.104 / TP2 0.058 ms; most of that is
+  die-skew sync the merge still waits out.
+
+| drafter d=3 sampled, traced (drafter_prof TRACED=1, x2 reps) | TP2 | TP4 |
+|---|---:|---:|
+| replicated block (b9a94771282) | 2.128 | 1.889 |
+| DRAFT_TP | 1.825 | 1.423 |
+| + DRAFT_MX | 1.815 | 1.410 |
+
+  Served spec pass (I2M_HOST_PROF T=1, median of 12-14 x 100-pass means, DRAFT_TP=0 vs default from one tree,
+  snap_dtp3): p300x2 13.80 -> 13.39 ms, p300 18.62 -> 18.22; p150 boots (28.68, one die: unchanged path). Greedy
+  sequential texts identical 10 / 10 on p300x2 and p300; prefix_serve (resume, turn 2, shared doc x4) correct.
+* Verify pass (4 rows of one slot) vs B=1, traced (tools/trace_prof.py VERIFY=4; csv ~/.cache/inkling2/tprof_v{4,0}_tp{4,2}.csv,
+  ~/inkling2-work/dec/an/sitediff.py): TP4 8.65 -> 12.07 ms span, TP2 11.89 -> 16.72; 615 -> 620 programs, every site the
+  same fused program (no unfused fallback at 4 rows). TP4 growth (kernel us): MoE +1537 (expert union of 4 rows), down
+  push +906 (waits out the MoE skew), SDPA +263 (16.8 -> 22.3 us / application), post +252, pre +227, gates +163.
+
 ## Next
 
-0. Drafter (single user, every profile): tensor-parallel drafter block on 2 / 4 dies (its ~0.8 ms of weights + SDPA are
-   replicated on every die; est. TP4 -0.5 ms, TP2 -0.3 ms per pass); TP4 vocab-merge all_gathers (3 per pass, ~66 us
-   each eager: measure traced first); DECODE_PLAN items 6 / 7 / 9.
+0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): SDPA / post / pre each ~+0.25 ms of row scaling inside the fused
+   kernels; the MoE union (+1.5 ms) is expert-count bound. Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
    gates, not fewer programs (merges measured neutral or slower once the ring is warm).
 2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not

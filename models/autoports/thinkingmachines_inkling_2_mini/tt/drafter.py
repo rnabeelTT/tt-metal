@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""DSpark speculative drafter (the checkpoint's mtp.safetensors), traceable, replicated on every die of the mesh.
+"""DSpark speculative drafter (the checkpoint's mtp.safetensors), traceable; on N > 1 dies its block tensor-parallel
+(DRAFT_TP), its LM head / fold vocab-sharded (DRAFT_VSHARD), the rest replicated.
 
 Follows reference/dspark_ref.py (the spec) except for roundings that only move near-ties (the target verifies every
 draft): the Markov head runs in fp32 without its bf16 roundings, greedy step logits skip the softcap (monotonic) and
@@ -28,8 +29,11 @@ Device state (every shape fixed; positions live in device tensors, so the whole 
                              row -> argmax -> the next token (kernels/dsp_step_*.cpp, the fold weight streamed per bank)
   vocab sharding             N > 1 dies (DRAFT_VSHARD=1): die d streams vocab columns [d Vs, (d + 1) Vs) of the LM head
                              and the fold weight; per Markov step each die's best pair / top 32 goes to a small tensor,
-                             one all_gather, then kernels/dsp_merge.cpp (same on every die) picks the token; the block
-                             stays replicated. DRAFT_VSHARD_SIM=n: n slices simulated on one die (concat, no gather)
+                             one all_gather, then kernels/dsp_merge.cpp (same on every die) picks the token
+  tensor-parallel block      N > 1 dies (DRAFT_TP=1): die d holds query heads / KV heads / MLP columns block d (its caches
+                             only its KV heads); o / down row-parallel + the packed decode all-reduce (tt/ccl.py); the
+                             commit's k / v_ctx column-parallel. TP4 traced drafter 1.889 -> 1.423 ms, TP2 2.128 -> 1.825
+                             (greedy drafts identical to the replicated block, 48 / 48 anchors). DRAFT_VSHARD_SIM=n: n slices simulated on one die (concat, no gather)
   sampled drafts             capture(..., sample=True): per step the top TOPK = 32 of the softcapped step logits
                              (ids / logits in cand_id / cand_lg, host: cand_host()), token = argmax_j (logit_j + tg_j)
                              with tg = T * Gumbel noise the host writes before each replay (set_gumbel; zeros = top-1);
@@ -164,17 +168,37 @@ class DSparkDrafter:
             return ttnn.as_tensor(t.T.contiguous().reshape(1, 1, t.shape[1], t.shape[0]).to(torch.bfloat16), dtype=dt,
                                   layout=TILE, device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
 
+        # DRAFT_TP (default 1 on 2 / 4 dies): the block tensor-parallel: die d holds query heads [d NH/N, (d+1) NH/N),
+        # KV heads [d NKV/N, ..) (its caches hold only those), MLP columns [d I/N, ..); o / down row-parallel, each
+        # followed by the packed decode all-reduce (tt/ccl.py, sites "mixer" / "mlp"); the commit's k / v_ctx
+        # column-parallel (no all-reduce). 0: the block replicated on every die.
+        self.tp = tp = N if N > 1 and os.environ.get("DRAFT_TP", "1") == "1" else 1
+        assert self.NKV % tp == 0 and m["intermediate_size"] % tp == 0
+
+        def blk(t, d):  # torch [N, K] (nn.Linear) -> output rows block d of tp
+            return t.reshape(tp, -1, t.shape[1])[d]
+
+        def mat_tp(per_die, dim, dt=wdtype):  # per die torch [N_l, K_l] -> device [1, 1, K_l, N_l] per die
+            if tp == 1:
+                return mat(per_die[0], dt)
+            x = torch.cat([p.T.contiguous().reshape(1, 1, p.shape[1], p.shape[0]) for p in per_die], dim=dim)
+            return ttnn.as_tensor(x.to(torch.bfloat16), dtype=dt, layout=TILE, device=mesh, memory_config=DRAM,
+                                  mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=dim))
+
         dls = {}
         dl_readers = int(os.environ.get("DRAFT_DL_READERS", "6"))
 
-        def lin(t, dt=wdtype):  # torch [N, K] -> (DecodeLinear, its bank-streamed weight) (DRAFT_DL=1) or mat(t, dt)
+        def lin(t, dt=wdtype):  # torch [N, K] (or a per-die list) -> (DecodeLinear, its bank-streamed weight) (DRAFT_DL=1)
+            per = t if isinstance(t, list) else [t]
+            per = per * N if len(per) == 1 else per
+            t = per[0]
             if not DL:
-                return mat(t, dt)
+                return mat_tp(per, 3, dt)
             key = (t.shape[1], t.shape[0], dt)
             if key not in dls:
                 dls[key] = DecodeLinear(mesh, t.shape[1], t.shape[0], dt, readers=dl_readers, fidelity=fid(dt),
                                         buffers=2 if t.shape[1] > 4096 else 3)  # (L1: x + buffered weight)
-            return dls[key], dls[key].weight([t.T.contiguous().to(torch.bfloat16)] * N)
+            return dls[key], dls[key].weight([p.T.contiguous().to(torch.bfloat16) for p in per])
 
         def vec(t):  # [n] -> fp32 [1, 1, 1, n]
             return ops.up(t.float().reshape(1, 1, 1, -1))
@@ -185,18 +209,20 @@ class DSparkDrafter:
         for i in range(self.L):
             p = f"layers.{i}."
             g = lambda n: w[p + n]  # noqa: E731
+            col = lambda *ns: [torch.cat([blk(g(n), d) for n in ns]) for d in range(tp)]  # noqa: E731
+            row = lambda n: [g(n).T.reshape(tp, -1, g(n).shape[0])[d].T for d in range(tp)]  # noqa: E731
             self.layers.append(dict(
                 dflare=vec(g("dflare_norm.weight")), in_norm=vec(g("input_layernorm.weight")),
                 post_norm=vec(g("post_attention_layernorm.weight")),
                 q_norm=vec(g("self_attn.q_norm.weight")), k_norm=vec(g("self_attn.k_norm.weight")),
                 k_norm_ctx=vec(g("self_attn.k_norm_ctx.weight")),
-                qkv=lin(torch.cat([g("self_attn.q_proj.weight"), g("self_attn.k_proj.weight"),
-                                   g("self_attn.v_proj.weight")])),
-                kv_ctx=mat(torch.cat([g("self_attn.k_proj_ctx.weight"), g("self_attn.v_proj_ctx.weight")])),
-                o=mat(g("self_attn.o_proj.weight")),  # (narrow N, wide K: the interleaved matmul is faster)
-                gu=lin(torch.cat([g("mlp.gate_proj.weight"), g("mlp.up_proj.weight")]), mdtype),
-                down=mat(g("mlp.down_proj.weight"), mdtype),
+                qkv=lin(col("self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight")),
+                kv_ctx=mat_tp(col("self_attn.k_proj_ctx.weight", "self_attn.v_proj_ctx.weight"), 3),
+                o=mat_tp(row("self_attn.o_proj.weight"), 2),  # (narrow N, wide K: the interleaved matmul is faster)
+                gu=lin(col("mlp.gate_proj.weight", "mlp.up_proj.weight"), mdtype),
+                down=mat_tp(row("mlp.down_proj.weight"), 2, mdtype),
             ))
+        self.NH, self.NKV = self.NH // tp, self.NKV // tp  # (per die from here on: caches, SDPA items, head programs)
         self.norm = vec(w["norm.weight"])
         self.rnn_norm = vec(w["markov_head.dflare_norm.weight"])
         tmpl = torch.zeros(1, 1, self.B, H)
@@ -328,6 +354,14 @@ class DSparkDrafter:
         xs = torch.arange(CAP_NTAB, dtype=torch.float64) / CAP_INV_H - CAP_L
         self.cap_tab = ttnn.from_torch((self.cap * torch.tanh(xs / self.cap)).float().reshape(1, -1), dtype=F32,
                                        layout=RM, device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
+        # DRAFT_MX (default 1 with DRAFT_TP): the vocab merge's die exchange inside the merge program (fabric, per Markov
+        # step a scratch page per die + a global semaphore) instead of an all_gather; needs the tensor-parallel block (its
+        # all-reduces keep a die from writing a step's page before every die read it)
+        self.mx = self.tp > 1 and self.NS == N and not self.vsim and os.environ.get("DRAFT_MX", "1") == "1"
+        if self.mx:
+            self.mx_scr = ttnn.from_torch(torch.zeros(d_max * self.NS, 2 * TOPK, dtype=torch.int32), dtype=U32,
+                                          layout=RM, device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
+            self.mx_sem = [ttnn.create_global_semaphore(mesh, _crs([ttnn.CoreCoord(0, 0)]), 0) for _ in range(d_max)]
         self.tokens = None
         self.trace = None
         # every eager shape used while a trace exists must run once before the capture: buffers allocated after it
@@ -378,6 +412,14 @@ class DSparkDrafter:
         if isinstance(w, tuple):
             return w[0](x, w[1], int(x.shape[2]), out_memory_config=DRAM)
         return self._mm(x, w, BF16)
+
+    def _ar(self, x, site):
+        """DRAFT_TP: the row-parallel projection's partial [1, 1, B, H] -> the sum over dies (packed decode all-reduce)."""
+        if self.tp == 1:
+            return x
+        from .ccl import all_reduce
+
+        return all_reduce(x, self.mesh, site=site, rows=int(x.shape[2]))
 
     def _mm(self, x, wt, dtype, ck=None):
         return dmm(x, wt, ck or self.ckw, dtype=dtype, memory_config=DRAM)
@@ -803,11 +845,21 @@ class DSparkDrafter:
             loc = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, 2 * TOPK]), U32, TILE, self.mesh, DRAM)
             self._step_prog(lat, row, prev, ks, fold, self.bases[s if self.vsim else 0], loc, stash)
             locs.append(loc)
-        g = ttnn.concat(locs, dim=3) if self.vsim else \
-            ttnn.all_gather(locs[0], dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
+        if self.mx:  # (the exchange inside the merge program)
+            return self._vmerge(locs[0], prev, ks, x=True)
+        if os.environ.get("DRAFT_NOGATHER") == "1":  # (timing probe only: the merge reads a stale buffer)
+            if not hasattr(self, "_g_probe"):
+                self._g_probe = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 1, 2 * TOPK * self.NS]), U32, TILE,
+                                                               self.mesh, DRAM)
+            g = self._g_probe
+        else:
+            g = ttnn.concat(locs, dim=3) if self.vsim else \
+                ttnn.all_gather(locs[0], dim=3, cluster_axis=1, topology=ttnn.Topology.Linear)
         self._vmerge(g, prev, ks)
 
-    def _vmerge(self, g, prev, ks):
+    def _vmerge(self, g, prev, ks, x=False):
+        """x (DRAFT_MX): g is this die's local result; the program exchanges it over the fabric (kernels/dsp_merge.cpp
+        DSP_X) instead of a preceding all_gather."""
         core = ttnn.CoreCoord(0, 0)
         crs = _crs([core])
         io = [g, prev, self.w1, self.wp[ks + 1]]
@@ -818,6 +870,8 @@ class DSparkDrafter:
         ct = [0, self.NS, TOPK, self.Vs, self.V, ks, CAP_NTAB]
         for t in io:
             ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        if x:
+            return self._vmerge_x(io, ct, defines, crs, core, ks)
         k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_merge.cpp"), core_ranges=crs, compile_time_args=ct,
                                   runtime_args=_rt({(0, 0): [t.buffer_address() for t in io]}), defines=defines,
                                   config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
@@ -826,6 +880,38 @@ class DSparkDrafter:
         prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, F32, nb, 1)])
         prog.custom_program_hash = _hash(("dsp_merge", tuple(ct), tuple(defines)))
         ttnn.generic_op(io, prog)
+
+    def _vmerge_x(self, io, ct, defines, crs, core, ks):
+        mesh, N = self.mesh, self.N
+        xy = mesh.worker_core_from_logical_core(core)
+        sem = self.mx_sem[ks]
+        defines = defines + [("DSP_X", "1"), ("DSP_X_SX", str(xy.x)), ("DSP_X_SY", str(xy.y)), ("DSP_X_CT", str(len(ct)))]
+        ct = ct + ttnn.TensorAccessorArgs(self.mx_scr).get_compile_time_args()
+        rt0 = [t.buffer_address() for t in io]
+        rt0 += [0] * (8 - len(rt0)) + [self.mx_scr.buffer_address(), ttnn.get_global_semaphore_address(sem)]
+        nb = 8 * self.NS * TOPK + 12 * TOPK + 4 * CAP_NTAB + 4096
+        mesh_prog = ttnn.MeshProgramDescriptor()
+        for me in range(N):
+            rt = ttnn.RuntimeArgs()
+            rt[core.x][core.y] = list(rt0)
+            k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_merge.cpp"), core_ranges=crs, compile_time_args=ct,
+                                      runtime_args=rt, defines=defines + [("DSP_X_ME", str(me))],
+                                      config=ttnn.DataMovementConfigDescriptor(
+                                          processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
+            prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, F32, nb, 1)])
+            coord = ttnn.MeshCoordinate(0, me)
+            src = mesh.get_fabric_node_id(coord)
+            fab = []
+            for step, hops in ((1, N - 1 - me), (-1, me)):
+                fab.append(1 if hops > 0 else 0)
+                if hops > 0:
+                    fab += ttnn.setup_fabric_connection(
+                        src_fabric_node_id=src, dst_fabric_node_id=mesh.get_fabric_node_id(
+                            ttnn.MeshCoordinate(0, me + step)),
+                        link_idx=0, program_descriptor=prog, worker_core=core)
+            prog.kernels[0].runtime_args[core.x][core.y].extend(fab)
+            mesh_prog[ttnn.MeshCoordinateRange(coord, coord)] = prog
+        ttnn.generic_op(io + [self.mx_scr], mesh_prog)
 
     def _step_prog(self, lat, row, prev, ks, fold, base, loc, stash=None):
         """One step program over one vocab slice (fold / base); loc: write the local result there (LOCAL_OUT)."""
@@ -994,10 +1080,10 @@ class DSparkDrafter:
             if i > 0:
                 residual = add(hidden, residual)
             qkv = self._lin(rms(residual, Lw["in_norm"]), Lw["qkv"])
-            hidden = self._lin(self._attention_f(i, Lw, qkv, C, S), Lw["o"])
+            hidden = self._ar(self._lin(self._attention_f(i, Lw, qkv, C, S), Lw["o"]), "mixer")
             residual = add(hidden, residual)
             gu = self._lin(rms(residual, Lw["post_norm"]), Lw["gu"])
-            hidden = self._lin(self._swiglu(gu), Lw["down"])
+            hidden = self._ar(self._lin(self._swiglu(gu), Lw["down"]), "mlp")
         residual = add(hidden, residual)
         return ttnn.to_memory_config(rms(residual, self.norm), DRAM)
 
@@ -1014,7 +1100,7 @@ class DSparkDrafter:
             qkv = self._lin(x, Lw["qkv"])
             q, k, v = self._split(qkv, (self.NH, self.NKV, self.NKV))
             q, k = self._norm_rope(q, Lw["q_norm"], C, S), self._norm_rope(k, Lw["k_norm"], C, S)
-            hidden = self._lin(self._attention(i, q, k, v), Lw["o"])
+            hidden = self._ar(self._lin(self._attention(i, q, k, v), Lw["o"]), "mixer")
             residual = self._add(hidden, residual)
             x = self._rms(residual, Lw["post_norm"])
             gu = self._lin(x, Lw["gu"])
@@ -1022,7 +1108,7 @@ class DSparkDrafter:
             g = ttnn.slice(gu, [0, 0, 0, 0], [1, 1, self.B, I])
             u = ttnn.slice(gu, [0, 0, 0, I], [1, 1, self.B, 2 * I])
             act = ttnn.multiply(g, u, input_tensor_a_activations=[ttnn.UnaryOpType.SILU], dtype=BF16)
-            hidden = self._lin(act, Lw["down"])
+            hidden = self._ar(self._lin(act, Lw["down"]), "mlp")
         residual = self._add(hidden, residual)
         return ttnn.to_memory_config(self._rms(residual, self.norm), DRAM)
 

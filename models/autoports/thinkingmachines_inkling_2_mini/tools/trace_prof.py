@@ -70,10 +70,17 @@ def main():
     mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=int(os.environ.get("TRACE_MB", "300")) << 20)
     REC["mesh"] = mesh
     m = Inkling2Model(mesh, max_seq_len=1024, expert_dtype=ttnn.bfloat8_b, kv_dtype=ttnn.bfloat16, prefill_chunk=256,
-                      slots=B)
+                      slots=max(B, int(os.environ.get("VERIFY", "0"))))
     dp = int(os.environ.get("DPOS", "300"))
-    dec = BatchedDecoder(m, B)
-    dec.set_inputs(torch.arange(100, 100 + B), torch.arange(dp, dp + B))
+    vr = int(os.environ.get("VERIFY", "0"))  # VERIFY=R: one slot's speculative verify pass of R rows (tt/spec.py)
+    if vr:
+        dec = BatchedDecoder(m, vr, shared=BatchedDecoder(m, max(B, vr)), verify=vr)
+        dec.set_accept([0])
+        dec.set_inputs(torch.arange(100, 100 + vr), torch.arange(dp, dp + vr))
+        B = f"v{vr}"
+    else:
+        dec = BatchedDecoder(m, B)
+        dec.set_inputs(torch.arange(100, 100 + B), torch.arange(dp, dp + B))
     dec.step()
     dec.step()
     _progs()
