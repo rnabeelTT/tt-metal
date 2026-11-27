@@ -39,7 +39,7 @@ RING = int(os.environ.get("I2M_PREFETCH_RING", "0"))  # (GCB pages; 0: the whole
 # I2M_PF_O (default 1): the o_proj weight prefetched too (GcbO), requested right after the q|k|v consumer: it streams
 # during the conv / prep / SDPA / output gate; I2M_OPF_H32 (debug): 32-row activation tiles
 O_ON = os.environ.get("I2M_PF_O", "1") == "1"
-# I2M_PF_O_SLOTS (default 8 on one die, 16 on two): only for models of up to this many slots: the o global CB (~104 KB
+# I2M_PF_O_SLOTS (default 8 on one die, 16 on two, 32 on four): only for models of up to this many slots: the o global CB (~104 KB
 # of L1 on every core, one die) does not fit beside one die's 16-row MoE gate|up (1008 KB of CBs: 6 KB short)
 O_SLOTS = int(os.environ.get("I2M_PF_O_SLOTS", "0"))
 SLOTS = 1  # (the model being built: set by Inkling2Model before its layers)
@@ -410,7 +410,9 @@ def qkv_prefetch(mesh, k, nq, nkv, fidelity):
 def o_prefetch(mesh, k, n, fidelity):
     """The shared prefetching o_proj for these shapes (after qkv_prefetch started the prefetcher), or None"""
     st = _STATE.get(id(mesh))
-    cap = O_SLOTS or (8 if mesh.get_num_devices() == 1 else 16)
+    # (4 dies: 32 slots too: B=32 with the o global CB passes the L1 check, 38.571 ms; o prefetch at B=1 8.019 -> 7.903)
+    nd = mesh.get_num_devices()
+    cap = O_SLOTS or (8 if nd == 1 else 16 if nd == 2 else 32)
     if not O_ON or SLOTS > cap or st is None or n % 256 or k % 32:
         return None
     kt, cn = k // 32, n // 256
