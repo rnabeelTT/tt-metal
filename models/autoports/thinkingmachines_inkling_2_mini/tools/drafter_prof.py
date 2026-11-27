@@ -22,7 +22,10 @@ FIXTURE = os.environ.get("FIXTURE", "/cache/fixtures/dspark_taps.pt")
 
 def main():
     d = int(os.environ.get("DRAFT_D", "3"))
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1))
+    N = int(os.environ.get("MESH", "1"))  # (the served drafter is replicated on every die, its head split by vocab)
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=64 << 20)
     OP.REC["mesh"] = mesh
     fx = torch.load(FIXTURE)
     r = next(iter(fx["texts"].values()))
@@ -36,6 +39,21 @@ def main():
     dr.set_inputs(int(r["ids"][p]), p - 4, 4)
     for _ in range(2):
         dr._traced_body(tb, d, True)
+    if os.environ.get("TRACED"):  # traced replay wall time of the drafter body (commit 4 + draft d), no profiler
+        import time
+        dr.capture(tb, d, True)
+        for _ in range(5):
+            dr.replay()
+        ttnn.synchronize_device(mesh)
+        n = 200
+        t0 = time.perf_counter()
+        for _ in range(n):
+            dr.replay()
+        ttnn.synchronize_device(mesh)
+        print(f"== drafter traced d={d} mesh={N}: {(time.perf_counter() - t0) * 1e3 / n:.3f} ms/replay", flush=True)
+        dr.release()
+        ttnn.close_mesh_device(mesh)
+        return
     OP._read()
     OP.REC["on"] = True
     dr._traced_body(tb, d, True)
