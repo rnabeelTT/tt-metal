@@ -534,15 +534,19 @@ class BatchedDecoder:
             self.plan = model._mixplan
             # I2M_POST (default 1): the fused post-attention section (tt/post.py) at <= 16 rows
             if POST and B <= 16:
+                # (each piece on its own: a 17..32-row decoder built first makes some of them, G2_WIDE)
                 if getattr(model, "_post", None) is None:
                     from .post import PostKernel
 
                     model._post = PostKernel(mesh, model.H, model.cfg.rms_norm_eps)
+                if model.ops.gate2k is None:
                     from .gate import GateKernel2
 
                     rk = next((int(g.wd.shape[-1]) for L in model.layers.values() if L.loop for g in L.gates.values()), 64)
                     model.ops.gate2k = GateKernel2(model._post, rk)
+                if getattr(model, "_nw_rows", None) is None:
                     model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
+                if getattr(model, "_q_rows", None) is None:
                     model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
                 self.post, self.nw_rows, self.q_rows = model._post, model._nw_rows, model._q_rows
                 if PRE:
