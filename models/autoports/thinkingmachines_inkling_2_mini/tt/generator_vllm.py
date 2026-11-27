@@ -40,6 +40,11 @@ PREFILL_CHUNK = int(os.environ.get("I2M_PREFILL_CHUNK", "256"))
 # a prompt's last chunk is padded to a multiple of this (64 | 128 | 256 ...): fewer prefill programs to warm up
 PREFILL_PAD = int(os.environ.get("I2M_PREFILL_PAD", str(min(256, PREFILL_CHUNK))))
 TRACE = os.environ.get("I2M_TRACE", "1") == "1"
+# I2M_PF_TRACE (tt/model.py PrefillTrace; default: on 4+ dies): one-request prefill chunks up to I2M_PF_TRACE_MAX
+# (512) rows replayed from traces. Such chunks are host-bound only on 4 dies (TP4 256 / 512 rows 147.7 / 158.7 ->
+# 114.2 / 145.1 ms; 1024 rows and TP2 device-bound: no change); ~19 MB of trace region each
+PF_TRACE = os.environ.get("I2M_PF_TRACE", "auto")
+PF_TRACE_MAX = int(os.environ.get("I2M_PF_TRACE_MAX", "512"))
 TIMING = os.environ.get("I2M_TIMING", "0") == "1"
 # decode width buckets: one decoder + trace per width (sharing the full width's state); a step runs the narrowest
 # width covering the highest live slot (new requests take the lowest free slot)
@@ -397,6 +402,12 @@ class Inkling2ForCausalLM:
                         self.store.save(0, 0, max(r, 64), 0)
                 self.store.restore(0, 0, 64, 0)
                 self.m.reset()
+            if PF_TRACE == "1" or (PF_TRACE == "auto" and self.mesh.get_num_devices() >= 4):  # traced one-request chunks: their inputs allocated and their programs run before any capture
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.model import PrefillTrace
+
+                self.pft = PrefillTrace(self.m, [n for n in range(PREFILL_PAD, PREFILL_CHUNK + 1, PREFILL_PAD)
+                                                 if n <= PF_TRACE_MAX], taps=self.dr is not None)
+                self.pft.warm()
             logger.info(f"prefill warm-up ({PREFILL_CHUNK // PREFILL_PAD} chunk sizes) in {time.time() - t0:.0f}s")
             if self.vt is not None:  # every padded length up to the largest image, and the row merge of every chunk size
                 from models.autoports.thinkingmachines_inkling_2_mini.tt.vllm_mm import max_image_tokens
@@ -414,6 +425,15 @@ class Inkling2ForCausalLM:
     def warmup_model_decode(self, *args, **kwargs):
         if not self.already_warmed_up_prefill:
             self.warmup_model_prefill()
+        self._warm_decode(*args, **kwargs)
+        pft = getattr(self, "pft", None)
+        if pft is not None and not pft.tid:  # (after every other capture: see PrefillTrace)
+            t0 = time.time()
+            pft.capture()
+            self.m.pft = pft
+            logger.info(f"prefill traces captured (chunks {pft.Ts}) in {time.time() - t0:.1f}s")
+
+    def _warm_decode(self, *args, **kwargs):
         if self.trs and not self._captured:
             # Trace safety: nothing a replay can overwrite may be allocated after the first capture and still be live at
             # a replay: every program runs once here (its binaries are allocated at its first run), and each trace's
@@ -647,6 +667,7 @@ class Inkling2ForCausalLM:
                 ids.append(torch.zeros(extra, dtype=torch.long))
                 used += extra
             taps = [] if spec else None
+            lg = None  # (the previous chunk's logits: not live at a prefill trace's replay)
             mm = (torch.cat(mrows), torch.cat(memb)) if mrows else None
             self._pmark("chunk_inputs")
             lg = self.m.forward_packed(torch.cat(ids), [tuple(sg) for sg in segs], taps=taps, mm=mm)

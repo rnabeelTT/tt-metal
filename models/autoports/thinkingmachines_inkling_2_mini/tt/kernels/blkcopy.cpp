@@ -4,6 +4,10 @@
 // Page-range copies between interleaved DRAM tensors (tt/blkcopy.py): each job copies n pages of page_size bytes from
 // page sp of the tensor at src to page dp of the tensor at dst (the prefix-cache snapshots: sliding-window KV blocks
 // and conv states into / out of their snapshot pools). Pages go through an L1 staging buffer, `per` pages per batch.
+//
+// BC_DYN (a traced prefill chunk, tt/model.py PrefillTrace): runtime arg 1 + 6 MAXJ is the address of a uint32 tensor
+// (one 128-byte page, written before each replay); a job whose page-size arg has bit 31 set adds word (ps >> 24) & 31
+// of it to its source page (the segment's valid / snapshot / last rows: data, not baked runtime args).
 
 #include <stdint.h>
 
@@ -15,15 +19,31 @@ void kernel_main() {
     constexpr auto args = TensorAccessorArgs<2>();
     const uint32_t n_jobs = get_arg_val<uint32_t>(0);
     const uint32_t l1 = get_write_ptr(cb);
+#ifdef BC_DYN
+    constexpr uint32_t maxj = get_compile_time_arg_val(args.next_compile_time_args_offset());
+    const uint32_t dynl = get_write_ptr(get_compile_time_arg_val(args.next_compile_time_args_offset() + 1));
+    if (n_jobs > 0) {
+        const auto adyn = TensorAccessor(args, get_arg_val<uint32_t>(1 + 6 * maxj), 128);
+        noc_async_read(adyn.get_noc_addr(0), dynl, 128);
+        noc_async_read_barrier();
+    }
+    volatile uint32_t* dyn = reinterpret_cast<volatile uint32_t*>(dynl);
+#endif
     uint32_t ai = 1;
     for (uint32_t j = 0; j < n_jobs; ++j) {
         const uint32_t src = get_arg_val<uint32_t>(ai);
-        const uint32_t sp = get_arg_val<uint32_t>(ai + 1);
+        uint32_t sp = get_arg_val<uint32_t>(ai + 1);
         const uint32_t dst = get_arg_val<uint32_t>(ai + 2);
         const uint32_t dp = get_arg_val<uint32_t>(ai + 3);
         const uint32_t n = get_arg_val<uint32_t>(ai + 4);
-        const uint32_t ps = get_arg_val<uint32_t>(ai + 5);
+        uint32_t ps = get_arg_val<uint32_t>(ai + 5);
         ai += 6;
+#ifdef BC_DYN
+        if (ps & 0x80000000u) {
+            sp += dyn[(ps >> 24) & 31];
+            ps &= 0xffffffu;
+        }
+#endif
         const auto as = TensorAccessor(args, src, ps);
         const auto ad = TensorAccessor(args, dst, ps);
         const uint32_t per = buf_bytes / ps;

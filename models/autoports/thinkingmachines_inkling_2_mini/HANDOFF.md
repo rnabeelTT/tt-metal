@@ -228,6 +228,31 @@ Prefill is device-bound (tools/bench_prefill.py, op_prof PREFILL): a 1024-row ch
 time (sparse-matmul experts 30 %, attention 14 %, glue the rest); 128 rows ~290 ms (expert reads dominate, hence the
 packing).
 
+### Traced prefill chunks (I2M_PF_TRACE; tt/model.py PrefillTrace, tt/attention.py StaticCtx)
+
+A one-request chunk (one segment over all T rows, lane 0, valid >= 3, snapshot row none or >= 3, no image rows) of
+T <= I2M_PF_TRACE_MAX (512) rows replays a trace per T (default `auto`: on 4+ dies; off on 1 / 2 dies, which are
+device-bound). The chunk's per-call inputs are data, not baked runtime args: StaticCtx holds the ids, SDPA positions,
+page-table rows, KV fill blocks, log scaling and 32 "dyn" words (valid / snapshot / last rows) in device tensors
+allocated before any capture and rewritten by copy_host_to_device_tensor before each replay (pt / fill / tau only
+when they change). pfseg_reader.cpp PF_DYN reads the per-segment n / snapshot words from it; blkcopy.cpp BC_DYN adds
+a dyn word to a job's source page (DynShortConv commit / snapshot rows, the last-row gather, RowSplit's two-step
+gather). The head runs in the trace into a preallocated 32-row logits tile; the drafter taps are copied into one shared
+[1, 4, Tmax, H] buffer. Allocation and an eager pass of every traced size (warmup_model_prefill) precede every
+capture; the prefill captures come after the decode / verify / drafter captures. _prefill_group drops the previous
+chunk's logits before the next chunk (the alloc tracker caught it live across a replay). ~19 MB of trace region per
+size (TP4 256 rows): the 256 / 512 traces fit p300x2's 128 MB region beside the 39 MB of decode traces.
+
+Chunk wall, eager -> traced (tools/pf_trace_probe.py; ms): TP4 256 rows 147.7 -> 114.2, 512 158.7 -> 145.1, 1024
+204.4 -> 203.6; TP2 256 152.2 -> 151.7, 512 182.4 -> 181.6, 1024 263.2 -> 263.1 (device-bound: not enabled). Served
+p300x2 (ab_serve.sh, two runs each): bench_card TTFT 128 198 / 190 -> 149 / 149 ms, 1K 262 / 264 -> 263 / 266
+(1024-row chunk, not traced), 8 x 128 408 / 431 -> 370 / 372; real-text ~300 tokens ~219-231 -> ~205 ms. Checks:
+probe logits / taps / 192 lane-0 conv states / snapshot rows bitwise (TP4, TP2; p0 > 0, slot 1, valid 3 / 77 / 130,
+snapshot row 64); tests/test_pftrace_device.py (TP4, decode traces, TT_METAL_TRACE_ALLOC_TRACKING=1): prefill logits,
+decode steps, snapshot resumes (a traced chunk at p0 = 2048) and, with I2M_SPEC=3, every speculative pass's emitted
+tokens bitwise traced vs eager; served greedy texts identical (the one concurrent text that split, split between two
+eager runs too: packing depends on arrival timing).
+
 ## Decode, this round (traced step, ms; tests/test_batched_device.py)
 
 | change | TP4 B=1 | TP4 B=4 | TP2 B=1 | TP1 B=1 |

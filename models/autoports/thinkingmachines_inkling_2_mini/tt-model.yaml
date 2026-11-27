@@ -88,6 +88,7 @@ serve_profiles:
     mesh_device: P300x2
     max_model_len: 1048576
     # the traces take 39 MB of the trace region: 128 MB frees 172 MB per die for the drafter's caches to 64K (+185 MB);
+    # the 256 / 512-row prefill traces (I2M_PF_TRACE, on by default on 4 dies) ~19 MB each more
     # the kernel-config ring +64 KB on 2 and 4 dies (tt/__init__.py I2M_RING_KB_TP2): 1461248 - 64 * 1024
     additional_config: {tt: {trace_region_size: 134217728, worker_l1_size: &i2m_worker_l1_mesh 1395712}}
     # 2048-row prefill chunks: +14% prefill; speculative decoding (DSpark drafter, 3 drafts per pass): the pool 2.06M ->

@@ -32,7 +32,7 @@ import ttnn
 
 from .dmm import dmm
 from models.autoports.thinkingmachines_inkling_2_mini.tt.attention import (AttnCache, AttnWeights, GlobalPages, PackedCtx,
-                                                                          attention, attention_packed)
+                                                                          StaticCtx, attention, attention_packed)
 from models.autoports.thinkingmachines_inkling_2_mini.tt.moe import MoE
 from models.autoports.thinkingmachines_inkling_2_mini.tt.sconv import ShortConv
 from models.autoports.thinkingmachines_inkling_2_mini.tt.weights import Checkpoint, load_config, schedule
@@ -105,14 +105,17 @@ class RowSplit:
     def conv(self):
         return (self.k0, self.Tl)
 
-    def cut(self, t, rows, bc):
+    def cut(self, t, rows, bc, dyn=None):
         """rows (global row ids, <= 32) of a row-split [1, 1, Tl, W] -> [1, 1, 32, W] tile on every die: each die
         copies row r mod Tl of its slice for every r (the same copy list on every die), one gather of the picks, then
-        row r from its owner's block"""
+        row r from its owner's block. dyn (StaticCtx, one row): the two rows from its words 18 / 19."""
         W = int(t.shape[-1])
         rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT)
         g = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, W]), t.dtype, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM)
-        bc([(rm, r % self.Tl, g, i, 1) for i, r in enumerate(rows)])
+        if dyn is not None:
+            bc([(rm, 0, g, 0, 1, 18)], dyn=dyn)
+        else:
+            bc([(rm, r % self.Tl, g, i, 1) for i, r in enumerate(rows)])
         ttnn.deallocate(rm)
         gt = ttnn.to_layout(g, ttnn.TILE_LAYOUT)
         ttnn.deallocate(g)
@@ -121,7 +124,10 @@ class RowSplit:
         Grm = ttnn.to_layout(G, ttnn.ROW_MAJOR_LAYOUT)
         ttnn.deallocate(G)
         o = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, W]), t.dtype, ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM)
-        bc([(Grm, (r // self.Tl) * 32 + i, o, i, 1) for i, r in enumerate(rows)])
+        if dyn is not None:
+            bc([(Grm, 0, o, 0, 1, 19)], dyn=dyn)
+        else:
+            bc([(Grm, (r // self.Tl) * 32 + i, o, i, 1) for i, r in enumerate(rows)])
         ttnn.deallocate(Grm)
         return ttnn.to_layout(o, ttnn.TILE_LAYOUT)
 
@@ -585,9 +591,11 @@ class Inkling2Model:
         print("embedding + lm head up", flush=True)
 
     # -- pieces ------------------------------------------------------------------------------------------------------
-    def embed_tokens(self, ids: torch.Tensor):
-        """ids [T] -> [1, 1, T, H] bf16 (normed embedding)."""
-        t = ttnn.from_torch(ids.reshape(1, -1).to(torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+    def embed_tokens(self, ids: torch.Tensor, dev=None):
+        """ids [T] -> [1, 1, T, H] bf16 (normed embedding). dev: the ids already on device ([1, T] uint32: a traced
+        chunk's StaticCtx.ids_t)."""
+        t = dev if dev is not None else \
+            ttnn.from_torch(ids.reshape(1, -1).to(torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
                             device=self.mesh, mesh_mapper=self.ops.rep)
         e = ttnn.embedding(t, self.embed, layout=ttnn.TILE_LAYOUT)  # [1, T, H]
         e = ttnn.reshape(e, (1, 1, int(ids.numel()), self.H))
@@ -735,7 +743,8 @@ class Inkling2Model:
         x = _bf(x)
         return st.lanes[0][i].prefill_packed(x, [(row0, R, valid, st.lanes[lane][i])
                                                  for row0, R, _, valid, _, lane in ctx.segs], resid=resid,
-                                             out_dtype=out_dtype, rs=rs.conv() if rs is not None else None)
+                                             out_dtype=out_dtype, rs=rs.conv() if rs is not None else None,
+                                             dyn=ctx.dyn)
 
     def messages(self, loop_idx, prev_src_n):
         """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages.
@@ -800,7 +809,12 @@ class Inkling2Model:
     def forward_packed(self, ids: torch.Tensor, segs, taps=None, mm=None):
         """A packed prefill chunk: ids [T] holding segments segs = [(row0, R, p0, valid, slot, lane)] (each its own
         sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row. taps, mm: see
-        forward."""
+        forward. A one-segment chunk with a captured trace of its size replays it (PrefillTrace, I2M_PF_TRACE)."""
+        pft = getattr(self, "pft", None)
+        if pft is not None and mm is None:
+            r = pft.run(ids, segs, taps)
+            if r is not None:
+                return r
         slid = next(self.apps[a].cache for a, (li, _) in enumerate(self.sched) if self.layers[li].sliding)
         glob = next((self.apps[a].cache for a, (li, _) in enumerate(self.sched) if not self.layers[li].sliding), None)
         ctx = PackedCtx(self.mesh, segs, slid, glob)
@@ -811,14 +825,14 @@ class Inkling2Model:
             ctx.release()
 
     def forward(self, ids: torch.Tensor, p0: int, valid=None, capture=None, slot=0, last_only=False, last_row=None,
-                ctx=None, last_rows=None, taps=None, mm=None):
+                ctx=None, last_rows=None, taps=None, mm=None, head_out=None):
         """Rows ids [T] at positions p0 .. p0+T-1 through all 48 applications -> logits [1,1,T,Vp] fp32.
         capture(a, out) is called with each application's output (debug). taps: a list that gets the speculative
         drafter's taps of every row, [1, 4, T, H] bf16 (the inputs of applications 5, 23, 41 + the final normed state).
         mm: (rows [k] int64, embeddings [k, H] bf16): these rows take the given embeddings instead of their tokens' (the
         image placeholders' rows get the vision tower's outputs, as transformers' masked_scatter)."""
         cfg, ops = self.cfg, self.ops
-        x = self.embed_tokens(ids)
+        x = self.embed_tokens(ids, dev=getattr(ctx, "ids_t", None))
         if mm is not None:
             x = self.merge_rows(x, *mm)
         if valid is not None and valid < int(ids.numel()):
@@ -877,14 +891,17 @@ class Inkling2Model:
         if last_rows is not None:  # the head on the given rows (each packed segment's last prompt token), rows 0..U-1
             def cut(t):  # row gather through row-major pages: every program's shape depends on T only
                 if rs is not None:
-                    return rs.cut(t, last_rows, ctx.bc)
+                    return rs.cut(t, last_rows, ctx.bc, dyn=ctx.dyn)
                 rm = ttnn.to_layout(t, ttnn.ROW_MAJOR_LAYOUT)
                 g = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, int(t.shape[-1])]), t.dtype,
                                                    ttnn.ROW_MAJOR_LAYOUT, self.mesh, DRAM)
-                ctx.bc([(rm, r, g, i, 1) for i, r in enumerate(last_rows)])
+                if ctx.dyn is not None:  # (StaticCtx: the last row from the dyn words)
+                    ctx.bc([(rm, -1, g, 0, 1, 17)], dyn=ctx.dyn)
+                else:
+                    ctx.bc([(rm, r, g, i, 1) for i, r in enumerate(last_rows)])
                 ttnn.deallocate(rm)
                 return ttnn.to_layout(g, ttnn.TILE_LAYOUT)
-            return self.head(cut(x), [cut(b) for b in blocks_n])
+            return self.head(cut(x), [cut(b) for b in blocks_n], out=head_out)
         if rs is not None:  # (the head on all rows / one row: the full rows back)
             x, blocks_n = rs.gather(x), [rs.gather(b) for b in blocks_n]
         if last_only:  # the head on one row (a prefill's last prompt token): [1, 1, 1, Vp]
@@ -892,3 +909,91 @@ class Inkling2Model:
             cut = lambda t: ttnn.slice(t, [0, 0, r, 0], [1, 1, r + 1, t.shape[-1]])  # noqa: E731
             return self.head(cut(x), [cut(b) for b in blocks_n])
         return self.head(x, blocks_n)
+
+
+class PrefillTrace:
+    """One-segment prefill chunks (one request: rows 0 .. T-1 of lane 0, any p0 / slot / valid) of the sizes Ts replayed
+    from a trace per size. The chunk's per-call inputs are data in StaticCtx's device tensors (written before each
+    replay), so a replay runs the eager chunk's programs on the same inputs: bitwise the eager chunk. Outputs go into
+    buffers allocated before any capture (logits: one 32-row tile; taps: [1, 4, CHUNK, H], rows 0 .. T-1).
+
+    Order (trace safety): __init__ (allocations) and warm() (every program, eager) before the first capture of the
+    mesh; capture() after every other trace's (its intermediates then sit on no live tensor; its outputs predate them)."""
+
+    def __init__(self, m: "Inkling2Model", Ts, taps=False):
+        self.m, self.mesh, self.taps = m, m.mesh, taps
+        mesh = m.mesh
+        slid = next(m.apps[a].cache for a, (li, _) in enumerate(m.sched) if m.layers[li].sliding)
+        glob = next((m.apps[a].cache for a, (li, _) in enumerate(m.sched) if not m.layers[li].sliding), None)
+        N = mesh.get_num_devices()
+        self.Ts = sorted(T for T in Ts if T <= slid.ring_chunk and T % 64 == 0)
+        self.ctx = {}
+        for T in self.Ts:
+            if RowSplit.ok(mesh, T) and T not in m._rs_by_T:
+                m._rs_by_T[T] = RowSplit(mesh, T)
+            self.ctx[T] = StaticCtx(mesh, T, slid, glob, Tl=T // N if RowSplit.ok(mesh, T) else None)
+        Tm = max(self.Ts) if self.Ts else 0
+        # (the head's output: one tile row of logits, each die its vocab slice)
+        self.lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32, m.Vs]), ttnn.float32, ttnn.TILE_LAYOUT, mesh,
+                                                 DRAM) if m.shead is not None else None
+        self.taps_buf = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 4, Tm, m.H]), ttnn.bfloat16, ttnn.TILE_LAYOUT,
+                                                       mesh, DRAM) if taps and Tm else None
+        self.Tm = Tm
+        self.tid, self.out = {}, {}
+        self.lane0 = [cv for a in m.apps if a is not None for cv in a.lanes[0]]
+
+    def _chunk(self, T):
+        """the chunk's device work (eager or captured) -> logits"""
+        ctx, m = self.ctx[T], self.m
+        taps = [] if self.taps else None
+        lg = m.forward(torch.zeros(T, dtype=torch.long), 0, ctx=ctx, last_rows=[T - 1], taps=taps, head_out=self.lg)
+        if taps:
+            t = taps[0]
+            # (into the shared buffer: per tap, T / 32 x H / 32 tiles at the same tile offset in a T-row tensor)
+            n = T // 32 * (m.H // 32)
+            ctx.bc([(t, g * n, self.taps_buf, g * (self.Tm // 32) * (m.H // 32), n) for g in range(4)])
+            ttnn.deallocate(t)
+        return lg
+
+    def warm(self):
+        """every program of every size, eager (before any trace capture)"""
+        for T in self.Ts:
+            self.m.reset(0)
+            self.ctx[T].set(torch.zeros(T, dtype=torch.long), (0, T, 0, T, 0, 0))
+            lg = self._chunk(T)
+            self.m.logits_host(lg, 1)
+        self.m.reset(0)
+        ttnn.synchronize_device(self.mesh)
+
+    def capture(self):
+        for T in self.Ts:
+            ttnn.synchronize_device(self.mesh)
+            tid = ttnn.begin_trace_capture(self.mesh, cq_id=0)
+            try:
+                self.out[T] = self._chunk(T)
+            finally:
+                ttnn.end_trace_capture(self.mesh, tid, cq_id=0)
+            self.tid[T] = tid
+        ttnn.synchronize_device(self.mesh)
+
+    def run(self, ids, segs, taps=None):
+        """forward_packed by a replay, or None (not a traced shape)"""
+        T = int(ids.numel())
+        if len(segs) != 1 or T not in self.tid or (taps is not None and not self.taps):
+            return None
+        snap = self.lane0[0].snap_row
+        if not StaticCtx.ok(segs[0], T, snap):
+            return None
+        self.ctx[T].set(ids, segs[0], snap)
+        ttnn.execute_trace(self.mesh, self.tid[T], cq_id=0, blocking=False)
+        if snap is not None:  # (the kernels wrote the snapshot rows into each lane-0 conv's snap_buf)
+            for cv in self.lane0:
+                cv.snap_out = cv.snap_buf
+        if taps is not None:
+            taps[:] = [self.taps_buf]
+        return self.out[T]
+
+    def release(self):
+        for tid in self.tid.values():
+            ttnn.release_trace(self.mesh, tid)
+        self.tid = {}

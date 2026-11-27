@@ -552,6 +552,8 @@ class PackedCtx:
     segs: [(row0, R, p0, valid, slot, lane)] (R % 64 == 0, p0 % 64 == 0). Built once per chunk: the SDPA's per-item
     positions and page-table rows (one 8-row item never straddles two segments), shared by every application."""
 
+    dyn = None  # (StaticCtx: the traced chunk's per-call words)
+
     def __init__(self, mesh, segs, sliding_cache: "AttnCache", global_cache: "AttnCache"):
         self.segs = segs
         rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
@@ -612,6 +614,105 @@ class PackedCtx:
             ttnn.deallocate(t)
 
 
+class StaticCtx(PackedCtx):
+    """PackedCtx of a traced one-segment chunk of T rows (tt/model.py PrefillTrace): every per-call input (positions,
+    page-table rows, KV fill blocks, log scaling, and the dyn words: the segment's valid / snapshot / last rows) lives
+    in a device tensor allocated before any trace capture and rewritten from the host (copy_host_to_device_tensor)
+    by set() before each replay. The same programs as the eager chunk, so the same results bit for bit.
+
+    dyn (uint32 [1, 1, 1, 32]): 0 n (valid rows), 1 snapshot row or NONE (the pfseg conv kernel's words), 16 snapshot
+    row or n (DynShortConv's always-run snapshot copy), 17 last row, 18 / 19 its RowSplit die-local row / gather row."""
+
+    NONE = 0xFFFFFFFF
+
+    def __init__(self, mesh, T, sliding_cache: "AttnCache", global_cache: "AttnCache", Tl=None):
+        from .blkcopy import BlockCopy
+
+        self.mesh, self.T, self.Tl = mesh, T, Tl
+        self.rep = ttnn.ReplicateTensorToMesh(mesh) if mesh.get_num_devices() > 1 else None
+        self.caches = [c for c in (sliding_cache, global_cache) if c is not None]
+        self.segs = [(0, T, 0, T, 0, 0)]
+        self.pos_h = torch.arange(T).reshape(-1, R_ITEM)
+        self.positions = self._alloc(self.pos_h)
+        self.pt_h, self.fill_h, self.pt, self.fill, self._subs, self._taus = {}, {}, {}, {}, {}, {}
+        for c in self.caches:
+            self.pt_h[c.w.sliding] = c.read_host[[0] * (T // R_ITEM)].clone()
+            self.pt[c.w.sliding] = self._alloc(self.pt_h[c.w.sliding])
+            self.fill_h[c.w.sliding] = c.read_host[0, : T // 64].reshape(1, -1).clone()
+            self.fill[c.w.sliding] = self._alloc(self.fill_h[c.w.sliding])
+        self.gw = global_cache.w if global_cache is not None else None
+        if self.gw is not None:
+            self._tau_h = tau_of(torch.arange(T), self.gw.n_floor, self.gw.alpha)
+            self._taus[(self.gw.n_floor, self.gw.alpha)] = _tau_tensor(self.gw, self._tau_h)
+        self.dyn_h = torch.zeros(1, 1, 1, 32, dtype=torch.int64)
+        self.dyn = ttnn.from_torch(self.dyn_h.to(torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                   device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
+        self.ids_t = ttnn.from_torch(torch.zeros(1, T, dtype=torch.int32), dtype=ttnn.uint32,
+                                     layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DRAM, mesh_mapper=self.rep)
+        self.p_hi = T
+        self.bc = BlockCopy(mesh, sliding_cache.k_cache)
+
+    def _alloc(self, h):
+        return ttnn.from_torch(h.to(torch.int32).contiguous(), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                               device=self.mesh, memory_config=DRAM, mesh_mapper=self.rep)
+
+    def _write(self, h, dev, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT):
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(h.contiguous(), dtype=dtype, layout=layout,
+                                                        mesh_mapper=self.rep), dev)
+
+    @staticmethod
+    def ok(seg, T, snap):
+        """seg (row0, R, p0, valid, slot, lane) can run traced: one segment over the whole chunk on lane 0, the commit
+        and snapshot rows past the state's (K - 1 = 3) rows."""
+        row0, R, p0, valid, slot, lane = seg
+        return row0 == 0 and R == T and lane == 0 and 3 <= valid <= T and (snap is None or 3 <= snap <= T)
+
+    def set(self, ids, seg, snap=None):
+        """the chunk's inputs: ids [T] (host), seg (0, T, p0, valid, slot, 0), snap (the armed snapshot row or None)"""
+        row0, R, p0, valid, slot, lane = seg
+        assert self.ok(seg, self.T, snap), (seg, snap)
+        T = self.T
+        self.segs = [tuple(seg)]
+        self._write(ids.reshape(1, T).to(torch.int32), self.ids_t, dtype=ttnn.uint32)
+        if int(self.pos_h[0, 0]) != p0:
+            self.pos_h = torch.arange(p0, p0 + T).reshape(-1, R_ITEM)
+            self._write(self.pos_h, self.positions)
+            if self.gw is not None:
+                tau = tau_of(torch.arange(p0, p0 + T), self.gw.n_floor, self.gw.alpha)
+                if not torch.equal(tau, self._tau_h):
+                    self._tau_h = tau
+                    self._write(tau.reshape(1, T, 1, 1).float(), self._taus[(self.gw.n_floor, self.gw.alpha)],
+                                dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT)
+        for c in self.caches:
+            k = c.w.sliding
+            pt = c.read_host[slot].reshape(1, -1).expand(T // R_ITEM, -1)
+            if not torch.equal(pt, self.pt_h[k]):
+                self.pt_h[k] = pt.clone()
+                self._write(self.pt_h[k], self.pt[k])
+            fill = c.read_host[slot, p0 // 64 : p0 // 64 + T // 64].reshape(1, -1)
+            if not torch.equal(fill, self.fill_h[k]):
+                self.fill_h[k] = fill.clone()
+                self._write(self.fill_h[k], self.fill[k])
+        last = valid - 1
+        d = torch.zeros(1, 1, 1, 32, dtype=torch.int64)
+        d[..., 0], d[..., 1] = valid, self.NONE if snap is None else snap
+        d[..., 16], d[..., 17] = valid if snap is None else snap, last
+        if self.Tl:
+            d[..., 18], d[..., 19] = last % self.Tl, (last // self.Tl) * 32
+        if not torch.equal(d, self.dyn_h):
+            self.dyn_h = d
+            self._write(torch.where(d >= 1 << 31, d - (1 << 32), d).to(torch.int32), self.dyn, dtype=ttnn.uint32)
+
+    def sub(self, sliding, r0, r1):
+        raise AssertionError("StaticCtx: chunks past the ring's chunk run eagerly")
+
+    def tau(self, w):
+        return self._taus[(w.n_floor, w.alpha)]
+
+    def release(self):
+        pass  # (persistent: kept across replays)
+
+
 def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: PackedCtx, tt_ccl=None):
     """attention() for a packed prefill chunk (PackedCtx): the projections, norms, gate and o_proj on all rows at once;
     the K / V convs (per-sequence state: lanes[lane] = (k_conv, v_conv)) and the KV writes per segment; one SDPA over
@@ -638,11 +739,11 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     sk_ = [(row0, R, valid, lanes[lane][0]) for row0, R, p0, valid, slot, lane in ctx.segs]
     sv_ = [(row0, R, valid, lanes[lane][1]) for row0, R, p0, valid, slot, lane in ctx.segs]
     if w.sliding:
-        k = c.k_conv.prefill_packed(pk, sk_)
-        v = c.v_conv.prefill_packed(pv, sv_)
+        k = c.k_conv.prefill_packed(pk, sk_, dyn=ctx.dyn)
+        v = c.v_conv.prefill_packed(pv, sv_, dyn=ctx.dyn)
     else:
-        k = c.k_conv.rows_packed(pk, xk, sk_, ctx.bc)
-        v = c.v_conv.rows_packed(pv, xv, sv_, ctx.bc)
+        k = c.k_conv.rows_packed(pk, xk, sk_, ctx.bc, dyn=ctx.dyn)
+        v = c.v_conv.rows_packed(pv, xv, sv_, ctx.bc, dyn=ctx.dyn)
     ttnn.deallocate(pk)
     ttnn.deallocate(pv)
     f32 = lambda t: ttnn.typecast(t, ttnn.float32)  # noqa: E731

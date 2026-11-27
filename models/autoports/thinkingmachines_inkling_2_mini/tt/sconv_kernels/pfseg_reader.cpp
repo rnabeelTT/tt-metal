@@ -17,6 +17,9 @@
 // K0 .. K0 + Rt - 1 (K0 from a per-die uint32 tensor, so every die runs the same program); the residual and the output
 // are this die's rows (tile k). Every segment's state points are written from x / the old state on every die (the conv
 // states stay replicated), by one core per column before the row loop.
+//
+// PF_DYN (a traced prefill chunk): the state points n[s] / snap[s] come from a uint32 tensor (words 2 s, 2 s + 1 of its
+// first page; address: the last common arg), written before each replay, not from the args.
 
 #include <stdint.h>
 
@@ -100,7 +103,27 @@ void kernel_main() {
     constexpr uint32_t K0 = 0;
 #endif
 
+#ifdef PF_DYN
+#ifdef PF_ROWOFF
+    constexpr uint32_t dyn_arg = k0_arg + 1;
+    constexpr uint32_t dyn_ct = TensorAccessorArgs<k0_ct>().next_compile_time_args_offset();
+#else
+    constexpr uint32_t dyn_arg = k0_arg;
+    constexpr uint32_t dyn_ct = k0_ct;
+#endif
+    {
+        constexpr auto dyn_args = TensorAccessorArgs<dyn_ct>();
+        const auto s_dyn = TensorAccessor(dyn_args, get_common_arg_val<uint32_t>(dyn_arg), 128);
+        noc_async_read(s_dyn.get_noc_addr(0), scr + 640, 64);
+        noc_async_read_barrier();
+    }
+    volatile uint32_t* dynw = reinterpret_cast<volatile uint32_t*>(scr + 640);
+    auto arg = [&](uint32_t s, uint32_t f) {
+        return f == 4 ? dynw[2 * s] : f == 6 ? dynw[2 * s + 1] : get_common_arg_val<uint32_t>(3 + s * 7 + f);
+    };
+#else
     auto arg = [&](uint32_t s, uint32_t f) { return get_common_arg_val<uint32_t>(3 + s * 7 + f); };
+#endif
     auto seg_of = [&](uint32_t k) {
         uint32_t s = 0;
         while (s + 1 < nseg && k >= arg(s, 1)) {

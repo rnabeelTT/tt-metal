@@ -41,17 +41,24 @@ class BlockCopy:
         self.ct = ttnn.TensorAccessorArgs(proto).get_compile_time_args()
         self.proto = proto
 
-    def __call__(self, jobs):
-        """jobs: [(src, src_page, dst, dst_page, n_pages)] (tensors on this mesh, same page size per job)."""
+    def __call__(self, jobs, dyn=None):
+        """jobs: [(src, src_page, dst, dst_page, n_pages[, k])] (tensors on this mesh, same page size per job).
+        dyn: a uint32 [1, 1, 1, 32] row-major DRAM tensor (BC_DYN): a job with k adds word k of it to its source page
+        on device (a traced chunk's segment rows; src_page may then be negative)."""
         work = []
-        for src, sp, dst, dp, n in jobs:
+        for job in jobs:
+            src, sp, dst, dp, n = job[:5]
+            k = job[5] if len(job) > 5 else None
+            assert k is None or (dyn is not None and int(n) <= SPLIT), (k, n)
             for t in (src, dst):
                 mc = t.memory_config()
                 assert mc.buffer_type == ttnn.BufferType.DRAM and not t.is_sharded(), f"blkcopy: {mc} (DRAM only)"
             ps = page_bytes(src)
             assert ps == page_bytes(dst) and ps <= BUF, (ps, page_bytes(dst))
             for o in range(0, int(n), SPLIT):
-                work.append((src.buffer_address(), int(sp) + o, dst.buffer_address(), int(dp) + o, min(SPLIT, int(n) - o), ps))
+                pw = ps if k is None else ps | (1 << 31) | (int(k) << 24)
+                work.append((src.buffer_address(), (int(sp) + o) & 0xFFFFFFFF, dst.buffer_address(), int(dp) + o,
+                             min(SPLIT, int(n) - o), pw))
         if not work:
             return
         nc = len(self.cores)
@@ -64,12 +71,17 @@ class BlockCopy:
             a = [len(lst)]
             for w in lst:
                 a += list(w)
-            rt.append(a + [0] * (1 + 6 * MAXJ - len(a)))
+            rt.append(a + [0] * (1 + 6 * MAXJ - len(a)) + ([dyn.buffer_address()] if dyn is not None else []))
+        cbs = [_cb(self.crs, 0, ttnn.bfloat16, 2048, BUF // 2048)]
+        ct = [0, BUF] + self.ct
+        if dyn is not None:
+            ct += [MAXJ, 1]
+            cbs.append(_cb(self.crs, 1, ttnn.bfloat16, 128, 1))
         k = ttnn.KernelDescriptor(
-            kernel_source=_ks(KDIR, "blkcopy.cpp"), core_ranges=self.crs, compile_time_args=[0, BUF] + self.ct,
-            runtime_args=_rt(self.cores, rt),
+            kernel_source=_ks(KDIR, "blkcopy.cpp"), core_ranges=self.crs, compile_time_args=ct,
+            runtime_args=_rt(self.cores, rt), defines=[("BC_DYN", "1")] if dyn is not None else [],
             config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
-        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(self.crs, 0, ttnn.bfloat16, 2048, BUF // 2048)])
-        key = ("i2m_blkcopy", nc, MAXJ, BUF)
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=cbs)
+        key = ("i2m_blkcopy", nc, MAXJ, BUF) + (("dyn",) if dyn is not None else ())
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
-        ttnn.generic_op([self.proto, self.proto], prog)
+        ttnn.generic_op([self.proto, self.proto] + ([dyn] if dyn is not None else []), prog)
