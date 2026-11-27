@@ -35,6 +35,12 @@ Device state (every shape fixed; positions live in device tensors, so the whole 
                              with tg = T * Gumbel noise the host writes before each replay (set_gumbel; zeros = top-1);
                              the drafter's q = softmax(logits / T) over the 32 candidates
 
+  fused (DRAFT_FUSE=1)       per layer one prep program (kernels/dsp_qkv.cpp: head split, q / k RMSNorm + RoPE with the
+                             rows gathered from the tables, K / V straight into the caches, q in the SDPA layout), the
+                             SDPA output unpack (dsp_ounpack.cpp), silu(g) u in one program (dsp_swiglu.cpp), the bf16
+                             residual kept width-sharded; the traced commit's 3 layers' k / v prep as one program; each
+                             Markov RNN step's ops after its matmul as one program (dsp_rnnpost.cpp)
+
 Use: eager    commit(taps, p0, valid) / draft(anchor, ctx_len, d=..., sample=...)  (host values)
      traced   capture(taps_buf, d, sample=...) -> trace; set_inputs(anchor, p0, n) [+ set_gumbel(T g)]; replay();
               tokens_host() / self.tokens (uint32 [1, 1, 1, d] ROW_MAJOR on every die) [+ cand_host()]
@@ -78,6 +84,9 @@ RMS_BF = os.environ.get("DRAFT_RMS", "bf16") == "bf16"
 ADD_BF = os.environ.get("DRAFT_ADD", "bf16") == "bf16"  # residual adds as one bf16 op
 ROPE_BF = os.environ.get("DRAFT_ROPE", "bf16") == "bf16"
 STASH = os.environ.get("DRAFT_STASH", "1") == "1"  # Markov steps 2..d read the fold weight from an L1 stash
+# DRAFT_FUSE: attention prep (head split + q / k RMSNorm + RoPE + KV cache write + query reshape) as one program per
+# layer / per commit (kernels/dsp_qkv.cpp), the SDPA output unpack (dsp_ounpack.cpp), the MLP activation (dsp_swiglu.cpp)
+FUSE = os.environ.get("DRAFT_FUSE", "1") == "1"
 
 
 def _bits(f):
@@ -202,6 +211,10 @@ class DSparkDrafter:
         self.zero_s = ops.up(torch.zeros(1, 1, 1, R))
         self.zero_sb = ops.up(torch.zeros(1, 1, 1, R), dtype=BF16)
         self.wp = [ops.up(torch.zeros(1, 1, 1, R), dtype=BF16) for _ in range(d_max + 1)]
+        if FUSE:  # (state per step: s_buf[k] / sb_buf[k] read by step k, s_buf[k + 1] / sb_buf[k + 1] written)
+            self.s_buf = [ops.up(torch.zeros(1, 1, 1, R)) for _ in range(d_max + 1)]
+            self.sb_buf = [ops.up(torch.zeros(1, 1, 1, R), dtype=BF16) for _ in range(d_max + 1)]
+            self.lat_buf = ops.up(torch.zeros(1, 1, 1, R), dtype=BF16)
 
         # shared modules: embedding + embed_norm, LM head
         ck = model.ck if model is not None else Checkpoint(cfg.snap)
@@ -267,6 +280,15 @@ class DSparkDrafter:
         self.rope_bf = ROPE_BF
         self.rope_b = [ttnn.as_tensor(torch.cat([t, t], -1).to(torch.bfloat16), dtype=BF16, layout=RM, device=mesh,
                                       memory_config=DRAM, mesh_mapper=self.rep) for t in (c, s)]
+        self.fuse = FUSE
+        if FUSE:  # (S' = [-s, s]: rotate-half's sign in the table; gamma tiles: every row = the norm weight, bf16)
+            self.rope_f = [self.rope_b[0], ttnn.as_tensor(torch.cat([-s, s], -1).to(torch.bfloat16), dtype=BF16,
+                                                          layout=RM, device=mesh, memory_config=DRAM,
+                                                          mesh_mapper=self.rep)]
+            gt = lambda v: ops.up(self._host(v).float().reshape(1, 1, 1, -1).expand(1, 1, 32, -1).contiguous(),  # noqa: E731
+                                  dtype=BF16)
+            for Lw in self.layers:
+                Lw["q_g"], Lw["k_g"], Lw["kc_g"] = gt(Lw["q_norm"]), gt(Lw["k_norm"]), gt(Lw["k_norm_ctx"])
 
         # caches: per layer K / V, paged layout [NKV * S / 32, 1, 32, D] (= [1, NKV, S, D] tile order), KV head h =
         # SDPA item h (pages h S/32 ..): the G query heads x B block rows of a KV head are one item (one tile)
@@ -533,6 +555,143 @@ class DSparkDrafter:
         prog.custom_program_hash = _hash(("dsp_rowcp", tuple(ct), len(cores)))
         ttnn.generic_op([j[0] for j in jobs] + [j[3] for j in jobs if j[3] is not None] + [j[1] for j in jobs], prog)
 
+    def _qkv(self, units, R, C, S, p0_t):
+        """Attention prep, one program (kernels/dsp_qkv.cpp), C / S': the row-major RoPE tables (rows p0 + i gathered
+        in the program), one unit per core: units (src, kind, nh, c0, gamma, dst,
+        idx, Srows[, j]): kind 0 q head j of group idx -> rows j R .. of item idx of the SDPA query dst (assembled on
+        the group's j = 0 core); 1 k head / 2 v head -> cache dst rows (p0 + i) mod Srows of head idx (p0: element 0 of
+        p0_t)."""
+        grid = self.mesh.compute_with_storage_grid_size()
+        cores = [ttnn.CoreCoord(j % grid.x, j // grid.x) for j in range(len(units))]
+        crs = _crs(cores)
+        DT = self.D // 32
+        ct = list(range(15)) + [R, _bits(self.eps), _bits(1.0 / self.D)] \
+            + ttnn.TensorAccessorArgs(units[0][0]).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(p0_t).get_compile_time_args()
+        rt, lead = {}, {}
+        for c, u in zip(cores, units):
+            if u[1] == 0 and u[8] == 0:
+                lead[u[6]] = self.mesh.worker_core_from_logical_core(c)
+        for c, u in zip(cores, units):
+            src, kind, nh, c0, gm, dst, idx, Sr = u[:8]
+            j = u[8] if len(u) > 8 else 0
+            lc = lead.get(idx) if kind == 0 else None
+            rt[(c.x, c.y)] = [src.buffer_address(), kind, nh, c0, gm.buffer_address() if gm is not None else 0,
+                              C.buffer_address(), S.buffer_address(), dst.buffer_address(), idx, Sr,
+                              p0_t.buffer_address(), j, lc.x if lc else 0, lc.y if lc else 0, self.G]
+        bf, f4 = 2048, 4096
+        sizes = [(BF16, bf, 2 * DT), (BF16, bf, DT), (BF16, bf, DT), (BF16, bf, DT), (BF16, bf, 1), (BF16, bf, 1),
+                 (F32, f4, DT), (F32, f4, 1), (F32, f4, 1), (F32, f4, DT), (BF16, bf, DT), (BF16, bf, DT),
+                 (BF16, bf, DT), (BF16, bf, 2 * DT), (BF16, bf, DT + 1)]
+        cbs = [_cb(i, crs, dt, pg, n) for i, (dt, pg, n) in enumerate(sizes)]
+        dm = ttnn.DataMovementConfigDescriptor
+        src = _ks(KDIR, "dsp_qkv.cpp")
+        kernels = [
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("READER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("WRITER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4,
+                                                                      fp32_dest_acc_en=True, math_approx_mode=False)),
+        ]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[ttnn.SemaphoreDescriptor(0, ttnn.CoreType.WORKER,
+                                                                                            crs, 0)], cbs=cbs)
+        prog.custom_program_hash = _hash(("dsp_qkv", tuple(ct), tuple(u[1:3] + (u[3], u[6], u[7]) + tuple(u[8:])
+                                                                   for u in units)))
+        io = [p0_t, C, S] + list({id(t): t for u in units for t in (u[0], u[5]) + ((u[4],) if u[4] is not None else ())}
+                                 .values())
+        ttnn.generic_op(io, prog)
+
+    def _ounpack(self, o):
+        """SDPA output [1, NKV, G B, D] -> [1, 1, B, NH D] bf16 (kernels/dsp_ounpack.cpp)."""
+        grid = self.mesh.compute_with_storage_grid_size()
+        DT = self.D // 32
+        out = self._alloc([1, 1, self.B, self.NH * self.D])
+        jobs = [(g, d) for g in range(self.NKV) for d in range(DT)]
+        cores = [ttnn.CoreCoord(j % grid.x, j // grid.x) for j in range(len(jobs))]
+        crs = _crs(cores)
+        ct = [0, self.B, self.G, DT] + ttnn.TensorAccessorArgs(o).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        rt = {(c.x, c.y): [o.buffer_address(), out.buffer_address(), g, d] for c, (g, d) in zip(cores, jobs)}
+        k = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "dsp_ounpack.cpp"), core_ranges=crs, compile_time_args=ct,
+                                  runtime_args=_rt(rt),
+                                  config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0,
+                                                                           noc=ttnn.NOC.NOC_0))
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[_cb(0, crs, BF16, 2048, 1 + self.G)])
+        prog.custom_program_hash = _hash(("dsp_ounpack", tuple(ct)))
+        ttnn.generic_op([o, out], prog)
+        return out
+
+    def _rnnpost(self, k, pj, cf):
+        """Markov RNN step k after its matmul (kernels/dsp_rnnpost.cpp; core b: tile b of each part): pj + cf ->
+        lat_buf (bf16), s_buf[k + 1] (FP32) / sb_buf[k + 1] (bf16) from s_buf[k]."""
+        RT = self.R // 32
+        cores = [ttnn.CoreCoord(b, 0) for b in range(RT)]
+        crs = _crs(cores)
+        ct = [0, 1, 2, 3, RT] + ttnn.TensorAccessorArgs(pj).get_compile_time_args()
+        io = (pj, cf, self.s_buf[k], self.lat_buf, self.s_buf[k + 1], self.sb_buf[k + 1])
+        rt = {(c.x, c.y): [t.buffer_address() for t in io] + [c.x] for c in cores}
+        dm = ttnn.DataMovementConfigDescriptor
+        src = _ks(KDIR, "dsp_rnnpost.cpp")
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                           math_approx_mode=False)
+        u2d = [ttnn.UnpackToDestMode.Default] * 64
+        u2d[0] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg.unpack_to_dest_mode = u2d
+        kernels = [
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("READER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("WRITER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  config=cfg),
+        ]
+        cbs = [_cb(0, crs, F32, 4096, 7), _cb(1, crs, BF16, 2048, 1), _cb(2, crs, F32, 4096, 1),
+               _cb(3, crs, BF16, 2048, 1)]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[], cbs=cbs)
+        prog.custom_program_hash = _hash(("dsp_rnnpost", tuple(ct)))
+        ttnn.generic_op([pj, cf, self.s_buf[k], self.lat_buf, self.s_buf[k + 1], self.sb_buf[k + 1]], prog)
+
+    def _swiglu(self, gu):
+        """gu [1, 1, B, 2 I] bf16 -> silu(g) u [1, 1, B, I] bf16 (kernels/dsp_swiglu.cpp)."""
+        I = int(gu.shape[-1]) // 2
+        IT = I // 32
+        grid = self.mesh.compute_with_storage_grid_size()
+        TPC = -(-IT // (grid.x * grid.y))
+        out = self._alloc([1, 1, int(gu.shape[2]), I])
+        rt, cores = {}, []
+        for t0 in range(0, IT, TPC):
+            j = len(cores)
+            c = ttnn.CoreCoord(j % grid.x, j // grid.x)
+            cores.append(c)
+            rt[(c.x, c.y)] = [gu.buffer_address(), out.buffer_address(), t0, min(TPC, IT - t0)]
+        crs = _crs(cores)
+        ct = [0, 1, 2, IT] + ttnn.TensorAccessorArgs(gu).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(out).get_compile_time_args()
+        dm = ttnn.DataMovementConfigDescriptor
+        src = _ks(KDIR, "dsp_swiglu.cpp")
+        kernels = [
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("READER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=ttnn.NOC.NOC_0)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  defines=[("WRITER", "1")],
+                                  config=dm(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_1)),
+            ttnn.KernelDescriptor(kernel_source=src, core_ranges=crs, compile_time_args=ct, runtime_args=_rt(rt),
+                                  config=ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4,
+                                                                      fp32_dest_acc_en=True, math_approx_mode=False)),
+        ]
+        prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=[],
+                                      cbs=[_cb(i, crs, BF16, 2048, 2) for i in range(3)])
+        prog.custom_program_hash = _hash(("dsp_swiglu", tuple(ct), TPC, len(cores)))
+        ttnn.generic_op([gu, out], prog)
+        return out
+
     def _alloc(self, shape, dt=BF16):
         return ttnn.allocate_tensor_on_device(ttnn.Shape(shape), dt, TILE, self.mesh, DRAM)
 
@@ -712,6 +871,17 @@ class DSparkDrafter:
         whose f_rnn is kept)."""
         R = int(taps.shape[2])
         mixes = self._mix(taps, self.alpha_f)
+        if self.fuse and R <= 32:
+            C, S = self.rope_f  # (the prep program gathers rows p0 + i of the tables)
+            units = []
+            for i, Lw in enumerate(self.layers):
+                kv = self._mm(self._rms(mixes[i], Lw["dflare"]), Lw["kv_ctx"], BF16)
+                units += [(kv, 1, 1, h * 4, Lw["kc_g"], self.kc[i], h, self.S[i]) for h in range(self.NKV)]
+                units += [(kv, 2, 1, (self.NKV + h) * 4, None, self.vc[i], h, self.S[i]) for h in range(self.NKV)]
+            self._qkv(units, R, C, S, p0_t)
+            f = self._rms(mixes[self.L], self.rnn_norm)
+            self._rowcp([(f, self.f_rnn, 0, last)])
+            return
         C, S = self._rope(idx)
         srcs = []
         for i, Lw in enumerate(self.layers):
@@ -784,8 +954,55 @@ class DSparkDrafter:
             compute_kernel_config=self.ckc, memory_config=DRAM)
         return self._merge(ttnn.reshape(o, (1, self.NH, self.B, self.D)))
 
+    def _attention_f(self, i, Lw, qkv, C, S):
+        """Fused: qkv [1, 1, B, (NH + 2 NKV) D] -> the prep program (q to the SDPA layout, K / V to cache rows p ..
+        p+B-1), SDPA, the output unpack -> [1, 1, B, NH D] bf16."""
+        DT, G, NKV, NH = self.D // 32, self.G, self.NKV, self.NH
+        qs = self._alloc([1, NKV, G * self.B, self.D])
+        Sr = self.S[i]
+        units = [(qkv, 0, 1, (g * G + j) * DT, Lw["q_g"], qs, g, 0, j) for g in range(NKV) for j in range(G)]
+        units += [(qkv, 1, 1, (NH + h) * DT, Lw["k_g"], self.kc[i], h, Sr) for h in range(NKV)]
+        units += [(qkv, 2, 1, (NH + NKV + h) * DT, None, self.vc[i], h, Sr) for h in range(NKV)]
+        self._qkv(units, self.B, C, S, self.idx_b)
+        local = i in self.local
+        o = ttnn.transformer.paged_scaled_dot_product_attention_decode(
+            qs, self.kc[i], self.vc[i], self.ptab[Sr], cur_pos_tensor=self.cpos, scale=self.D**-0.5,
+            sliding_window_size=self.window + self.B if local else None, cache_position_modulo=Sr if local else None,
+            program_config=self.sdpa_cfg, compute_kernel_config=self.ckc, memory_config=DRAM)
+        return self._ounpack(o)
+
+    def _block_f(self):
+        """block_hidden, fused (DRAFT_FUSE): prep / unpack / swiglu programs, the bf16 residual width-sharded (Ops
+        _rms_cfg: the sharded norm in place, no reshards; DRAFT_SHRES=0: the reshards kept)."""
+        mc, pc = self.ops._rms_cfg(self.H)
+        shres = os.environ.get("DRAFT_SHRES", "1") == "1"
+
+        def rms(x, w):
+            if not shres:
+                return self._rms(x, w)
+            return ttnn.rms_norm(x, epsilon=self.eps, weight=w, program_config=pc, memory_config=mc,
+                                 compute_kernel_config=self.ckc)
+
+        def add(a, b):
+            return ttnn.add(a, b, dtype=BF16, memory_config=mc if shres else None)
+
+        residual = ttnn.add(self._rms(self.e_in, self.embed_norm), self.tmpl, memory_config=mc if shres else None)
+        C, S = self.rope_f
+        for i, Lw in enumerate(self.layers):
+            if i > 0:
+                residual = add(hidden, residual)
+            qkv = self._lin(rms(residual, Lw["in_norm"]), Lw["qkv"])
+            hidden = self._lin(self._attention_f(i, Lw, qkv, C, S), Lw["o"])
+            residual = add(hidden, residual)
+            gu = self._lin(rms(residual, Lw["post_norm"]), Lw["gu"])
+            hidden = self._lin(self._swiglu(gu), Lw["down"])
+        residual = add(hidden, residual)
+        return ttnn.to_memory_config(rms(residual, self.norm), DRAM)
+
     def block_hidden(self):
         """The block at position p (ctrl outputs) -> final normed hidden [1, 1, B, H] bf16."""
+        if self.fuse:  # (the residual kept width-sharded: the norms read / write it in place, the projections read it)
+            return self._block_f()
         hidden = ttnn.add(self._rms(self.e_in, self.embed_norm), self.tmpl)  # (e_in row 0: embed[anchor], by ctrl)
         C, S = self._rope(self.idx_b)
         residual = None
@@ -816,7 +1033,15 @@ class DSparkDrafter:
         s, sb, prev = self.zero_s, self.zero_sb, self.in_anchor
         stash = self._stash() if STASH and d > 1 and not self.vsim else None
         self._rowcp([(h, self.hk[k], k + 1, None) for k in range(d)])
-        for k in range(d):
+        if self.fuse:
+            for k in range(d):
+                x = ttnn.concat([self.sb_buf[k], self.wp[k], self.hk[k]], dim=-1)
+                self._rnnpost(k, self._mm(x, self.w_shh, F32, self.ckc), cf)
+                self._step(self.lat_buf, k + 1, self.prev[k], k, stash)
+            d_loop = 0
+        else:
+            d_loop = d
+        for k in range(d_loop):
             wp = self.wp[k]  # (w1[prev]: written by ctrl / the previous step program)
             pj = ttnn.add(self._mm(ttnn.concat([sb, wp, self.hk[k]], dim=-1), self.w_shh, F32, self.ckc), cf)
             gate = ttnn.sigmoid(ttnn.slice(pj, [0, 0, 0, 0], [1, 1, 1, R]))
