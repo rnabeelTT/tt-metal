@@ -47,7 +47,7 @@ GATE2 = os.environ.get("I2M_GATE2", "1") == "1"  # the round-reduced gate on the
 # the round-reduced gate at 17..32 rows too: two 16-row halves (rows 16.. in faces 2 / 3) on two core rectangles in one
 # program (tt/gate.py GateKernel2.halves / multi); I2M_G2_ROWS_MAX 16: the old GateKernel there
 G2_ROWS_MAX = int(os.environ.get("I2M_G2_ROWS_MAX", "32"))
-G2_BFP8 = os.environ.get("I2M_G2_BFP8", "0") == "1"  # (see MessageGate: bfp8 decode gate weights)
+G2_BFP8 = os.environ.get("I2M_G2_BFP8", "1") == "1"  # (see MessageGate: bfp8 decode gate weights)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 # I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
@@ -344,7 +344,9 @@ class MessageGate:
         self.wfg = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.float32)
         if GATE_FUSED:  # the one-program gate (tt/gate.py): bf16 forget / gain weights (the checkpoint's, exact)
             self.wfg_bf = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat16)
-        # decode GateKernel2 with bfp8 Wd / Wf|Wg (I2M_G2_BFP8; half the gate weight bytes; prefill keeps bf16)
+        # decode GateKernel2 with bfp8 Wd / Wf|Wg (I2M_G2_BFP8; half the gate weight bytes; prefill keeps bf16): traced
+        # B=1 TP4 / TP2 / TP1 8.070 / 10.224 / 14.706 -> 7.905 / 10.074 / 14.561 ms; teacher-forced decode TP4 B=1 / 8
+        # .9699 / .9954 / .0166 -> .9708 / .9942 / .0167, .9694 / .9949 / .0193 -> .9713 / .9950 / .0184
         self.wd2, self.wfg2 = self.wd, getattr(self, "wfg_bf", None)
         if G2_BFP8 and GATE_FUSED:
             self.wd2 = ops.up(d.T.reshape(1, 1, 2 * H, -1), ttnn.bfloat8_b)
