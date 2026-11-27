@@ -44,7 +44,7 @@ _STK = {}  # (mesh, T, NH, NKV, HD) -> the zeroed stacked q / rq / sink buffers 
 
 def stk_buffers(mesh, T, NH, NKV, HD):
     """the persistent stacked q / rq / sink buffers of T-row chunks (tt/kernels/aprep_nat_writer.cpp NAT_STK; 8-row
-    items, rq in row pairs): zeroed once, the prep rewrites the same live rows every call (the rest stay zero)"""
+    items, rq in row pairs; the prep writes whole tiles)"""
     key = (id(mesh), T, NH, NKV, HD)
     if key not in _STK:
         n = T // 8 * NKV
@@ -306,10 +306,11 @@ class AttnPrep:
         cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out, cb_st, cb_out1, cb_x1 = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
         f32, bf = ttnn.float32, ttnn.bfloat16
         tok = max(HT * 2 * 8 * 32, BF)  # (aprep_nat_writer.cpp: staging bytes per token)
+        # (stk: the stacked tiles a unit assembles: 4 items x (HT q, 4 rq, NKV sink))
+        st = _cb(crs, cb_st, bf, BF, 4 * HT + 16 + 4 * w.NKV) if stk else _cb(crs, cb_st, bf, tok, 32)
         cbs = [_cb(crs, cb_xf, f32, F32, 2 * HT), _cb(crs, cb_xb, bf, BF, 2 * HT), _cb(crs, cb_tau, f32, F32, 2),
                _cb(crs, cb_ones, bf, BF, 1), _cb(crs, cb_sq, f32, F32, 2 * HT), _cb(crs, cb_f, f32, F32, 2),
-               _cb(crs, cb_out, bf, BF, 2 * HT), _cb(crs, cb_st, bf, tok, 32), _cb(crs, cb_out1, bf, BF, 2),
-               _cb(crs, cb_x1, f32, F32, 2)]
+               _cb(crs, cb_out, bf, BF, 2 * HT), st, _cb(crs, cb_out1, bf, BF, 2), _cb(crs, cb_x1, f32, F32, 2)]
         R0, S0 = w.qd // 32, (w.qd + w.rd) // 32
         rd_ct = [cb_xf, cb_xb, cb_tau, HT, w.DR, R0, S0, int(glob), int(pq.shape[-1]) // 32, int(k.shape[-1]) // 32, cb_x1] \
             + ttnn.TensorAccessorArgs(pq).get_compile_time_args() + ttnn.TensorAccessorArgs(k).get_compile_time_args() \
