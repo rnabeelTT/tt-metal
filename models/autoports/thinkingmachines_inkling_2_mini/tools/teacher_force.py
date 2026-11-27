@@ -9,7 +9,7 @@ held-out texts (models/experimental/hybrid_moe/quality_texts.py): the quality ga
   nll        device next-token NLL (ref's alongside)
 
 usage (in the image): tools/run_dev.sh python models/autoports/thinkingmachines_inkling_2_mini/tools/teacher_force.py
-env: EXPERT_DT bf16|bfp8|bfp4 (or a per-layer spec, see tt/precision.py), MESH (devices: 1, 2, 4), CHUNK (256),
+env: PACKED (1: forward_packed), EXPERT_DT bf16|bfp8|bfp4 (or a per-layer spec, see tt/precision.py), MESH (devices: 1, 2, 4), CHUNK (256),
      REF (/cache/fixtures/ref_bf16.pt), ONLY (comma list of text names)
 """
 
@@ -26,6 +26,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt.model import Inkling2Mo
 DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 REF = os.environ.get("REF", "/cache/fixtures/ref_bf16.pt")
 CHUNK = int(os.environ.get("CHUNK", "256"))
+PACKED = os.environ.get("PACKED", "0") == "1"  # (env PACKED=1: chunks through forward_packed)
 
 
 def main():
@@ -55,7 +56,10 @@ def main():
             n = len(chunk)
             if n % 64:
                 chunk = torch.cat([chunk, torch.zeros((-n) % 64, dtype=chunk.dtype)])
-            lg = m.forward(chunk, p0, valid=n)
+            if PACKED:  # (the served path: forward_packed, one segment; RowSplit on > 1 die)
+                lg = m.forward_packed(chunk, [(0, len(chunk), p0, n, 0, 0)], all_rows=True)
+            else:
+                lg = m.forward(chunk, p0, valid=n)
             lg = m.logits_host(lg, int(lg.shape[2]))  # (TILE rows; the vocab slices of a sharded head gathered)
             lps.append(torch.log_softmax(lg.reshape(len(chunk), -1)[:n, : m.V], -1))
         lp = torch.cat(lps)

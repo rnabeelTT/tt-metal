@@ -39,6 +39,7 @@ KERNELS = Path(__file__).parent / "sconv_kernels"
 FUSED = os.environ.get("INKLING_SCONV_KERNEL", "1") == "1"
 FUSED_MAX_ROWS = 29  # 3 carried rows + R rows in one tile
 PF_MAXSEG = 8  # sequences per packed prefill chunk (sconv_kernels/pfseg_reader.cpp MAXSEG)
+RSX_SLOTS = 16  # side tiles of a reduce-scattered conv input (pfseg_reader.cpp PF_RSX; tt/model.py RowSplit.side)
 # INKLING_SCONV_PF_KERNEL (default 1): a prefill chunk (R % 32 == 0 rows, bf16) through one program over the row tiles
 # (sconv_kernels/pf_*.cpp: the same arithmetic as the fused rows kernel, the carried rows passed between tiles) plus a
 # state copy, instead of ~15 ttnn ops per conv
@@ -395,9 +396,12 @@ class ShortConv:
         written on every die."""
         T = int(x.shape[2])
         assert self._pf_ok(x) and len(segs) <= PF_MAXSEG, (T, len(segs))
-        k0t = None
+        k0t = A = None
         if rs is not None:
-            k0t, T = rs
+            k0t, T = rs[:2]
+            if len(rs) > 2:  # (PF_RSX: x is this die's rows; A the gathered side tiles at rs[3]'s local indices)
+                A, slots = rs[2], rs[3]
+                assert dyn is None and int(x.shape[2]) == T and len(slots) <= RSX_SLOTS, (dyn, x.shape, slots)
         pr = self._pf_program(T, PF_FLAT)
         cols, Rt, G, gy = pr["ct"]
         cr = pr["cr"]
@@ -420,14 +424,17 @@ class ShortConv:
         if k0t is not None:
             assert G >= cols or not PF_FLAT, (G, cols)  # (pfseg_reader.cpp: one core per column writes the states)
             args.append(k0t.buffer_address())
+        if A is not None:
+            args += [A.buffer_address(), len(slots)] + list(slots) + [0] * (RSX_SLOTS - len(slots))
         if dyn is not None:
             args.append(dyn.buffer_address())
         ckey = (T, int(x.shape[2]), str(out_dtype), None if resid is None else (str(resid.dtype), repr(resid.memory_config())),
-                None if k0t is None else repr(k0t.memory_config()), repr(x.memory_config()), dyn is not None)
+                None if k0t is None else repr(k0t.memory_config()), repr(x.memory_config()), dyn is not None,
+                None if A is None else repr(A.memory_config()))
         pc = self.__dict__.setdefault("_pf_pc", {})
         hit = pc.get(ckey) if PCACHE else None
         if hit is None:
-            hit = self._pf_desc(x, resid, k0t, y, shift, out_dtype, T, pr, dyn)
+            hit = self._pf_desc(x, resid, k0t, y, shift, out_dtype, T, pr, dyn, A)
             if PCACHE:
                 pc[ckey] = hit
         rd, wr, cp, cbs, h = hit
@@ -436,14 +443,15 @@ class ShortConv:
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
         prog.custom_program_hash = h
         ttnn.generic_op([x, self.st, self.taps_tiles, shift] + ([resid] if resid is not None else [])
-                        + ([k0t] if k0t is not None else []) + ([dyn] if dyn is not None else []) + [y], prog)
+                        + ([k0t] if k0t is not None else []) + ([A] if A is not None else [])
+                        + ([dyn] if dyn is not None else []) + [y], prog)
         for row0, R, n, lc in segs:
             ttnn.copy(lc._pf_stn, lc.st)
             if lc.snap_row is not None and dyn is None:
                 lc.snap_out = lc.snap_buf
         return y
 
-    def _pf_desc(self, x, resid, k0t, y, shift, out_dtype, T, pr, dyn=None):
+    def _pf_desc(self, x, resid, k0t, y, shift, out_dtype, T, pr, dyn=None, A=None):
         """prefill_packed's kernels (common runtime args set per call), CBs and hash"""
         cols, Rt, G, gy = pr["ct"]
         cr = pr["cr"]
@@ -459,6 +467,9 @@ class ShortConv:
         if k0t is not None:
             rd_ct += ttnn.TensorAccessorArgs(k0t).get_compile_time_args()
             defs += [("PF_ROWOFF", "1")]
+        if A is not None:
+            rd_ct += ttnn.TensorAccessorArgs(A).get_compile_time_args()
+            defs += [("PF_RSX", "1")]
         if dyn is not None:
             rd_ct += ttnn.TensorAccessorArgs(dyn).get_compile_time_args()
             defs += [("PF_DYN", "1")]
@@ -490,7 +501,7 @@ class ShortConv:
             cbs.append(_cb(cr, cb_r, resid.dtype, 4096 if resid.dtype == f32 else 2048, 2))
         h = _stable_hash("inkling_sconv_pfseg3", PF_FLAT, self.C, T, G, gy, str(out_dtype),
                          str(resid.dtype) if resid is not None else "-", int(x.shape[2]) if k0t is not None else 0,
-                         *(("dyn",) if dyn is not None else ()))
+                         *(("dyn",) if dyn is not None else ()), *(("rsx",) if A is not None else ()))
         return kernels[0], kernels[1], kernels[2], cbs, h
 
     def _shift_tiles(self):

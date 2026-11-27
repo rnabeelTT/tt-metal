@@ -79,6 +79,36 @@ def main():
                     print(f"conv {vname} snap {snap}: die {d} states DIFF", flush=True)
                 yp.append(y)
             check(f"conv {vname} snap {snap}", yf, yp)
+            # PF_RSX: x only this die's rows + the side tiles every die contributes (RowSplit.slots / side, emulated)
+            from models.autoports.thinkingmachines_inkling_2_mini.tt.model import RowSplit
+
+            rsh = RowSplit.__new__(RowSplit)
+            rsh.N, rsh.T, rsh.Tl = NS, T, Tl
+            slots = rsh.slots([(r0, n, snap if li == 1 else None) for r0, R, n, li in segs_h])
+            xh = ttnn.to_torch(x)
+            Rt = Tl // 32
+            A = torch.cat([xh[..., (o * Rt + l) * 32:(o * Rt + l + 1) * 32, :] for o in range(NS) for l in slots], 2)
+            A_tt = up(A.float(), ttnn.bfloat16)
+            yp = []
+            for d in range(NS):
+                k0 = torch.zeros(1, 1, 1, 16, dtype=torch.int32)
+                k0[0, 0, 0, 0] = d * Tl // 32
+                k0t = ttnn.from_torch(k0, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh, memory_config=DR)
+                xl = rows(x, d)
+                for ln, s0 in zip(lanes, st0_tt):
+                    ttnn.copy(s0, ln.st)
+                    ln.snap_row = None
+                lanes[1].snap_row = snap
+                segs = [(r0, R, n, lanes[li]) for r0, R, n, li in segs_h]
+                y = cv.prefill_packed(xl, segs, resid=rows(resid, d) if resid is not None else None, out_dtype=odt,
+                                      rs=(k0t, Tl, A_tt, slots))
+                s = [bits(ln.st) for ln in lanes] + ([bits(lanes[1].snap_buf)] if snap is not None else [])
+                same_st = all(torch.equal(u, v) for u, v in zip(s, sf))
+                ok &= same_st
+                if not same_st:
+                    print(f"rsx conv {vname} snap {snap}: die {d} states DIFF", flush=True)
+                yp.append(y)
+            check(f"rsx conv {vname} snap {snap} slots {slots}", yf, yp)
 
     # (2) the glue ops
     ops = Ops(mesh, EPS)

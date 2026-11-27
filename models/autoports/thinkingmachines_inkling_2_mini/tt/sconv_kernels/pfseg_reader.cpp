@@ -18,6 +18,11 @@
 // are this die's rows (tile k). Every segment's state points are written from x / the old state on every die (the conv
 // states stay replicated), by one core per column before the row loop.
 //
+// PF_RSX (with PF_ROWOFF; the conv input reduce-scattered by rows): x holds only this die's Rt row tiles (global tiles
+// K0 .. K0 + Rt - 1); any other row tile j the conv reads (the halo tile K0 - 1, a state point's rows) comes from the
+// gathered side tensor A: every die contributed the same nslot local row tiles (local index l at slot s: common args
+// after A's address), so tile j is A's tile row (j / Rt) * nslot + (the slot of j % Rt).
+//
 // PF_DYN (a traced prefill chunk): the state points n[s] / snap[s] come from a uint32 tensor (words 2 s, 2 s + 1 of its
 // first page; address: the last common arg), written before each replay, not from the args.
 
@@ -25,6 +30,10 @@
 
 #include "api/dataflow/dataflow_api.h"
 #include "tile_rows.hpp"
+
+#if defined(PF_RSX) && (defined(PF_DYN) || !defined(PF_ROWOFF))
+#error "PF_RSX: with PF_ROWOFF, without PF_DYN"
+#endif
 
 constexpr uint32_t MAXSEG = 8;
 constexpr uint32_t NONE = 0xffffffffu;
@@ -103,6 +112,25 @@ void kernel_main() {
     constexpr uint32_t K0 = 0;
 #endif
 
+#ifdef PF_RSX
+    constexpr uint32_t rsx_ct = TensorAccessorArgs<k0_ct>().next_compile_time_args_offset();
+    constexpr auto a_args = TensorAccessorArgs<rsx_ct>();
+    const auto s_a = TensorAccessor(a_args, get_common_arg_val<uint32_t>(k0_arg + 1), TB);
+    const uint32_t nslot = get_common_arg_val<uint32_t>(k0_arg + 2);
+    auto xaddr = [&](uint32_t j, uint32_t col) -> uint64_t {
+        if (j >= K0 && j < K0 + Rt) {
+            return s_x.get_noc_addr((j - K0) * cols + col);
+        }
+        const uint32_t l = j % Rt;
+        uint32_t sl = 0;
+        while (sl + 1 < nslot && get_common_arg_val<uint32_t>(k0_arg + 3 + sl) != l) {
+            ++sl;
+        }
+        return s_a.get_noc_addr(((j / Rt) * nslot + sl) * cols + col);
+    };
+#else
+    auto xaddr = [&](uint32_t j, uint32_t col) -> uint64_t { return s_x.get_noc_addr(j * cols + col); };
+#endif
 #ifdef PF_DYN
 #ifdef PF_ROWOFF
     constexpr uint32_t dyn_arg = k0_arg + 1;
@@ -200,7 +228,7 @@ void kernel_main() {
                             }
                         } else {
                             const uint32_t gr = arg(s, 0) * 32 + P + r - 3;
-                            noc_async_read(s_x.get_noc_addr((gr / 32) * cols + sc), xs, TB);
+                            noc_async_read(xaddr(gr / 32, sc), xs, TB);
                             noc_async_read_barrier();
                             sconv::row_to_f32(orw, xsw, gr % 32);
                         }
@@ -255,9 +283,9 @@ void kernel_main() {
         cb_reserve_back(cb_p, 1);
         const uint32_t x = get_write_ptr(cb_x);
         const uint32_t pp = get_write_ptr(cb_p);
-        noc_async_read(s_x.get_noc_addr(kg * cols + c), x, TB);
+        noc_async_read(xaddr(kg, c), x, TB);
         if (kg != ks) {
-            noc_async_read(s_x.get_noc_addr((kg - 1) * cols + c), pp, TB);
+            noc_async_read(xaddr(kg - 1, c), pp, TB);
         } else {
             volatile uint32_t* pw = reinterpret_cast<volatile uint32_t*>(pp);
             for (uint32_t w = 0; w < TB / 4; ++w) {

@@ -74,6 +74,12 @@ PF_MIXC = os.environ.get("I2M_PF_MIXC", "1") == "1"
 # T / N rows instead of all T: the residual stream, blocks and messages are row-split, the all-reduces stay as they are (their full output gives the convs their halo and every
 # segment's state rows), and only the attention inputs and the MoE input are all-gathered (RowSplit)
 PF_ROWSPLIT = os.environ.get("I2M_PF_ROWSPLIT", "1") == "1"
+# I2M_PF_RSX (with PF_ROWSPLIT; eager chunks): the attention / MoE outputs reduce-scattered by rows, not all-reduced:
+# each conv reads its die's rows plus a few side tiles gathered from the others (the halo tile before its rows, the
+# state points' tiles; RowSplit.side, sconv_kernels/pfseg_reader.cpp PF_RSX). I2M_PF_RS_LINKS: the reduce-scatter's
+# fabric links
+PF_RSX = os.environ.get("I2M_PF_RSX", "1") == "1"
+RS_LINKS = int(os.environ.get("I2M_PF_RS_LINKS", "2"))
 
 
 class RowSplit:
@@ -104,6 +110,41 @@ class RowSplit:
 
     def conv(self):
         return (self.k0, self.Tl)
+
+    def slots(self, segs):
+        """PF_RSX: the local row tiles every die contributes to the conv's side tensor, the same list on every die:
+        its last (the next die's halo), then every tile holding a state point's rows (segs: (row0, n, snap | None)),
+        padded with the first to 4 / 8 / 16 (few gather programs). None: more than 16."""
+        Rt = self.Tl // 32
+        sl = [Rt - 1]
+        for row0, n, snap in segs:
+            for P in (n, snap):
+                if P is None:
+                    continue
+                for r in range(3):
+                    if P + r >= 3:
+                        l = ((row0 + P + r - 3) // 32) % Rt
+                        if l not in sl:
+                            sl.append(l)
+        m = next((m for m in (4, 8, 16) if len(sl) <= m), None)
+        return None if m is None else sl + [sl[0]] * (m - len(sl))
+
+    def side(self, x, slots, bc):
+        """PF_RSX: this die's local row tiles `slots` of x [1, 1, Tl, C] (one copy program), gathered from every die
+        -> [1, 1, N * 32 * len(slots), C] (die o's at tile rows o * len(slots) ..)"""
+        C = int(x.shape[-1])
+        cols = C // 32
+        m = len(slots)
+        c = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, 32 * m, C]), x.dtype, ttnn.TILE_LAYOUT, self.mesh, DRAM)
+        bc([(x, l * cols, c, s * cols, cols) for s, l in enumerate(slots)])
+        A = ttnn.all_gather(c, 2, cluster_axis=1, memory_config=DRAM, topology=ttnn.Topology.Linear)
+        ttnn.deallocate(c)
+        return A
+
+    def scatter(self, t):
+        """[1, 1, T, W] partial sums on every die -> the sum's rows of this die [1, 1, Tl, W] (PF_RSX)"""
+        return ttnn.reduce_scatter(t, 2, cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=DRAM,
+                                   num_links=RS_LINKS)
 
     def cut(self, t, rows, bc, dyn=None):
         """rows (global row ids, <= 32) of a row-split [1, 1, Tl, W] -> [1, 1, 32, W] tile on every die: each die
@@ -704,9 +745,13 @@ class Inkling2Model:
             for t in {id(u): u for u in (qn, kn, vn)}.values():
                 ttnn.deallocate(t)
             qn, kn, vn = qg, kg, vg
+        # (I2M_PF_RSX: the attention / MoE outputs reduce-scattered; each conv's side tiles from RowSplit.side)
+        sx = [self._rsx_slots(rs, st, i, ctx) for i in (2, 3)] if rs is not None and PF_RSX and ctx.dyn is None \
+            else [None, None]
         if ctx is not None:
-            att = attention_packed(L.attn, st.cache, [ln[:2] for ln in st.lanes], qn, kn, vn, ctx, tt_ccl=self.tt_ccl)
-            att = self._seg_conv(st, 2, att, ctx, resid=r_in, out_dtype=f32, rs=rs)
+            att = attention_packed(L.attn, st.cache, [ln[:2] for ln in st.lanes], qn, kn, vn, ctx, tt_ccl=self.tt_ccl,
+                                   scatter=rs.scatter if sx[0] is not None else None)
+            att = self._seg_conv(st, 2, att, ctx, resid=r_in, out_dtype=f32, rs=rs, slots=sx[0])
         else:
             att = attention(L.attn, st.cache, qn, kn, vn, p0, valid=valid, tt_ccl=self.tt_ccl, slot=slot)
             att = st.conv("attn", att, rows_mode, nvalid, resid=r_in, out_dtype=f32)
@@ -731,20 +776,32 @@ class Inkling2Model:
             mg = rs.gather(mn)
             ttnn.deallocate(mn)
             mn = mg
-        mo = L.moe.forward(mn)
+        mo = L.moe.forward(mn, scatter=rs.scatter if sx[1] is not None else None)
         if ctx is not None:
-            return self._seg_conv(st, 3, mo, ctx, resid=resid, out_dtype=ttnn.bfloat16, rs=rs)
+            return self._seg_conv(st, 3, mo, ctx, resid=resid, out_dtype=ttnn.bfloat16, rs=rs, slots=sx[1])
         return st.conv("mlp", mo, rows_mode, nvalid, resid=resid, out_dtype=ttnn.bfloat16)
 
     @staticmethod
-    def _seg_conv(st, i, x, ctx, resid=None, out_dtype=ttnn.bfloat16, rs=None):
+    def _rsx_slots(rs, st, i, ctx):
+        """PF_RSX: conv i's side tiles (RowSplit.slots) for the chunk's segments, or None (all-reduce as before)"""
+        return rs.slots([(row0, valid, st.lanes[lane][i].snap_row) for row0, R, _, valid, _, lane in ctx.segs])
+
+    @staticmethod
+    def _seg_conv(st, i, x, ctx, resid=None, out_dtype=ttnn.bfloat16, rs=None, slots=None):
         """Conv i (2: attention output, 3: MoE output) of a packed chunk: each segment on its lane's state (resid: the
-        following residual add, ShortConv.prefill_packed). rs (RowSplit): x all rows, resid / the output this die's."""
+        following residual add, ShortConv.prefill_packed). rs (RowSplit): x all rows, resid / the output this die's.
+        slots (PF_RSX): x is this die's rows too; the other rows the conv reads come from RowSplit.side."""
         x = _bf(x)
-        return st.lanes[0][i].prefill_packed(x, [(row0, R, valid, st.lanes[lane][i])
-                                                 for row0, R, _, valid, _, lane in ctx.segs], resid=resid,
-                                             out_dtype=out_dtype, rs=rs.conv() if rs is not None else None,
-                                             dyn=ctx.dyn)
+        rsa, A = (rs.conv() if rs is not None else None), None
+        if slots is not None:
+            A = rs.side(x, slots, ctx.bc)
+            rsa = rsa + (A, slots)
+        y = st.lanes[0][i].prefill_packed(x, [(row0, R, valid, st.lanes[lane][i])
+                                              for row0, R, _, valid, _, lane in ctx.segs], resid=resid,
+                                          out_dtype=out_dtype, rs=rsa, dyn=ctx.dyn)
+        if A is not None:
+            ttnn.deallocate(A)
+        return y
 
     def messages(self, loop_idx, prev_src_n):
         """prev_src_n: rms-normed fp32 [block-12 input, layer-17 output] of the previous pass -> 4 fp32 messages.
@@ -806,12 +863,13 @@ class Inkling2Model:
             if s is not None:
                 s.reset(lane)
 
-    def forward_packed(self, ids: torch.Tensor, segs, taps=None, mm=None):
+    def forward_packed(self, ids: torch.Tensor, segs, taps=None, mm=None, all_rows=False):
         """A packed prefill chunk: ids [T] holding segments segs = [(row0, R, p0, valid, slot, lane)] (each its own
         sequence; R, p0 multiples of 64) -> logits [1, 1, U, Vp] of each segment's last valid row. taps, mm: see
-        forward. A one-segment chunk with a captured trace of its size replays it (PrefillTrace, I2M_PF_TRACE)."""
+        forward. A one-segment chunk with a captured trace of its size replays it (PrefillTrace, I2M_PF_TRACE).
+        all_rows (evals): the logits of every row [1, 1, T, Vp] instead."""
         pft = getattr(self, "pft", None)
-        if pft is not None and mm is None:
+        if pft is not None and mm is None and not all_rows:
             r = pft.run(ids, segs, taps)
             if r is not None:
                 return r
@@ -819,8 +877,8 @@ class Inkling2Model:
         glob = next((self.apps[a].cache for a, (li, _) in enumerate(self.sched) if not self.layers[li].sliding), None)
         ctx = PackedCtx(self.mesh, segs, slid, glob)
         try:
-            return self.forward(ids, 0, ctx=ctx, last_rows=[row0 + valid - 1 for row0, _, _, valid, _, _ in segs],
-                                taps=taps, mm=mm)
+            return self.forward(ids, 0, ctx=ctx, taps=taps, mm=mm,
+                                last_rows=None if all_rows else [row0 + valid - 1 for row0, _, _, valid, _, _ in segs])
         finally:
             ctx.release()
 

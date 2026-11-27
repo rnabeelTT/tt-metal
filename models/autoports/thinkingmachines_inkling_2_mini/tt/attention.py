@@ -713,7 +713,7 @@ class StaticCtx(PackedCtx):
         pass  # (persistent: kept across replays)
 
 
-def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: PackedCtx, tt_ccl=None):
+def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: PackedCtx, tt_ccl=None, scatter=None):
     """attention() for a packed prefill chunk (PackedCtx): the projections, norms, gate and o_proj on all rows at once;
     the K / V convs (per-sequence state: lanes[lane] = (k_conv, v_conv)) and the KV writes per segment; one SDPA over
     every segment (per-item page-table rows). xq / xk / xv [1, 1, T, H] bf16 -> [1, 1, T, H] bf16."""
@@ -761,12 +761,12 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
             os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0))
         for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
-        return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl)
+        return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl, scatter)
     if prep:  # the q / r / sink prep and the K / V writes in one program
         q, rq, sk = _prefill_prep(w, c, pq, k, v, None if w.sliding else ctx.tau(w), ctx.fill[w.sliding])
         for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
-        return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
+        return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter)
     q = _l2clip(f32(ttnn.reshape(q, (1, T, NH, HD))), w.qk_clip, w.q_scale)
     r = _l2clip(f32(ttnn.reshape(r, (1, T, NH, DR))), w.rel_clip, w.r_scale)
     k = _l2clip(f32(ttnn.reshape(k, (1, T, NKV, HD))), w.qk_clip)
@@ -789,7 +789,7 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     ttnn.deallocate(v)
     rq = ttnn.pad(bf(r), [1, T, NH, 32], [0, 0, 0, 0], 0.0)
     sk = bf(ttnn.multiply(f32(ttnn.reshape(s, (1, T, NH, 1))), w.sink_bcast))
-    return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl)
+    return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter)
 
 
 def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
@@ -803,13 +803,14 @@ def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
     return o
 
 
-def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl):
+def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter=None):
     """attention_packed()'s SDPA, output gate, o_proj and all-reduce."""
-    return _packed_out(w, _packed_sdpa(w, c, q, rq, sk, ctx.positions, ctx.pt[w.sliding], T), g, T, tt_ccl)
+    return _packed_out(w, _packed_sdpa(w, c, q, rq, sk, ctx.positions, ctx.pt[w.sliding], T), g, T, tt_ccl, scatter)
 
 
-def _packed_out(w, o, g, T, tt_ccl):
-    """The output gate, o_proj and all-reduce of the SDPA output o [1, 1, T, NH * HD]."""
+def _packed_out(w, o, g, T, tt_ccl, scatter=None):
+    """The output gate, o_proj and all-reduce of the SDPA output o [1, 1, T, NH * HD]. scatter (tt/model.py RowSplit,
+    I2M_PF_RSX): reduce-scattered by rows instead (-> this die's rows)."""
     N = w.N
     if isinstance(g, tuple):  # (PGATE: g = (pq, the gate's first column))
         if w.mesh not in _PGATE:
@@ -827,6 +828,10 @@ def _packed_out(w, o, g, T, tt_ccl):
     out = proj(w, "o", o)
     if w.dram_sharded and int(out.shape[-1]) != w.H:
         out = ttnn.slice(out, (0, 0, 0, 0), (1, 1, T, w.H))
+    if N > 1 and scatter is not None:
+        u = scatter(out)
+        ttnn.deallocate(out)
+        return u
     if N > 1:
         out = all_reduce(out, w.mesh, tt_ccl)
     return out
