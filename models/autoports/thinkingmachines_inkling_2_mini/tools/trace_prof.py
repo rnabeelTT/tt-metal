@@ -8,6 +8,11 @@ a per-op sync gives the site and program count of each op; the trace replays the
 usage: DEV_ENV="-e TT_METAL_DEVICE_PROFILER=1 -e TT_METAL_PROFILER_MID_RUN_DUMP=1 -e TT_METAL_PROFILER_CPP_POST_PROCESS=1
        -e MESH=4 -e B=1" tools/run_dev.sh python .../tools/trace_prof.py
 env: OUT (csv path, default /cache/trace_prof_B{B}_N{N}.csv), DIE (0), REPS (replays profiled, 1)
+Steps of more than ~1000 programs (B > 16) need -e TT_METAL_PROFILER_PROGRAM_SUPPORT_COUNT=4000: the device profiler's
+DRAM buffer holds 1000 programs per RISC by default and a traced replay is not drained mid-way (the replay's later
+programs were dropped: traced 1413 vs eager 1568 at TP4 B=32). Traced programs are ordered by dispatch (runtime id;
+the prefetch programs run concurrently on their own sub-device) and matched to the eager ones by core-count sequence.
+FW duration includes in-kernel waits (post / prefetch wait on each other): budget with the kernel column.
 """
 
 import collections
@@ -49,8 +54,8 @@ def _call(self, *a, **k):
     site = _site()
     out = _orig(self, *a, **k)
     data = _progs()
-    n = len(data[sorted(data)[0]]) if data else 0
-    REC["rows"].append((self.python_fully_qualified_name, site, n))
+    progs = sorted(data[sorted(data)[0]], key=lambda p: p.program_execution_uid.runtime_id) if data else []
+    REC["rows"].append((self.python_fully_qualified_name, site, len(progs), [p.core_count for p in progs]))
     return out
 
 
@@ -75,9 +80,10 @@ def main():
     REC["on"] = True
     dec.step()
     REC["on"] = False
-    seq = []  # one (op, site) per program, in order
-    for name, site, n in REC["rows"]:
+    seq, seq_cc = [], []  # one (op, site) / core count per program, in order
+    for name, site, n, ccs in REC["rows"]:
         seq += [(name, site)] * n
+        seq_cc += ccs
     tr = TracedDecoder(dec)
     tr.capture()
     for _ in range(5):
@@ -88,30 +94,50 @@ def main():
         tr.step()
     data = _progs()
     die = sorted(data)[int(os.environ.get("DIE", "0"))]
+    # dispatch order (runtime id), not start time: prefetch programs on their own sub-device run concurrently with the
+    # main stream, so start-time order interleaves them differently from the eager op order
     progs = []
     for p in data[die]:
         res = p.program_analyses_results
         k = "DEVICE FW DURATION [ns]" if "DEVICE FW DURATION [ns]" in res else next(iter(res))
         r = res[k]
         kk = res.get("DEVICE KERNEL DURATION [ns]")
-        progs.append((r.start_timestamp, r.end_timestamp, r.duration, kk.duration if kk else r.duration, p.core_count))
+        u = p.program_execution_uid
+        progs.append(((u.trace_id_counter, u.runtime_id), r.start_timestamp, r.end_timestamp, r.duration,
+                      kk.duration if kk else r.duration, p.core_count))
     progs.sort()
+    progs = [q[1:] for q in progs]
     print(f"keys: {list(data[die][0].program_analyses_results.keys()) if data[die] else None}")
     print(f"== B={B} N={N}: eager {len(REC['rows'])} ops / {len(seq)} programs; traced profiled {len(progs)} programs "
           f"({reps} replays)")
     per = len(progs) // reps
     progs = progs[-per:]  # the last replay
-    if per != len(seq):
-        print(f"WARNING: program count mismatch traced {per} vs eager {len(seq)}: sites unaligned")
+    # traced program i -> eager program: aligned on the core-count sequence (difflib; equal runs only), so eager-only
+    # programs (or traced-only ones) leave the rest of the sites in place; unmatched traced programs get site "?"
+    import difflib
+
+    tcc = [q[4] for q in progs]
+    tmap = {}
+    sm = difflib.SequenceMatcher(None, seq_cc, tcc, autojunk=False)
+    for a, b, n in sm.get_matching_blocks():
+        for k in range(n):
+            tmap[b + k] = a + k
+    if per != len(seq) or len(tmap) != per:
+        miss = collections.Counter(seq[i][1] for i in set(range(len(seq))) - set(tmap.values()))
+        print(f"NOTE: traced {per} vs eager {len(seq)} programs; aligned {len(tmap)} by core-count sequence; eager "
+              f"programs without a traced match by site: {dict(miss.most_common(12))}")
     # start / end are core cycles, duration ns: cycles -> ns at the chip clock (from the longest program)
     lp = max(progs, key=lambda q: q[2])
     mhz = (lp[1] - lp[0]) * 1000.0 / lp[2]
     progs = [(s * 1000.0 / mhz, e * 1000.0 / mhz, d, kd, cc) for s, e, d, kd, cc in progs]
     print(f"clock {mhz:.0f} MHz")
-    t0, t1 = progs[0][0], progs[-1][1]
+    t0, t1 = min(p[0] for p in progs), max(p[1] for p in progs)
     span = t1 - t0
     busy = sum(p[2] for p in progs)
-    gaps = [progs[i][0] - progs[i - 1][1] if i else 0 for i in range(len(progs))]
+    gaps, mx = [], None  # idle before a program: its start - the latest end so far (dispatch order; >= 0 if serial)
+    for p in progs:
+        gaps.append(max(0.0, p[0] - mx) if mx is not None else 0.0)
+        mx = p[1] if mx is None else max(mx, p[1])
     print(f"replay span {span / 1e3:.1f} us, sum FW {busy / 1e3:.1f} us, sum gaps {sum(gaps) / 1e3:.1f} us, "
           f"programs {per}, mean gap {sum(gaps) / max(1, per - 1) / 1e3:.2f} us")
     out = os.environ.get("OUT", f"/cache/trace_prof_B{B}_N{N}.csv")
@@ -119,7 +145,7 @@ def main():
     with open(out, "w") as f:
         f.write("i,site,op,start_us,fw_us,kernel_us,gap_us,cores\n")
         for i, (s, e, d, kd, cc) in enumerate(progs):
-            name, site = seq[i] if per == len(seq) else ("?", "?")
+            name, site = seq[tmap[i]] if i in tmap else ("?", "?")
             f.write(f"{i},{site},{name},{(s - t0) / 1e3:.3f},{d / 1e3:.3f},{kd / 1e3:.3f},{gaps[i] / 1e3:.3f},{cc}\n")
             a = agg[site]
             a[0] += 1
