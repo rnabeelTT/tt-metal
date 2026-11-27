@@ -120,6 +120,7 @@ def inkling_sdpa_decode(
     table2=None,
     one_min=0,
     cargs=False,
+    stk=0,
 ):
     """-> [1, n_items * R, NH, HD] bf16, or [1, 1, n_items * R, NH * HD] when mi * R == 32 (freshly allocated; the
     caller frees it). window: 0 (global) or the sliding window; extent: rel_extent E (the table must be
@@ -140,11 +141,19 @@ def inkling_sdpa_decode(
     ``one_min`` (one item): a kv head with at most this many chunks runs on one core (as SDPA_MU_MIN).
     ``cargs`` (prefill, I2M_PCACHE): the reader / writer descriptors kept per shape, the addresses in the common runtime
     arguments (SDPA_CARGS): ~0.2 ms less host time per call.
+    ``stk`` (prefill, = NH; with the pair tables): q / rq / sink in the SDPA's own stacked tiles (tt/aprep.py NAT STK):
+    q tile ((item * NKV + kv head) * DHt + d) holds row r's heads of that kv head in tile rows r * G .., rq tile
+    ((item * NKV + kv head) * R / 2 + j / 2) row j's at rows j * G .. (columns 0-15 / 16-31 for even / odd j), the
+    sink tile (item * NKV + kv head); every other row zero. The reader takes whole tiles (no row gather).
     """
     n_items = int(cur_pos.shape[0]) if len(cur_pos.shape) == 2 else 1
     R = int(cur_pos.shape[-1])
-    NH, HD = int(q.shape[2]), int(q.shape[3])
-    if int(q.shape[1]) != n_items * R:
+    NH, HD = (stk, int(k_cache.shape[-1])) if stk else (int(q.shape[2]), int(q.shape[3]))
+    if stk:
+        if n_items == 1 or not (table2 is not None and PAIR and _PF_CACHE_ON and mi > 1 and n_items % mi == 0
+                                and R % 2 == 0):
+            raise ValueError("inkling_sdpa_decode: stk needs prefill items with the pair tables")
+    elif int(q.shape[1]) != n_items * R:
         raise ValueError(f"inkling_sdpa_decode: q {tuple(q.shape)} for {n_items} items x {R} rows")
     _, NKV, block, HDk = (int(s) for s in k_cache.shape)
     if tuple(v_cache.shape) != tuple(k_cache.shape) or HDk != HD or HD % TILE:
@@ -156,14 +165,14 @@ def inkling_sdpa_decode(
         )
     if q.dtype != ttnn.bfloat16 or q.layout != ttnn.TILE_LAYOUT or q.is_sharded():
         raise ValueError(f"rows_sdpa_decode: q must be interleaved bf16 TILE, got {q.dtype} {q.layout}")
-    if tuple(rq.shape) != (1, n_items * R, NH, TILE) or rq.dtype != ttnn.bfloat16 or rq.layout != ttnn.TILE_LAYOUT:
+    if not stk and tuple(rq.shape) != (1, n_items * R, NH, TILE) or rq.dtype != ttnn.bfloat16 or rq.layout != ttnn.TILE_LAYOUT:
         raise ValueError(
             f"inkling_sdpa_decode: rq must be [1, {n_items * R}, {NH}, 32] bf16 TILE, got {tuple(rq.shape)}"
         )
     M_tiles = relbias.n_tiles(extent)
     if tuple(table.shape) != (1, TILE, TILE, M_tiles * TILE) or table.dtype != ttnn.bfloat16:
         raise ValueError(f"inkling_sdpa_decode: table {tuple(table.shape)} for extent {extent}")
-    if sink is None or tuple(sink.shape) != (1, n_items * R, NH, TILE) or sink.dtype != ttnn.bfloat16:
+    if sink is None or not stk and tuple(sink.shape) != (1, n_items * R, NH, TILE) or sink.dtype != ttnn.bfloat16:
         raise ValueError(f"inkling_sdpa_decode: sink must be [1, {n_items * R}, {NH}, 32] bf16 TILE")
     if pt_per_item and int(page_table.shape[0]) < n_items:
         raise ValueError(f"inkling_sdpa_decode: pt_per_item needs {n_items} page-table rows, got {page_table.shape}")
@@ -219,6 +228,7 @@ def inkling_sdpa_decode(
             BALANCE,
             FIN2,
             FUSE,
+            stk,
             tuple(repr(t.memory_config()) for t in (q, k_cache, v_cache, cur_pos, page_table, rq, table, sink)),
         )
         st = _PF_CACHE.get(key)
@@ -241,6 +251,7 @@ def inkling_sdpa_decode(
                 sink,
                 pt_per_item,
                 mi,
+                stk,
             )
         out = _pf_launch(st, q, k_cache, v_cache, cur_pos, page_table, rq, table, sink, cargs=cargs)
         if tbl_l1 is not None:
@@ -307,6 +318,7 @@ def _build_and_run(
     pt_per_item=False,
     mi=1,
     one_min=0,
+    stk=0,
 ):
     """The program for one call (static_only: its static parts, no launch; _pf_static)."""
     grid = mesh.compute_with_storage_grid_size()
@@ -365,7 +377,8 @@ def _build_and_run(
     pos_stick = _align(R * 4)
     pair = int(table.shape[-1]) == (M_tiles + 1) * TILE  # (the row-pair tables, see inkling_sdpa_decode)
     RP = R // 2 if pair else R
-    defs = _mi_defines(mi, pos_stick, trim, bcast, pt_pre) + [("SDPA_MU_MIN", str(mu_min)), ("SDPA_PAIR", str(int(pair)))]
+    defs = _mi_defines(mi, pos_stick, trim, bcast, pt_pre) + [("SDPA_MU_MIN", str(mu_min)), ("SDPA_PAIR", str(int(pair))),
+                                                              ("SDPA_STK", str(int(bool(stk))))]
     if bcast:
         defs.append(("SDPA_NEG_OFF", str(_align(n_items * slot))))
     pt_stick = _align(int(page_table.shape[-1]) * 4)
@@ -619,9 +632,10 @@ def _pf_static(
     sink,
     pt_per_item,
     mi=1,
+    stk=0,
 ):
     n_items, R = int(cur_pos.shape[0]), int(cur_pos.shape[-1])
-    NH, HD = int(q.shape[2]), int(q.shape[3])
+    NH, HD = (stk, int(k_cache.shape[-1])) if stk else (int(q.shape[2]), int(q.shape[3]))
     _, NKV, block, _ = (int(s) for s in k_cache.shape)
     st = _build_and_run(
         q,
@@ -650,6 +664,7 @@ def _pf_static(
         sink=sink,
         pt_per_item=pt_per_item,
         mi=mi,
+        stk=stk,
     )
     cores = st["cores"]
     st["cp_rtargs"] = _rt(cores, [pc[2] for pc in st["per_core"]])

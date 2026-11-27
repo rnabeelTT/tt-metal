@@ -14,11 +14,19 @@
 #define NAT_NH 1
 #define NAT_NKV 1
 #endif
+#ifndef NAT_STK
+#define NAT_STK 0  // q / rq / sink out in the SDPA's stacked tiles (aprep_nat_writer.cpp); q / r groups = kv heads
+#endif
 #ifndef NAT_HG
 #define NAT_HG 2  // heads per q / r unit (even: two heads' rows share a 64-byte DRAM word, so one core writes both)
 #endif
 
+constexpr uint32_t NAT_G = NAT_NH / NAT_NKV;  // q heads per kv head
+
 constexpr uint32_t nat_ng() {
+    if (NAT_STK) {
+        return NAT_NKV;
+    }
     uint32_t n = 0;
     for (uint32_t h = 0; h < NAT_NH;) {
         uint32_t e = h + NAT_HG;
@@ -34,6 +42,10 @@ constexpr uint32_t NAT_NG = nat_ng();
 constexpr uint32_t NAT_NU = 2 * NAT_NG + 2 * NAT_NKV + 1;
 
 inline void nat_group(uint32_t g, uint32_t& h0, uint32_t& h1) {
+    if constexpr (NAT_STK) {
+        h0 = g * NAT_G, h1 = h0 + NAT_G;
+        return;
+    }
     uint32_t h = 0;
     for (uint32_t i = 0;; ++i) {
         uint32_t e = h + NAT_HG;

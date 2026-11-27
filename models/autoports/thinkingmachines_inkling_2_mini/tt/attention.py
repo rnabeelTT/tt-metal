@@ -205,6 +205,11 @@ _PFCFG = {}
 # ms, bitwise (tools/rsx_probe.py SWITCH=attention:APREP_NAT_SUB, I2M_RING_CHUNK=256)
 APREP_NAT_SUB = __import__("os").environ.get("I2M_APREP_NAT_SUB", "1") == "1" and \
     __import__("os").environ.get("I2M_APREP_NAT", "1") == "1"
+# I2M_PF_STK (with tt/aprep.py NAT and the SDPA's pair tables): the packed prefill's prep writes q / rq / sink straight
+# into the SDPA's stacked tiles (persistent zeroed buffers, tt/aprep.py stk_buffers) and the SDPA reads them whole (no
+# per-unit row gather / zero fill / placement); bitwise (tools/rsx_probe.py SWITCH=attention:PF_STK, TP4 / TP2 / TP1);
+# chunk wall TP4 2048 / 1024 rows 286.5 / 193.5 -> 280.6 / 188.4 ms, TP2 1024 251.7 -> 246.8, TP1 512 235.3 -> 235.1
+PF_STK = __import__("os").environ.get("I2M_PF_STK", "1") == "1"
 PF_PROJ_WHICH = __import__("os").environ.get("I2M_PF_PROJ_WHICH", "qkvo")
 PF_PROJ_L1 = int(__import__("os").environ.get("I2M_PF_PROJ_L1", str(1100 << 10)))
 
@@ -468,7 +473,15 @@ def _tau_tensor(w, tau_rows):
                            device=w.mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if w.N > 1 else None)
 
 
-def _prefill_prep(w, c, pq, k, v, tau_rows, fill, row0=0, rows=None):
+def _stk_ok(w, T):
+    """the packed prefill's T-row prep / SDPA in the stacked layout (PF_STK)"""
+    from .aprep import NAT
+
+    return PF_STK and NAT and SDPA_PAIR and w.table2 is not None and w.DR == 16 and T > 32 and T % 32 == 0 \
+        and SDPA_MI > 1 and (T // R_ITEM) % SDPA_MI == 0 and w.NH % w.NKV == 0 and R_ITEM * (w.NH // w.NKV) <= 32
+
+
+def _prefill_prep(w, c, pq, k, v, tau_rows, fill, row0=0, rows=None, stk=False):
     """-> (q [1, T, NH, HD], rq [1, T, NH, 32], sk [1, T, NH, 32]) bf16; the K / V rows written into the caches.
     row0 / rows (aprep NAT): rows row0 .. row0 + rows - 1 of pq / k / v (a sliding sub-chunk, read in place)."""
     from .aprep import AttnPrep
@@ -482,7 +495,7 @@ def _prefill_prep(w, c, pq, k, v, tau_rows, fill, row0=0, rows=None):
         tau_t, own = _tau_tensor(w, tau_rows), True
     elif not w.sliding:  # (a packed chunk's: built once per chunk, PackedCtx.tau)
         tau_t = tau_rows
-    q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill), row0=row0)
+    q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill), row0=row0, stk=stk)
     if own:
         ttnn.deallocate(tau_t)
     return q, rq, sk
@@ -816,22 +829,24 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
         for r0 in range(0, T, S):
             r1 = min(T, r0 + S)
             pos_s, pt_s, fill_s = ctx.sub(True, r0, r1)
+            stk = _stk_ok(w, r1 - r0)
             if APREP_NAT_SUB and (r1 - r0) % 32 == 0 and r1 - r0 > 32:  # (the prep reads the sub-chunk in place)
-                q, rq, sk = _prefill_prep(w, c, pq, k, v, None, fill_s, row0=r0, rows=r1 - r0)
+                q, rq, sk = _prefill_prep(w, c, pq, k, v, None, fill_s, row0=r0, rows=r1 - r0, stk=stk)
             else:
                 ps, ks, vs = rows(pq, r0, r1), rows(k, r0, r1), rows(v, r0, r1)
-                q, rq, sk = _prefill_prep(w, c, ps, ks, vs, None, fill_s)
+                q, rq, sk = _prefill_prep(w, c, ps, ks, vs, None, fill_s, stk=stk)
                 for t in (ps, ks, vs):
                     ttnn.deallocate(t)
-            os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0))
+            os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0, stk))
         for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
         return _packed_out(w, ttnn.concat(os_, dim=2), g, T, tt_ccl, scatter)
     if prep:  # the q / r / sink prep and the K / V writes in one program
-        q, rq, sk = _prefill_prep(w, c, pq, k, v, None if w.sliding else ctx.tau(w), ctx.fill[w.sliding])
+        stk = _stk_ok(w, T)
+        q, rq, sk = _prefill_prep(w, c, pq, k, v, None if w.sliding else ctx.tau(w), ctx.fill[w.sliding], stk=stk)
         for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)
-        return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter)
+        return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter, stk)
     q = _l2clip(f32(ttnn.reshape(q, (1, T, NH, HD))), w.qk_clip, w.q_scale)
     r = _l2clip(f32(ttnn.reshape(r, (1, T, NH, DR))), w.rel_clip, w.r_scale)
     k = _l2clip(f32(ttnn.reshape(k, (1, T, NKV, HD))), w.qk_clip)
@@ -857,20 +872,23 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
     return _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter)
 
 
-def _packed_sdpa(w, c, q, rq, sk, positions, pt, T):
-    """The packed SDPA over T rows -> [1, 1, T, NH * HD]."""
+def _packed_sdpa(w, c, q, rq, sk, positions, pt, T, stk=False):
+    """The packed SDPA over T rows -> [1, 1, T, NH * HD]. stk: q / rq / sink stacked (PF_STK; persistent: kept)."""
     o = inkling_sdpa_decode(q, c.k_cache, c.v_cache, positions, pt, rq, w.table, w.scale, w.W, w.E,
-                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI, table2=w.table2, cargs=True)
-    for t in (q, rq, sk):
-        ttnn.deallocate(t)
+                            sink=sk, out_memory_config=DRAM, pt_per_item=True, mi=SDPA_MI, table2=w.table2, cargs=True,
+                            stk=w.NH if stk else 0)
+    if not stk:
+        for t in (q, rq, sk):
+            ttnn.deallocate(t)
     if int(o.shape[-1]) != w.NH * w.HD:  # (the SDPA writes [1, 1, rows, NH * HD] directly when it can)
         o = ttnn.reshape(o, (1, 1, T, w.NH * w.HD))
     return o
 
 
-def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter=None):
+def _packed_tail(w, c, q, rq, sk, g, ctx, T, tt_ccl, scatter=None, stk=False):
     """attention_packed()'s SDPA, output gate, o_proj and all-reduce."""
-    return _packed_out(w, _packed_sdpa(w, c, q, rq, sk, ctx.positions, ctx.pt[w.sliding], T), g, T, tt_ccl, scatter)
+    return _packed_out(w, _packed_sdpa(w, c, q, rq, sk, ctx.positions, ctx.pt[w.sliding], T, stk), g, T, tt_ccl,
+                       scatter)
 
 
 def _packed_out(w, o, g, T, tt_ccl, scatter=None):

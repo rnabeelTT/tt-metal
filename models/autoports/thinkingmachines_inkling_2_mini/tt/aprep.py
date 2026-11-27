@@ -39,6 +39,19 @@ from .post import SFPU_ROWS  # noqa: E402
 # SDPA's per-row q / r / sink tiles (rows < NH) and writes the K / V fill tiles whole. Outputs bitwise unchanged
 NAT = __import__("os").environ.get("I2M_APREP_NAT", "1") == "1"
 NAT_HG = int(__import__("os").environ.get("I2M_APREP_NAT_HG", "2"))  # (heads per q / r unit, even)
+_STK = {}  # (mesh, T, NH, NKV, HD) -> the zeroed stacked q / rq / sink buffers (NAT stk=True), shared by the layers
+
+
+def stk_buffers(mesh, T, NH, NKV, HD):
+    """the persistent stacked q / rq / sink buffers of T-row chunks (tt/kernels/aprep_nat_writer.cpp NAT_STK; 8-row
+    items, rq in row pairs): zeroed once, the prep rewrites the same live rows every call (the rest stay zero)"""
+    key = (id(mesh), T, NH, NKV, HD)
+    if key not in _STK:
+        n = T // 8 * NKV
+        z = lambda tiles: ttnn.zeros(ttnn.Shape([1, 1, tiles * 32, 32]), dtype=ttnn.bfloat16,  # noqa: E731
+                                     layout=ttnn.TILE_LAYOUT, device=mesh, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        _STK[key] = (z(n * HD // 32), z(n * 4), z(n))
+    return _STK[key]
 
 
 def _bits(x: float) -> int:
@@ -64,14 +77,15 @@ class AttnPrep:
         self.HT = w.HD // 32
         self._pc = {}  # (PCACHE: prefill programs by shape key)
 
-    def __call__(self, pq, k, v, tau=None, kv=None, fill=None, row0=0):
+    def __call__(self, pq, k, v, tau=None, kv=None, fill=None, row0=0, stk=False):
         """kv = (k_cache, v_cache, positions int32 [B], block table int32 [B, max blocks]): the k / v rows written into
         the paged bf16 caches here (no k / v outputs: None). fill = (k_cache, v_cache, fill table int32 [1, B / 64]):
-        a prefill chunk's rows written into the caches (row b -> block fill[b / 64], row b % 64)."""
+        a prefill chunk's rows written into the caches (row b -> block fill[b / 64], row b % 64).
+        stk (NAT only: nat_ok()): q / rq / sink in the SDPA's stacked tiles (stk_buffers: not to be freed)."""
         w, B, HT, mesh = self.w, self.B, self.HT, self.mesh
-        if NAT and fill is not None and B > 32 and B % 32 == 0 and w.DR in (16, 32):
-            return self._nat(pq, k, v, tau, fill, row0)
-        assert row0 == 0
+        if self.nat_ok(fill):
+            return self._nat(pq, k, v, tau, fill, row0, stk)
+        assert row0 == 0 and not stk
         L1 = ttnn.L1_MEMORY_CONFIG
         kf = vf = None
         if fill is not None:  # (the rows go to L1 [1, NKV, T, HD] tensors; paged_fill_cache moves them below)
@@ -230,7 +244,13 @@ class AttnPrep:
             return q_o, r_o, None, None, s_o
         return q_o, r_o, k_o, v_o, s_o
 
-    def _nat(self, pq, k, v, tau, fill, row0=0):
+    def nat_ok(self, fill=True, stk=False):
+        """the call runs the NAT prep (stk: and can write the stacked layout: 16-column r, 8-row items)"""
+        w, B = self.w, self.B
+        return NAT and fill is not None and B > 32 and B % 32 == 0 and w.DR in ((16,) if stk else (16, 32)) \
+            and (not stk or w.NH % w.NKV == 0 and 8 * (w.NH // w.NKV) <= 32)
+
+    def _nat(self, pq, k, v, tau, fill, row0=0, stk=False):
         """the prefill prep on whole tiles (NAT): -> (q, rq, None, None, sink); the K / V rows into the caches.
         row0 (a multiple of 32): pq / k / v hold more rows; this call's are row0 .. row0 + T - 1 (read in place)"""
         w, T, HT, mesh = self.w, self.B, self.HT, self.mesh
@@ -240,14 +260,17 @@ class AttnPrep:
         kf, vf = mk(), mk()
         al = lambda shape: ttnn.allocate_tensor_on_device(ttnn.Shape(shape), ttnn.bfloat16,  # noqa: E731
                                                            ttnn.TILE_LAYOUT, mesh, DRAM)
-        q_o, r_o, s_o = al([1, T, w.NH, w.HD]), al([1, T, w.NH, 32]), al([1, T, w.NH, 32])
+        if stk:
+            q_o, r_o, s_o = stk_buffers(mesh, T, w.NH, w.NKV, w.HD)
+        else:
+            q_o, r_o, s_o = al([1, T, w.NH, w.HD]), al([1, T, w.NH, 32]), al([1, T, w.NH, 32])
         glob = not w.sliding
         tau_t = tau if glob else pq
-        key = ("nat", T, glob, repr(pq.memory_config()), repr(k.memory_config()), repr(tau_t.memory_config()),
+        key = ("nat", T, glob, stk, repr(pq.memory_config()), repr(k.memory_config()), repr(tau_t.memory_config()),
                tuple(pq.shape), tuple(k.shape), repr(kf.memory_config()))
         hit = self._pc.get(key)
         if hit is None:
-            hit = self._pc[key] = self._nat_desc(pq, k, tau_t, q_o, r_o, kf, T, glob)
+            hit = self._pc[key] = self._nat_desc(pq, k, tau_t, q_o, r_o, kf, T, glob, stk)
         rd, wr, cp, cbs, h = hit
         rd.common_runtime_args = [pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address(),
                                   row0 // 32]
@@ -266,13 +289,15 @@ class AttnPrep:
             ttnn.deallocate(t)
         return q_o, r_o, None, None, s_o
 
-    def _nat_desc(self, pq, k, tau_t, q_o, r_o, kf, T, glob):
+    def _nat_desc(self, pq, k, tau_t, q_o, r_o, kf, T, glob, stk=False):
         w, HT, mesh = self.w, self.HT, self.mesh
         grid = mesh.compute_with_storage_grid_size()
         ng, h = 0, 0
         while h < w.NH:
             h = min(h + NAT_HG, (h // 16 + 1) * 16, w.NH)
             ng += 1
+        if stk:  # (aprep_nat.hpp NAT_STK: one q / r group per kv head)
+            ng = w.NKV
         nu = 2 * ng + 2 * w.NKV + 1
         total = (T // 32) * nu
         nc = min(total, grid.x * grid.y)
@@ -300,7 +325,7 @@ class AttnPrep:
         cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
-        defs = [("NAT_NH", str(w.NH)), ("NAT_NKV", str(w.NKV)), ("NAT_HG", str(NAT_HG))]
+        defs = [("NAT_NH", str(w.NH)), ("NAT_NKV", str(w.NKV)), ("NAT_HG", str(NAT_HG)), ("NAT_STK", str(int(stk)))]
         dm = lambda src, ct, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
             kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
             defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
@@ -308,7 +333,7 @@ class AttnPrep:
         wr = dm("aprep_nat_writer.cpp", wr_ct, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)
         cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "aprep_nat_compute.cpp"), core_ranges=crs,
                                    compile_time_args=cp_ct, runtime_args=_rt(cores, rt), config=cfg, defines=defs)
-        key = ("i2m_aprep_nat", NAT_HG, T, nc, w.NH, w.NKV, w.HD, w.DR, glob, w.qk_clip, w.rel_clip, w.eps, w.scale,
+        key = ("i2m_aprep_nat", NAT_HG, stk, T, nc, w.NH, w.NKV, w.HD, w.DR, glob, w.qk_clip, w.rel_clip, w.eps, w.scale,
                tuple(pq.shape), tuple(k.shape), repr(pq.memory_config()), repr(k.memory_config()),
                repr(tau_t.memory_config()), repr(kf.memory_config()))
         hh = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)

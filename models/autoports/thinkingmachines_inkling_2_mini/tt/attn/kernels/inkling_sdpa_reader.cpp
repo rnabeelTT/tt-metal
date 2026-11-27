@@ -29,6 +29,9 @@
 #ifndef SDPA_BCAST
 #define SDPA_BCAST 0  // decode (one unit per core): program core 0 reads the positions / Q for all (below)
 #endif
+#ifndef SDPA_STK
+#define SDPA_STK 0  // prefill (with SDPA_PAIR): q / rq / sink already in the stacked tiles (tt/aprep.py NAT STK)
+#endif
 #ifndef SDPA_BCAST_PT
 #define SDPA_BCAST_PT 64  // SDPA_BCAST: page-table bytes per item broadcast with the positions
 #endif
@@ -331,6 +334,22 @@ void kernel_main() {
     cb_q.reserve_back(MI * DHt);
     cb_rqc.reserve_back(MI * RP);
     cb_sinkc.reserve_back(MI);
+    if constexpr (SDPA_STK) {
+        // whole tiles: q ((item * NKV + kv head) * DHt + d), rq (.. * RP + p), sink (item * NKV + kv head)
+        static_assert(!SDPA_STK || SDPA_PAIR, "SDPA_STK: the pair layout");
+        const uint32_t q_l1 = cb_q.get_write_ptr(), rq_l1 = cb_rqc.get_write_ptr(), sink_l1 = cb_sinkc.get_write_ptr();
+        for (uint32_t m = 0; m < MI; ++m) {
+            const uint32_t u = (item + m) * num_kv_heads + cur_head;
+            for (uint32_t d = 0; d < DHt; ++d) {
+                noc_async_read(q_reader.get_noc_addr(u * DHt + d), q_l1 + (m * DHt + d) * q_tile_bytes, q_tile_bytes);
+            }
+            for (uint32_t p = 0; p < RP; ++p) {
+                noc_async_read(rq_reader.get_noc_addr(u * RP + p), rq_l1 + (m * RP + p) * q_tile_bytes, q_tile_bytes);
+            }
+            noc_async_read(sink_reader.get_noc_addr(u), sink_l1 + m * q_tile_bytes, q_tile_bytes);
+        }
+        noc_async_read_barrier();  // (and the page table)
+    } else {
     uint32_t scr_q, scr_rq, scr_sink;  // the source tiles of item m (scratch or broadcast slot)
     if constexpr (SDPA_BCAST) {
         scr_q = stage + item * SLOT + SLOT_TILES_OFF;
@@ -379,6 +398,7 @@ void kernel_main() {
         }
         noc.async_read_barrier();
     }
+    }  // (SDPA_STK)
     cb_q.push_back(MI * DHt);
     cb_rqc.push_back(MI * RP);
     cb_sinkc.push_back(MI);
