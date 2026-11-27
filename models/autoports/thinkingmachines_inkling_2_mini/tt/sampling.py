@@ -635,3 +635,199 @@ class HostSampler:
                     p = res / res.sum()
             return emitted + [int(ids[int(torch.multinomial(p, 1, generator=gen))])], j
         raise AssertionError("unreachable")
+
+
+# ---------------------------------------------------------------------------------------------------- device accept
+LOG2E = 1.4426950408889634
+
+
+def _exp_tables():
+    """2^-f in Q30: [hi / 256 for hi in 0..255] + [lo / 65536 for lo in 0..255] (tt/kernels/taccept.cpp)."""
+    hi = [int(round((1 << 30) * 2.0 ** (-h / 256.0))) for h in range(256)]
+    lo = [int(round((1 << 30) * 2.0 ** (-x / 65536.0))) for x in range(256)]
+    return hi + lo
+
+
+def _q24(x: float) -> int:
+    return max(0, min(0xFFFFFFFF, int(round(x * (1 << 24)))))
+
+
+def accept_params(temp: float, qt: float, J: int, ua, us):
+    """The kernel's parameter row (uint32 [64]): mode, J, a_p, a_q, accept / sample uniforms (Q31 ints)."""
+    p = [0] * 64
+    if temp <= 0.0:
+        p[0] = 0
+    else:
+        p[0], p[2], p[3] = 1, _q24(LOG2E / temp), _q24(LOG2E / (qt * temp))
+    p[1] = J
+    for j, u in enumerate(ua[:8]):
+        p[8 + j] = int(u)
+    for j, u in enumerate(us[:8]):
+        p[16 + j] = int(u)
+    return p
+
+
+def _fx16(u: int) -> int:
+    e = (u >> 23) & 255
+    if e == 0:
+        return 0
+    m = (u & 0x7FFFFF) | 0x800000
+    sh = e - 134
+    if sh > 6:
+        mag = 1 << 30
+    elif sh >= 0:
+        mag = m << sh
+    elif sh > -32:
+        mag = m >> (-sh)
+    else:
+        mag = 0
+    return -mag if u >> 31 else mag
+
+
+def accept_ref(idx, vals, drafts, prm, qid=None, qlg=None, V=None, tab=None):
+    """Python twin of tt/kernels/taccept.cpp (bitwise): idx / vals [R, K] the merged verify candidates (DeviceTopK.host:
+    vals fp32 holding bf16 values), drafts [J], prm accept_params(...), qid / qlg [d, K] (int ids / fp32 logits) -> (emitted, kept)."""
+    tab = tab or _exp_tables()
+    M = 0xFFFFFFFFFFFFFFFF
+
+    def bits(x):
+        return int(torch.tensor([float(x)], dtype=torch.float32).view(torch.int32).item()) & 0xFFFFFFFF
+
+    def e2(dlt, a):
+        t = (dlt * a) >> 24
+        n = t >> 16
+        if n >= 25:
+            return 0
+        f = t & 0xFFFF
+        return ((tab[f >> 8] * tab[256 + (f & 255)]) >> 30) >> (6 + n)
+
+    def draw(w, S, u):
+        tg = (u * S) >> 31
+        c, last = 0, 0
+        for j, x in enumerate(w):
+            if x == 0:
+                continue
+            c += x
+            last = j
+            if c > tg:
+                return j
+        return last
+
+    mode, J, a_p, a_q = prm[0], min(prm[1], len(drafts)), prm[2], prm[3]
+    em = []
+    for j in range(J + 1):
+        oid = [int(x) for x in idx[j]]
+        ofx = [_fx16(bits(v)) for v in vals[j]]
+        b = None
+        for i in range(len(oid)):
+            if oid[i] < V and (b is None or ofx[i] > ofx[b]):
+                b = i
+        last = j == J
+        if mode == 0:
+            g = 0 if b is None else oid[b]
+            em.append(g)
+            if not last and g == drafts[j]:
+                continue
+            return em, j
+        m = ofx[b]
+        pw = [e2((m - ofx[i]) & 0xFFFFFFFF, a_p) if oid[i] < V else 0 for i in range(len(oid))]
+        rz = (1 << 62) // sum(pw)
+        pw = [(w * rz) >> 31 for w in pw]
+        if last:
+            em.append(oid[draw(pw, sum(pw), prm[16 + j])])
+            return em, j
+        dj = drafts[j]
+        qf = [_fx16(bits(v)) for v in qlg[j]]
+        mq = max(qf)
+        qw = [e2((mq - x) & 0xFFFFFFFF, a_q) for x in qf]
+        rq = (1 << 62) // sum(qw)
+        qw = [(w * rq) >> 31 for w in qw]
+        qi = [int(x) for x in qid[j]]
+        qd = sum(w for w, i in zip(qw, qi) if i == dj)
+        pd = sum(w for w, i in zip(pw, oid) if i == dj)
+        if pd > 0 and qd > 0 and (prm[8 + j] * qd) & M < (pd << 31):
+            em.append(dj)
+            continue
+        rs = []
+        for i in range(len(oid)):
+            pq = sum(w for w, c in zip(qw, qi) if c == oid[i])
+            rs.append(pw[i] - pq if pw[i] > pq else 0)
+        S = sum(rs)
+        em.append(oid[draw(rs, S, prm[16 + j])] if S > 0 else oid[draw(pw, sum(pw), prm[16 + j])])
+        return em, j
+    raise AssertionError("unreachable")
+
+
+class DeviceAccept:
+    """Speculative acceptance at the end of the verify trace (tt/kernels/taccept.cpp, one core): writes the next
+    drafter's anchor / commit count, the next verify's accept row and a result row [emitted (pad 0xFFFFFFFF) | kept at
+    8 | the pass's tokens at 16..]; the host reads that row without a turn between the verify and the next drafter.
+    Exactly HostSampler.spec's rule for device_ok requests (Q31 integer arithmetic; accept_ref is its twin)."""
+
+    def __init__(self, topk: DeviceTopK, dr, ver, R: int):
+        self.tk, self.dr, self.ver, self.R = topk, dr, ver, R
+        self.nt = topk.N if (topk.sharded and GATHER) else 1
+        mesh = topk.mesh
+        self.mesh = mesh
+        self.rep = ttnn.ReplicateTensorToMesh(mesh) if topk.N > 1 else None
+        u32 = lambda t: ttnn.from_torch(t, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,  # noqa
+                                        memory_config=ttnn.DRAM_MEMORY_CONFIG, mesh_mapper=self.rep)
+        self.tab_host = _exp_tables()
+        self.prm = u32(torch.tensor([accept_params(0.0, 1.0, 0, [], [])], dtype=torch.int64).to(torch.int32))
+        self.tab = u32(torch.tensor([self.tab_host], dtype=torch.int64).to(torch.int32))
+        self.out = u32(torch.zeros(1, 32, dtype=torch.int32))
+        core = ttnn.CoreCoord(0, 0)
+        self.crs = ttnn.CoreRangeSet([ttnn.CoreRange(core, core)])
+        self.host = None
+
+    def set(self, prm):
+        t = torch.tensor([prm], dtype=torch.int64)
+        t = torch.where(t >= 1 << 31, t - (1 << 32), t).to(torch.int32)
+        ttnn.copy_host_to_device_tensor(ttnn.from_torch(t, dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT,
+                                                        mesh_mapper=self.rep), self.prm)
+
+    def device(self, parts):
+        import hashlib
+        from pathlib import Path
+
+        assert len(parts) == 1 and parts[0][2] == self.R, [p[2] for p in parts]
+        i2, v2, _ = parts[0]
+        dr = self.dr
+        io = [i2, v2, self.ver.tokens, dr.cand_id, dr.cand_lg, self.prm, self.tab, self.out, self.ver.acc,
+              dr.in_anchor, dr.in_n]
+        ct = [0, self.R, self.nt, self.tk.Vp if self.nt > 1 else 0, self.tk.V, 4 if i2.dtype == ttnn.uint32 else 2,
+              int(dr.cand_id.shape[0])]
+        for t in io:
+            ct += ttnn.TensorAccessorArgs(t).get_compile_time_args()
+        rt = ttnn.RuntimeArgs()
+        rt[0][0] = [t.buffer_address() for t in io]
+        k = ttnn.KernelDescriptor(
+            kernel_source=str(Path(__file__).parent / "kernels" / "taccept.cpp"), core_ranges=self.crs,
+            compile_time_args=ct, runtime_args=rt,
+            config=ttnn.DataMovementConfigDescriptor(processor=ttnn.DataMovementProcessor.RISCV_0, noc=ttnn.NOC.NOC_0))
+        dm = int(dr.cand_id.shape[0])
+        nb = self.nt * 1024 * 4 + self.nt * 2048 + 64 + 256 + 2048 + dm * 256 + 128 * 2 + 128 + self.nt * K * 8 + K * 20
+        fmt = ttnn.CBFormatDescriptor(buffer_index=0, data_format=ttnn.float32, page_size=nb)
+        prog = ttnn.ProgramDescriptor(kernels=[k], semaphores=[], cbs=[
+            ttnn.CBDescriptor(total_size=nb, core_ranges=self.crs, format_descriptors=[fmt])])
+        key = ("i2m_taccept", tuple(ct))
+        prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & (
+            (1 << 63) - 1)
+        ttnn.generic_op(io, prog)
+
+    def read(self):
+        """the result row's host copy enqueued (before the next drafter's replay), -> its event"""
+        self.host = self.out.cpu(blocking=False)
+        return ttnn.record_event(self.mesh, 0)
+
+    def result(self, ev=None, die=0):
+        """-> (emitted tokens, kept, the pass's tokens [R])"""
+        if ev is not None:
+            ttnn.event_synchronize(ev)
+        h = self.host if self.host is not None else self.out.cpu()
+        self.host = None
+        if self.mesh.get_num_devices() > 1:
+            h = ttnn.get_device_tensors(h)[die]
+        t = ttnn.to_torch(h).reshape(-1).to(torch.int64) & 0xFFFFFFFF
+        k = int(t[8])
+        return [int(x) for x in t[: k + 1]], k, [int(x) for x in t[16 : 16 + self.R]]
