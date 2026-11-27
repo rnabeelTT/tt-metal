@@ -64,6 +64,9 @@ AGATE = __import__("os").environ.get("I2M_AGATE", "1") == "1"  # the attention o
 VROWS = int(__import__("os").environ.get("I2M_SDPA_VROWS", "1"))
 
 
+_ROWLOAD = __import__("os").environ.get("I2M_ROWLOAD", "1") == "1"  # tt/rowload.py at load_slot
+
+
 class Tail:
     """An application's deferred tail: its output is bf16(resid + conv(mo)) (computed by the next pre program)."""
 
@@ -189,6 +192,10 @@ class BatchedConv:
         for t in self.s:
             _set_row(t, dst, ttnn.slice(t, [0, 0, src, 0], [1, 1, src + 1, self.C]), self.B, self.C)
 
+    def load_jobs(self, b: int, lane_state):
+        """tt/rowload.py jobs of load_slot: row j of the lane state -> row b of s[j]."""
+        return [(lane_state, j, self.s[j], b) for j in range(K - 1)]
+
     def load_slot(self, b: int, lane_state):
         """Row b of the states := the lane's [1, 1, K-1, C] row-major fp32 state (after a slot's prefill)."""
         lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
@@ -258,6 +265,9 @@ class BatchedDynConv:
 
     move_row = BatchedConv.move_row
 
+    def load_jobs(self, b: int, lane_state):
+        return [(lane_state, j, self.s[j], b) for j in range(K - 1)]
+
     def load_slot(self, b: int, lane_state):
         lt = ttnn.to_layout(lane_state, ttnn.TILE_LAYOUT)
         for j in range(K - 1):
@@ -309,6 +319,8 @@ class BatchedApp:
     def load_slot(self, b, app, lane=0):
         """After slot b's prefill on prefill lane `lane`: copy the lane's conv states into row b."""
         k, v, at, ml = app.lanes[lane]
+        if _ROWLOAD:
+            return [jb for c, l in ((self.k, k), (self.v, v), (self.attn, at), (self.mlp, ml)) for jb in c.load_jobs(b, l.st)]
         self.k.load_slot(b, k.st)
         self.v.load_slot(b, v.st)
         self.attn.load_slot(b, at.st)
@@ -568,8 +580,14 @@ class BatchedDecoder:
             return self.shared.load_slot(self.R * b, lane)
         if self.shared is not None:
             return self.shared.load_slot(b, lane)
+        jobs = []
         for a in range(len(self.apps)):
-            self.apps[a].load_slot(b, self.m.apps[a], lane)
+            jobs += self.apps[a].load_slot(b, self.m.apps[a], lane) or []
+        if jobs:  # (I2M_ROWLOAD: every application's conv-state rows in one program)
+            if getattr(self.m, "_rowload", None) is None:
+                from .rowload import RowLoad
+                self.m._rowload = RowLoad(self.m.mesh, jobs[0][2])
+            self.m._rowload(jobs)
 
     def set_inputs(self, tokens: torch.Tensor, positions: torch.Tensor):
         """tokens [B] int (None: already on device), positions [B] int (-1 = idle slot)."""
