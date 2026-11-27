@@ -842,7 +842,9 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
 0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): the MoE (+2.4 ms incl. the down) is at its DRAM floor per
    union expert; the rest is row scaling in latency chains (post router gather / route merge, SDPA bias, pre), each
    <= ~0.1 ms reachable bitwise. Bigger lever is policy: a shorter verify (R = 3, d = 2) reads ~16 instead of ~19 union
-   experts (~-0.6 ms TP4); needs accepted tokens per pass at d = 2 vs 3 (tools/acc_ab.py) before deciding. Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
+   experts (~-0.6 ms TP4, ~-5 % of the served pass); d = 3 TP4 acc_ab: greedy 2.045 kept / pass, T=1 1.02-1.17
+   (dlogs/d2_acc_d3_t{0,1}.log), so d = 2 would lose little at T=1 and more at greedy: about break-even. Not runnable
+   now: BatchedDecoder asserts B % verify == 0 (I2M_SPEC=2 -> R=3 with 4 slots; trace_prof VERIFY=3 too). Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
    gates, not fewer programs (merges measured neutral or slower once the ring is warm).
 2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not
