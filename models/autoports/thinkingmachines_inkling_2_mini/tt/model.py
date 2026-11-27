@@ -79,7 +79,19 @@ PF_ROWSPLIT = os.environ.get("I2M_PF_ROWSPLIT", "1") == "1"
 # state points' tiles; RowSplit.side, sconv_kernels/pfseg_reader.cpp PF_RSX). I2M_PF_RS_LINKS: the reduce-scatter's
 # fabric links
 PF_RSX = os.environ.get("I2M_PF_RSX", "1") == "1"
+# I2M_PF_RSX_MIN (1024): chunks of fewer rows keep the all-reduce (they are the traced sizes on 4 dies: a traced chunk
+# and its eager twin stay the same programs, bitwise; the reduce-scatter saves ~nothing there)
+RSX_MIN = int(os.environ.get("I2M_PF_RSX_MIN", "1024"))
 RS_LINKS = int(os.environ.get("I2M_PF_RS_LINKS", "2"))
+# I2M_PF_ROUTE_RS (with PF_ROWSPLIT): the sorted prefill MoE's router (matmul, sigmoid, top-k, weights) on each die's
+# rows before the all-gather, its weights / ids gathered (one small all-gather) instead of routing all T rows per die
+PF_ROUTE_RS = os.environ.get("I2M_PF_ROUTE_RS", "1") == "1"
+
+
+def moe_sorted(moe, T):
+    """the MoE forward of T rows takes the sorted dispatch path (moe.py forward)"""
+    from .moe import SORTED, SPLIT_DECODE
+    return SORTED and T > moe.fe.rows_max and not (T <= 2 * moe.fe.rows_max and SPLIT_DECODE)
 
 
 class RowSplit:
@@ -746,7 +758,8 @@ class Inkling2Model:
                 ttnn.deallocate(t)
             qn, kn, vn = qg, kg, vg
         # (I2M_PF_RSX: the attention / MoE outputs reduce-scattered; each conv's side tiles from RowSplit.side)
-        sx = [self._rsx_slots(rs, st, i, ctx) for i in (2, 3)] if rs is not None and PF_RSX and ctx.dyn is None \
+        sx = [self._rsx_slots(rs, st, i, ctx) for i in (2, 3)] \
+            if rs is not None and PF_RSX and ctx.dyn is None and rs.T >= RSX_MIN \
             else [None, None]
         if ctx is not None:
             att = attention_packed(L.attn, st.cache, [ln[:2] for ln in st.lanes], qn, kn, vn, ctx, tt_ccl=self.tt_ccl,
@@ -772,11 +785,22 @@ class Inkling2Model:
         if messages is not None:
             m = L.gates["mlp"](m, messages[3])
         mn = _bf(ops.rms(m, L.mlp_norm, out_dtype=ttnn.bfloat16))
+        routed = None
+        if rs is not None and PF_ROUTE_RS and L.moe.fused and moe_sorted(L.moe, rs.T):
+            # the router on this die's rows, its outputs gathered (row-local math: the rows' weights / ids unchanged)
+            w_l, i_l = L.moe.route(mn)
+            i_f = ttnn.typecast(i_l, ttnn.float32)
+            ttnn.deallocate(i_l)
+            w_g, i_g = rs.gather(w_l), rs.gather(i_f)
+            for t in (w_l, i_f):
+                ttnn.deallocate(t)
+            routed = (w_g, ttnn.typecast(i_g, ttnn.uint16))
+            ttnn.deallocate(i_g)
         if rs is not None:  # (the expert-sharded MoE reads every row)
             mg = rs.gather(mn)
             ttnn.deallocate(mn)
             mn = mg
-        mo = L.moe.forward(mn, scatter=rs.scatter if sx[1] is not None else None)
+        mo = L.moe.forward(mn, scatter=rs.scatter if sx[1] is not None else None, routed=routed)
         if ctx is not None:
             return self._seg_conv(st, 3, mo, ctx, resid=resid, out_dtype=ttnn.bfloat16, rs=rs, slots=sx[1])
         return st.conv("mlp", mo, rows_mode, nvalid, resid=resid, out_dtype=ttnn.bfloat16)

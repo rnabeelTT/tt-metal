@@ -191,7 +191,7 @@ class MoE:
         return wn, ids16
 
     # -- experts -----------------------------------------------------------------------------------------------------
-    def forward(self, x, logits=None, dup=False, packed_out=False, scatter=None):
+    def forward(self, x, logits=None, dup=False, packed_out=False, scatter=None, routed=None):
         """x [1, 1, T, H] bf16 (normed) -> [1, 1, T, H] bf16 (all-reduced over the mesh; times 1/sqrt(5), see doc).
         logits: the router logits computed upstream ([1, 1, max(T, 2), E] fp32; T = 1: dup, row 1 = row 0 in x too)."""
         T = int(x.shape[2])
@@ -220,7 +220,7 @@ class MoE:
             hi = self.fe.forward(ttnn.slice(x, [0, 0, R, 0], [1, 1, T, self.H]))
             out = ttnn.concat([lo, hi], dim=2)
         elif self.fused and SORTED:
-            out = self._sorted(x, T)
+            out = self._sorted(x, T, routed)
         elif self.fused:
             w, ids = self.route(x)
             out = None
@@ -241,7 +241,7 @@ class MoE:
             out = all_reduce(out, self.mesh, self.tt_ccl, site="mlp", rows=rows, packed_out=packed_out)
         return out
 
-    def _sorted(self, x, T):
+    def _sorted(self, x, T, routed=None):
         """Prefill rows through the sorted dispatch: tokens' (token, expert) pairs sorted by expert into 32-row groups
         (one expert each), one grouped sparse matmul per projection and sub-shard, routing weights on the activations,
         a fused gather-add un-dispatch (bf16) per sub-shard; the sub-shards summed."""
@@ -261,7 +261,7 @@ class MoE:
                 W: (sparse_matmul_program_config(gs, 2 * W, H, target_cores=64, in0_block_w_cap=kc(W)),
                     sparse_matmul_program_config(gs, H, W, target_cores=64, in0_block_w_cap=kc(W)))
                 for W in [W for _, _, W, _, _ in self.subs] + ([self.rem_dn[1]] if self.fe.rem else [])}
-        w, ids = self.route(x)
+        w, ids = routed if routed is not None else self.route(x)  # (routed: computed per die rows, gathered)
         m = self._dispatches[gs].build(ids, ttnn.typecast(w, ttnn.bfloat16), T)
         Rd, G = m["Rd"], m["G"]
         if GATHER_L1 and T <= 2048:  # the rows gathered from an L1 row-major copy of x (from DRAM: 2x slower)
