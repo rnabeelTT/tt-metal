@@ -200,6 +200,11 @@ PF_PROJ_CFG = __import__("os").environ.get("I2M_PF_PROJ_CFG", "1") == "1"
 _PFCFG = {}
 
 
+# I2M_APREP_NAT_SUB (with tt/aprep.py NAT): a sliding sub-chunk's prep (I2M_RING_CHUNK < the chunk: p150 profiles) reads
+# its rows of pq / k / v in place (row offset), not three row slices per sub-chunk; TP1 512-row chunk wall 239.0 -> 235.5
+# ms, bitwise (tools/rsx_probe.py SWITCH=attention:APREP_NAT_SUB, I2M_RING_CHUNK=256)
+APREP_NAT_SUB = __import__("os").environ.get("I2M_APREP_NAT_SUB", "1") == "1" and \
+    __import__("os").environ.get("I2M_APREP_NAT", "1") == "1"
 PF_PROJ_WHICH = __import__("os").environ.get("I2M_PF_PROJ_WHICH", "qkvo")
 PF_PROJ_L1 = int(__import__("os").environ.get("I2M_PF_PROJ_L1", str(1100 << 10)))
 
@@ -463,11 +468,12 @@ def _tau_tensor(w, tau_rows):
                            device=w.mesh, mesh_mapper=ttnn.ReplicateTensorToMesh(w.mesh) if w.N > 1 else None)
 
 
-def _prefill_prep(w, c, pq, k, v, tau_rows, fill):
-    """-> (q [1, T, NH, HD], rq [1, T, NH, 32], sk [1, T, NH, 32]) bf16; the K / V rows written into the caches."""
+def _prefill_prep(w, c, pq, k, v, tau_rows, fill, row0=0, rows=None):
+    """-> (q [1, T, NH, HD], rq [1, T, NH, 32], sk [1, T, NH, 32]) bf16; the K / V rows written into the caches.
+    row0 / rows (aprep NAT): rows row0 .. row0 + rows - 1 of pq / k / v (a sliding sub-chunk, read in place)."""
     from .aprep import AttnPrep
 
-    T = int(pq.shape[-2])
+    T = int(pq.shape[-2]) if rows is None else rows
     key = (id(w), T)
     if key not in _PREP:
         _PREP[key] = AttnPrep(w, T, None)
@@ -476,7 +482,7 @@ def _prefill_prep(w, c, pq, k, v, tau_rows, fill):
         tau_t, own = _tau_tensor(w, tau_rows), True
     elif not w.sliding:  # (a packed chunk's: built once per chunk, PackedCtx.tau)
         tau_t = tau_rows
-    q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill))
+    q, rq, _, _, sk = _PREP[key](pq, k, v, tau_t, fill=(c.k_cache, c.v_cache, fill), row0=row0)
     if own:
         ttnn.deallocate(tau_t)
     return q, rq, sk
@@ -810,10 +816,13 @@ def attention_packed(w: AttnWeights, c: AttnCache, lanes, xq, xk, xv, ctx: Packe
         for r0 in range(0, T, S):
             r1 = min(T, r0 + S)
             pos_s, pt_s, fill_s = ctx.sub(True, r0, r1)
-            ps, ks, vs = rows(pq, r0, r1), rows(k, r0, r1), rows(v, r0, r1)
-            q, rq, sk = _prefill_prep(w, c, ps, ks, vs, None, fill_s)
-            for t in (ps, ks, vs):
-                ttnn.deallocate(t)
+            if APREP_NAT_SUB and (r1 - r0) % 32 == 0 and r1 - r0 > 32:  # (the prep reads the sub-chunk in place)
+                q, rq, sk = _prefill_prep(w, c, pq, k, v, None, fill_s, row0=r0, rows=r1 - r0)
+            else:
+                ps, ks, vs = rows(pq, r0, r1), rows(k, r0, r1), rows(v, r0, r1)
+                q, rq, sk = _prefill_prep(w, c, ps, ks, vs, None, fill_s)
+                for t in (ps, ks, vs):
+                    ttnn.deallocate(t)
             os_.append(_packed_sdpa(w, c, q, rq, sk, pos_s, pt_s, r1 - r0))
         for t in (k, v) if pg else (pq, k, v):
             ttnn.deallocate(t)

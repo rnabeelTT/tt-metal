@@ -19,6 +19,7 @@ void kernel_main() {
     const uint32_t k_addr = get_common_arg_val<uint32_t>(1);
     const uint32_t v_addr = get_common_arg_val<uint32_t>(2);
     const uint32_t tau_addr = get_common_arg_val<uint32_t>(3);
+    const uint32_t RB0 = get_common_arg_val<uint32_t>(4);  // (pq / k / v: this call's rows from row tile RB0 on)
     const uint32_t start = get_arg_val<uint32_t>(0);
     const uint32_t step = get_arg_val<uint32_t>(1);
     const uint32_t total = get_arg_val<uint32_t>(2);
@@ -70,7 +71,7 @@ void kernel_main() {
                 cb_reserve_back(cb_xf, HT);
                 const uint32_t l1 = get_write_ptr(cb_xf);
                 for (uint32_t c = 0; c < HT; ++c) {
-                    noc_async_read(apq.get_noc_addr(R * PQT + h * HT + c), l1 + c * F32_TILE, F32_TILE);
+                    noc_async_read(apq.get_noc_addr((R + RB0) * PQT + h * HT + c), l1 + c * F32_TILE, F32_TILE);
                 }
                 noc_async_read_barrier();
                 cb_push_back(cb_xf, HT);
@@ -79,7 +80,7 @@ void kernel_main() {
             for (uint32_t h = h0; h < h1; ++h) {
                 cb_reserve_back(cb_x1, 1);
                 const uint32_t l1 = get_write_ptr(cb_x1);
-                noc_async_read(apq.get_noc_addr(R * PQT + R0 + (DR == 16 ? h / 2 : h)), l1, F32_TILE);
+                noc_async_read(apq.get_noc_addr((R + RB0) * PQT + R0 + (DR == 16 ? h / 2 : h)), l1, F32_TILE);
                 noc_async_read_barrier();
                 if constexpr (DR == 16) {
                     // fp32 faces of 1 KB: 0 = rows 0-15 cols 0-15, 1 = rows 0-15 cols 16-31, 2 / 3 rows 16-31
@@ -103,13 +104,13 @@ void kernel_main() {
             cb_reserve_back(cb_xb, HT);
             const uint32_t l1 = get_write_ptr(cb_xb);
             for (uint32_t c = 0; c < HT; ++c) {
-                noc_async_read(a.get_noc_addr(R * KVT + h0 * HT + c), l1 + c * BF_TILE, BF_TILE);
+                noc_async_read(a.get_noc_addr((R + RB0) * KVT + h0 * HT + c), l1 + c * BF_TILE, BF_TILE);
             }
             noc_async_read_barrier();
             cb_push_back(cb_xb, HT);
         } else {
             cb_reserve_back(cb_x1, 1);
-            noc_async_read(apq.get_noc_addr(R * PQT + S0), get_write_ptr(cb_x1), F32_TILE);
+            noc_async_read(apq.get_noc_addr((R + RB0) * PQT + S0), get_write_ptr(cb_x1), F32_TILE);
             noc_async_read_barrier();
             cb_push_back(cb_x1, 1);
         }

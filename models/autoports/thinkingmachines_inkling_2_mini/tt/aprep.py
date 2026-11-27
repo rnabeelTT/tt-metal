@@ -64,13 +64,14 @@ class AttnPrep:
         self.HT = w.HD // 32
         self._pc = {}  # (PCACHE: prefill programs by shape key)
 
-    def __call__(self, pq, k, v, tau=None, kv=None, fill=None):
+    def __call__(self, pq, k, v, tau=None, kv=None, fill=None, row0=0):
         """kv = (k_cache, v_cache, positions int32 [B], block table int32 [B, max blocks]): the k / v rows written into
         the paged bf16 caches here (no k / v outputs: None). fill = (k_cache, v_cache, fill table int32 [1, B / 64]):
         a prefill chunk's rows written into the caches (row b -> block fill[b / 64], row b % 64)."""
         w, B, HT, mesh = self.w, self.B, self.HT, self.mesh
         if NAT and fill is not None and B > 32 and B % 32 == 0 and w.DR in (16, 32):
-            return self._nat(pq, k, v, tau, fill)
+            return self._nat(pq, k, v, tau, fill, row0)
+        assert row0 == 0
         L1 = ttnn.L1_MEMORY_CONFIG
         kf = vf = None
         if fill is not None:  # (the rows go to L1 [1, NKV, T, HD] tensors; paged_fill_cache moves them below)
@@ -229,8 +230,9 @@ class AttnPrep:
             return q_o, r_o, None, None, s_o
         return q_o, r_o, k_o, v_o, s_o
 
-    def _nat(self, pq, k, v, tau, fill):
-        """the prefill prep on whole tiles (NAT): -> (q, rq, None, None, sink); the K / V rows into the caches"""
+    def _nat(self, pq, k, v, tau, fill, row0=0):
+        """the prefill prep on whole tiles (NAT): -> (q, rq, None, None, sink); the K / V rows into the caches.
+        row0 (a multiple of 32): pq / k / v hold more rows; this call's are row0 .. row0 + T - 1 (read in place)"""
         w, T, HT, mesh = self.w, self.B, self.HT, self.mesh
         L1, DRAM = ttnn.L1_MEMORY_CONFIG, ttnn.DRAM_MEMORY_CONFIG
         mk = lambda: ttnn.allocate_tensor_on_device(ttnn.Shape([1, w.NKV, T, w.HD]), ttnn.bfloat16,  # noqa: E731
@@ -247,7 +249,8 @@ class AttnPrep:
         if hit is None:
             hit = self._pc[key] = self._nat_desc(pq, k, tau_t, q_o, r_o, kf, T, glob)
         rd, wr, cp, cbs, h = hit
-        rd.common_runtime_args = [pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address()]
+        rd.common_runtime_args = [pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address(),
+                                  row0 // 32]
         wr.common_runtime_args = [q_o.buffer_address(), r_o.buffer_address(), s_o.buffer_address(),
                                   kf.buffer_address(), vf.buffer_address()]
         prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
