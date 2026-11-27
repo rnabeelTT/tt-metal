@@ -50,6 +50,16 @@ GATE_NORM_ATTN = __import__("os").environ.get("I2M_GATE_NORM_ATTN", "1") == "1" 
 POST_ROUTER = __import__("os").environ.get("I2M_POST_ROUTER", "1") == "1"
 AR_DIRECT = __import__("os").environ.get("I2M_AR_DIRECT", "1") == "1"
 GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"
+# 17..32-row decoders: the message gates with their norms on GateKernel2 (two 16-row halves), not GateKernel + norms.
+# I2M_G2_WIDE
+G2_WIDE = __import__("os").environ.get("I2M_G2_WIDE", "1") == "1"
+# the decode q|k|v prefetch / streamed program up to this many rows (I2M_PF_ROWS; above: three ttnn.linear)
+PF_ROWS = int(__import__("os").environ.get("I2M_PF_ROWS", "16"))
+# 17..32-row decoders: the fused post-attention section (tt/post.py) as two 16-row programs (rows 16.. in faces 2 / 3)
+# instead of the conv / add / norm / mix ops. I2M_POST_WIDE
+POST_WIDE = __import__("os").environ.get("I2M_POST_WIDE", "1") == "1"
+# 17..32-row decoders (with POST_WIDE): the fused pre-attention section (tt/pre.py) as two 16-row programs. I2M_PRE_WIDE
+PRE_WIDE = __import__("os").environ.get("I2M_PRE_WIDE", "1") == "1"
 KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 # I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
 # _messages; per layer only the mix program)
@@ -333,11 +343,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    if getattr(w, "pf", None) is not None and B <= 16:  # (q prefetched into a global CB: tt/prefetch.py)
+    if getattr(w, "pf", None) is not None and B <= PF_ROWS:  # (q prefetched into a global CB: tt/prefetch.py)
         from models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch import qkv as pf_qkv
 
         pq, pk, pv = pf_qkv(w.pf, w, [xq, xk, xv], B)
-    elif getattr(w, "ms", None) is not None and B <= 16:  # (q | k | v streamed in one program)
+    elif getattr(w, "ms", None) is not None and B <= PF_ROWS:  # (q | k | v streamed in one program)
         pq, pk, pv = w.ms([xq, xk, xv], w.ms_w, B)
     else:
         pq = proj(w, "q", xq, ttnn.float32)
@@ -524,21 +534,26 @@ class BatchedDecoder:
         self.plan = None
         self.post = None
         self.pre = None
+        self.g2wide = False
         if MIX_CACHE != "0":  # (one die too: its KV pool cap leaves room for the plan's query copies)
             if getattr(model, "_mixplan", None) is None:
                 model._mixplan = MixPlan(model)
             self.plan = model._mixplan
             # I2M_POST (default 1): the fused post-attention section (tt/post.py) at <= 16 rows
             if POST and B <= 16:
+                # (each piece on its own: a 17..32-row decoder built first makes some of them, G2_WIDE / POST_WIDE)
                 if getattr(model, "_post", None) is None:
                     from .post import PostKernel
 
                     model._post = PostKernel(mesh, model.H, model.cfg.rms_norm_eps)
+                if model.ops.gate2k is None:
                     from .gate import GateKernel2
 
                     rk = next((int(g.wd.shape[-1]) for L in model.layers.values() if L.loop for g in L.gates.values()), 64)
                     model.ops.gate2k = GateKernel2(model._post, rk)
+                if getattr(model, "_nw_rows", None) is None:
                     model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
+                if getattr(model, "_q_rows", None) is None:
                     model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
                 self.post, self.nw_rows, self.q_rows = model._post, model._nw_rows, model._q_rows
                 if PRE:
@@ -546,9 +561,11 @@ class BatchedDecoder:
                         from .pre import PreKernel
 
                         model._pre = PreKernel(model._post)
-                        rw = model._post.rows_weight
+                    rw = model._post.rows_weight
+                    if getattr(model, "_aq_rows", None) is None:  # (a PRE_WIDE decoder may have made it)
                         model._aq_rows = {li: [rw(L.attn_Q, col=j) for j in range(L.nq)]
                                           for li, L in model.layers.items() if L.nq}
+                    if getattr(model, "_norm_rows", None) is None:
                         nr = {}
                         for li, L in model.layers.items():
                             if L.sliding:
@@ -558,6 +575,43 @@ class BatchedDecoder:
                                     nr[(li, k)] = rw(getattr(L, f"{k}_norm"))
                         model._norm_rows = nr
                     self.pre, self.aq_rows, self.norm_rows = model._pre, model._aq_rows, model._norm_rows
+            elif B <= 32 and G2_WIDE:
+                # 17..32 rows: no fused post / pre, but the gates (+ their norms) on GateKernel2's two halves
+                if getattr(model, "_post", None) is None:
+                    from .post import PostKernel
+
+                    model._post = PostKernel(mesh, model.H, model.cfg.rms_norm_eps)
+                if model.ops.gate2k is None:
+                    from .gate import GateKernel2
+
+                    rk = next((int(g.wd.shape[-1]) for L in model.layers.values() if L.loop for g in L.gates.values()), 64)
+                    model.ops.gate2k = GateKernel2(model._post, rk)
+                if getattr(model, "_nw_rows", None) is None:
+                    model._nw_rows = {li: model._post.rows_weight(L.mlp_norm) for li, L in model.layers.items()}
+                if getattr(model, "_norm_rows", None) is None:
+                    rw, nr = model._post.rows_weight, {}
+                    for li, L in model.layers.items():
+                        if L.sliding:
+                            nr[(li, "in")] = rw(L.in_norm)
+                        else:
+                            for k in "qkv":
+                                nr[(li, k)] = rw(getattr(L, f"{k}_norm"))
+                    model._norm_rows = nr
+                self.nw_rows, self.norm_rows, self.g2wide = model._nw_rows, model._norm_rows, True
+                if POST_WIDE:  # (the fused post-attention section as two 16-row programs: tt/post.py)
+                    if getattr(model, "_q_rows", None) is None:
+                        model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
+                    self.post, self.q_rows = model._post, model._q_rows
+                    if PRE_WIDE:  # (the fused pre-attention section too: the MoE output read unpacked)
+                        if getattr(model, "_pre", None) is None:
+                            from .pre import PreKernel
+
+                            model._pre = PreKernel(model._post)
+                        if getattr(model, "_aq_rows", None) is None:
+                            rw = model._post.rows_weight
+                            model._aq_rows = {li: [rw(L.attn_Q, col=j) for j in range(L.nq)]
+                                              for li, L in model.layers.items() if L.nq}
+                        self.pre, self.aq_rows = model._pre, model._aq_rows
 
     def move_row(self, src: int, dst: int = 0):
         """Every conv state's row src -> row dst (leaving speculative decode: the committed row back to the slot's)."""
@@ -704,7 +758,7 @@ class BatchedDecoder:
         if self._msg is None or self._msg[0] is not prev_src:
             src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src[:2]]
             nl = len(m.msg_Q)
-            fold = lgx.FOLD and MSG_ALL and self.post is not None  # (the mix readers expand the packed logits)
+            fold = lgx.FOLD and MSG_ALL and self.post is not None and not self.g2wide  # (the mix readers expand the packed logits)
             b = prev_src[2]
             if fold and b in self.plan.msg_off and D is not None and \
                     src[0].memory_config() == src[1].memory_config():
@@ -725,7 +779,7 @@ class BatchedDecoder:
             if fold:
                 allm = m.ops.mixk.groups(S, lg, 2, 4, nl, int(lg.shape[-1]), pk=True)
             else:
-                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
+                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None and not self.g2wide else None
             self._msg = (prev_src, S, lg, allm)
         _, S, lg, allm = self._msg
         if allm is not None:
@@ -785,7 +839,7 @@ class BatchedDecoder:
             ins = [_f32(x)]
         if fused is not None and messages is None:  # (normed in the program)
             qn, kn, vn = (fused * 3) if L.sliding else fused
-        elif messages is not None and GATE_NORM_ATTN and self.pre is not None and \
+        elif messages is not None and GATE_NORM_ATTN and (self.pre is not None or self.g2wide) and \
                 (gn := self._gate_norms(L, li, ins, messages)) is not None:
             qn, kn, vn = gn
         elif L.sliding:
@@ -806,7 +860,7 @@ class BatchedDecoder:
             qn, kn, vn = ops.rms(qi, L.q_norm, bf), ops.rms(ki, L.k_norm, bf), ops.rms(vi, L.v_norm, bf)
         post_path = self.post is not None and ba.attn.kernel is not None
         att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl,
-                                packed_out=post_path and AR_DIRECT)
+                                packed_out=post_path and AR_DIRECT and not self.g2wide)
         if not post_path:
             att = unpacked(att)
         blk = None
@@ -831,7 +885,8 @@ class BatchedDecoder:
             if messages is None and GATE_NORM == 2 and POST_ROUTER and getattr(L.moe, "fused", False):
                 # + the router logits (and the row duplicated for the one-row MoE) in the same program
                 resid, o, lg = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
-                                         nw=self.nw_rows[li], router=L.moe.router_hl, dup=T == 1)
+                                         nw=self.nw_rows[li], router=L.moe.router_hl, dup=T == 1,
+                                         route=L.moe.fe.route_target(T))
                 dup = lg is not None and T == 1
             else:
                 resid, o = self.post(att, None if L.boundary else x, ba.attn, self.q_rows[li], blocks_n, lgs,
@@ -840,14 +895,16 @@ class BatchedDecoder:
                 # the gate + the MoE-input norm (+ the router logits) in one program (tt/gate.py GateKernel2)
                 T = int(o.shape[-2])
                 rt = L.moe.router_hl if GATE_NORM == 2 and getattr(L.moe, "fused", False) else None
-                f = L.gates["mlp"].fused_norm(o, messages[3], self.nw_rows[li], rt, dup=T == 1) if GATE_NORM else None
+                f = L.gates["mlp"].fused_norm(o, messages[3], self.nw_rows[li], rt, dup=T == 1,
+                                              route=L.moe.fe.route_target(T) if rt is not None else None) \
+                    if GATE_NORM else None
                 if f is not None:
                     (mn, lg), dup = f, T == 1
                 else:
                     mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
             else:
                 mn = o
-            pk = self.pre is not None and AR_DIRECT  # (the next pre program reads the packed rows)
+            pk = self.pre is not None and AR_DIRECT and not self.g2wide  # (the next pre program reads the packed rows)
             mo = L.moe.forward(mn, logits=lg, dup=dup, packed_out=pk) if (lg is not None or dup or pk) \
                 else L.moe.forward(mn)
             if self.pre is not None:  # the tail (MoE-output conv + residual) runs in the next application's program
@@ -857,9 +914,15 @@ class BatchedDecoder:
         att = ba.attn.step(att)
         resid = _f32(att) if L.boundary else ttnn.add(_f32(x), _f32(att))
         mi = self._mix(("mlp", a), blocks_n, ids, D, ops.rms(resid), L.mlp_Q, 1)[0]
-        if messages is not None:
-            mi = L.gates["mlp"](mi, messages[3])
-        mo = ba.mlp.step(L.moe.forward(ops.rms(mi, L.mlp_norm, ttnn.bfloat16)))
+        f = L.gates["mlp"].fused_norm(mi, messages[3], self.nw_rows[li]) \
+            if messages is not None and self.g2wide and GATE_NORM else None
+        if f is not None:  # (the gate + the MoE-input norm in one program: GateKernel2.halves)
+            mn = f[0]
+        else:
+            if messages is not None:
+                mi = L.gates["mlp"](mi, messages[3])
+            mn = ops.rms(mi, L.mlp_norm, ttnn.bfloat16)
+        mo = ba.mlp.step(L.moe.forward(mn))
         out = _bf(ttnn.add(resid, _f32(mo)))
         return (ttnn.to_memory_config(out, L1) if GLUE_L1 and out.memory_config() != L1 else out), blk
 

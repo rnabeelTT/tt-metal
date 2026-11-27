@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Decode SDPA (tt/attn/inkling_sdpa.py) device zones: one decode row of a sliding (W 1024) or global layer at position
 POS, run N times with the device profiler; per zone (S_*, and the RISC kernels): mean us, max over cores.
-env: TP (1: 24 q / 8 kv heads), POS (300), W (1024; 0 = global), N (6), B (0: one decode row; > 0: B users at POS,
+env: TP (1: 24 q / 8 kv heads), POS (300), W (1024; 0 = global), N (6), R (1: rows of one sequence, a verify pass), B (0: one decode row; > 0: B users at POS,
 POS + 7, .. as the batched decoder calls it); the CSV under TT_METAL_PROFILER_DIR when set (a private profiler dir)"""
 
 import collections
@@ -23,8 +23,8 @@ def main():
     for i in range(int(os.environ.get("N", "6"))):
         if B:
             T.run_case(dev, W, T.E, [pos + 7 * u for u in range(B)], seed=i, users=B)
-        else:
-            T.run_case(dev, W, T.E, [pos], seed=i)
+        else:  # R > 1: a verify pass's R consecutive rows of one sequence
+            T.run_case(dev, W, T.E, [pos + j for j in range(int(os.environ.get("R", "1")))], seed=i)
     ttnn.synchronize_device(dev)
     ttnn.ReadDeviceProfiler(dev)
     ttnn.close_device(dev)

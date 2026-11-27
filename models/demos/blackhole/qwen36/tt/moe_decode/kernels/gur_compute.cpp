@@ -122,6 +122,17 @@ void kernel_main() {
     UNPACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     MATH(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(n = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+#ifdef MOE_ROWS_SKIP
+    // per slot, the row groups with a routed row (4 bits per slot, 8 slots per word; gur_writer.cpp)
+    uint32_t msk[16];
+    for (uint32_t w = 0; w < (n + 7) / 8; ++w) {
+        uint32_t v = 0;
+        UNPACK(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        MATH(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        PACK(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        msk[w] = v;
+    }
+#endif
 
 #ifndef GU_KCH
 #define GU_KCH 1
@@ -141,7 +152,13 @@ void kernel_main() {
             cb_wait_front(cb_w, nb * kt * m);  // the slot's bank blocks (consecutive in the ring: an even ring when nb = 2)
         }
         cb_wait_front(cb_sc, 2 * groups);
+        bool first = true;  // (GU_KCH: the first computed group waits for the chunks)
         for (uint32_t g = 0; g < groups; ++g) {
+#ifdef MOE_ROWS_SKIP
+            if (!((msk[i / 8] >> (4 * (i % 8) + g)) & 1u)) {
+                continue;
+            }
+#endif
             tile_regs_acquire();
             gu_layout::static_for<nb>([&](auto h) {
                 constexpr uint32_t hb = decltype(h)::value;
@@ -149,7 +166,7 @@ void kernel_main() {
                     custom_mm_block<true>(cb_x, cb_w, g * kt, hb * kt * m, hb * m, kt, m);
                 } else {
                     for (uint32_t q = 0; q < kch; ++q) {
-                        if (g == 0) {
+                        if (first) {
                             cb_wait_front(cb_w, (hb * kch + q + 1) * kcu * m);
                         }
                         if (q + 1 < kch) {
@@ -160,6 +177,7 @@ void kernel_main() {
                     }
                 }
             });
+            first = false;
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_sc, cb_id, cb_act, 1);
             custom_mm_block<true>(cb_sc, cb_id, 2 * g, 0, wdst, 2);  // the group's per-row weights
 
@@ -221,6 +239,11 @@ void kernel_main() {
             cb_push_back(cb_act, np);
 
             custom_mm_block_init_short<transpose, split_acc, dense_packing>(cb_x, cb_w, cb_act, ct);
+        }
+        if constexpr (kch > 1) {
+            if (first) {  // (MOE_ROWS_SKIP: no group computed; the slot's weights still arrived)
+                cb_wait_front(cb_w, nb * kt * m);
+            }
         }
         cb_pop_front(cb_sc, 2 * groups);
         cb_pop_front(cb_w, nb * kt * m);

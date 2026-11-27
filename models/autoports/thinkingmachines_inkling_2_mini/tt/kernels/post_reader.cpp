@@ -15,6 +15,14 @@
 #endif
 #include "glz.hpp"
 #include "lgpk.hpp"
+#ifndef POST_ROUTE
+#define POST_ROUTE 0
+#endif
+#if POST_ROUTE
+#define ROUTE_FAST 1
+#include "models/demos/blackhole/qwen36/tt/moe_decode/kernels/router_topk.hpp"
+#include "post_route.hpp"
+#endif
 #ifdef SEQ_R
 #include "seqshift.hpp"
 #endif
@@ -45,8 +53,12 @@ void kernel_main() {
     constexpr uint32_t NQ = get_compile_time_arg_val(14);
     constexpr uint32_t T = POST_ROWS, TH = POST_TH;  // TH: the rows of the CB tiles of token rows (8 / 16 / 32)
     constexpr uint32_t F32 = TH * 128, BF = TH * 64;  // (a CB tile of token rows; tensor tiles are 32 x 32)
-    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src, dst); };
-    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src, dst); };
+#ifndef POST_ROW0  // (16: rows 16 .. 16 + T - 1 of 32-row tensors, faces 2 / 3: tt/post.py's 17..32-row halves)
+#define POST_ROW0 0
+#endif
+    // (every row tensor read through rf / rb: token rows, states, and the 32-row replicated weights)
+    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src + POST_ROW0 * 128, dst); };
+    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src + POST_ROW0 * 64, dst); };
     constexpr auto a_args = TensorAccessorArgs<15>();  // att
     constexpr auto x_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();  // x
     constexpr auto s_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();  // states
@@ -231,6 +243,13 @@ void kernel_main() {
     cb_push_back(cb_blk, NB * PER);
     if constexpr (NORM) {
         cb_push_back(cb_nw, PER);
+    }
+#endif
+#if POST_ROUTE  // (root (t, e)'s upper 16 experts: post_route.hpp)
+    if (c < T * POST_RT) {
+        route_reader<POST_ROUTE>((TH < 16 ? TH : 16) * 64, get_write_ptr(POST_CB_RS), c % POST_RT,
+                                 reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(5)),
+                                 reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(6)));
     }
 #endif
 }

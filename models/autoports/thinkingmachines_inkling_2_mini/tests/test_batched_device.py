@@ -105,7 +105,7 @@ def main():
         tr.step()
     ttnn.synchronize_device(mesh)
     dt = (time.time() - t0) / n
-    print(f"traced decode: {dt * 1000:.1f} ms/step at B={B} -> {1 / dt:.1f} tok/s per user, {B / dt:.0f} tok/s total",
+    print(f"traced decode: {dt * 1000:.3f} ms/step at B={B} -> {1 / dt:.1f} tok/s per user, {B / dt:.0f} tok/s total",
           flush=True)
     tr.release()
     ttnn.close_mesh_device(mesh)

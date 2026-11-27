@@ -9,11 +9,25 @@
 // = argmax_j (logit_j + tg_j). Then the token -> prev, w1[token] -> row 0 of the next step's wp.
 //
 // runtime args: [g_addr, prev_addr, w1_addr, wp_addr (, gum_addr, cid_addr, clg_addr, tab_addr)]
+//
+// DSP_X (tensor-parallel drafter, tt/drafter.py _vmerge_x): no all-gather before this program. g is this die's own local
+// result (loc, [1, 1, 1, 2 K] uint32 TILE); this core puts its row 0 at slot ME of its L1 values (the gathered layout:
+// die s at bytes [256 s, 256 s + 256)), multicasts it over the fabric into page KS NS + ME of a persistent DRAM scratch
+// on every other die with an atomic increment of this step's global semaphore (one per Markov step: a die's next write
+// to a page / semaphore follows the next drafter block's all-reduces, which every die enters only after this merge),
+// waits for the NS - 1 others and reads their pages into their slots. Compile defines DSP_X_ME / _SX / _SY (this
+// core's noc) / _CT (offset of the scratch accessor's compile args); runtime args 8 .. : scratch address, semaphore
+// address, <fabric connection manager args>.
 
 #include <stdint.h>
 
 #include "api/dataflow/dataflow_api.h"
 #include "dsp_w1row.hpp"
+#ifdef DSP_X
+#include "tt_metal/fabric/hw/inc/edm_fabric/fabric_connection_manager.hpp"
+#include "tt_metal/fabric/hw/inc/noc_addr.h"
+#include "tt_metal/fabric/hw/inc/packet_header_pool.h"
+#endif
 
 void kernel_main() {
     constexpr uint32_t cb = get_compile_time_arg_val(0);
@@ -33,12 +47,72 @@ void kernel_main() {
     const uint32_t l1 = get_write_ptr(cb);  // [0, 4 NV): values; then scratch
     const uint32_t scr = l1 + ((4 * NV + 63) / 64) * 64;
     const auto s_g = TensorAccessor(g_args, get_arg_val<uint32_t>(0), 4096);
+#ifdef DSP_X
+    {
+        constexpr uint32_t ME = DSP_X_ME, FWD = NS - 1 - ME, BWD = ME;
+        constexpr uint32_t SLOT = 8 * K;  // one die's 2 K uint32
+        constexpr auto x_args = TensorAccessorArgs<DSP_X_CT>();
+        const auto s_x = TensorAccessor(x_args, get_arg_val<uint32_t>(8), SLOT);
+        volatile tt_l1_ptr uint32_t* sem = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_arg_val<uint32_t>(9));
+        size_t arg_idx = 10;
+        auto fabric = FabricConnectionManager::build_from_args<
+            FabricConnectionManager::BuildFromArgsMode::BUILD_AND_OPEN_CONNECTION_START_ONLY>(arg_idx);
+        PacketHeaderPool::reset();
+        const uint64_t dst = s_x.get_noc_addr(KS * NS + ME);
+        const uint64_t sa = safe_get_noc_addr(DSP_X_SX, DSP_X_SY, reinterpret_cast<uint32_t>(sem), 0);
+        volatile PACKET_HEADER_TYPE* fh = nullptr;
+        volatile PACKET_HEADER_TYPE* bh = nullptr;
+        if constexpr (FWD > 0) {
+            fh = PacketHeaderPool::allocate_header();
+            fh->to_chip_multicast(tt::tt_fabric::MulticastRoutingCommandHeader{1, static_cast<uint8_t>(FWD)});
+            fh->to_noc_fused_unicast_write_atomic_inc(
+                tt::tt_fabric::NocUnicastAtomicIncFusedCommandHeader{dst, sa, 1, true}, SLOT);
+        }
+        if constexpr (BWD > 0) {
+            bh = PacketHeaderPool::allocate_header();
+            bh->to_chip_multicast(tt::tt_fabric::MulticastRoutingCommandHeader{1, static_cast<uint8_t>(BWD)});
+            bh->to_noc_fused_unicast_write_atomic_inc(
+                tt::tt_fabric::NocUnicastAtomicIncFusedCommandHeader{dst, sa, 1, true}, SLOT);
+        }
+        const uint32_t mine = l1 + ME * SLOT;
+        for (uint32_t t = 0; t < 2 * K / 32; ++t) {
+            const uint64_t a = s_g.get_noc_addr(t);
+            noc_async_read(a, mine + t * 128, 64);
+            noc_async_read(a + 1024, mine + t * 128 + 64, 64);
+        }
+        noc_async_read_barrier();
+        fabric.open_finish();
+        if constexpr (FWD > 0) {
+            auto& conn = fabric.get_forward_connection();
+            conn.wait_for_empty_write_slot();
+            conn.send_payload_without_header_non_blocking_from_address(mine, SLOT);
+            conn.send_payload_flush_non_blocking_from_address((uint32_t)fh, sizeof(PACKET_HEADER_TYPE));
+        }
+        if constexpr (BWD > 0) {
+            auto& conn = fabric.get_backward_connection();
+            conn.wait_for_empty_write_slot();
+            conn.send_payload_without_header_non_blocking_from_address(mine, SLOT);
+            conn.send_payload_flush_non_blocking_from_address((uint32_t)bh, sizeof(PACKET_HEADER_TYPE));
+        }
+        fabric.close();
+        noc_semaphore_wait(sem, NS - 1);
+        noc_semaphore_set(sem, 0);
+        for (uint32_t d = 0; d < NS; ++d) {
+            if (d != ME) {
+                noc_async_read(s_x.get_noc_addr(KS * NS + d), l1 + d * SLOT, SLOT);
+            }
+        }
+        noc_async_read_barrier();
+        invalidate_l1_cache();
+    }
+#else
     for (uint32_t t = 0; t < NT; ++t) {
         const uint64_t a = s_g.get_noc_addr(t);
         noc_async_read(a, l1 + t * 128, 64);
         noc_async_read(a + 1024, l1 + t * 128 + 64, 64);
     }
     noc_async_read_barrier();
+#endif
     volatile tt_l1_ptr uint32_t* v = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(l1);
     uint32_t key[NS * K], gid[NS * K];
     for (uint32_t s = 0; s < NS; ++s) {

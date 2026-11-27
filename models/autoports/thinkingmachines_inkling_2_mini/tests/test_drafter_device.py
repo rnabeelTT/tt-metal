@@ -35,6 +35,7 @@ from models.autoports.thinkingmachines_inkling_2_mini.tt import model as model_m
 
 FIXTURE = os.environ.get("FIXTURE", "/cache/fixtures/dspark_taps.pt")
 DTR = int(os.environ.get("DRAFT_D", "3"))
+DUMP = {}  # DRAFT_DUMP=path: traced greedy tokens + sampled candidates per anchor (A/B of drafter changes)
 
 
 class _Count:
@@ -234,6 +235,7 @@ def run_traced(mesh, dr, fx, eager):
             trows.append((name, j, p, got))
             same_eager += (name, j) in eager and got == eager[(name, j)][:DTR]
     analyse(f"traced d={DTR}", trows, r_of)
+    DUMP["traced"] = trows
     print(f"traced tokens == eager tokens: {same_eager}/{len(trows)}", flush=True)
     for n_acc in (1, 2, 3):  # commits of fewer rows (rows >= n written past the context)
         r = r0
@@ -310,6 +312,7 @@ def run_sampled(mesh, dr, fx, tb, put_taps):
             same += sum(g == x for g, x in zip(got, ref))
             n += DTR
             ci, cl = dr.cand_host(DTR)
+            DUMP.setdefault("sampled", []).append((name, j, got, ci.clone(), cl.clone()))
             for k in range(DTR):
                 if got[:k] != ref[:k]:
                     break
@@ -350,6 +353,8 @@ def run_sampled(mesh, dr, fx, tb, put_taps):
     ttnn.synchronize_device(mesh)
     print(f"TRACED sampled step (d={DTR}): {(time.time() - t1) / nrep * 1e3:.3f} ms", flush=True)
     dr.release()
+    if os.environ.get("DRAFT_DUMP"):
+        torch.save(DUMP, os.environ["DRAFT_DUMP"])
 
 
 if __name__ == "__main__":

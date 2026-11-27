@@ -42,6 +42,11 @@ _os.environ.setdefault("QWEN35_MOE_DN_SKIPPAD", _os.environ.get("I2M_MOE_DN_SKIP
 _os.environ.setdefault("QWEN35_MOE_GU_OFFROW_X", "east" if _os.environ.get("I2M_MOE_GU_EAST", "1") == "1" else "")
 # I2M_MOE_DN_SLOT: down weight slots pushed / multiplied one by one as they land (down -0.2 / -0.35 us at TP4 / TP2)
 _os.environ.setdefault("QWEN35_MOE_DN_SLOT", _os.environ.get("I2M_MOE_DN_SLOT", "1"))
+# I2M_MOE_ROWS_SKIP (default 1): the multi-row MoE kernels skip a union slot's row groups none of whose rows routed to
+# its expert (qwen36 moe_decode union.py rows_skip; > 1 row group, i.e. 9..32 rows; bitwise). With it one 32-row call
+# (I2M_MOE_ROWS_MAX 32, tt/moe_fused.py) reads the 32 rows' expert union once (95.6 experts per application on real text
+# vs 2 x 71.1 for two 16-row calls): TP4 traced B=32 53.51 -> 42.62 ms, B=16 25.57 -> 24.51
+_os.environ.setdefault("QWEN35_MOE_ROWS_SKIP", _os.environ.get("I2M_MOE_ROWS_SKIP", "1"))
 
 # I2M_L1_CHECK=1 (debug): before every generic_op, compare the program's circular buffers per core with the lowest
 # allocated L1 address, CBs over an L1 tensor excluded (fast runtime mode does not check CB / L1-buffer clashes: an

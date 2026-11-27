@@ -39,6 +39,17 @@ void kernel_main() {
     UNPACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     MATH(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
     PACK(slots = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+#ifdef MOE_ROWS_SKIP
+    uint32_t msk[33];  // per slot, the row groups with a routed row (dnr_writer.cpp; <= 264 slots)
+    for (uint32_t w = 0; w < (slots + 7) / 8; ++w) {
+        uint32_t v = 0;
+        UNPACK(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        MATH(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        PACK(v = ckernel::mailbox_read(ckernel::ThreadId::BriscThreadId));
+        msk[w] = v;
+    }
+    auto live = [&](uint32_t s, uint32_t g) { return (msk[s / 8] >> (4 * (s % 8) + g)) & 1u; };
+#endif
 #ifdef EP_EXPERTS
     if (slots == 0) {  // none of the union on this die: the writer writes zero rows
         custom_mm_block_uninit<dense_packing>();
@@ -141,6 +152,29 @@ void kernel_main() {
         if (s0 == 0) {
             MOE_MARK("D_C1");
         }
+#ifdef MOE_ROWS_SKIP
+        // each live (slot, group) as its own K run (the skipped ones were exact zeros); the group's last live slot
+        // finalizes (every group has one: each of its rows routed to k experts of the union)
+        for (uint32_t g = 0; g < groups; ++g) {
+            for (uint32_t s = 0; s < cs; ++s) {
+                if (!live(s0 + s, g)) {
+                    continue;
+                }
+                bool last = true;
+                for (uint32_t t = s0 + s + 1; t < slots; ++t) {
+                    if (live(t, g)) {
+                        last = false;
+                        break;
+                    }
+                }
+                if (last) {
+                    custom_mm_block<true>(cb_in0, cb_w, (g * cs + s) * kt, s * kt * cols, g * cols, kt, cols);
+                } else {
+                    custom_mm_block<false>(cb_in0, cb_w, (g * cs + s) * kt, s * kt * cols, g * cols, kt, cols);
+                }
+            }
+        }
+#else
         for (uint32_t g = 0; g < groups; ++g) {
             if (s0 + cs < slots) {
                 custom_mm_block<false>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
@@ -148,6 +182,7 @@ void kernel_main() {
                 custom_mm_block<true>(cb_in0, cb_w, g * cs * kt, 0, g * cols, cs * kt, cols);
             }
         }
+#endif
         cb_pop_front(cb_w, cs * kt * cols);
         cb_pop_front(cb_in0, groups * cs * kt);
     }

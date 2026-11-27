@@ -5,7 +5,7 @@
 
 usage: ~/inkling2-work/jobs/die.sh 3 dprof "-e TT_METAL_DEVICE_PROFILER=1 -e TT_METAL_PROFILER_MID_RUN_DUMP=1
        -e TT_METAL_PROFILER_CPP_POST_PROCESS=1" python -u models/autoports/thinkingmachines_inkling_2_mini/tools/drafter_prof.py
-env: DRAFT_D (3), SEQ=1 (every op in order)
+env: DRAFT_D (3), SEQ=1 (every op in order), SAMPLE (1: sampled drafts as served), MESH, TRACED=1
 """
 
 import collections
@@ -22,7 +22,10 @@ FIXTURE = os.environ.get("FIXTURE", "/cache/fixtures/dspark_taps.pt")
 
 def main():
     d = int(os.environ.get("DRAFT_D", "3"))
-    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, 1))
+    N = int(os.environ.get("MESH", "1"))  # (the served drafter is replicated on every die, its head split by vocab)
+    if N > 1:
+        ttnn.set_fabric_config(ttnn.FabricConfig.FABRIC_1D)
+    mesh = ttnn.open_mesh_device(ttnn.MeshShape(1, N), trace_region_size=64 << 20)
     OP.REC["mesh"] = mesh
     fx = torch.load(FIXTURE)
     r = next(iter(fx["texts"].values()))
@@ -34,8 +37,25 @@ def main():
     tb = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=mesh,
                          memory_config=ttnn.DRAM_MEMORY_CONFIG)
     dr.set_inputs(int(r["ids"][p]), p - 4, 4)
+    sample = os.environ.get("SAMPLE", "1") == "1"  # (served: sampled drafts)
+    dr.sample = sample
     for _ in range(2):
         dr._traced_body(tb, d, True)
+    if os.environ.get("TRACED"):  # traced replay wall time of the drafter body (commit 4 + draft d), no profiler
+        import time
+        dr.capture(tb, d, True, sample=sample)
+        for _ in range(5):
+            dr.replay()
+        ttnn.synchronize_device(mesh)
+        n = 200
+        t0 = time.perf_counter()
+        for _ in range(n):
+            dr.replay()
+        ttnn.synchronize_device(mesh)
+        print(f"== drafter traced d={d} mesh={N}: {(time.perf_counter() - t0) * 1e3 / n:.3f} ms/replay", flush=True)
+        dr.release()
+        ttnn.close_mesh_device(mesh)
+        return
     OP._read()
     OP.REC["on"] = True
     dr._traced_body(tb, d, True)

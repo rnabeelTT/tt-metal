@@ -16,7 +16,7 @@ import struct
 import ttnn
 
 from .bconv import KDIR, _cb, _range_set, _rt
-from .post import SFPU_ROWS, MR, RSPLIT, WS, ZDEFER, ZLAZY, red_k, red_pack, red_sel
+from .post import ROUTE, SFPU_ROWS, MR, RSPLIT, WS, ZDEFER, ZLAZY, red_k, red_pack, red_sel
 from .bconv import _ks
 
 F32, BF = 4096, 2048
@@ -33,6 +33,8 @@ LOCAL_ONES = __import__("os").environ.get("I2M_LOCAL_ONES", "1") == "1"
 # GateKernel2 compute: the round-1 norm and the scaled operands, tanh and the output, round 3's norm and the output
 # each in one DST block (no CB round trip between them; the same ops). I2M_G2_FUSE
 G2_FUSE = __import__("os").environ.get("I2M_G2_FUSE", "1") == "1"
+# probe only (garbage numerics): GateKernel2 reads no weights (the bound of resident / prefetched gate weights). I2M_G2_NOWT
+G2_NOWT = __import__("os").environ.get("I2M_G2_NOWT", "0") == "1"
 
 
 class GateKernel:
@@ -144,19 +146,27 @@ class GateKernel2:
         if CX == 9 and CY == 4 and g.y >= 10:
             self.rects += [_Rect(post, 0, 4, 9, 4), _Rect(post, 0, 8, 9, 2)]
 
-    def _parts(self, rc, h, m, wd, wfg, nw, router, dup, out_mc, lo=False):
+    def _parts(self, rc, h, m, wd, wfg, nw, router, dup, out_mc, lo=False, route=None, half=0, out=None):
+        """half (17..32 rows): this part's 16-row half of the rows (half 1: rows 16.., read from / written to faces
+        2 / 3 of the 32-row tiles), into out (allocated by the caller: both halves write it)"""
         pk = self.pk
         h, m = (ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t for t in (h, m))
-        T = int(h.shape[-2])
+        TA = int(h.shape[-2])
+        T = TA if TA <= 16 else (16 if half == 0 else TA - 16)
         norm, rt = nw is not None, router is not None
         assert T <= 16 and h.dtype == ttnn.float32 and m.dtype == ttnn.float32 and (norm or not rt)
+        assert TA <= 16 or (not rt and not dup and out is not None)
         assert not rt or T <= self.ROUTER_ROWS
         dup = dup and T == 1
         odt = ttnn.bfloat16 if norm else ttnn.float32
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), odt, ttnn.TILE_LAYOUT, pk.mesh, out_mc)
+        if out is None:
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), odt, ttnn.TILE_LAYOUT, pk.mesh, out_mc)
+        row0 = 16 * half if TA > 16 else 0
         ET = int(router[0].shape[-1]) // 32 if rt else 4
+        rsplit0 = RSPLIT and rt and T * ET <= 16
+        rk = int(route[2]) if rsplit0 and route is not None and ROUTE else 0  # (the routing here: tt/kernels/post_route.hpp)
         lg = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, max(T, 2), 32 * ET]), ttnn.float32, ttnn.TILE_LAYOUT,
-                                            pk.mesh, out_mc) if rt else None
+                                            pk.mesh, out_mc) if rt and not rk else None
         pack = not rt and red_pack(T, "gate")
         NSEL, sel = rc.red(T, pack)  # (a root per row; pack: core 0)
         rsplit = RSPLIT and rt and T * ET <= 16
@@ -171,8 +181,11 @@ class GateKernel2:
         r = lambda i, dt, n: cbt(crs, i, dt, n, th)  # noqa: E731  (token rows: th x 32 tiles)
         nparts = 8 + (2 if norm else 0) + (2 * ET if rt else 0)  # (every round's parts contiguous: no wrap inside one)
         ntout = 4 + (1 if norm else 0) + (ET if rt else 0)
-        cbs = [r(cb_h, f32, PER), r(cb_m, f32, PER), _cb(crs, cb_wd, bf, BF, 2 * PER * R),
-               _cb(crs, cb_wf, bf, BF, R * PER), _cb(crs, cb_wg, bf, BF, R * PER), _cb(crs, cb_ones, bf, BF, 1),
+        w8 = wd.dtype == ttnn.bfloat8_b  # (I2M_G2_BFP8: bfp8 Wd / Wfg)
+        assert w8 == (wfg.dtype == ttnn.bfloat8_b)
+        wdt, WB = (ttnn.bfloat8_b, 1088) if w8 else (bf, BF)
+        cbs = [r(cb_h, f32, PER), r(cb_m, f32, PER), _cb(crs, cb_wd, wdt, WB, 2 * PER * R),
+               _cb(crs, cb_wf, wdt, WB, R * PER), _cb(crs, cb_wg, wdt, WB, R * PER), _cb(crs, cb_ones, bf, BF, 1),
                r(cb_sel, bf, NSEL), r(cb_sq, f32, 4 * PER), r(cb_part, f32, nparts),
                _cb(crs, cb_gath, f32, F32, GP * NSEL), r(cb_tout, f32, ntout),
                r(cb_tot, f32, 2), r(cb_r, f32, 2), r(cb_hn, bf, 2 * PER),
@@ -182,6 +195,9 @@ class GateKernel2:
             cbs += [r(cb_o32, f32, PER), r(cb_tot3, f32, 1), r(cb_nw, f32, PER)]
         if rt:
             cbs += [r(cb_xb, bf, PER), _cb(crs, cb_rw, bf, BF, 2 * PER * ET)]
+        cb_rs = 24
+        if rk:
+            cbs.append(_cb(crs, cb_rs, ttnn.uint32, -(-4 * 32 * ET // 64) * 64 + 64 + 64 * ET + 64, 1))  # (post_route.hpp)
         rhi, rlo = router if rt else (wd, wd)
         rd_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, PER, R, self.Ht, NSEL, cb_nw, cb_rw, int(norm), int(rt),
                  ET] + ttnn.TensorAccessorArgs(h).get_compile_time_args() \
@@ -191,9 +207,11 @@ class GateKernel2:
                      rhi.buffer_address(), rlo.buffer_address()]
         wr_ct = [cb_part, cb_gath, cb_tout, cb_tot, cb_tot2, cb_tot3, cb_out, cb_zero, PER, C, NSEL, GP, int(norm),
                  int(rt), ET, int(dup)] + ttnn.TensorAccessorArgs(out).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(lg if rt else out).get_compile_time_args() \
-            + ttnn.TensorAccessorArgs(pk.zeros).get_compile_time_args()
-        wr_common = [out.buffer_address(), (lg if rt else out).buffer_address()] + rc.mc + [pk.zeros.buffer_address()] \
+            + ttnn.TensorAccessorArgs(lg if rt and not rk else out).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(pk.zeros).get_compile_time_args() \
+            + (ttnn.TensorAccessorArgs(route[0]).get_compile_time_args() if rk else [])
+        wr_common = [out.buffer_address(), (lg if rt and not rk else out).buffer_address()] + rc.mc + [pk.zeros.buffer_address()] \
+            + ([route[0].buffer_address(), route[1].buffer_address()] if rk else [0, 0]) \
             + rc.roots[:2 * max(T * ET if rsplit else T, 2 * T if mr else T)]
         cp_ct = [cb_h, cb_m, cb_wd, cb_wf, cb_wg, cb_ones, cb_sel, cb_sq, cb_part, cb_gath, cb_tout, cb_tot, cb_r, cb_hn,
                  cb_gath, cb_tot2, cb_g, cb_fa, cb_out, PER, R, NSEL, _bits(1.0 / self.H), _bits(self.eps), GP,
@@ -206,7 +224,9 @@ class GateKernel2:
         cfg.unpack_to_dest_mode = u2d
         defs = [("G2_RK", str(red_k(T))), ("G2_CX", str(rc.CX)), ("G2_ROWS", str(T)), ("G2_X0", str(rc.x0)), ("G2_Y0", str(rc.y0)),
                 ("G2_TH", str(th)), ("G2_ZLAZY", str(int(ZLAZY))), ("G2_RSPLIT", str(int(rsplit))), ("G2_MR", str(int(mr))), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("G2_PACK", str(int(pack))),
-                ("LOCAL_ONES", str(int(lo and LOCAL_ONES)))]
+                ("LOCAL_ONES", str(int(lo and LOCAL_ONES))), ("G2_ROUTE", str(rk)), ("G2_CB_RS", str(cb_rs)),
+                ("RT_E", str(32 * ET)), ("G2_NOWT", str(int(G2_NOWT))),
+                ("G2_ROW0", str(row0)), ("G2_WB", str(WB))]
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
@@ -223,10 +243,13 @@ class GateKernel2:
                                            ("G2_PACK", str(int(pack))), ("G2_FUSE", str(int(G2_FUSE))),
                                            ("SFPU_ROWS", str(int(SFPU_ROWS)))]),
         ]
-        key = (SFPU_ROWS, T, red_k(T), th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
-               tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt else ())))
+        key = (w8, row0, G2_NOWT, rk, SFPU_ROWS, T, red_k(T), th, rc.x0, rc.y0, rc.CX, rc.CY, norm, rt, ET, dup, ZLAZY, rsplit, mr, pack, WS, ZDEFER, G2_FUSE, lo,
+               tuple(repr(t.memory_config()) for t in (h, m, wd, out) + ((lg,) if rt and not rk else ())))
         io = [h, m, wd, wfg, pk.ones, sel, pk.zeros] + ([nw] if norm else []) + ([rhi, rlo] if rt else []) + [out] \
-            + ([lg] if rt else [])
+            + ([lg] if rt and not rk else []) + (list(route[:2]) if rk else [])
+        if rk:
+            from .post import Routed
+            lg = Routed(route[0])
         return kernels, cbs, io, key, ((out, lg) if norm else out)
 
     def _run(self, parts, crs):
@@ -237,7 +260,7 @@ class GateKernel2:
             io += i
             keys.append(key)
             res.append(r)
-        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
+        sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(8)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(("i2m_gate2", self.R, keys)).encode()).digest()[:8],
                                                   "little") & ((1 << 63) - 1)
@@ -249,13 +272,38 @@ class GateKernel2:
         ttnn.generic_op(uio, prog)
         return res
 
-    def __call__(self, h, m, wd, wfg, nw=None, router=None, dup=False, out_mc=ttnn.L1_MEMORY_CONFIG):
+    def __call__(self, h, m, wd, wfg, nw=None, router=None, dup=False, out_mc=ttnn.L1_MEMORY_CONFIG, route=None):
         rc = self.rects[0]
-        return self._run([self._parts(rc, h, m, wd, wfg, nw, router, dup, out_mc)], rc.crs)[0]
+        return self._run([self._parts(rc, h, m, wd, wfg, nw, router, dup, out_mc, route=route)], rc.crs)[0]
+
+    def out_buf(self, h, norm, out_mc=ttnn.L1_MEMORY_CONFIG):
+        return ttnn.allocate_tensor_on_device(ttnn.Shape(list(h.shape)), ttnn.bfloat16 if norm else ttnn.float32,
+                                              ttnn.TILE_LAYOUT, self.pk.mesh, out_mc)
+
+    def halves(self, h, m, wd, wfg, nw=None, out_mc=ttnn.L1_MEMORY_CONFIG):
+        """17..32 rows: rows 0..15 on rectangle 0, rows 16.. on rectangle 1, one program -> out ((out, None) with nw)"""
+        h, m = (ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t for t in (h, m))
+        out = self.out_buf(h, nw is not None, out_mc)
+        rects = self.rects[:2]
+        parts = [self._parts(rc, h, m, wd, wfg, nw, None, False, out_mc, lo=True, half=i, out=out)
+                 for i, rc in enumerate(rects)]
+        self._run(parts, _range_set([c for rc in rects for c in rc.cores]))
+        return (out, None) if nw is not None else out
 
     def multi(self, gates, out_mc=ttnn.L1_MEMORY_CONFIG):
-        """gates: up to len(self.rects) (h, m, wd, wfg, nw) -> their outputs ((x, None) with nw), one program."""
+        """gates: up to len(self.rects) (h, m, wd, wfg, nw) -> their outputs ((x, None) with nw), one program (17..32
+        rows: two programs, rows 0..15 then rows 16..)."""
         assert len(gates) <= len(self.rects)
+        if int(gates[0][0].shape[-2]) > 16:
+            gates = [tuple(ttnn.sharded_to_interleaved(t, ttnn.L1_MEMORY_CONFIG) if t.is_sharded() else t
+                           for t in g[:2]) + tuple(g[2:]) for g in gates]
+            outs = [self.out_buf(g[0], g[4] is not None, out_mc) for g in gates]
+            rects = self.rects[: len(gates)]
+            crs = _range_set([c for rc in rects for c in rc.cores])
+            for half in (0, 1):
+                self._run([self._parts(rc, h, m, wd, wfg, nw, None, False, out_mc, lo=True, half=half, out=o)
+                           for rc, (h, m, wd, wfg, nw), o in zip(rects, gates, outs)], crs)
+            return [((o, None) if g[4] is not None else o) for g, o in zip(gates, outs)]
         rects = self.rects[: len(gates)]
         parts = [self._parts(rc, h, m, wd, wfg, nw, None, False, out_mc, lo=True) for rc, (h, m, wd, wfg, nw) in zip(rects, gates)]
         crs = _range_set([c for rc in rects for c in rc.cores])

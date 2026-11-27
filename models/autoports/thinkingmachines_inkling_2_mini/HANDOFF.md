@@ -654,8 +654,197 @@ One-die bench of the per-die shards, us gate|up / down (floor at 512 GB/s): TP2 
 67.8 / 36.4 -> 63.8 / 33.8 (55 / 27.5); TP1 unchanged. Traced TP2 B=1 12.7 -> 12.4 ms. Left: the route program
 (7.2 us x 48 = 0.35 ms/step), gate|up / down prologue + tail ~3 us each.
 
+## Decode round 2026-11-27 (lane i2m-decode, ~/inkling2-work/plan/DECODE_PLAN.md; logs ~/inkling2-work/dlogs)
+
+Baseline at 5b98fd30cef (traced, test_batched D=4): TP4 B=1 / 16 / 32 8.084 / 25.571 / 53.511 ms, TP2 B=1 / 16 10.345 /
+46.673, TP1 B=1 14.687. Drafter traced (tools/drafter_prof.py MESH=N TRACED=1, d=3): TP4 2.010, TP2 2.216, TP1 2.910 ms
+(~1.5 ms of it hides under the served pass's host time on TP4: drafter fusion is worth <= ~0.5 ms per pass).
+
+Real-text expert union per application (tools/route_dump.py, 8 held-out texts): B 1 / 2 / 4 / 8 / 16 / 32 rows from
+different texts 8.0 / 14.9 / 27.4 / 47.0 / 71.1 / 95.6 experts; union(32) / (union(16) + union(16)) = 0.667. Verify rows
+(consecutive tokens) R 2 / 4 / 6 / 8: 12.6 / 19.3 / 24.8 / 29.1.
+
+| change | TP4 B=16 | TP4 B=32 | TP2 B=16 | served |
+|---|---:|---:|---:|---|
+| start | 25.571 | 53.511 | 46.673 | p300x2 32u 483.7 tok/s (TPOT 57.8); p300 16u 300.2 (48.0) |
+| 7fdf49fe21d multi-row MoE skips row groups with no routed row (QWEN35_MOE_ROWS_SKIP) + one 32-row call on 4 dies | 24.505 | 42.615 | = | p300x2 32u 581.8 (46.7) |
+| fbab479cf2e TP2 9..16 rows as one MoE call (I2M_MOE_HALVES=0) | = | = | 35.152 | p300 16u 372.3 (37.4) |
+
+B=1 and B<=8 unchanged (one row group; B=1 TP4 8.085 bitwise). 7fdf49fe21d is bitwise on decode rows (skip vs no skip;
+one vs two calls: every slot whose prefill had no 17..32-row MoE call). fbab479cf2e changes TP2 numerics at 9..16 rows:
+teacher-forced decode TP2 B=16 x 736 .9694 / .9954 / .0161 -> .9686 / .9943 / .0195 (nll 1.7513 -> 1.7512): flagged for
+review; I2M_MOE_HALVES=1 restores it.
+
+Why one 32-row call lost before (I2M_MOE_ROWS_MAX=32: 56.8 ms): gate|up computed 4 row groups per union slot (3.5 us per
+expert, compute-bound) and each of the 72 down cores read 4 groups x 96 slots x 10 activation tiles (~2 MB of 512-byte L1
+reads per core). ~half of the (slot, group) pairs have no routed row at 32 rows; the skip drops them in both kernels
+(masks from the route table, 4 bits per slot, to the compute threads through the mailboxes after the slot count).
+
+TP4 B=32 after (prof_tp4_b32_skip.log, 43.39 ms profiled, 2829 programs): MoE 17.17 ms (gate|up 213 us / call = 2.2 us per
+union expert, down 128); the rest is the > 16-row glue fallbacks: message gates on the old GateKernel 5.67 ms (59 us per
+call), block mix unfused 4.52 (_mix: generic 3.80 + matmul 0.73), attention projections as ttnn.linear 2.25, SDPA 2.47,
+unpacked all_reduce_async (MoE + attention out) 1.46, reshape / rms_norm / typecast ~3. Next lever for 32 users: the
+fused glue at 17..32 rows (two 16-row groups per program, or the 16-row programs with a row offset into the slot state).
+
+Per application TP4 B=1 (profiled us): MoE gate|up 29.4 + route/duprow 5.4 + down+push 22.5 (floor 33); q|k|v 17.7, o+push
+16, SDPA 16.3; glue: pre 16.5, post 17.9, message gates 24.2 avg (multi 28 + mlp 20 on 24 apps), aprep / convs 10.4,
+agate 2.3. The glue is fixed-latency phases and rounds (zones_post / zones_gate2: 2-5 us each), and Inkling-specific math
+(block mix, 4 message gates, output convs) Ornith does not have; the AR exchange is already in the producer / consumer.
+Ornith-class glue (~18 us / application) is not reachable by program fusion alone. Not done: route inside gate|up at
+B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 columns).
+
+### Decode round 2026-11-27, part 2 (route-in, wide gates, bfp8 gate weights)
+
+| change | TP4 B=1 | TP4 B=8 | TP4 B=16 | TP4 B=32 | TP2 B=1 | TP2 B=16 | TP1 B=1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| b8acc359b6c (route-in) | 8.070 | 16.624 | 24.518 | 42.628 | 10.216 | 35.160 | 14.699 |
+| c69aa2f3c1c + ca997ccbe78 (gates at 17..32 rows, bfp8 gate weights) | 7.907 | 16.478 | 24.390 | 38.573 | 10.072 | 35.009 | 14.561 |
+
+(traced test_batched D=4, before / after interleaved in one session; TP2 B=8 25.016 -> 24.866.)
+
+* Gates at 17..32 rows (I2M_G2_WIDE): GateKernel2 as two 16-row halves (rows 16.. in faces 2 / 3, G2_ROW0) on two core
+  rectangles in one program; the three attention-side gates as two multi programs. B=32 gate time 5.67 -> 3.03 ms
+  (profiled). Bitwise per half (tools/g2wide_check.py); teacher-forced decode TP4 B=32 .9708 / .9958 / .0196 -> .9715 /
+  .9957 / .0144.
+* bfp8 Wd / Wf|Wg for the decode gates (I2M_G2_BFP8): -0.15 ms at B=1 on every die count; teacher-forced TP4 B=1 / 8
+  within noise (commit message). Numerics change, flagged.
+* Measured and dropped: the gate reader's phases issued at once under NOC trids (+3.9 us per gate: Wd shares bandwidth);
+  a GCB prefetch of the gate weights (traced bound with no weight reads -0.23 ms, bfp8 already takes ~0.165 of it); k / v
+  prefetch (bound -0.045 ms at TP4 B=1).
+* Served greedy texts at 8 concurrent vary run to run in one server with or without route-in (batch composition):
+  not a numerics change of route-in.
+* o_proj prefetch for 32-slot models on 4 dies (49e4f35308a): the p300x2 profile (32 slots) had it off for every batch
+  size; TP4 B=1 8.019 -> 7.903 ms with it.
+* Served p300x2 b8acc359b6c -> 49e4f35308a (bench_card 128:128): 1 user 113.3 -> 118.4 tok/s, 32 users total 592.1 ->
+  631.2 tok/s (TPOT 45.7 -> 42.3); real-text T=1 mean of 6 154.3 -> 155.8 (speculation noise).
+* I2M_POST_WIDE (default on; teacher-forced TP4 B=32 .9715 / .9957 / .0144 -> .9691 / .9956 / .0146, nll 1.7589 -> 1.7516): the post-attention program at 17..32 rows as two 16-row
+  programs (POST_ROW0); bitwise per half (tools/postwide_check.py); TP4 B=32 38.573 -> 38.183, B=24 36.989 -> 36.131.
+* Next for 17..32 rows: pre the same way (its Tail / q|k|v norm outputs), then the q|k|v prefetch above
+  16 rows (I2M_PF_ROWS) and the o prefetch for 32-slot models (I2M_PF_O_SLOTS: on p300x2 with 32 slots the o prefetch is
+  off for every batch size, the cap is 16 on several dies).
+
+### Decode round 2026-11-27, part 3 (device acceptance, pre at 17..32 rows)
+
+* Speculative acceptance on device (6482bb48cf9, I2M_DEV_ACCEPT, default on; tt/kernels/taccept.cpp, sampling.DeviceAccept
+  / accept_ref): HostSampler.spec's rule in integer arithmetic at the end of the verify trace; it writes the next
+  drafter's inputs and the next verify's accept row, so the next drafter is enqueued right after the verify. Bitwise vs
+  accept_ref (tests/test_accept_device.py, TP4 every die / TP1), exact in distribution (chi-square), acceptance and
+  streams identical to the host path (tools/acc_ab.py). Served spec pass (HOST_PROF, T=1): p300x2 14.90 -> 14.17 ms,
+  p300 19.49 -> 18.78, p150 29.47 -> 28.97. The pass is now device-bound (verify + drafter back to back): the next spec
+  lever is the drafter's ~2.5 ms (DECODE_PLAN item 3).
+* I2M_PRE_WIDE (default on): the pre-attention program at 17..32 rows as two 16-row programs (PRE_ROW0, as POST_WIDE);
+  bitwise per half (tools/prewide_check.py, NQ 1 / 3, tail, norm, bound). Traced: TP4 B=32 38.184 -> 37.635 (repeat
+  38.188 -> 37.631), B=24 36.141 -> 35.055; TP2 B=32 66.751 -> 66.237, B=24 57.405 -> 56.393. Teacher-forced TP4 B=32
+  .9691 / .9956 / .0146 / nll 1.7516 -> .9674 / .9944 / .0185 / 1.7552 (B=32 now on the <= 16-row path's fused numerics;
+  B=8 .9713 / .9950 / .0184).
+* bfp8 decode gate weights (ca997ccbe78) stay on pending review: I2M_G2_BFP8=0 restores the bf16 weights.
+
+### Decode round 2026-11-27, part 4 (drafter fusion, trace_prof at B=32)
+
+* Drafter fusion (42dbdce0d71, DRAFT_FUSE, default on; DRAFT_FUSE=0 restores): per layer one attention-prep program
+  (kernels/dsp_qkv.cpp: head split, q / k RMSNorm + RoPE with the rows gathered from the tables, K / V into the paged
+  caches, q in the SDPA layout; one q head per core, a KV group's rows assembled in its leader's L1), the SDPA output
+  unpack (dsp_ounpack.cpp), silu(g) u (dsp_swiglu.cpp), the residual width-sharded through the block, the traced
+  commit's k / v prep as one program, each Markov RNN step's ops after its matmul as one program (dsp_rnnpost.cpp).
+  162 -> 79 programs per drafter pass. Greedy drafts identical to the unfused drafter (48 / 48 anchors); acc_ab one die
+  greedy 1.681 -> 1.687 drafts kept per pass (8 / 9 prompts identical).
+
+| drafter d=3 sampled, traced (drafter_prof TRACED=1) | 1 die | TP2 | TP4 |
+|---|---:|---:|---:|
+| unfused (2ecc5630070) | 3.013 | 2.394 | 2.255 |
+| DRAFT_FUSE (42dbdce0d71) | 2.811 | 2.174 | 2.050 |
+| + head readers 2 on 2 / 4 dies | 2.811 | 2.128 | 1.889 |
+
+  Served spec pass (I2M_HOST_PROF T=1, median of 11 x 100-pass means, DRAFT_FUSE=0 / 1 from one tree): p300x2 14.14 ->
+  13.97 ms, p300 18.70 -> 18.61, p150 28.81 -> 28.69. Real-text T=1 mean of 6: 158.1 -> 172.3, 126.1 -> 131.5, 79.4 ->
+  83.0 tok/s (acceptance noise). Served greedy sequential texts identical on every profile.
+* Drafter LM-head slice with 2 readers per bank on 2 / 4 dies (DRAFT_HEAD_READERS default 2 there, 4 on one die;
+  placement only, bitwise): traced readers 1 / 2 / 3 / 4: one die 3.170 / 3.596 / 3.634 / 2.812 ms, TP2 2.342 / 2.128 /
+  2.507 / 2.174, TP4 1.997 / 1.889 / 1.894 / 2.050. Served spec pass (median of 11-12): p300x2 13.97 -> 13.89 ms, p300
+  18.59 -> 18.49.
+* Drafter one die after fusion (eager per-op, us): LM head rows 1..3 1159, Markov step programs 494, qkv / gate|up
+  DecodeLinear 401, o / down / k|v_ctx / rnn matmuls 373, SDPA 103, qkv prep 3 x 18 + commit prep 15, rest ~250. The
+  block's weights (~280 MB bfp8, ~0.8 ms incl. SDPA) are read on EVERY die (replicated): tensor-parallel block (heads /
+  MLP columns per die + 2 all-reduces per layer) is the next drafter lever on TP2 / TP4 (est. TP4 -0.5 ms per pass).
+  TP4 eager die 0: LM head slice 450 us (~270 GB/s), 3 vocab-merge all_gathers ~199 us.
+* Measured and dropped: o / down / k|v_ctx as DecodeLinear (one die 3.013 -> 3.044 / 3.119 / 3.006: the interleaved
+  matmul is faster at 8 rows); the whole Markov RNN step as one DecodeLinear-placed program (28.6 us / step, and its CBs,
+  x + 2 x 88 weight tiles, clash with the model's L1 buffers on one die: drafter-only tests do not see the model's L1 ->
+  gate new drafter programs with acc_ab or a served boot).
+* Overlapping the drafter with the verify: not built. The drafter needs the verify's bonus token and taps; only the
+  commit (~0.13 ms) is token-independent, and one command queue serializes programs (no concurrent core sets without a
+  sub-device split) -> bound < 0.5 ms per pass.
+* tools/trace_prof.py (85b7825beb0): traced programs in dispatch order (the prefetch stream runs concurrently on its own
+  sub-device) and TT_METAL_PROFILER_PROGRAM_SUPPORT_COUNT=4000 (the profiler kept 1000 programs per RISC: the B=32 replay
+  lost 155 of 1568). Budget below from the kernel column (FW includes in-kernel waits). TP4, 2ecc5630070 decode path,
+  profiled replay (csv ~/.cache/inkling2/tprof_r8_tp4_b{1,32}.csv, ~/inkling2-work/dec/an/budget.py):
+
+| TP4 kernel us per step | B=1 programs | B=1 us | B=32 programs | B=32 us |
+|---|---:|---:|---:|---:|
+| MoE (gate\|up, down, route, push) | 96 | 2055 | 432 | 19164 |
+| attention (q\|k\|v / o, SDPA, attn out, qkv prefetch) | 240 | 2216 | 720 | 8203 |
+| glue (pre / post / gates / messages / mix) | 167 | 3048 | 356 | 10225 |
+| LM head + sampling + step | 64 | 546 | 60 | 601 |
+| prefetch stream (concurrent) | 48 | 1082 | - | - |
+| total (replay span) | 615 | 8947 (9254) | 1568 | 38193 (39034) |
+
+  B=32 per application: MoE 399 us (gate|up 206, down 122, route 41), glue 213 (pre 71, post 65, gates 56), attention 171.
+
+### Decode round 2026-11-27, part 5 (tensor-parallel drafter, merge exchange, verify vs B1)
+
+* Tensor-parallel drafter block on 2 / 4 dies (DRAFT_TP, default 1 there; 0 = replicated block): die d holds query heads
+  / KV heads / MLP columns block d (its caches only its KV heads), o / down row-parallel + the packed decode all-reduce
+  (tt/ccl.py sites mixer / mlp, 8 rows), the commit's k / v_ctx column-parallel. Greedy drafts identical to the
+  replicated block (test_drafter_device 48 / 48 anchors, 144 / 144 tokens, TP4 and TP2; sampled zero-noise top-8 ids
+  identical on 16 / 48 (TP4), 19 / 48 (TP2): bf16 all-reduce order, max |top-8 logit diff| 0.32 / 0.57). acc_ab on the
+  mesh, greedy: TP4 2.045 -> 2.045 kept / pass (378 passes), TP2 2.405 -> 2.405 (338). T=1 at 9 prompts is noise (one run's
+  host vs device on the same drafter differ by 0.23). DrafterSnapshots save / restore per die checked
+  (tests/snap_tp_check.py, TP4: restored rows equal on every die).
+* Vocab-merge exchange inside the merge program (DRAFT_MX, default 1 with DRAFT_TP; kernels/dsp_merge.cpp DSP_X: fabric
+  multicast of the die's 2 K pairs into a per-step DRAM page + global semaphore, no all_gather; bitwise). A probe that
+  skipped the 3 all_gathers (DRAFT_NOGATHER=1, wrong tokens) bounded them at TP4 0.104 / TP2 0.058 ms; most of that is
+  die-skew sync the merge still waits out.
+
+| drafter d=3 sampled, traced (drafter_prof TRACED=1, x2 reps) | TP2 | TP4 |
+|---|---:|---:|
+| replicated block (b9a94771282) | 2.128 | 1.889 |
+| DRAFT_TP | 1.825 | 1.423 |
+| + DRAFT_MX | 1.815 | 1.410 |
+
+  Served spec pass (I2M_HOST_PROF T=1, median of 12-14 x 100-pass means, DRAFT_TP=0 vs default from one tree,
+  snap_dtp3): p300x2 13.80 -> 13.39 ms, p300 18.62 -> 18.22; p150 boots (28.68, one die: unchanged path). Greedy
+  sequential texts identical 10 / 10 on p300x2 and p300; prefix_serve (resume, turn 2, shared doc x4) correct.
+* Verify pass (4 rows of one slot) vs B=1, traced (tools/trace_prof.py VERIFY=4; csv ~/.cache/inkling2/tprof_v{4,0}_tp{4,2}.csv,
+  ~/inkling2-work/dec/an/sitediff.py): TP4 8.65 -> 12.07 ms span, TP2 11.89 -> 16.72; 615 -> 620 programs, every site the
+  same fused program (no unfused fallback at 4 rows). TP4 growth (kernel us): MoE +1537 (expert union of 4 rows), down
+  push +906 (the down's union bytes, see below), SDPA +263 (16.8 -> 22.3 us / application), post +252, pre +227, gates +163.
+* Verify pass, where the growth goes (2026-11-27 round 008; logs ~/inkling2-work/dlogs/{zv1,zv2,zs1,zp1,glp1,vp2}_*):
+  - MoE at 4 rows is at the DRAM floor per union expert. tools/zones_verify.py (traced replay, rows kernels' marks
+    QWEN35_MOE_ZONES=1, per die): fit vs union (D_WA chunk counts, ~19.3 experts per layer on this replay) gate|up
+    2.70-2.89 us / expert + 1.7-3.0, down 1.34-1.38 us / expert + 1.5-2.2; floor per die (TP4 bfp8 slice: 1.41 MB gate|up,
+    0.705 MB down per expert at 512 GB/s) 2.75 / 1.377: gate|up + down 83.3 us per layer vs floor 79.7 (96 %).
+  - down_push's growth is not skew: down compute (D_WU -> last D_WO) 12.7 us (B=1, 8 experts) -> 27.9 (v4), identical
+    on all 4 dies; AR tail (last D_WO -> program end) B=1 2.7-4.6 -> v4 3.1-5.8 us; arrival spread between dies 2.19 ->
+    3.12 us / layer (+45 us / pass; last die not stable: die 1 at B=1, die 3 (gate|up slope +7 %) at v4). Every die
+    streams the same union over all 8 banks: no balance lever.
+  - SDPA (tools/zones_sdpa.py R=4, one die TP4 shapes): kernel 14.0 -> 17.5 us; bias matmul per row (S_C_BIAS 1.0 ->
+    4.5) and the per-row Q placement (S_R_Q 0.6 -> 3.0). Dropped: the prefill row-pair bias tables on verify rows
+    (I2M_SDPA_VPAIR, bitwise on live rows): SDPA -0.6 us / application, but the concurrent o_proj prefetch program
+    (tt/prefetch.py:268) grew 472 -> 2203 us: traced verify TP4 12.09 -> 13.82 ms, TP2 16.76 -> 17.93 (not debugged;
+    check tool ~/inkling2-work/dec/attic/vpair_check.py).
+  - post +6.5 us / call: without the router round only +1.4 (tools/zones_post.py T=4 I2M_RED_K=8); with router + route
+    (tools/glz_timeline.py OP=post ROUTER=1 ROUTE=1): ~+1.6 earlier phases, +1.4 router gather (each core writes T x 2 ET
+    rows to T x ET roots), ~+2 the per-row route merge tail. Verify rows must stay bitwise to one-row decode (ROWX:
+    8 partials per group), so the packed reductions do not apply; no single piece is worth > ~70 us / pass.
+
 ## Next
 
+0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): the MoE (+2.4 ms incl. the down) is at its DRAM floor per
+   union expert; the rest is row scaling in latency chains (post router gather / route merge, SDPA bias, pre), each
+   <= ~0.1 ms reachable bitwise. Bigger lever is policy: a shorter verify (R = 3, d = 2) reads ~16 instead of ~19 union
+   experts (~-0.6 ms TP4, ~-5 % of the served pass); d = 3 TP4 acc_ab: greedy 2.045 kept / pass, T=1 1.02-1.17
+   (dlogs/d2_acc_d3_t{0,1}.log), so d = 2 would lose little at T=1 and more at greedy: about break-even. Not runnable
+   now: BatchedDecoder asserts B % verify == 0 (I2M_SPEC=2 -> R=3 with 4 slots; trace_prof VERIFY=3 too). Drafter: DECODE_PLAN items 6 / 7 / 9, DRAFT_FOLD_READERS sweep.
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
    gates, not fewer programs (merges measured neutral or slower once the ring is warm).
 2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not

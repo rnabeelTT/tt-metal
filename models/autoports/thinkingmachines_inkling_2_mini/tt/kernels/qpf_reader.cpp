@@ -94,7 +94,9 @@ void kernel_main() {
                         uint32_t src = (k0 * nb + col0 + c + j) * tile_bytes;
                         uint32_t dst = l1 + j * tile_bytes;
                         for (uint32_t k = 0; k < kb; ++k) {
+#ifndef QPF_KV_PROBE  // (probe only: no k / v weight reads, garbage weights: the bound of a k / v prefetch)
                             noc_async_read_one_packet_with_state_with_trid(base, src, dst, trid);
+#endif
                             src += nb * tile_bytes;
                             dst += g * tile_bytes;
                         }

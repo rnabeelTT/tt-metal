@@ -59,6 +59,13 @@ def row_groups(m):
 ACT_PAGE = 64 * 8  # one [8, 32] BF16 tile: every width's [Mp, 32] tile fits a page
 
 
+def rows_skip(groups, ep_experts=None):
+    """QWEN35_MOE_ROWS_SKIP=1 (> 1 row group, no EP): a union slot's row groups none of whose rows routed to its expert
+    are skipped: gate|up computes / writes no activation tiles for them, the down neither reads nor multiplies them
+    (both kernels derive the same per-slot group mask from the route table; the skipped tiles were exact zeros)."""
+    return groups > 1 and not ep_experts and os.environ.get("QWEN35_MOE_ROWS_SKIP", "0") == "1"
+
+
 def act_buffer(mesh_device, inter, num_experts, k, rows, subs=1):
     """The activations of a `rows`-row step (one [Mp, 32] tile per ACT_PAGE page: union slot, K tile, row group), L1
     interleaved: every down core reads all of it, which from DRAM cost more than the weights at 32 rows (2.7 MB x 64
@@ -549,6 +556,7 @@ class ExpertGateUpRows:
         kch = [("GU_KCH", str(self.kch))] if self.kch > 1 else []
         # QWEN35_MOE_ZONES=1: device-profiler points in the rows kernels (kernels/moe_zones.hpp)
         defines += [("MOE_ZONES", "1")] if os.environ.get("QWEN35_MOE_ZONES") == "1" else []
+        defines += [("MOE_ROWS_SKIP", "1")] if rows_skip(self.groups, self.ep_experts) else []
         semaphores = []
         if self.split:
             half = self.banks // 2
@@ -782,6 +790,7 @@ class ExpertDownRows:
         # QWEN35_MOE_DN_SLOT=1 (one row group): weight slots pushed and multiplied one by one as they land (bitwise)
         defines += [("DN_SLOT", "1")] if os.environ.get("QWEN35_MOE_DN_SLOT") == "1" and self.groups == 1 else []
         defines += [("MOE_ZONES", "1")] if os.environ.get("QWEN35_MOE_ZONES") == "1" else []
+        defines += [("MOE_ROWS_SKIP", "1")] if rows_skip(self.groups, self.ep_experts) else []
         if not self.shared:
             defines.append(("NO_SHARED", "1"))
         defines += _ep_defines(self.ep_experts)

@@ -48,6 +48,11 @@ REM = {int(v) for v in os.environ.get("I2M_MOE_REM", "2,4").split(",") if v.stri
 # I2M_MOE_REM_SPLIT (default 1): with REM where the old layout had two sub-shards (TP2: 384 + 256), the down as two K
 # chains packed to BF16 and added in its program: the two-program numerics
 REM_SPLIT = os.environ.get("I2M_MOE_REM_SPLIT", "1") == "1"
+# I2M_MOE_HALVES: 1: REM_SPLIT layouts (TP2) run 9..16 rows as two <= 8-row calls (bitwise the split-down numerics);
+# 0 (default with the row-group skip): one call (2 row groups, one down chain, the union read once): TP2 traced B=16
+# 46.673 -> 35.152 ms; served p300 16 users 300 -> 372 tok/s; not bitwise: teacher-forced decode TP2 B=16 x 736
+# .9694 / .9954 / .0161 -> .9686 / .9943 / .0195 (nll 1.7513 -> 1.7512)
+HALVES = os.environ.get("I2M_MOE_HALVES", "0" if os.environ.get("QWEN35_MOE_ROWS_SKIP", "0") == "1" else "1") == "1"
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -206,7 +211,11 @@ class FusedExperts:
         del w13, w2
         # I2M_MOE_ROWS_MAX: the widest decode batch through one fused call (32: every expert of the union read once;
         # 16: two calls above 16 rows)
-        self.rows_max = int(os.environ.get("I2M_MOE_ROWS_MAX", "16")) if rows_max is None else rows_max
+        # (default 32 with the row-group skip, QWEN35_MOE_ROWS_SKIP: 4 row groups per slot cost more than a second union
+        # read without it: 56.8 vs 53.5 ms at B = 32)
+        # measured on 4 dies; TP2 serves <= 16 rows and splits 9..16-row calls (REM_SPLIT halves)
+        rm = "32" if os.environ.get("QWEN35_MOE_ROWS_SKIP", "0") == "1" and moe.N == 4 else "16"
+        self.rows_max = int(os.environ.get("I2M_MOE_ROWS_MAX", rm)) if rows_max is None else rows_max
 
     def _logits(self, x):
         xf = ttnn.typecast(x, ttnn.float32)
@@ -224,7 +233,17 @@ class FusedExperts:
     def _halves(self, M):
         """The split down (REM_SPLIT) packs one row group's two chains: 9..16 rows as two calls of <= 8 (each row's
         sum runs over its own experts in the same order, so the halves are bitwise the whole call)."""
-        return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None
+        return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None and HALVES
+
+    def route_target(self, M):
+        """(table, bias, k) a producer program writes the routing of M decode rows into (post / gate2 POST_ROUTE), or
+        None where forward() would not read that table as is (the halves split)."""
+        if M > self.rows_max or self._halves(M) or (M == 1 and ROW1):
+            return None
+        op0 = self.subs[0][0]
+        if op0.bias is None:
+            return None
+        return op0.rows_ops(max(M, 2))[3].table, op0.bias, self.moe.k
 
     def forward(self, x, logits=None, dup=False, raw=False, push=None):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
@@ -259,10 +278,15 @@ class FusedExperts:
 
         op0 = self.subs[0][0]
         route, _, _, b0 = op0.rows_ops(m)
-        own = logits is None
-        logits = self._logits(xr) if own else logits
-        route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
-        ttnn.deallocate(logits)
+        from .post import Routed
+
+        if isinstance(logits, Routed):  # (routed by the producer program into this table: tt/kernels/post_route.hpp)
+            assert logits.table is b0.table
+        else:
+            own = logits is None
+            logits = self._logits(xr) if own else logits
+            route(logits, b0.table, bias=op0.bias)  # ONE routing per layer: every sub-shard reads this table
+            ttnn.deallocate(logits)
         acc = None
         for (op, ug, dn), (_, W) in zip(self.subs, self.widths):
             _, gu, dnop, b = op.rows_ops(m)

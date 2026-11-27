@@ -51,8 +51,12 @@ void kernel_main() {
     constexpr auto s_args = TensorAccessorArgs<r_args.next_compile_time_args_offset()>();  // states
     constexpr auto w_args = TensorAccessorArgs<s_args.next_compile_time_args_offset()>();  // taps, ones, sel, q, nw
     constexpr auto b_args = TensorAccessorArgs<w_args.next_compile_time_args_offset()>();  // blocks, logits
-    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src, dst); };
-    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src, dst); };
+#ifndef PRE_ROW0  // (16: rows 16 .. 16 + T - 1 of 32-row tensors, faces 2 / 3: tt/pre.py's 17..32-row halves)
+#define PRE_ROW0 0
+#endif
+    // (every row tensor read through rf / rb: token rows, states, logits, blocks and the 32-row replicated weights)
+    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src + PRE_ROW0 * 128, dst); };
+    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src + PRE_ROW0 * 64, dst); };
 
     const uint32_t c = (uint32_t)get_absolute_logical_y() * PRE_CX + (uint32_t)get_absolute_logical_x();
     const uint32_t t0 = c * PER;

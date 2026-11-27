@@ -13,7 +13,11 @@
 // them (the matmul in0 sender's scheme); every write is acknowledged before the kernel ends. (An all-to-all of the
 // partials, every core multicasting to every core, measured ~150 us per round: concurrent multicasts serialize.)
 //
-// common args: s0, s1, s2, resid, out, mcast x0, y0, x1, y1, zeros, logits, root t x, y (t < T)
+// common args: s0, s1, s2, resid, out, mcast x0, y0, x1, y1, zeros, logits, route table, route bias, root t x, y (t < T)
+//
+// POST_ROUTE = k (with the router round split, POST_RSPLIT): the MoE routing in this program (post_route.hpp), not
+// the logits: root (t, e) selects the top-k of its 32 experts (this BRISC the lower 16, the NCRISC the upper 16),
+// root (t, 0) merges the ET lists and writes row t's route record (qwen36 RouteRows' table; the same bits)
 
 #include <stdint.h>
 
@@ -24,6 +28,14 @@
 #define RED_ZDEFER 0
 #endif
 #include "glz.hpp"
+#ifndef POST_ROUTE
+#define POST_ROUTE 0
+#endif
+#if POST_ROUTE
+#define ROUTE_FAST 1
+#include "models/demos/blackhole/qwen36/tt/moe_decode/kernels/router_topk.hpp"
+#include "post_route.hpp"
+#endif
 
 // rows 0 .. T-1 of a TH x 32 CB tile (faces min(TH, 16) x 16) into a 32 x 32 tensor tile
 template <uint32_t T, uint32_t E, uint32_t TH>
@@ -68,7 +80,7 @@ void kernel_main() {
     const auto oo = TensorAccessor(o_args, ca(4), OUTB);
     const uint32_t mx0 = ca(5), my0 = ca(6), mx1 = ca(7), my1 = ca(8);
     const auto zz = TensorAccessor(z_args, ca(9), 2048);
-    auto rxy = [&](uint32_t t, uint32_t a) { return get_noc_addr(ca(11 + 2 * t), ca(12 + 2 * t), a); };
+    auto rxy = [&](uint32_t t, uint32_t a) { return get_noc_addr(ca(13 + 2 * t), ca(14 + 2 * t), a); };
     // root of row c (POST_PACK: core 0 reduces every row, red.hpp; never with the router round)
     const bool root = POST_PACK ? c == 0 : c < T;
     constexpr uint32_t TR = POST_PACK ? T : 1;
@@ -135,6 +147,11 @@ void kernel_main() {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
+#if POST_ROUTE
+        if (rr) {  // (the selection bias: Q23 int32 per expert, one DRAM page in bank 0)
+            noc_async_read(get_noc_addr_from_bank_id<true>(0, ca(12)), get_write_ptr(POST_CB_RS) + RS_C, RS_CBYTES);
+        }
+#endif
 #if !RED_ZDEFER
         noc_async_read_barrier();
 #endif
@@ -159,11 +176,14 @@ void kernel_main() {
         const uint32_t t = t0 + i;
         cb_wait_front(cb_so, 3);
         const uint32_t so = get_read_ptr(cb_so);
-        write_rows<T, 4, TH>(so, s0.get_noc_addr(t));  // (live rows only: the other rows are other slots' / padding)
-        write_rows<T, 4, TH>(so + FT, s1.get_noc_addr(t));
-        write_rows<T, 4, TH>(so + 2 * FT, s2.get_noc_addr(t));
+#ifndef POST_ROW0  // (16: rows 16.. in faces 2 / 3: tt/post.py's 17..32-row halves)
+#define POST_ROW0 0
+#endif
+        write_rows<T, 4, TH>(so, s0.get_noc_addr(t) + POST_ROW0 * 128);  // (live rows only: the other rows are other slots' / padding)
+        write_rows<T, 4, TH>(so + FT, s1.get_noc_addr(t) + POST_ROW0 * 128);
+        write_rows<T, 4, TH>(so + 2 * FT, s2.get_noc_addr(t) + POST_ROW0 * 128);
         cb_wait_front(cb_rout, 1);
-        write_rows<T, 4, TH>(get_read_ptr(cb_rout), ro.get_noc_addr(t));
+        write_rows<T, 4, TH>(get_read_ptr(cb_rout), ro.get_noc_addr(t) + POST_ROW0 * 128);
         noc_async_write_barrier();
         cb_pop_front(cb_so, 3);
         cb_pop_front(cb_rout, 1);
@@ -275,7 +295,7 @@ void kernel_main() {
 
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
-        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i));
+        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + POST_ROW0 * 32 * (OUTB / 1024));
 #if POST_DUP
         write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + 16 * (OUTB / 1024));
 #endif
@@ -307,8 +327,17 @@ void kernel_main() {
             cb_reserve_back(POST_CB_G3, parts * NQ);
             noc_semaphore_wait(sem(s_g), gcnt + C);
             cb_push_back(POST_CB_G3, parts * NQ);
-            const auto al = TensorAccessor(l_args, ca(10), F32);
             cb_wait_front(POST_CB_T3, 1);
+#if POST_ROUTE
+            {
+                constexpr auto t_args = TensorAccessorArgs<l_args.next_compile_time_args_offset()>();
+                const auto tab = TensorAccessor(t_args, ca(11), 64);
+                route_root<POST_ROUTE, ET, POST_DUP>(get_read_ptr(POST_CB_T3), FO, get_write_ptr(POST_CB_RS), re, rt_,
+                    sem(get_semaphore(5)), sem(get_semaphore(6)), sem(get_semaphore(7)), rxy(rt_ * ET, 0), tab,
+                    [&]() { cb_pop_front(POST_CB_T3, 1); });
+            }
+#else
+            const auto al = TensorAccessor(l_args, ca(10), F32);
             const uint64_t dl = al.get_noc_addr(re) + rt_ * 64;
             write_rows<1, 4, TH>(get_read_ptr(POST_CB_T3), dl);
 #if POST_DUP
@@ -316,6 +345,7 @@ void kernel_main() {
 #endif
             noc_async_write_barrier();
             cb_pop_front(POST_CB_T3, 1);
+#endif
         }
 #else
         send(get_read_ptr(POST_CB_P3), parts, get_write_ptr(POST_CB_G3), 1);
@@ -349,4 +379,9 @@ void kernel_main() {
     *sem(s_g) = 0;
     *sem(s_done) = 0;
     *sem(s_t) = 0;
+#if POST_ROUTE
+    *sem(get_semaphore(5)) = 0;
+    *sem(get_semaphore(6)) = 0;
+    *sem(get_semaphore(7)) = 0;
+#endif
 }

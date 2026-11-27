@@ -44,6 +44,10 @@ _DT = {"bf16": ttnn.bfloat16, "bfp8": ttnn.bfloat8_b, "bfp4": ttnn.bfloat4_b}
 ATTN_DT = _DT[os.environ.get("I2M_ATTN_DT", "bfp8")]  # attention projections (q|r|sink|gate, k, v, o)
 GATE_FUSED = os.environ.get("I2M_GATE_FUSED", "1") == "1"
 GATE2 = os.environ.get("I2M_GATE2", "1") == "1"  # the round-reduced gate on the post-attention rectangle (tt/gate.py GateKernel2)
+# the round-reduced gate at 17..32 rows too: two 16-row halves (rows 16.. in faces 2 / 3) on two core rectangles in one
+# program (tt/gate.py GateKernel2.halves / multi); I2M_G2_ROWS_MAX 16: the old GateKernel there
+G2_ROWS_MAX = int(os.environ.get("I2M_G2_ROWS_MAX", "32"))
+G2_BFP8 = os.environ.get("I2M_G2_BFP8", "1") == "1"  # (see MessageGate: bfp8 decode gate weights)
 GATE_KERNEL = os.environ.get("I2M_GATE_KERNEL", "1") == "1"  # fused message-gate tail (tt/gatet.py)
 RMS_SHARD = os.environ.get("I2M_RMS_SHARD", "1") == "1"  # one-row norms width-sharded on 8 cores
 # I2M_RMS_CAST (default 1): a one-row norm's input cast (bf16 -> fp32) inside its reshard (exact; one op fewer)
@@ -394,27 +398,37 @@ class MessageGate:
         self.wfg = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.float32)
         if GATE_FUSED:  # the one-program gate (tt/gate.py): bf16 forget / gain weights (the checkpoint's, exact)
             self.wfg_bf = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat16)
+        # decode GateKernel2 with bfp8 Wd / Wf|Wg (I2M_G2_BFP8; half the gate weight bytes; prefill keeps bf16): traced
+        # B=1 TP4 / TP2 / TP1 8.070 / 10.224 / 14.706 -> 7.905 / 10.074 / 14.561 ms; teacher-forced decode TP4 B=1 / 8
+        # .9699 / .9954 / .0166 -> .9708 / .9942 / .0167, .9694 / .9949 / .0193 -> .9713 / .9950 / .0184
+        self.wd2, self.wfg2 = self.wd, getattr(self, "wfg_bf", None)
+        if G2_BFP8 and GATE_FUSED:
+            self.wd2 = ops.up(d.T.reshape(1, 1, 2 * H, -1), ttnn.bfloat8_b)
+            self.wfg2 = ops.up(wfg.reshape(1, 1, d.shape[0], 2 * H), ttnn.bfloat8_b)
 
     def fused_args(self, h, m, nw_rows):
         """(h, m, wd, wf|wg, nw) for GateKernel2.multi, or None (not available here)."""
         o = self.ops
         hf, mf = _f32(h), _f32(m)
         if not (GATE2 and o.gate2k is not None and len(hf.shape) == 4 and int(hf.shape[1]) == 1
-                and int(hf.shape[-2]) <= 16):
+                and int(hf.shape[-2]) <= G2_ROWS_MAX):
             return None
-        return hf, mf, self.wd, self.wfg_bf, nw_rows
+        return hf, mf, self.wd2, self.wfg2, nw_rows
 
-    def fused_norm(self, h, m, nw_rows, router=None, dup=False):
+    def fused_norm(self, h, m, nw_rows, router=None, dup=False, route=None):
         """The gate + the following RMS norm (nw_rows: [1, 1, 32, H] fp32) in one program, with the router logits
         (router: bf16 hi / lo [1, 1, H, E]) -> (bf16 normed x, logits | None). None: not available here."""
         o = self.ops
         hf, mf = _f32(h), _f32(m)
         if not (GATE2 and o.gate2k is not None and len(hf.shape) == 4 and int(hf.shape[1]) == 1
-                and int(hf.shape[-2]) <= 16):
+                and int(hf.shape[-2]) <= G2_ROWS_MAX):
             return None
+        if int(hf.shape[-2]) > 16:  # (two 16-row halves on two rectangles: tt/gate.py GateKernel2.halves)
+            return o.gate2k.halves(hf, mf, self.wd2, self.wfg2, nw=nw_rows)
         if router is not None and int(hf.shape[-2]) > o.gate2k.ROUTER_ROWS:
             router = None
-        return o.gate2k(hf, mf, self.wd, self.wfg_bf, nw=nw_rows, router=router, dup=dup)
+        return o.gate2k(hf, mf, self.wd2, self.wfg2, nw=nw_rows, router=router, dup=dup,
+                        route=route if router is not None else None)
 
     def pf_ok(self, h):
         """the prefill gate path (I2M_PF_GATEF): rows > 32 in whole tiles"""
@@ -447,8 +461,10 @@ class MessageGate:
             out = o.gatepf(g, self.wfg_bf, hf, mf)
             ttnn.deallocate(g)
             return out
-        if GATE2 and o.gate2k is not None and int(hf.shape[-2]) <= 16 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
-            return o.gate2k(hf, mf, self.wd, self.wfg_bf)
+        if GATE2 and o.gate2k is not None and int(hf.shape[-2]) <= G2_ROWS_MAX and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
+            if int(hf.shape[-2]) > 16:
+                return o.gate2k.halves(hf, mf, self.wd2, self.wfg2)
+            return o.gate2k(hf, mf, self.wd2, self.wfg2)
         if GATE_FUSED and int(hf.shape[-2]) <= 32 and len(hf.shape) == 4 and int(hf.shape[1]) == 1:
             if o.gatefk is None:
                 from .gate import GateKernel

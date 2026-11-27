@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
+// (profiler: zone lines kept off pre_writer.cpp W_D 228's 16-bit source-location hash)
 //
 // Message gate, round-reduced (tt/gate.py GateKernel2), writer: the cross-core rounds (tt/post.py's scheme: a root per
 // row, core t: row t of the partials -> row c of root t's gather tiles; root t's totals (row 0) -> row t of core 0's,
@@ -10,7 +11,9 @@
 //   DUP (T = 1): row 0 of the output / logits also into row 1 (the MoE's two-row path).
 //   G2_MR (T > 1): rounds 1 / 2's hi / lo pair j of row t reduced by core 2 t + j (half the root matmuls each).
 //
-// common args: out, logits, mcast x0, y0, x1, y1, zeros, root t x, y (t < T)
+// common args: out, logits, mcast x0, y0, x1, y1, zeros, route table, route bias, root t x, y (t < T)
+//   G2_ROUTE = k (with G2_RSPLIT): the MoE routing here, not the logits (post_route.hpp; route table accessor after the
+//   zeros')
 
 #include <stdint.h>
 
@@ -21,6 +24,14 @@
 #define RED_ZDEFER 0
 #endif
 #include "glz.hpp"
+#ifndef G2_ROUTE
+#define G2_ROUTE 0
+#endif
+#if G2_ROUTE
+#define ROUTE_FAST 1
+#include "models/demos/blackhole/qwen36/tt/moe_decode/kernels/router_topk.hpp"
+#include "post_route.hpp"
+#endif
 
 // rows 0 .. T-1 of a TH x 32 CB tile (faces min(TH, 16) x 16) into a 32 x 32 tensor tile
 template <uint32_t T, uint32_t E, uint32_t TH>
@@ -69,7 +80,7 @@ void kernel_main() {
     const auto ao = TensorAccessor(o_args, ca(0), 1024 * OE);
     const uint32_t mx0 = ca(2), my0 = ca(3), mx1 = ca(4), my1 = ca(5);
     const auto zz = TensorAccessor(z_args, ca(6), 2048);
-    auto rxy = [&](uint32_t t, uint32_t a) { return get_noc_addr(ca(7 + 2 * t), ca(8 + 2 * t), a); };
+    auto rxy = [&](uint32_t t, uint32_t a) { return get_noc_addr(ca(9 + 2 * t), ca(10 + 2 * t), a); };
 
     const uint32_t s_ready = get_semaphore(0), s_go = get_semaphore(1), s_g = get_semaphore(2);
     const uint32_t s_done = get_semaphore(3), s_t = get_semaphore(4);
@@ -122,6 +133,11 @@ void kernel_main() {
         cb_reserve_back(cb_zero, 1);
         z = get_write_ptr(cb_zero);
         noc_async_read(zz.get_noc_addr(0), z, 2048);
+#if G2_ROUTE
+        if (rr) {  // (the selection bias)
+            noc_async_read(get_noc_addr_from_bank_id<true>(0, ca(8)), get_write_ptr(G2_CB_RS) + RS_C, RS_CBYTES);
+        }
+#endif
 #if !RED_ZDEFER
         noc_async_read_barrier();
 #endif
@@ -253,7 +269,10 @@ void kernel_main() {
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
         const uint32_t s = get_read_ptr(cb_out);
-        const uint64_t d = ao.get_noc_addr(t0 + i);
+#ifndef G2_ROW0
+#define G2_ROW0 0
+#endif
+        const uint64_t d = ao.get_noc_addr(t0 + i) + G2_ROW0 * 32 * OE;  // (G2_ROW0 16: faces 2 / 3)
         write_rows<T, OE, TH>(s, d);
         if constexpr (DUP) {
             write_rows<T, OE, TH>(s, d + 16 * OE);
@@ -284,8 +303,15 @@ void kernel_main() {
             cb_reserve_back(cb_gath, GT);
             noc_semaphore_wait(sem(s_g), gcnt + C);
             cb_push_back(cb_gath, GT);
-            const auto al = TensorAccessor(l_args, ca(1), F32);
             cb_wait_front(cb_tout, 1);
+#if G2_ROUTE
+            constexpr auto t_args = TensorAccessorArgs<z_args.next_compile_time_args_offset()>();
+            const auto tab = TensorAccessor(t_args, ca(7), 64);
+            route_root<G2_ROUTE, ET, DUP>(get_read_ptr(cb_tout), FO, get_write_ptr(G2_CB_RS), re, rt_, sem(get_semaphore(5)),
+                                          sem(get_semaphore(6)), sem(get_semaphore(7)), rxy(rt_ * ET, 0), tab,
+                                          [&]() { cb_pop_front(cb_tout, 1); });
+#else
+            const auto al = TensorAccessor(l_args, ca(1), F32);
             const uint64_t d = al.get_noc_addr(re) + rt_ * 64;
             write_rows<1, 4, TH>(get_read_ptr(cb_tout), d);
             if constexpr (DUP) {
@@ -293,6 +319,7 @@ void kernel_main() {
             }
             noc_async_write_barrier();
             cb_pop_front(cb_tout, 1);
+#endif
         }
         if (false) {
 #else
@@ -322,4 +349,9 @@ void kernel_main() {
     *sem(s_g) = 0;
     *sem(s_done) = 0;
     *sem(s_t) = 0;
+#if G2_ROUTE
+    *sem(get_semaphore(5)) = 0;
+    *sem(get_semaphore(6)) = 0;
+    *sem(get_semaphore(7)) = 0;
+#endif
 }

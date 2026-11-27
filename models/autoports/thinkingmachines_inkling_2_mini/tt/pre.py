@@ -34,6 +34,25 @@ class PreKernel:
 
     def __call__(self, x, blocks, logits, qrows, nws=None, tail=None, bound=False, out_mc=ttnn.L1_MEMORY_CONFIG,
                  rows=None):
+        """(17..32 rows: two programs, rows 0..15 then rows 16.. (PRE_ROW0: faces 2 / 3 of every row tensor), into the
+        same outputs)"""
+        from .ccl import PackedAR
+
+        TA = rows or int(x.shape[-2])
+        if TA <= 16:
+            return self._call(x, blocks, logits, qrows, nws, tail, bound, out_mc, rows)
+        assert tail is None or not isinstance(tail[0], PackedAR)
+        shape = ttnn.Shape([1, 1, TA, self.H])
+        alloc = lambda dt: ttnn.allocate_tensor_on_device(shape, dt, ttnn.TILE_LAYOUT, self.mesh, out_mc)  # noqa: E731
+        xo = alloc(ttnn.bfloat16) if tail is not None else x
+        xn = alloc(ttnn.float32) if bound else None
+        outs = [alloc(ttnn.bfloat16 if nws is not None else ttnn.float32) for _ in range(len(qrows))]
+        for half in (0, 1):
+            self._call(x, blocks, logits, qrows, nws, tail, bound, out_mc, TA, half=half, bufs=(xo, xn, outs))
+        return xo, xn, outs
+
+    def _call(self, x, blocks, logits, qrows, nws=None, tail=None, bound=False, out_mc=ttnn.L1_MEMORY_CONFIG,
+              rows=None, half=0, bufs=None):
         """x [1, 1, T, H] bf16 (the layer input) or, with tail = (mo, resid, conv), the previous application's MoE
         output (bf16) + residual (fp32) + its MoE-output BatchedConv; blocks n fp32 with logits [(tensor, first tile)]
         (NQ consecutive tiles each); qrows NQ query rows ([1, 1, 32, H] fp32); nws NQ norm weight rows (None: return
@@ -41,7 +60,9 @@ class PreKernel:
         from .ccl import PackedAR
 
         pk, PER = self.post, self.PER
-        T = rows or int(x.shape[-2])  # (rows: x may be a wider buffer whose first rows are live, e.g. the MoE's)
+        TA = rows or int(x.shape[-2])  # (rows: x may be a wider buffer whose first rows are live, e.g. the MoE's)
+        T = TA if TA <= 16 else (16 if half == 0 else TA - 16)
+        row0 = 16 * half if TA > 16 else 0
         packed = tail is not None and isinstance(tail[0], PackedAR)  # (mo: the packed all-reduce rows, in place)
         if packed:
             tail = (tail[0].t,) + tuple(tail[1:])
@@ -53,10 +74,13 @@ class PreKernel:
         NSEL, sel = pk.red(T, pack)
         shape = ttnn.Shape([1, 1, T, self.H])
         alloc = lambda dt: ttnn.allocate_tensor_on_device(shape, dt, ttnn.TILE_LAYOUT, self.mesh, out_mc)  # noqa: E731
-        xo = alloc(ttnn.bfloat16) if tail is not None else x
-        xn = alloc(ttnn.float32) if bound else None
         odt = ttnn.bfloat16 if norm else ttnn.float32
-        outs = [alloc(odt) for _ in range(NQ)]
+        if bufs is not None:
+            xo, xn, outs = bufs
+        else:
+            xo = alloc(ttnn.bfloat16) if tail is not None else x
+            xn = alloc(ttnn.float32) if bound else None
+            outs = [alloc(odt) for _ in range(NQ)]
         K1 = 1 + NQ
         # roots per row of rounds 1 / 2 (MR: one per hi / lo pair while T NP <= 16, the first 16 cores)
         np1, np2 = ((K1 if T * K1 <= 16 else 1), (NQ if T * NQ <= 16 else 1)) if "pre" in MR and T > 1 and not pack else (1, 1)
@@ -115,7 +139,7 @@ class PreKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("PRE_RK", str(red_k(T))), ("PRE_CX", str(CX)), ("PRE_ROWS", str(T)), ("PRE_IN_PACKED", str(int(packed))),
-                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("PRE_PACK", str(int(pack))), ("PRE_CSQ", str(int(csq)))] + sdefs + lgx.DEF
+                ("PRE_TH", str(th)), ("PRE_RD_STAGED", str(int(RD_STAGED))), ("PRE_NP1", str(np1)), ("PRE_NP2", str(np2)), ("RED_WS", str(int(WS))), ("RED_ZDEFER", str(int(ZDEFER))), ("PRE_PACK", str(int(pack))), ("PRE_CSQ", str(int(csq))), ("PRE_ROW0", str(row0))] + sdefs + lgx.DEF
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
@@ -135,7 +159,7 @@ class PreKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_pre", SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
+        key = ("i2m_pre", row0, SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, NQ, RD_STAGED, RN1, p1b, FUSE, csq, SOFT_BATCH, np1, np2, WS, ZDEFER, pack, tail is not None, norm, bound, self.H, CX, CY, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None,
                tuple(repr(t.memory_config()) for t in (mo, resid, states[0], taps[0], blocks[0], outs[0])))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

@@ -73,6 +73,12 @@ SPEC_MAX_LEN = int(os.environ.get("I2M_SPEC_MAX_LEN", "32768"))
 # per prompt token + 6.4 MB of sliding rings each)
 SPEC_DEBUG = os.environ.get("I2M_SPEC_DEBUG", "0") == "1"
 SPEC_DUMP = os.environ.get("I2M_SPEC_DUMP")  # (a path: every pass's verify / draft candidates, for offline study)
+# I2M_DEV_ACCEPT (default 1): a device_ok request's acceptance inside the verify trace (tt/sampling.DeviceAccept): the
+# next drafter is enqueued right after the verify, no host turn (dq_read + accept + next_draft) between them.
+# I2M_DEV_ACCEPT_CHECK=1: every device-accepted pass also run through tt/sampling.accept_ref on the host (asserts
+# bitwise; reads the candidates before the next drafter: slower)
+DEV_ACCEPT = os.environ.get("I2M_DEV_ACCEPT", "1") == "1"
+DEV_ACCEPT_CHECK = os.environ.get("I2M_DEV_ACCEPT_CHECK", "0") == "1"
 # I2M_SPEC_MIN: a request whose tokens per pass (running mean, over >= 16 passes) fall below this goes back to plain
 # decode for the rest of its generation. Default per die count: a served pass's time / a served plain token's
 # (one die 41.6 / 24.7, TP2 ~29 / 20.1, TP4 24.5 / 15.5)
@@ -270,6 +276,11 @@ class Inkling2ForCausalLM:
             self.dr = DSparkDrafter(mesh, model, max_len=min(max_seq_len, SPEC_MAX_LEN) + 64, d_max=SPEC)
             self.ver = BatchedDecoder(model, SPEC + 1, shared=self.dec, verify=SPEC + 1)
             self.vtr = TracedDecoder(self.ver)
+            self.dacc, self._dacc_mode = None, None
+            if DEV_ACCEPT:
+                from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import DeviceAccept
+
+                self.dacc = DeviceAccept(self.topk, self.dr, self.ver, SPEC + 1)
             self.dsnaps = None
             if self.store is not None and DR_SNAPS > 0:
                 from models.autoports.thinkingmachines_inkling_2_mini.tt.drafter import DrafterSnapshots
@@ -457,7 +468,7 @@ class Inkling2ForCausalLM:
                 R = SPEC + 1
                 self.ver.set_inputs(torch.zeros(R, dtype=torch.long), torch.full((R,), -1))
                 vout, vparts = vres
-                self.vtr.capture(compile=False, post=lambda lg: self.topk.device(lg, R, outs=vparts), out=vout)
+                self.vtr.capture(compile=False, post=lambda lg: self._vpost(lg, R, vparts), out=vout)
                 # (its taps buffer: the verify trace's taps output; sampled drafts: zero noise = greedy; the verify
                 # capture is the mesh's first, so its taps, allocated in it, are no other trace's intermediates)
                 self.dr.capture(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens, compile=False)
@@ -900,6 +911,9 @@ class Inkling2ForCausalLM:
         parts = self.topk.device(out, R)
         self.topk.host(parts)
         self.topk.device(out, R, outs=parts)
+        if self.dacc is not None:  # (mode 2 = off: compiled, writes nothing)
+            self._dacc_set(None)
+            self.dacc.device(parts)
         for j in range(1, R):  # leaving speculative decode from row j
             self.ver.move_row(j, 0)
         toks = [ttnn.reshape(t, (1, 1, 1, 1)) for t in self.dr.prev[:SPEC]]
@@ -907,6 +921,25 @@ class Inkling2ForCausalLM:
         self.dr.write_tokens(toks, self.ver.tokens)  # (the drafter trace's token hand-off)
         self.dr.precompile(self.ver.taps, SPEC, sample=True, out_tokens=self.ver.tokens)
         return out, parts
+
+    def _vpost(self, lg, R, vparts):
+        """the verify trace's tail: top-K candidates (+ the device acceptance)"""
+        parts = self.topk.device(lg, R, outs=vparts)
+        if self.dacc is not None:
+            self.dacc.device(parts)
+        return parts
+
+    def _dacc_set(self, prm):
+        """the acceptance kernel's parameters (None: off), written only when they change (off stays off)"""
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import accept_params
+
+        if prm is None:
+            if self._dacc_mode == 2:
+                return
+            prm = accept_params(0.0, 1.0, 0, [], [])
+            prm[0] = 2
+        self._dacc_mode = prm[0]
+        self.dacc.set(prm)
 
     def _dr_commit(self, taps, p0, valid):
         """A prefill chunk's taps [1, 4, T, H] (rows past `valid`: padding) into the drafter, <= 512 rows per call."""
@@ -953,25 +986,56 @@ class Inkling2ForCausalLM:
             drafts = None
             self.vtr.set_inputs(None, torch.arange(p, p + R))
         pf.mark("draft_inputs")
+        from models.autoports.thinkingmachines_inkling_2_mini.tt.sampling import accept_params, accept_ref, device_ok
+
+        temp = float(_param(sp, "temperature", r, 0.0))
+        J = self.ver.rows_ok - 1  # (the drafts whose verify rows are live: a pass stops at a K / V chunk boundary)
+        dev = self.dacc is not None and not SPEC_DUMP and device_ok(sp, r)
+        if dev:  # (top-k 1 = greedy whatever the temperature)
+            u = torch.randint(0, 1 << 31, (16,), generator=self.hs._gen(r, _param(sp, "seed", r, None)))
+            gt = 0.0 if int(_param(sp, "top_k", r, -1)) == 1 else temp
+            prm = accept_params(gt, self.hs.qt, J, u[:8].tolist(), u[8:].tolist())
+            self._dacc_set(prm)
+        elif self.dacc is not None:
+            self._dacc_set(None)
         self.vtr.step()
         pf.mark("v_enqueue")
-        idx, vals = self.topk.host(self.vtr.extra)
-        pf.mark("v_wait_read")
-        if drafts is None:
-            drafts = [int(x) for x in self.dr._host(self.ver.tokens).reshape(-1)[1:R]]
         q = None
-        if float(_param(sp, "temperature", r, 0.0)) > 0.0:
-            ci, cl = self.dr.cand_host(d)
-            q = [(ci[j], cl[j]) for j in range(d)]
-        pf.mark("dq_read")
-        J = self.ver.rows_ok - 1  # (the drafts whose verify rows are live: a pass stops at a K / V chunk boundary)
-        em, k = self.hs.spec(idx, vals, r, drafts[:J], sp, outs=_row(kwargs.get("output_tokens"), r),
-                             prompt=_row(kwargs.get("prompt_tokens"), r), q=q[:J] if q is not None else None)
-        pf.mark("accept")
-        self.ver.set_accept([k])
+        if dev:
+            if DEV_ACCEPT_CHECK:  # (the host's view, read before the next drafter overwrites its candidates)
+                idx, vals = self.topk.host(self.vtr.extra)
+                cq = self.dr.cand_host(d) if prm[0] == 1 else (None, None)
+            ev = self.dacc.read()
+            nxt = self.spec is s and p + 2 * SPEC + 3 < SPEC_MAX_LEN - 64
+            if nxt:  # the next pass's drafter, now (its anchor / commit count written by the acceptance kernel)
+                self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))
+                self.dr._write(self.dr.in_p0, [[int(p)]])
+                self.dr.replay()
+            em, k, toks = self.dacc.result(ev)
+            pf.mark("v_wait_read")
+            drafts = toks[1:R]
+            if DEV_ACCEPT_CHECK:
+                for die in range(1, self.N):  # (every die computed the same)
+                    assert self.dacc.result(None, die)[:2] == (em, k), die
+                ref = accept_ref(idx, vals, drafts[:J], prm, cq[0], cq[1], V=self.V, tab=self.dacc.tab_host)
+                assert ref == (em, k), (ref, em, k, prm[:4], drafts)
+            pf.mark("accept")
+        else:
+            idx, vals = self.topk.host(self.vtr.extra)
+            pf.mark("v_wait_read")
+            if drafts is None:
+                drafts = [int(x) for x in self.dr._host(self.ver.tokens).reshape(-1)[1:R]]
+            if temp > 0.0:
+                ci, cl = self.dr.cand_host(d)
+                q = [(ci[j], cl[j]) for j in range(d)]
+            pf.mark("dq_read")
+            em, k = self.hs.spec(idx, vals, r, drafts[:J], sp, outs=_row(kwargs.get("output_tokens"), r),
+                                 prompt=_row(kwargs.get("prompt_tokens"), r), q=q[:J] if q is not None else None)
+            pf.mark("accept")
+            self.ver.set_accept([k])
         if SPEC_DUMP and q is not None:  # (offline acceptance study: the target's candidates / the drafter's per step)
             self._dump.append({"idx": idx[: d + 1].clone(), "vals": vals[: d + 1].clone(), "drafts": list(drafts),
-                               "q": [(qi.clone(), ql.clone()) for qi, ql in q], "temp": float(_param(sp, "temperature", r, 0.0))})
+                               "q": [(qi.clone(), ql.clone()) for qi, ql in q], "temp": temp})
             if len(self._dump) % 50 == 0:
                 torch.save(self._dump, SPEC_DUMP)
         if SPEC_DEBUG:
@@ -984,7 +1048,10 @@ class Inkling2ForCausalLM:
             if TIMING:
                 logger.info(f"speculative decode off for this request: {s['nt'] / s['np']:.2f} tokens per pass")
             self._spec_exit(p + k + 1)
-        if self.spec is s and p + k + 1 + SPEC + 2 < SPEC_MAX_LEN - 64:  # the next pass's drafter, now
+        if dev:
+            if nxt and self.spec is s:
+                s["pre"] = (r, em[-1], (p, k + 1))
+        elif self.spec is s and p + k + 1 + SPEC + 2 < SPEC_MAX_LEN - 64:  # the next pass's drafter, now
             self.dr.set_gumbel(self.hs.gumbel(r, sp, d, 32))
             self.dr.set_inputs(em[-1], p, k + 1)
             self.dr.replay()
