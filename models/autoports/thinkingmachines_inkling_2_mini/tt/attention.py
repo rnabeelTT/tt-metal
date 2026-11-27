@@ -193,9 +193,65 @@ class AttnWeights:
             math_approx_mode=False, fp32_dest_acc_en=True, packer_l1_acc=True)
 
 
+# I2M_PF_PROJ_CFG (default 1): prefill rows (> 32) of the attention projections on an explicit 2D multicast config over
+# the whole grid (pf_progcfg) instead of ttnn's default (tools/bench_pfproj.py, one die, 2048 rows, us: TP4 q 240 -> 136,
+# k / v 99 -> 62, o 128 -> 73; TP2 q 395 -> 249, k / v 110 -> 65, o 215 -> 109)
+PF_PROJ_CFG = __import__("os").environ.get("I2M_PF_PROJ_CFG", "1") == "1"
+_PFCFG = {}
+
+
+PF_PROJ_WHICH = __import__("os").environ.get("I2M_PF_PROJ_WHICH", "qkvo")
+PF_PROJ_L1 = int(__import__("os").environ.get("I2M_PF_PROJ_L1", str(1100 << 10)))
+
+
+def pf_progcfg(grid, M, K, N, wbytes=1088, obytes=2048):
+    """2D multicast config for x [M, K] @ w [K, N] (M > 32): the grid shape with the fewest output tiles per core and no
+    idle core row / column, K blocks of up to 8 tiles, the largest output subblock (<= 4 tiles: fp32 DST). None when
+    its circular buffers (in0 / in1 double-buffered, the fp32 partials and the output) pass PF_PROJ_L1 bytes (TP1's
+    q: ttnn's default config then)."""
+    key = (grid.x, grid.y, M, K, N, wbytes, obytes)
+    if key not in _PFCFG:
+        Mt, Nt, Kt = -(-M // 32), -(-N // 32), K // 32
+        best = None
+        for gx in range(grid.x, 0, -1):
+            for gy in range(grid.y, 0, -1):
+                pm, pn = -(-Mt // gy), -(-Nt // gx)
+                if pn * gx - Nt >= pn or pm * gy - Mt >= pm:
+                    continue
+                c = (pm * pn, -(gx * gy))
+                if best is None or c < best[0]:
+                    best = (c, gx, gy, pm, pn)
+        _, gx, gy, pm, pn = best
+        bw = max(d for d in range(1, 9) if Kt % d == 0)
+        if 2 * pm * bw * 2048 + 2 * bw * pn * wbytes + pm * pn * (4096 + obytes) > PF_PROJ_L1:
+            _PFCFG[key] = None
+            return None
+        sbs = [(h, ww) for h in (1, 2, 4) for ww in (1, 2, 4) if h * ww <= 4 and pn % ww == 0 and pm % h == 0]
+        sh, sw = max(sbs, key=lambda s_: (s_[0] * s_[1], s_[1]))
+        _PFCFG[key] = ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
+            compute_with_storage_grid_size=(gx, gy), in0_block_w=bw, out_subblock_h=sh, out_subblock_w=sw,
+            per_core_M=pm, per_core_N=pn, transpose_mcast=False, fused_activation=None, fuse_batch=False)
+    return _PFCFG[key]
+
+
 def proj(w: "AttnWeights", which: str, x, dtype=None):
     """One attention projection (q | k | v | o) on x [1, 1, M, K] -> [1, 1, M, n(+pad)] in DRAM."""
     W = getattr(w, "w_" + which)
+    M = int(x.shape[-2])
+    if not w.dram_sharded and PF_PROJ_CFG and which in PF_PROJ_WHICH and M > 32 and int(x.shape[1]) == 1 \
+            and not x.is_sharded():
+        K, N = int(x.shape[-1]), int(W.shape[-1])
+        for b in (1, 2, 4):  # (b > 1: the rows as b batches of M / b, the weight broadcast: smaller per-core blocks)
+            if M % (32 * b):
+                break
+            cfg = pf_progcfg(w.mesh.compute_with_storage_grid_size(), M // b, K, N,
+                             wbytes={ttnn.bfloat8_b: 1088, ttnn.bfloat4_b: 576}.get(W.dtype, 2048),
+                             obytes=4096 if dtype == ttnn.float32 else 2048)
+            if cfg is not None:
+                kw = {} if dtype is None else {"dtype": dtype}
+                xb = x if b == 1 else ttnn.reshape(x, (1, b, M // b, K))
+                o = ttnn.linear(xb, W, compute_kernel_config=w.ckc, memory_config=DRAM, program_config=cfg, **kw)
+                return o if b == 1 else ttnn.reshape(o, (1, 1, M, N))
     if not w.dram_sharded:
         return dmm(x, W, w.ckc, dtype=dtype, memory_config=DRAM, linear=True)
     from models.demos.blackhole.qwen36.tt import tp_common as tpc
