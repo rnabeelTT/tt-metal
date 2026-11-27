@@ -80,6 +80,44 @@ void kernel_main() {
     ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, slots);
     ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, slots);
+#ifdef MOE_ROWS_SKIP
+    // per slot (index s: union slot S0 + s), the row groups with a routed row, as gur_writer.cpp: those tiles only
+    static_assert(groups <= 4, "MOE_ROWS_SKIP: 4 bits per slot");
+    uint32_t msk[(rows * topk * MOE_SUBS + 1 + 7) / 8 + 1];
+    for (uint32_t w = 0; w < sizeof(msk) / 4; ++w) {
+        msk[w] = 0;
+    }
+    {
+        const uint16_t* table = reinterpret_cast<const uint16_t*>(tab);
+        const uint32_t U = slots - 1 + S0;  // routed union slots 1 .. U
+        for (uint32_t r = 0; r < rows; ++r) {
+            if (S0 == 0) {
+                msk[0] |= 1u << (r / trows);  // the shared slot: every row
+            }
+            for (uint32_t j = 0; j < topk; ++j) {
+                const uint32_t e = table[32 * r + j] * MOE_SUBS;
+                uint32_t lo = 0, hi = U;
+                while (lo < hi) {
+                    const uint32_t mid = (lo + hi) / 2;
+                    if (uni[mid] < e) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                for (uint32_t v = 0; v < MOE_SUBS; ++v) {
+                    const uint32_t i = 1 + lo + v - S0;
+                    msk[i / 8] |= 1u << (4 * (i % 8) + r / trows);
+                }
+            }
+        }
+    }
+    for (uint32_t w = 0; w < (slots + 7) / 8; ++w) {
+        ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, msk[w]);
+        ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, msk[w]);
+        ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, msk[w]);
+    }
+#endif
 #ifdef EP_EXPERTS
     if (slots == 0) {  // none of the union on this die: zero partial rows
         for (uint32_t g = 0; g < groups; ++g) {
@@ -103,6 +141,11 @@ void kernel_main() {
         const uint32_t in0 = get_write_ptr(cb_in0);
         for (uint32_t g = 0; g < groups; ++g) {
             for (uint32_t s = s0; s < s0 + cs; ++s) {
+#ifdef MOE_ROWS_SKIP
+                if (!((msk[s / 8] >> (4 * (s % 8) + g)) & 1u)) {
+                    continue;  // (not multiplied: its L1 slot is left as it is)
+                }
+#endif
                 for (uint32_t k = 0; k < kt; ++k) {
                     noc_async_read(
                         s_act.get_noc_addr(((S0 + s) * kt + k) * groups + g), in0 + ((g * cs + s - s0) * kt + k) * tb, tb);

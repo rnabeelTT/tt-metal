@@ -206,7 +206,11 @@ class FusedExperts:
         del w13, w2
         # I2M_MOE_ROWS_MAX: the widest decode batch through one fused call (32: every expert of the union read once;
         # 16: two calls above 16 rows)
-        self.rows_max = int(os.environ.get("I2M_MOE_ROWS_MAX", "16")) if rows_max is None else rows_max
+        # (default 32 with the row-group skip, QWEN35_MOE_ROWS_SKIP: 4 row groups per slot cost more than a second union
+        # read without it: 56.8 vs 53.5 ms at B = 32)
+        # measured on 4 dies; TP2 serves <= 16 rows and splits 9..16-row calls (REM_SPLIT halves)
+        rm = "32" if os.environ.get("QWEN35_MOE_ROWS_SKIP", "0") == "1" and moe.N == 4 else "16"
+        self.rows_max = int(os.environ.get("I2M_MOE_ROWS_MAX", rm)) if rows_max is None else rows_max
 
     def _logits(self, x):
         xf = ttnn.typecast(x, ttnn.float32)

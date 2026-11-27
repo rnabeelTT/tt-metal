@@ -185,9 +185,24 @@ void kernel_main() {
     volatile tt_l1_ptr uint16_t* wt = reinterpret_cast<volatile tt_l1_ptr uint16_t*>(get_write_ptr(cb_wt));
     zero_l1(get_write_ptr(cb_wt), ((2 * mine * rows + 15) / 16) * 16);
     noc_async_read_barrier();
+#ifdef MOE_ROWS_SKIP
+#ifdef SPLIT_PAIR
+#error "MOE_ROWS_SKIP: not with SPLIT_PAIR"
+#endif
+    static_assert(groups <= 4, "MOE_ROWS_SKIP: 4 bits per slot");
+    // per slot of this core: the row groups with a routed row (bit g); the down kernel derives the same from the table
+    uint32_t msk[(rows * topk * MOE_SUBS + 1 + 7) / 8 + 1];
+    for (uint32_t w = 0; w < sizeof(msk) / 4; ++w) {
+        msk[w] = 0;
+    }
+#endif
     auto put = [&](uint32_t s, uint32_t r, uint32_t w) {
         if (s >= slot0 && (s - slot0) % step == 0) {
             wt[((s - slot0) / step) * rows + r] = static_cast<uint16_t>((w + 1) & 0xFFFE);  // srcB width, half up
+#ifdef MOE_ROWS_SKIP
+            const uint32_t i = (s - slot0) / step;
+            msk[i / 8] |= 1u << (4 * (i % 8) + r / trows);
+#endif
         }
     };
     for (uint32_t r = 0; r < rows; ++r) {
@@ -216,6 +231,17 @@ void kernel_main() {
         }
     }
 
+#ifdef MOE_ROWS_SKIP
+    for (uint32_t w = 0; w < (mine + 7) / 8; ++w) {  // (the compute threads read these right after the slot count)
+        ckernel::mailbox_write(ckernel::ThreadId::UnpackThreadId, msk[w]);
+        ckernel::mailbox_write(ckernel::ThreadId::MathThreadId, msk[w]);
+        ckernel::mailbox_write(ckernel::ThreadId::PackThreadId, msk[w]);
+    }
+    auto live = [&](uint32_t s, uint32_t g) { const uint32_t i = (s - slot0) / step; return (msk[i / 8] >> (4 * (i % 8) + g)) & 1u; };
+#else
+    auto live = [&](uint32_t s, uint32_t g) { (void)s; (void)g; return 1u; };
+#endif
+
 #if defined(SPLIT_PAIR) && defined(ROLE_GATE)
     const uint32_t ring_base = get_write_ptr(cb_sc);  // cb_sc's start: the partner's ring sits at the same address
     volatile tt_l1_ptr uint32_t* credit = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(get_semaphore(0));
@@ -237,6 +263,9 @@ void kernel_main() {
 #else
     auto drain = [&](uint32_t s) {
         for (uint32_t g = 0; g < groups; ++g) {
+            if (!live(s, g)) {
+                continue;  // (MOE_ROWS_SKIP: no tiles computed, none read by the down)
+            }
             cb_wait_front(cb_act, np);
             for (uint32_t p = 0; p < np; ++p) {
 #ifdef GU_REM
