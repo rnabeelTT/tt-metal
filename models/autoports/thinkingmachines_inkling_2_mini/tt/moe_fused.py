@@ -48,6 +48,11 @@ REM = {int(v) for v in os.environ.get("I2M_MOE_REM", "2,4").split(",") if v.stri
 # I2M_MOE_REM_SPLIT (default 1): with REM where the old layout had two sub-shards (TP2: 384 + 256), the down as two K
 # chains packed to BF16 and added in its program: the two-program numerics
 REM_SPLIT = os.environ.get("I2M_MOE_REM_SPLIT", "1") == "1"
+# I2M_MOE_HALVES: 1: REM_SPLIT layouts (TP2) run 9..16 rows as two <= 8-row calls (bitwise the split-down numerics);
+# 0 (default with the row-group skip): one call (2 row groups, one down chain, the union read once): TP2 traced B=16
+# 46.673 -> 35.152 ms; served p300 16 users 300 -> 372 tok/s; not bitwise: teacher-forced decode TP2 B=16 x 736
+# .9694 / .9954 / .0161 -> .9686 / .9943 / .0195 (nll 1.7513 -> 1.7512)
+HALVES = os.environ.get("I2M_MOE_HALVES", "0" if os.environ.get("QWEN35_MOE_ROWS_SKIP", "0") == "1" else "1") == "1"
 if os.environ.get("I2M_MOE_SUBS1"):
     SUBS[1] = [(int(w), int(w)) for w in os.environ["I2M_MOE_SUBS1"].split(",")]
 
@@ -228,7 +233,7 @@ class FusedExperts:
     def _halves(self, M):
         """The split down (REM_SPLIT) packs one row group's two chains: 9..16 rows as two calls of <= 8 (each row's
         sum runs over its own experts in the same order, so the halves are bitwise the whole call)."""
-        return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None
+        return M > 8 and getattr(self.subs[0][0], "down_split", None) is not None and HALVES
 
     def forward(self, x, logits=None, dup=False, raw=False, push=None):
         """x [1, 1, M, H] bf16 (normed), M <= rows_max (3 down readers per bank: 16 rows; wider batches stay on
