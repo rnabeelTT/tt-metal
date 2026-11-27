@@ -11,6 +11,7 @@ prints markdown table rows: | in | out | users | N | TTFT ms | TPOT ms | decode 
 
 import concurrent.futures as cf
 import json
+import os
 import random
 import sys
 import time
@@ -20,7 +21,7 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 DEFAULT = ("128:128:1,1024:256:1,4096:256:1,16384:256:1,128:128:2,128:128:4,128:128:8,128:128:16,128:128:32,"
            "1024:256:2,1024:256:4,1024:256:8,1024:256:16,1024:256:32")
 CASES = [tuple(int(v) for v in c.split(":")) for c in (sys.argv[2] if len(sys.argv) > 2 else DEFAULT).split(",")]
-PER_USER = 2
+PER_USER = int(os.environ.get("PER_USER", "2"))  # (requests per user per case: N)
 SALT = time.time_ns()
 MODEL = "inkling-2-mini"
 
