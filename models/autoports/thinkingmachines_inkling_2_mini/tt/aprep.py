@@ -33,6 +33,13 @@ LEAN = __import__("os").environ.get("I2M_APREP_LEAN", "1") == "1"
 PCACHE = __import__("os").environ.get("I2M_PCACHE", "1") == "1"  # (see tt/gmm.py)
 from .post import SFPU_ROWS  # noqa: E402
 
+# I2M_APREP_NAT (default 1): a prefill chunk's prep on the projections' own layout (tt/kernels/aprep_nat_*.cpp): units
+# (tile row, head group | k / v head | sink) read whole tiles and run the per-row math on 32 tokens at once (the per-row
+# units read each head row in 64-byte pieces and computed NH of 32 tile rows); the writer scatters the rows into the
+# SDPA's per-row q / r / sink tiles (rows < NH) and writes the K / V fill tiles whole. Outputs bitwise unchanged
+NAT = __import__("os").environ.get("I2M_APREP_NAT", "1") == "1"
+NAT_HG = int(__import__("os").environ.get("I2M_APREP_NAT_HG", "2"))  # (heads per q / r unit, even)
+
 
 def _bits(x: float) -> int:
     return struct.unpack("<I", struct.pack("<f", float(x)))[0]
@@ -62,6 +69,8 @@ class AttnPrep:
         the paged bf16 caches here (no k / v outputs: None). fill = (k_cache, v_cache, fill table int32 [1, B / 64]):
         a prefill chunk's rows written into the caches (row b -> block fill[b / 64], row b % 64)."""
         w, B, HT, mesh = self.w, self.B, self.HT, self.mesh
+        if NAT and fill is not None and B > 32 and B % 32 == 0 and w.DR in (16, 32):
+            return self._nat(pq, k, v, tau, fill)
         L1 = ttnn.L1_MEMORY_CONFIG
         kf = vf = None
         if fill is not None:  # (the rows go to L1 [1, NKV, T, HD] tensors; paged_fill_cache moves them below)
@@ -219,3 +228,85 @@ class AttnPrep:
                 ttnn.deallocate(v_o)
             return q_o, r_o, None, None, s_o
         return q_o, r_o, k_o, v_o, s_o
+
+    def _nat(self, pq, k, v, tau, fill):
+        """the prefill prep on whole tiles (NAT): -> (q, rq, None, None, sink); the K / V rows into the caches"""
+        w, T, HT, mesh = self.w, self.B, self.HT, self.mesh
+        L1, DRAM = ttnn.L1_MEMORY_CONFIG, ttnn.DRAM_MEMORY_CONFIG
+        mk = lambda: ttnn.allocate_tensor_on_device(ttnn.Shape([1, w.NKV, T, w.HD]), ttnn.bfloat16,  # noqa: E731
+                                                    ttnn.TILE_LAYOUT, mesh, L1)
+        kf, vf = mk(), mk()
+        al = lambda shape: ttnn.allocate_tensor_on_device(ttnn.Shape(shape), ttnn.bfloat16,  # noqa: E731
+                                                           ttnn.TILE_LAYOUT, mesh, DRAM)
+        q_o, r_o, s_o = al([1, T, w.NH, w.HD]), al([1, T, w.NH, 32]), al([1, T, w.NH, 32])
+        glob = not w.sliding
+        tau_t = tau if glob else pq
+        key = ("nat", T, glob, repr(pq.memory_config()), repr(k.memory_config()), repr(tau_t.memory_config()),
+               tuple(pq.shape), tuple(k.shape), repr(kf.memory_config()))
+        hit = self._pc.get(key)
+        if hit is None:
+            hit = self._pc[key] = self._nat_desc(pq, k, tau_t, q_o, r_o, kf, T, glob)
+        rd, wr, cp, cbs, h = hit
+        rd.common_runtime_args = [pq.buffer_address(), k.buffer_address(), v.buffer_address(), tau_t.buffer_address()]
+        wr.common_runtime_args = [q_o.buffer_address(), r_o.buffer_address(), s_o.buffer_address(),
+                                  kf.buffer_address(), vf.buffer_address()]
+        prog = ttnn.ProgramDescriptor(kernels=[rd, wr, cp], semaphores=[], cbs=cbs)
+        prog.custom_program_hash = h
+        io, seen = [], set()
+        for t in [pq, k, v, tau_t, q_o, r_o, s_o, kf, vf]:
+            if id(t) not in seen:
+                seen.add(id(t))
+                io.append(t)
+        ttnn.generic_op(io, prog)
+        for cache, t in ((fill[0], kf), (fill[1], vf)):
+            ttnn.experimental.paged_fill_cache(cache, t, fill[2], batch_idx=0)
+            ttnn.deallocate(t)
+        return q_o, r_o, None, None, s_o
+
+    def _nat_desc(self, pq, k, tau_t, q_o, r_o, kf, T, glob):
+        w, HT, mesh = self.w, self.HT, self.mesh
+        grid = mesh.compute_with_storage_grid_size()
+        ng, h = 0, 0
+        while h < w.NH:
+            h = min(h + NAT_HG, (h // 16 + 1) * 16, w.NH)
+            ng += 1
+        nu = 2 * ng + 2 * w.NKV + 1
+        total = (T // 32) * nu
+        nc = min(total, grid.x * grid.y)
+        cores = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(nc)]
+        crs = _range_set(cores)
+        cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out, cb_st, cb_out1, cb_x1 = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+        f32, bf = ttnn.float32, ttnn.bfloat16
+        tok = max(HT * 2 * 8 * 32, BF)  # (aprep_nat_writer.cpp: staging bytes per token)
+        cbs = [_cb(crs, cb_xf, f32, F32, 2 * HT), _cb(crs, cb_xb, bf, BF, 2 * HT), _cb(crs, cb_tau, f32, F32, 2),
+               _cb(crs, cb_ones, bf, BF, 1), _cb(crs, cb_sq, f32, F32, 2 * HT), _cb(crs, cb_f, f32, F32, 2),
+               _cb(crs, cb_out, bf, BF, 2 * HT), _cb(crs, cb_st, bf, tok, 32), _cb(crs, cb_out1, bf, BF, 2),
+               _cb(crs, cb_x1, f32, F32, 2)]
+        R0, S0 = w.qd // 32, (w.qd + w.rd) // 32
+        rd_ct = [cb_xf, cb_xb, cb_tau, HT, w.DR, R0, S0, int(glob), int(pq.shape[-1]) // 32, int(k.shape[-1]) // 32, cb_x1] \
+            + ttnn.TensorAccessorArgs(pq).get_compile_time_args() + ttnn.TensorAccessorArgs(k).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(tau_t).get_compile_time_args()
+        cp_ct = [cb_xf, cb_xb, cb_tau, cb_ones, cb_sq, cb_f, cb_out, HT, int(glob), _bits(w.qk_clip),
+                 _bits(w.rel_clip), _bits(1.0 / w.HD), _bits(w.eps), _bits(1.0 / w.scale), cb_out1, cb_x1]
+        wr_ct = [cb_out, cb_st, HT, T // 32, cb_out1] + ttnn.TensorAccessorArgs(q_o).get_compile_time_args() \
+            + ttnn.TensorAccessorArgs(r_o).get_compile_time_args() + ttnn.TensorAccessorArgs(kf).get_compile_time_args()
+        rt = [[i, nc, total] for i in range(nc)]
+        u2d = [ttnn.UnpackToDestMode.Default] * 64
+        for i in (cb_xf, cb_f, cb_tau, cb_x1):
+            u2d[i] = ttnn.UnpackToDestMode.UnpackToDestFp32
+        cfg = ttnn.ComputeConfigDescriptor(math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True,
+                                           dst_full_sync_en=True, math_approx_mode=False)
+        cfg.unpack_to_dest_mode = u2d
+        defs = [("NAT_NH", str(w.NH)), ("NAT_NKV", str(w.NKV)), ("NAT_HG", str(NAT_HG))]
+        dm = lambda src, ct, riscv, noc: ttnn.KernelDescriptor(  # noqa: E731
+            kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct, runtime_args=_rt(cores, rt),
+            defines=defs, config=ttnn.DataMovementConfigDescriptor(processor=riscv, noc=noc))
+        rd = dm("aprep_nat_reader.cpp", rd_ct, ttnn.DataMovementProcessor.RISCV_1, ttnn.NOC.NOC_0)
+        wr = dm("aprep_nat_writer.cpp", wr_ct, ttnn.DataMovementProcessor.RISCV_0, ttnn.NOC.NOC_1)
+        cp = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, "aprep_nat_compute.cpp"), core_ranges=crs,
+                                   compile_time_args=cp_ct, runtime_args=_rt(cores, rt), config=cfg, defines=defs)
+        key = ("i2m_aprep_nat", NAT_HG, T, nc, w.NH, w.NKV, w.HD, w.DR, glob, w.qk_clip, w.rel_clip, w.eps, w.scale,
+               tuple(pq.shape), tuple(k.shape), repr(pq.memory_config()), repr(k.memory_config()),
+               repr(tau_t.memory_config()), repr(kf.memory_config()))
+        hh = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
+        return rd, wr, cp, cbs, hh

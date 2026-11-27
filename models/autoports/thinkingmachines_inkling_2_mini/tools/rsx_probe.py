@@ -64,9 +64,10 @@ def main():
             res.append(out)
         return res
 
-    setattr(M, sw, False)
+    OFF, ON = (False, True) if isinstance(getattr(M, sw), bool) else ("0", "1")
+    setattr(M, sw, OFF)
     ref = [run(i) for i in range(len(cases))]
-    setattr(M, sw, True)
+    setattr(M, sw, ON)
     got = [run(i) for i in range(len(cases))]
     bit = True
     for i, (a_, b_) in enumerate(zip(ref, got)):
@@ -86,7 +87,7 @@ def main():
     reps = int(os.environ.get("REPS", "5"))
     for T in Ts:
         x = torch.randint(1000, 100000, (T,), generator=g)
-        for on in (False, True):
+        for on in (OFF, ON):
             setattr(M, sw, on)
             ws = []
             for _ in range(reps + 1):

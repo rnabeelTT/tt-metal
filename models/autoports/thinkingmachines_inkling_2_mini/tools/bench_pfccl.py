@@ -70,6 +70,27 @@ def main():
                              memory_config=DRAM, mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=2))
         bench(f"T={T} all_gather of T/N rows", lambda: ttnn.all_gather(xl, 2, cluster_axis=1, memory_config=DRAM,
                                                                       topology=ttnn.Topology.Linear))
+        grid = mesh.compute_with_storage_grid_size()
+        crs = ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(grid.x - 1, grid.y - 1))})
+        sems = [[ttnn.create_global_semaphore(mesh, crs, 0) for _ in range(2)] for _ in range(2)]
+        bars = [ttnn.create_global_semaphore(mesh, crs, 0) for _ in range(2)]
+        cyc = [0]
+
+        def aga(lk, wpl, cps, nb=2):
+            i = cyc[0] = (cyc[0] + 1) % 2
+            return ttnn.experimental.all_gather_async(
+                xl, persistent_output_buffer=None, dim=2, multi_device_global_semaphore=sems[i], num_links=lk,
+                cluster_axis=1, topology=ttnn.Topology.Linear, memory_config=DRAM, barrier_semaphore=bars[i],
+                chunks_per_sync=cps, num_workers_per_link=wpl, num_buffers_per_channel=nb)
+        for lk, wpl, cps in ((1, 2, 10), (2, 2, 10), (2, 4, 10), (2, 1, 10), (2, 2, 20)):
+            try:
+                g = bench(f"T={T} all_gather_async links={lk} workers={wpl} cps={cps}", lambda: aga(lk, wpl, cps))
+                ref = ttnn.to_torch(ttnn.get_device_tensors(ttnn.all_gather(
+                    xl, 2, cluster_axis=1, memory_config=DRAM, topology=ttnn.Topology.Linear))[0])
+                print(f"   equal to all_gather: {torch.equal(ttnn.to_torch(ttnn.get_device_tensors(g)[0]), ref)}",
+                      flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"all_gather_async {lk} {wpl}: {type(e).__name__}: {str(e)[:300]}", flush=True)
         try:
             bench(f"T={T} all_gather of T/N rows links=2", lambda: ttnn.all_gather(
                 xl, 2, cluster_axis=1, memory_config=DRAM, topology=ttnn.Topology.Linear, num_links=2))
