@@ -47,6 +47,7 @@ OPF_H32 = os.environ.get("I2M_OPF_H32", "0") == "1"
 
 
 RCB = 31
+KV_PROBE = os.environ.get("I2M_PF_KVPROBE", "0") == "1"  # (probe only: q|k|v without the k / v weight reads)
 
 
 def dram_banks():
@@ -226,7 +227,7 @@ class GcbQKV:
             assert not ack or self.ring_blocks == self.nqb, "credits from the writer need the whole q in the ring"
             kernels += [
                 ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_reader.cpp"), core_ranges=cores, compile_time_args=rd_ct + [ack],
-                                      runtime_args=rt_for(rd, cores),
+                                      runtime_args=rt_for(rd, cores), defines=[("QPF_KV_PROBE", "1")] if KV_PROBE else [],
                                       config=dm(processor=ttnn.DataMovementProcessor.RISCV_1, noc=rnoc)),
                 ttnn.KernelDescriptor(kernel_source=str(KDIR / "qpf_writer.cpp"), core_ranges=cores, compile_time_args=wr_ct + [ack, RCB, 1 if drain else 0, 4096],
                                       runtime_args=rt_for(wr, cores),

@@ -30,6 +30,16 @@ inline void read_rows(uint64_t src, uint32_t dst) {
     noc_async_read(src + FACE, dst + (TH < 16 ? TH : 16) * 16 * E, T * 16 * E);
 }
 
+#ifndef G2_NOWT  // (probe only, garbage numerics: no Wd / Wfg / router reads: the bound of resident gate weights)
+#define G2_NOWT 0
+#endif
+#ifndef G2_ROW0  // (16: rows 16 .. 16 + T - 1 of a 32-row tensor, in faces 2 / 3: tt/gate.py GateKernel2.halves)
+#define G2_ROW0 0
+#endif
+#ifndef G2_WB  // (Wd / Wfg tile bytes: 2048 bf16, 1088 bfp8)
+#define G2_WB 2048
+#endif
+
 void kernel_main() {
     constexpr uint32_t cb_h = get_compile_time_arg_val(0);
     constexpr uint32_t cb_m = get_compile_time_arg_val(1);
@@ -63,8 +73,9 @@ void kernel_main() {
     const uint32_t t0 = c * PER;
     const auto ah = TensorAccessor(x_args, ca(0), F32);
     const auto am = TensorAccessor(m_args, ca(1), F32);
-    const auto awd = TensorAccessor(w_args, ca(2), BF);
-    const auto awfg = TensorAccessor(w_args, ca(3), BF);
+    constexpr uint32_t WB = G2_WB;
+    const auto awd = TensorAccessor(w_args, ca(2), WB);
+    const auto awfg = TensorAccessor(w_args, ca(3), WB);
     const auto aones = TensorAccessor(w_args, ca(4), BF);
     const auto asel = TensorAccessor(w_args, ca(5), BF);
 
@@ -72,8 +83,8 @@ void kernel_main() {
     cb_reserve_back(cb_h, PER);
     cb_reserve_back(cb_m, PER);
     for (uint32_t t = 0; t < PER; ++t) {
-        read_rows<T, 4, TH>(ah.get_noc_addr(t0 + t), get_write_ptr(cb_h) + t * FT);
-        read_rows<T, 4, TH>(am.get_noc_addr(t0 + t), get_write_ptr(cb_m) + t * FT);
+        read_rows<T, 4, TH>(ah.get_noc_addr(t0 + t) + G2_ROW0 * 128, get_write_ptr(cb_h) + t * FT);
+        read_rows<T, 4, TH>(am.get_noc_addr(t0 + t) + G2_ROW0 * 128, get_write_ptr(cb_m) + t * FT);
     }
     cb_reserve_back(cb_ones, 1);
     if constexpr (LOCAL_ONES) {  // (the bf16 ones tile written here: ~90 cores reading one DRAM page is a hotspot)
@@ -101,8 +112,8 @@ void kernel_main() {
     const uint32_t w = get_write_ptr(cb_wd);
     for (uint32_t half = 0; half < 2; ++half) {
         for (uint32_t t = 0; t < PER; ++t) {
-            for (uint32_t n = 0; n < R; ++n) {
-                noc_async_read(awd.get_noc_addr((half * HT + t0 + t) * R + n), w + ((half * PER + t) * R + n) * BF, BF);
+            for (uint32_t n = 0; n < R && !G2_NOWT; ++n) {
+                noc_async_read(awd.get_noc_addr((half * HT + t0 + t) * R + n), w + ((half * PER + t) * R + n) * WB, WB);
             }
         }
     }
@@ -112,10 +123,10 @@ void kernel_main() {
     cb_push_back(cb_wd, 2 * PER * R);
     cb_reserve_back(cb_wf, R * PER);
     cb_reserve_back(cb_wg, R * PER);
-    for (uint32_t k = 0; k < R; ++k) {
+    for (uint32_t k = 0; k < R && !G2_NOWT; ++k) {
         for (uint32_t t = 0; t < PER; ++t) {
-            noc_async_read(awfg.get_noc_addr(k * 2 * HT + t0 + t), get_write_ptr(cb_wf) + (k * PER + t) * BF, BF);
-            noc_async_read(awfg.get_noc_addr(k * 2 * HT + HT + t0 + t), get_write_ptr(cb_wg) + (k * PER + t) * BF, BF);
+            noc_async_read(awfg.get_noc_addr(k * 2 * HT + t0 + t), get_write_ptr(cb_wf) + (k * PER + t) * WB, WB);
+            noc_async_read(awfg.get_noc_addr(k * 2 * HT + HT + t0 + t), get_write_ptr(cb_wg) + (k * PER + t) * WB, WB);
         }
     }
     noc_async_read_barrier();
@@ -135,7 +146,7 @@ void kernel_main() {
     if constexpr (ROUTER) {
         cb_reserve_back(cb_rw, 2 * PER * ET);
         const uint32_t rw = get_write_ptr(cb_rw);
-        for (uint32_t half = 0; half < 2; ++half) {
+        for (uint32_t half = 0; half < 2 && !G2_NOWT; ++half) {
             const auto ar = TensorAccessor(w_args, ca(7 + half), BF);
             for (uint32_t t = 0; t < PER; ++t) {
                 for (uint32_t e = 0; e < ET; ++e) {

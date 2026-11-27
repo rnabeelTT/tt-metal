@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 // SPDX-License-Identifier: Apache-2.0
+// (profiler: zone lines kept off pre_writer.cpp W_D 228's 16-bit source-location hash)
 //
 // Message gate, round-reduced (tt/gate.py GateKernel2), writer: the cross-core rounds (tt/post.py's scheme: a root per
 // row, core t: row t of the partials -> row c of root t's gather tiles; root t's totals (row 0) -> row t of core 0's,
@@ -268,7 +269,10 @@ void kernel_main() {
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
         const uint32_t s = get_read_ptr(cb_out);
-        const uint64_t d = ao.get_noc_addr(t0 + i);
+#ifndef G2_ROW0
+#define G2_ROW0 0
+#endif
+        const uint64_t d = ao.get_noc_addr(t0 + i) + G2_ROW0 * 32 * OE;  // (G2_ROW0 16: faces 2 / 3)
         write_rows<T, OE, TH>(s, d);
         if constexpr (DUP) {
             write_rows<T, OE, TH>(s, d + 16 * OE);
