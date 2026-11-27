@@ -58,6 +58,8 @@ PF_ROWS = int(__import__("os").environ.get("I2M_PF_ROWS", "16"))
 # 17..32-row decoders: the fused post-attention section (tt/post.py) as two 16-row programs (rows 16.. in faces 2 / 3)
 # instead of the conv / add / norm / mix ops. I2M_POST_WIDE
 POST_WIDE = __import__("os").environ.get("I2M_POST_WIDE", "1") == "1"
+# 17..32-row decoders (with POST_WIDE): the fused pre-attention section (tt/pre.py) as two 16-row programs. I2M_PRE_WIDE
+PRE_WIDE = __import__("os").environ.get("I2M_PRE_WIDE", "1") == "1"
 KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 # I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
 # _messages; per layer only the mix program)
@@ -559,9 +561,11 @@ class BatchedDecoder:
                         from .pre import PreKernel
 
                         model._pre = PreKernel(model._post)
-                        rw = model._post.rows_weight
+                    rw = model._post.rows_weight
+                    if getattr(model, "_aq_rows", None) is None:  # (a PRE_WIDE decoder may have made it)
                         model._aq_rows = {li: [rw(L.attn_Q, col=j) for j in range(L.nq)]
                                           for li, L in model.layers.items() if L.nq}
+                    if getattr(model, "_norm_rows", None) is None:
                         nr = {}
                         for li, L in model.layers.items():
                             if L.sliding:
@@ -598,6 +602,16 @@ class BatchedDecoder:
                     if getattr(model, "_q_rows", None) is None:
                         model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
                     self.post, self.q_rows = model._post, model._q_rows
+                    if PRE_WIDE:  # (the fused pre-attention section too: the MoE output read unpacked)
+                        if getattr(model, "_pre", None) is None:
+                            from .pre import PreKernel
+
+                            model._pre = PreKernel(model._post)
+                        if getattr(model, "_aq_rows", None) is None:
+                            rw = model._post.rows_weight
+                            model._aq_rows = {li: [rw(L.attn_Q, col=j) for j in range(L.nq)]
+                                              for li, L in model.layers.items() if L.nq}
+                        self.pre, self.aq_rows = model._pre, model._aq_rows
 
     def move_row(self, src: int, dst: int = 0):
         """Every conv state's row src -> row dst (leaving speculative decode: the committed row back to the slot's)."""
@@ -890,7 +904,7 @@ class BatchedDecoder:
                     mn = ops.rms(L.gates["mlp"](o, messages[3]), L.mlp_norm, ttnn.bfloat16)
             else:
                 mn = o
-            pk = self.pre is not None and AR_DIRECT  # (the next pre program reads the packed rows)
+            pk = self.pre is not None and AR_DIRECT and not self.g2wide  # (the next pre program reads the packed rows)
             mo = L.moe.forward(mn, logits=lg, dup=dup, packed_out=pk) if (lg is not None or dup or pk) \
                 else L.moe.forward(mn)
             if self.pre is not None:  # the tail (MoE-output conv + residual) runs in the next application's program

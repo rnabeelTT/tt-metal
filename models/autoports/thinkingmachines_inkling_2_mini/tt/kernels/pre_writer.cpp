@@ -45,6 +45,9 @@ void kernel_main() {
     constexpr uint32_t NORM = get_compile_time_arg_val(16);
     constexpr uint32_t BOUND = get_compile_time_arg_val(17);
     constexpr uint32_t NSEL = get_compile_time_arg_val(18);
+#ifndef PRE_ROW0  // (16: rows 16.. in faces 2 / 3: tt/pre.py's 17..32-row halves)
+#define PRE_ROW0 0
+#endif
     constexpr uint32_t T = PRE_ROWS;
     constexpr uint32_t F32 = 4096;  // a tensor / gather tile
     constexpr uint32_t TH = PRE_TH, FT = TH * 128, FO = (TH < 16 ? TH : 16) * 64;  // a CB tile of token rows (fp32)
@@ -134,10 +137,10 @@ void kernel_main() {
             const uint32_t so = get_read_ptr(cb_so);
             for (uint32_t j = 0; j < 3; ++j) {
                 const auto as = TensorAccessor(s_args, ca(j), F32);
-                write_rows<T, 4, TH>(so + j * FT, as.get_noc_addr(t));
+                write_rows<T, 4, TH>(so + j * FT, as.get_noc_addr(t) + PRE_ROW0 * 128);
             }
             cb_wait_front(cb_xo, 1);
-            write_rows<T, 2, TH>(get_read_ptr(cb_xo), x_o.get_noc_addr(t));
+            write_rows<T, 2, TH>(get_read_ptr(cb_xo), x_o.get_noc_addr(t) + PRE_ROW0 * 64);
             noc_async_write_barrier();
             cb_pop_front(cb_so, 3);
             cb_pop_front(cb_xo, 1);
@@ -240,7 +243,7 @@ void kernel_main() {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);
             for (uint32_t i = 0; i < PER; ++i) {
                 cb_wait_front(cb_out, 1);
-                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
+                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i) + PRE_ROW0 * 32 * OE);
                 noc_async_write_barrier();
                 cb_pop_front(cb_out, 1);
             }
@@ -250,7 +253,7 @@ void kernel_main() {
         const auto xn = TensorAccessor(x_args, ca(4), F32);
         for (uint32_t i = 0; i < PER; ++i) {
             cb_wait_front(cb_xn, 1);
-            write_rows<T, 4, TH>(get_read_ptr(cb_xn), xn.get_noc_addr(t0 + i));
+            write_rows<T, 4, TH>(get_read_ptr(cb_xn), xn.get_noc_addr(t0 + i) + PRE_ROW0 * 128);
             noc_async_write_barrier();
             cb_pop_front(cb_xn, 1);
         }
@@ -260,7 +263,7 @@ void kernel_main() {
             const auto ao = TensorAccessor(x_args, ca(5 + q), 1024 * OE);
             for (uint32_t i = 0; i < PER; ++i) {
                 cb_wait_front(cb_out, 1);
-                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i));
+                write_rows<T, OE, TH>(get_read_ptr(cb_out), ao.get_noc_addr(t0 + i) + PRE_ROW0 * 32 * OE);
                 noc_async_write_barrier();
                 cb_pop_front(cb_out, 1);
             }

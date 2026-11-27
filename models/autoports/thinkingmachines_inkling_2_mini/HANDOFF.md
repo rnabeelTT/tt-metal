@@ -723,6 +723,22 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
   16 rows (I2M_PF_ROWS) and the o prefetch for 32-slot models (I2M_PF_O_SLOTS: on p300x2 with 32 slots the o prefetch is
   off for every batch size, the cap is 16 on several dies).
 
+### Decode round 2026-11-27, part 3 (device acceptance, pre at 17..32 rows)
+
+* Speculative acceptance on device (6482bb48cf9, I2M_DEV_ACCEPT, default on; tt/kernels/taccept.cpp, sampling.DeviceAccept
+  / accept_ref): HostSampler.spec's rule in integer arithmetic at the end of the verify trace; it writes the next
+  drafter's inputs and the next verify's accept row, so the next drafter is enqueued right after the verify. Bitwise vs
+  accept_ref (tests/test_accept_device.py, TP4 every die / TP1), exact in distribution (chi-square), acceptance and
+  streams identical to the host path (tools/acc_ab.py). Served spec pass (HOST_PROF, T=1): p300x2 14.90 -> 14.17 ms,
+  p300 19.49 -> 18.78, p150 29.47 -> 28.97. The pass is now device-bound (verify + drafter back to back): the next spec
+  lever is the drafter's ~2.5 ms (DECODE_PLAN item 3).
+* I2M_PRE_WIDE (default on): the pre-attention program at 17..32 rows as two 16-row programs (PRE_ROW0, as POST_WIDE);
+  bitwise per half (tools/prewide_check.py, NQ 1 / 3, tail, norm, bound). Traced: TP4 B=32 38.184 -> 37.635 (repeat
+  38.188 -> 37.631), B=24 36.141 -> 35.055; TP2 B=32 66.751 -> 66.237, B=24 57.405 -> 56.393. Teacher-forced TP4 B=32
+  .9691 / .9956 / .0146 / nll 1.7516 -> .9674 / .9944 / .0185 / 1.7552 (B=32 now on the <= 16-row path's fused numerics;
+  B=8 .9713 / .9950 / .0184).
+* bfp8 decode gate weights (ca997ccbe78) stay on pending review: I2M_G2_BFP8=0 restores the bf16 weights.
+
 ## Next
 
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
