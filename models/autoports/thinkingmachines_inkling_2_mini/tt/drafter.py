@@ -241,7 +241,9 @@ class DSparkDrafter:
             return [dl.weight([p]) for p in parts] if self.vsim else [dl.weight(parts)]
 
         un = ck.get("model.llm.unembed.weight")[: self.V]
-        head_readers = int(os.environ.get("DRAFT_HEAD_READERS", "4"))
+        # (readers per bank of the head slice: traced d=3, 1 / 2 / 3 / 4 readers: one die 3.170 / 3.596 / 3.634 / 2.812 ms,
+        # TP2 2.342 / 2.128 / 2.507 / 2.174, TP4 1.997 / 1.889 / 1.894 / 2.050)
+        head_readers = int(os.environ.get("DRAFT_HEAD_READERS", "4" if N == 1 else "2"))
         if model is not None and N == 1 and NS == 1 and model.shead is not None and model.shead.n == Vp:
             # the target's per-bank head copy, streamed by our own placement (its 2 readers per bank: 1.94 vs 1.14 ms)
             sh = model.shead

@@ -739,8 +739,62 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
   B=8 .9713 / .9950 / .0184).
 * bfp8 decode gate weights (ca997ccbe78) stay on pending review: I2M_G2_BFP8=0 restores the bf16 weights.
 
+### Decode round 2026-11-27, part 4 (drafter fusion, trace_prof at B=32)
+
+* Drafter fusion (42dbdce0d71, DRAFT_FUSE, default on; DRAFT_FUSE=0 restores): per layer one attention-prep program
+  (kernels/dsp_qkv.cpp: head split, q / k RMSNorm + RoPE with the rows gathered from the tables, K / V into the paged
+  caches, q in the SDPA layout; one q head per core, a KV group's rows assembled in its leader's L1), the SDPA output
+  unpack (dsp_ounpack.cpp), silu(g) u (dsp_swiglu.cpp), the residual width-sharded through the block, the traced
+  commit's k / v prep as one program, each Markov RNN step's ops after its matmul as one program (dsp_rnnpost.cpp).
+  162 -> 79 programs per drafter pass. Greedy drafts identical to the unfused drafter (48 / 48 anchors); acc_ab one die
+  greedy 1.681 -> 1.687 drafts kept per pass (8 / 9 prompts identical).
+
+| drafter d=3 sampled, traced (drafter_prof TRACED=1) | 1 die | TP2 | TP4 |
+|---|---:|---:|---:|
+| unfused (2ecc5630070) | 3.013 | 2.394 | 2.255 |
+| DRAFT_FUSE (42dbdce0d71) | 2.811 | 2.174 | 2.050 |
+| + head readers 2 on 2 / 4 dies | 2.811 | 2.128 | 1.889 |
+
+  Served spec pass (I2M_HOST_PROF T=1, median of 11 x 100-pass means, DRAFT_FUSE=0 / 1 from one tree): p300x2 14.14 ->
+  13.97 ms, p300 18.70 -> 18.61, p150 28.81 -> 28.69. Real-text T=1 mean of 6: 158.1 -> 172.3, 126.1 -> 131.5, 79.4 ->
+  83.0 tok/s (acceptance noise). Served greedy sequential texts identical on every profile.
+* Drafter LM-head slice with 2 readers per bank on 2 / 4 dies (DRAFT_HEAD_READERS default 2 there, 4 on one die;
+  placement only, bitwise): traced readers 1 / 2 / 3 / 4: one die 3.170 / 3.596 / 3.634 / 2.812 ms, TP2 2.342 / 2.128 /
+  2.507 / 2.174, TP4 1.997 / 1.889 / 1.894 / 2.050. Served spec pass (median of 11-12): p300x2 13.97 -> 13.89 ms, p300
+  18.59 -> 18.49.
+* Drafter one die after fusion (eager per-op, us): LM head rows 1..3 1159, Markov step programs 494, qkv / gate|up
+  DecodeLinear 401, o / down / k|v_ctx / rnn matmuls 373, SDPA 103, qkv prep 3 x 18 + commit prep 15, rest ~250. The
+  block's weights (~280 MB bfp8, ~0.8 ms incl. SDPA) are read on EVERY die (replicated): tensor-parallel block (heads /
+  MLP columns per die + 2 all-reduces per layer) is the next drafter lever on TP2 / TP4 (est. TP4 -0.5 ms per pass).
+  TP4 eager die 0: LM head slice 450 us (~270 GB/s), 3 vocab-merge all_gathers ~199 us.
+* Measured and dropped: o / down / k|v_ctx as DecodeLinear (one die 3.013 -> 3.044 / 3.119 / 3.006: the interleaved
+  matmul is faster at 8 rows); the whole Markov RNN step as one DecodeLinear-placed program (28.6 us / step, and its CBs,
+  x + 2 x 88 weight tiles, clash with the model's L1 buffers on one die: drafter-only tests do not see the model's L1 ->
+  gate new drafter programs with acc_ab or a served boot).
+* Overlapping the drafter with the verify: not built. The drafter needs the verify's bonus token and taps; only the
+  commit (~0.13 ms) is token-independent, and one command queue serializes programs (no concurrent core sets without a
+  sub-device split) -> bound < 0.5 ms per pass.
+* tools/trace_prof.py (85b7825beb0): traced programs in dispatch order (the prefetch stream runs concurrently on its own
+  sub-device) and TT_METAL_PROFILER_PROGRAM_SUPPORT_COUNT=4000 (the profiler kept 1000 programs per RISC: the B=32 replay
+  lost 155 of 1568). Budget below from the kernel column (FW includes in-kernel waits). TP4, 2ecc5630070 decode path,
+  profiled replay (csv ~/.cache/inkling2/tprof_r8_tp4_b{1,32}.csv, ~/inkling2-work/dec/an/budget.py):
+
+| TP4 kernel us per step | B=1 programs | B=1 us | B=32 programs | B=32 us |
+|---|---:|---:|---:|---:|
+| MoE (gate\|up, down, route, push) | 96 | 2055 | 432 | 19164 |
+| attention (q\|k\|v / o, SDPA, attn out, qkv prefetch) | 240 | 2216 | 720 | 8203 |
+| glue (pre / post / gates / messages / mix) | 167 | 3048 | 356 | 10225 |
+| LM head + sampling + step | 64 | 546 | 60 | 601 |
+| prefetch stream (concurrent) | 48 | 1082 | - | - |
+| total (replay span) | 615 | 8947 (9254) | 1568 | 38193 (39034) |
+
+  B=32 per application: MoE 399 us (gate|up 206, down 122, route 41), glue 213 (pre 71, post 65, gates 56), attention 171.
+
 ## Next
 
+0. Drafter (single user, every profile): tensor-parallel drafter block on 2 / 4 dies (its ~0.8 ms of weights + SDPA are
+   replicated on every die; est. TP4 -0.5 ms, TP2 -0.3 ms per pass); TP4 vocab-merge all_gathers (3 per pass, ~66 us
+   each eager: measure traced first); DECODE_PLAN items 6 / 7 / 9.
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /
    gates, not fewer programs (merges measured neutral or slower once the ring is warm).
 2. All-reduce: the push into its producer at both sites measured TP2 B=1 11.15 -> 11.02 ms (~/inkling2-work/bd; not
