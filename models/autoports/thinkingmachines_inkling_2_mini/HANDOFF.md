@@ -693,6 +693,36 @@ agate 2.3. The glue is fixed-latency phases and rounds (zones_post / zones_gate2
 Ornith-class glue (~18 us / application) is not reachable by program fusion alone. Not done: route inside gate|up at
 B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 columns).
 
+### Decode round 2026-11-27, part 2 (route-in, wide gates, bfp8 gate weights)
+
+| change | TP4 B=1 | TP4 B=8 | TP4 B=16 | TP4 B=32 | TP2 B=1 | TP2 B=16 | TP1 B=1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| b8acc359b6c (route-in) | 8.070 | 16.624 | 24.518 | 42.628 | 10.216 | 35.160 | 14.699 |
+| c69aa2f3c1c + ca997ccbe78 (gates at 17..32 rows, bfp8 gate weights) | 7.907 | 16.478 | 24.390 | 38.573 | 10.072 | 35.009 | 14.561 |
+
+(traced test_batched D=4, before / after interleaved in one session; TP2 B=8 25.016 -> 24.866.)
+
+* Gates at 17..32 rows (I2M_G2_WIDE): GateKernel2 as two 16-row halves (rows 16.. in faces 2 / 3, G2_ROW0) on two core
+  rectangles in one program; the three attention-side gates as two multi programs. B=32 gate time 5.67 -> 3.03 ms
+  (profiled). Bitwise per half (tools/g2wide_check.py); teacher-forced decode TP4 B=32 .9708 / .9958 / .0196 -> .9715 /
+  .9957 / .0144.
+* bfp8 Wd / Wf|Wg for the decode gates (I2M_G2_BFP8): -0.15 ms at B=1 on every die count; teacher-forced TP4 B=1 / 8
+  within noise (commit message). Numerics change, flagged.
+* Measured and dropped: the gate reader's phases issued at once under NOC trids (+3.9 us per gate: Wd shares bandwidth);
+  a GCB prefetch of the gate weights (traced bound with no weight reads -0.23 ms, bfp8 already takes ~0.165 of it); k / v
+  prefetch (bound -0.045 ms at TP4 B=1).
+* Served greedy texts at 8 concurrent vary run to run in one server with or without route-in (batch composition):
+  not a numerics change of route-in.
+* o_proj prefetch for 32-slot models on 4 dies (49e4f35308a): the p300x2 profile (32 slots) had it off for every batch
+  size; TP4 B=1 8.019 -> 7.903 ms with it.
+* Served p300x2 b8acc359b6c -> 49e4f35308a (bench_card 128:128): 1 user 113.3 -> 118.4 tok/s, 32 users total 592.1 ->
+  631.2 tok/s (TPOT 45.7 -> 42.3); real-text T=1 mean of 6 154.3 -> 155.8 (speculation noise).
+* I2M_POST_WIDE (default off pending its teacher-forced eval): the post-attention program at 17..32 rows as two 16-row
+  programs (POST_ROW0); bitwise per half (tools/postwide_check.py); TP4 B=32 38.573 -> 38.183, B=24 36.989 -> 36.131.
+* Next for 17..32 rows: pre the same way (its Tail / q|k|v norm outputs), then the q|k|v prefetch above
+  16 rows (I2M_PF_ROWS) and the o prefetch for 32-slot models (I2M_PF_O_SLOTS: on p300x2 with 32 slots the o prefetch is
+  off for every batch size, the cap is 16 on several dies).
+
 ## Next
 
 1. Decode glue latency (TP4: ~4.4 ms of 9.8, replicated on every die): fewer cross-core rounds inside pre / post /

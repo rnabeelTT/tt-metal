@@ -53,6 +53,11 @@ GATE_MULTI = __import__("os").environ.get("I2M_GATE_MULTI", "1") == "1"
 # 17..32-row decoders: the message gates with their norms on GateKernel2 (two 16-row halves), not GateKernel + norms.
 # I2M_G2_WIDE
 G2_WIDE = __import__("os").environ.get("I2M_G2_WIDE", "1") == "1"
+# the decode q|k|v prefetch / streamed program up to this many rows (I2M_PF_ROWS; above: three ttnn.linear)
+PF_ROWS = int(__import__("os").environ.get("I2M_PF_ROWS", "16"))
+# 17..32-row decoders: the fused post-attention section (tt/post.py) as two 16-row programs (rows 16.. in faces 2 / 3)
+# instead of the conv / add / norm / mix ops. I2M_POST_WIDE
+POST_WIDE = __import__("os").environ.get("I2M_POST_WIDE", "0") == "1"
 KV_FUSED = __import__("os").environ.get("I2M_KV_FUSED", "1") == "1"  # k / v cache rows written by tt/aprep.py  # the attention-side gates in one program  # post / pre read the packed all-reduce rows  # the router logits in tt/post.py
 # I2M_MSG_PASS (default 1): a decode pass's message logits for all its loop layers in one matmul (tt/batched.py
 # _messages; per layer only the mix program)
@@ -336,11 +341,11 @@ def attention_batched(w, c, ba: BatchedApp, xq, xk, xv, pos, pos_wr, pos_sdpa, t
     NH, NKV, HD, DR, N = w.NH, w.NKV, w.HD, w.DR, w.N
     B = int(xq.shape[2])
     ckc = w.ckc
-    if getattr(w, "pf", None) is not None and B <= 16:  # (q prefetched into a global CB: tt/prefetch.py)
+    if getattr(w, "pf", None) is not None and B <= PF_ROWS:  # (q prefetched into a global CB: tt/prefetch.py)
         from models.autoports.thinkingmachines_inkling_2_mini.tt.prefetch import qkv as pf_qkv
 
         pq, pk, pv = pf_qkv(w.pf, w, [xq, xk, xv], B)
-    elif getattr(w, "ms", None) is not None and B <= 16:  # (q | k | v streamed in one program)
+    elif getattr(w, "ms", None) is not None and B <= PF_ROWS:  # (q | k | v streamed in one program)
         pq, pk, pv = w.ms([xq, xk, xv], w.ms_w, B)
     else:
         pq = proj(w, "q", xq, ttnn.float32)
@@ -534,7 +539,7 @@ class BatchedDecoder:
             self.plan = model._mixplan
             # I2M_POST (default 1): the fused post-attention section (tt/post.py) at <= 16 rows
             if POST and B <= 16:
-                # (each piece on its own: a 17..32-row decoder built first makes some of them, G2_WIDE)
+                # (each piece on its own: a 17..32-row decoder built first makes some of them, G2_WIDE / POST_WIDE)
                 if getattr(model, "_post", None) is None:
                     from .post import PostKernel
 
@@ -589,6 +594,10 @@ class BatchedDecoder:
                                 nr[(li, k)] = rw(getattr(L, f"{k}_norm"))
                     model._norm_rows = nr
                 self.nw_rows, self.norm_rows, self.g2wide = model._nw_rows, model._norm_rows, True
+                if POST_WIDE:  # (the fused post-attention section as two 16-row programs: tt/post.py)
+                    if getattr(model, "_q_rows", None) is None:
+                        model._q_rows = {li: model._post.rows_weight(L.mlp_Q, col=0) for li, L in model.layers.items()}
+                    self.post, self.q_rows = model._post, model._q_rows
 
     def move_row(self, src: int, dst: int = 0):
         """Every conv state's row src -> row dst (leaving speculative decode: the committed row back to the slot's)."""
@@ -735,7 +744,7 @@ class BatchedDecoder:
         if self._msg is None or self._msg[0] is not prev_src:
             src = [ttnn.sharded_to_interleaved(s, L1) if s.is_sharded() else s for s in prev_src[:2]]
             nl = len(m.msg_Q)
-            fold = lgx.FOLD and MSG_ALL and self.post is not None  # (the mix readers expand the packed logits)
+            fold = lgx.FOLD and MSG_ALL and self.post is not None and not self.g2wide  # (the mix readers expand the packed logits)
             b = prev_src[2]
             if fold and b in self.plan.msg_off and D is not None and \
                     src[0].memory_config() == src[1].memory_config():
@@ -756,7 +765,7 @@ class BatchedDecoder:
             if fold:
                 allm = m.ops.mixk.groups(S, lg, 2, 4, nl, int(lg.shape[-1]), pk=True)
             else:
-                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None else None
+                allm = m.ops.mixk.groups(S, lg, 2, 4, nl, 4 * nl) if MSG_ALL and self.post is not None and not self.g2wide else None
             self._msg = (prev_src, S, lg, allm)
         _, S, lg, allm = self._msg
         if allm is not None:
@@ -837,7 +846,7 @@ class BatchedDecoder:
             qn, kn, vn = ops.rms(qi, L.q_norm, bf), ops.rms(ki, L.k_norm, bf), ops.rms(vi, L.v_norm, bf)
         post_path = self.post is not None and ba.attn.kernel is not None
         att = attention_batched(L.attn, c, ba, qn, kn, vn, pos, pos_wr, pos_sdpa, tau, tt_ccl=m.tt_ccl,
-                                packed_out=post_path and AR_DIRECT)
+                                packed_out=post_path and AR_DIRECT and not self.g2wide)
         if not post_path:
             att = unpacked(att)
         blk = None

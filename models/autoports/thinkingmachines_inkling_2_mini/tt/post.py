@@ -160,6 +160,26 @@ class PostKernel:
 
     def __call__(self, att, x, conv, q, blocks, logits, nw=None, out_mc=ttnn.L1_MEMORY_CONFIG, router=None, dup=False,
                  route=None):
+        """(17..32 rows: two programs, rows 0..15 then rows 16.. (POST_ROW0: faces 2 / 3 of every row tensor), into the
+        same resid / out; no router there)"""
+        from .ccl import PackedAR
+
+        TA = int(att.shape[-2])
+        if TA <= 16:
+            return self._call(att, x, conv, q, blocks, logits, nw, out_mc, router, dup, route)
+        assert not isinstance(att, PackedAR)
+        att = ttnn.sharded_to_interleaved(att, ttnn.L1_MEMORY_CONFIG) if att.is_sharded() else att
+        resid = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, TA, self.H]), ttnn.float32, ttnn.TILE_LAYOUT,
+                                               self.mesh, out_mc)
+        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, TA, self.H]),
+                                             ttnn.bfloat16 if nw is not None else ttnn.float32, ttnn.TILE_LAYOUT,
+                                             self.mesh, out_mc)
+        for half in (0, 1):
+            self._call(att, x, conv, q, blocks, logits, nw, out_mc, None, False, None, half=half, bufs=(resid, out))
+        return (resid, out, None) if router is not None else (resid, out)
+
+    def _call(self, att, x, conv, q, blocks, logits, nw=None, out_mc=ttnn.L1_MEMORY_CONFIG, router=None, dup=False,
+              route=None, half=0, bufs=None):
         """att / x [1, 1, T, H] bf16 (x None: a block boundary, resid = y), conv: the BatchedConv (states / taps),
         q: the query as rows ([1, 1, 32, H] fp32, rows_weight), blocks n fp32 [1, 1, T, H] with logits [(tensor, tile)], nw: the norm weight rows
         ([1, 1, 32, H] fp32; None: return the mix output) -> (resid fp32, out bf16 | fp32).
@@ -168,7 +188,9 @@ class PostKernel:
         from .ccl import PackedAR
 
         packed = isinstance(att, PackedAR)  # (att: the packed all-reduce rows, read in place)
-        T = int(att.shape[-2])
+        TA = int(att.shape[-2])
+        T = TA if TA <= 16 else (16 if half == 0 else TA - 16)
+        row0 = 16 * half if TA > 16 else 0
         att = att.t if packed else att
         assert T <= min(16, C) and att.dtype == ttnn.bfloat16 and len(blocks) == len(logits) >= 1
         NB, PER, add, norm = len(blocks), self.PER, x is not None, nw is not None
@@ -181,10 +203,13 @@ class PostKernel:
         mr = "post" in MR and 1 < T <= 8 and not pack  # (2 T roots among the first 16 cores)
         assert not (rt and RSPLIT) or T * ET <= 16, (T, ET)
         rk = int(route[2]) if rt and RSPLIT and route is not None and ROUTE else 0  # (the routing here: k)
-        resid = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), ttnn.float32, ttnn.TILE_LAYOUT, self.mesh,
-                                               out_mc)
         odt = ttnn.bfloat16 if norm else ttnn.float32
-        out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), odt, ttnn.TILE_LAYOUT, self.mesh, out_mc)
+        if bufs is not None:
+            resid, out = bufs
+        else:
+            resid = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), ttnn.float32, ttnn.TILE_LAYOUT,
+                                                   self.mesh, out_mc)
+            out = ttnn.allocate_tensor_on_device(ttnn.Shape([1, 1, T, self.H]), odt, ttnn.TILE_LAYOUT, self.mesh, out_mc)
         (cb_att, cb_x, cb_s, cb_w, cb_q, cb_ones, cb_d, cb_blk, cb_nw, cb_y16, cb_so, cb_res, cb_rmm, cb_rout, cb_sq,
          cb_part, cb_gath, cb_red, cb_wt, cb_mi, cb_part2, cb_gath2, cb_out, cb_sel, cb_tout, cb_tot, cb_tot2, cb_zero) = range(28)
         NQ, sel = self.red(T, pack)
@@ -246,7 +271,7 @@ class PostKernel:
                                            dst_full_sync_en=True, math_approx_mode=False)
         cfg.unpack_to_dest_mode = u2d
         defs = [("POST_RK", str(red_k(T))), ("POST_CX", str(CX)), ("POST_ROWS", str(T)), ("POST_ATT_PACKED", str(int(packed))),
-                ("POST_TH", str(th))] + rdefs + sdefs + lgx.DEF
+                ("POST_TH", str(th)), ("POST_ROW0", str(row0))] + rdefs + sdefs + lgx.DEF
 
         def dm(src, ct, common, riscv, noc):
             kd = ttnn.KernelDescriptor(kernel_source=_ks(KDIR, src), core_ranges=crs, compile_time_args=ct,
@@ -263,7 +288,7 @@ class PostKernel:
         ]
         sems = [ttnn.SemaphoreDescriptor(i, ttnn.CoreType.WORKER, crs, 0) for i in range(8 if rk else 5)]
         prog = ttnn.ProgramDescriptor(kernels=kernels, semaphores=sems, cbs=cbs)
-        key = ("i2m_post", rk, SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
+        key = ("i2m_post", row0, rk, SFPU_ROWS, lgx.FOLD, T, red_k(T), th, NB, add, norm, self.H, ET, RD_STAGED, ZLAZY, SOFT_BATCH, RSPLIT, mr, pack, WS, ZDEFER, POST_FUSE, POST_MSQ, CSQ, dup, packed, bconv.SEQ[:2] + (bconv.SEQ_ONE,) if acc else None, tuple(repr(t.memory_config()) for t in
                                                             (att, xa, conv.s[0], taps[0], blocks[0], resid, out)))
         prog.custom_program_hash = int.from_bytes(hashlib.sha1(repr(key).encode()).digest()[:8], "little") & ((1 << 63) - 1)
         io, seen = [], set()

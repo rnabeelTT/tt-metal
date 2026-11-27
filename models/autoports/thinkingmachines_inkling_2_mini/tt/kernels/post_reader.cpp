@@ -53,8 +53,12 @@ void kernel_main() {
     constexpr uint32_t NQ = get_compile_time_arg_val(14);
     constexpr uint32_t T = POST_ROWS, TH = POST_TH;  // TH: the rows of the CB tiles of token rows (8 / 16 / 32)
     constexpr uint32_t F32 = TH * 128, BF = TH * 64;  // (a CB tile of token rows; tensor tiles are 32 x 32)
-    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src, dst); };
-    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src, dst); };
+#ifndef POST_ROW0  // (16: rows 16 .. 16 + T - 1 of 32-row tensors, faces 2 / 3: tt/post.py's 17..32-row halves)
+#define POST_ROW0 0
+#endif
+    // (every row tensor read through rf / rb: token rows, states, and the 32-row replicated weights)
+    auto rf = [&](uint64_t src, uint32_t dst) { read_rows<T, 4, TH>(src + POST_ROW0 * 128, dst); };
+    auto rb = [&](uint64_t src, uint32_t dst) { read_rows<T, 2, TH>(src + POST_ROW0 * 64, dst); };
     constexpr auto a_args = TensorAccessorArgs<15>();  // att
     constexpr auto x_args = TensorAccessorArgs<a_args.next_compile_time_args_offset()>();  // x
     constexpr auto s_args = TensorAccessorArgs<x_args.next_compile_time_args_offset()>();  // states

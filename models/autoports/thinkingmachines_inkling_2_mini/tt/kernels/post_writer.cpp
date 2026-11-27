@@ -176,11 +176,14 @@ void kernel_main() {
         const uint32_t t = t0 + i;
         cb_wait_front(cb_so, 3);
         const uint32_t so = get_read_ptr(cb_so);
-        write_rows<T, 4, TH>(so, s0.get_noc_addr(t));  // (live rows only: the other rows are other slots' / padding)
-        write_rows<T, 4, TH>(so + FT, s1.get_noc_addr(t));
-        write_rows<T, 4, TH>(so + 2 * FT, s2.get_noc_addr(t));
+#ifndef POST_ROW0  // (16: rows 16.. in faces 2 / 3: tt/post.py's 17..32-row halves)
+#define POST_ROW0 0
+#endif
+        write_rows<T, 4, TH>(so, s0.get_noc_addr(t) + POST_ROW0 * 128);  // (live rows only: the other rows are other slots' / padding)
+        write_rows<T, 4, TH>(so + FT, s1.get_noc_addr(t) + POST_ROW0 * 128);
+        write_rows<T, 4, TH>(so + 2 * FT, s2.get_noc_addr(t) + POST_ROW0 * 128);
         cb_wait_front(cb_rout, 1);
-        write_rows<T, 4, TH>(get_read_ptr(cb_rout), ro.get_noc_addr(t));
+        write_rows<T, 4, TH>(get_read_ptr(cb_rout), ro.get_noc_addr(t) + POST_ROW0 * 128);
         noc_async_write_barrier();
         cb_pop_front(cb_so, 3);
         cb_pop_front(cb_rout, 1);
@@ -292,7 +295,7 @@ void kernel_main() {
 
     for (uint32_t i = 0; i < PER; ++i) {
         cb_wait_front(cb_out, 1);
-        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i));
+        write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + POST_ROW0 * 32 * (OUTB / 1024));
 #if POST_DUP
         write_rows<T, OUTB / 1024, TH>(get_read_ptr(cb_out), oo.get_noc_addr(t0 + i) + 16 * (OUTB / 1024));
 #endif
