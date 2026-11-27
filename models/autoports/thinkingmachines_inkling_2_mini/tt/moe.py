@@ -43,6 +43,11 @@ SORTED = os.environ.get("I2M_MOE_SORTED", "1") == "1"
 # times (one weight read per group) at more padding; long prefill chunks favour larger groups
 GATHER_L1 = os.environ.get("I2M_GATHER_L1", "1") == "1"
 GROUP_ROWS = int(os.environ.get("I2M_MOE_GROUP", "32"))
+# I2M_GATHER_K (with GATHER_L1, 32-row groups; auto = one die): the row gather as ttnn.moe_gather_rows (each real
+# group's rows straight into tiles on many cores; the padding groups' tiles left unwritten: the grouped matmuls skip
+# them) instead of ttnn.embedding; bitwise. One die 512-row chunk 12.93 -> 10.78 ms per chunk; TP4 2048 rows slower
+# (18.26 -> 26.64 ms), so off on a mesh
+GATHER_K = os.environ.get("I2M_GATHER_K", "auto")
 # I2M_MOE_GMM (default 1): the sorted prefill's expert matmuls as tt/gmm.py (every core) instead of ttnn.sparse_matmul
 # (its 1D config puts gate|up's 24 output tiles on 24 cores)
 GMM = os.environ.get("I2M_MOE_GMM", "1") == "1"
@@ -261,8 +266,11 @@ class MoE:
         Rd, G = m["Rd"], m["G"]
         if GATHER_L1 and T <= 2048:  # the rows gathered from an L1 row-major copy of x (from DRAM: 2x slower)
             x_rm = ttnn.to_layout(ttnn.reshape(x, (T, H)), ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG)
-            x_disp = ttnn.reshape(ttnn.embedding(m["src_tok"], x_rm, layout=ttnn.TILE_LAYOUT, memory_config=DRAM),
-                                  (1, Rd // gs, gs, H))
+            if (GATHER_K == "1" or (GATHER_K == "auto" and self.N == 1)) and gs == 32 and GMM:
+                x_disp = ttnn.moe_gather_rows(x_rm, m["src_tok"], m["group_ids"], E, memory_config=DRAM)
+            else:
+                x_disp = ttnn.reshape(ttnn.embedding(m["src_tok"], x_rm, layout=ttnn.TILE_LAYOUT, memory_config=DRAM),
+                                      (1, Rd // gs, gs, H))
             ttnn.deallocate(x_rm)
         else:
             x_disp = gather_rows(x, m["src_tok"], Rd, gs)  # [1, G, 32, H]
