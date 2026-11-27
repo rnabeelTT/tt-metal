@@ -79,9 +79,10 @@ PF_ROWSPLIT = os.environ.get("I2M_PF_ROWSPLIT", "1") == "1"
 # state points' tiles; RowSplit.side, sconv_kernels/pfseg_reader.cpp PF_RSX). I2M_PF_RS_LINKS: the reduce-scatter's
 # fabric links
 PF_RSX = os.environ.get("I2M_PF_RSX", "1") == "1"
-# I2M_PF_RSX_MIN (1024): chunks of fewer rows keep the all-reduce (they are the traced sizes on 4 dies: a traced chunk
-# and its eager twin stay the same programs, bitwise; the reduce-scatter saves ~nothing there)
-RSX_MIN = int(os.environ.get("I2M_PF_RSX_MIN", "1024"))
+# I2M_PF_RSX_MIN (2048): chunks of fewer rows keep the all-reduce (they are the traced sizes on 4 dies: a traced chunk
+# and its eager twin stay the same programs, bitwise). At 1024 rows the reduce-scatter was slower in serving (p300x2 1K
+# prefill 0.23 -> 0.26 s) and a traced 1024 chunk was not bitwise to eager (pf_trace_probe case 3); 2048 rows gain.
+RSX_MIN = int(os.environ.get("I2M_PF_RSX_MIN", "2048"))
 RS_LINKS = int(os.environ.get("I2M_PF_RS_LINKS", "2"))
 # I2M_PF_ROUTE_RS (with PF_ROWSPLIT): the sorted prefill MoE's router (matmul, sigmoid, top-k, weights) on each die's
 # rows before the all-gather, its weights / ids gathered (one small all-gather) instead of routing all T rows per die
