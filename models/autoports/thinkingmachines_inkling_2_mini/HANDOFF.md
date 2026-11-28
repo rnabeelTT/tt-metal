@@ -837,6 +837,78 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
     rows to T x ET roots), ~+2 the per-row route merge tail. Verify rows must stay bitwise to one-row decode (ROWX:
     8 partials per group), so the packed reductions do not apply; no single piece is worth > ~70 us / pass.
 
+## Final optimization round 2026-11-28 (lane i2m-final: merge, gates, image, served benchmarks)
+
+Merge 99b435dc827 = prefill rounds (590fbc01004: I2M_PF_RSX, I2M_PF_PROJ_CFG, I2M_APREP_NAT / NAT_SUB, I2M_PF_STK,
+traced prefill chunks) + decode rounds (raahem/i2m-decode 6172ebf2657: multi-row MoE row-group skip, TP2 one 9..16-row
+MoE call, route-in, GateKernel2 at 17..32 rows + bfp8 gate weights (I2M_G2_ROWS_MAX=32, I2M_G2_BFP8), device
+acceptance, tensor-parallel drafter + merge exchange (DRAFT_TP / DRAFT_MX)). No textual conflicts; every env default
+kept. Image tt-model/inkling-2-mini:7acb7d9ebd21 built from it (tt-model package, describe
+published/inkling-2-mini-51-g99b435dc82, not dirty); every number below except the device tests is that image served
+through `tt-model serve` with the profile's own env. Logs ~/inkling2-work/flogs (gate_summary.txt, sb_<profile>_v1.txt,
+ns_<profile>.txt); scripts ~/inkling2-work/final.
+
+Gates (dev image + this tree mounted): test_verify_device TP4 / TP2 bitwise; test_accept_device TP4 / TP2 / TP1 PASS;
+snap_tp_check TP4 / TP2 restored rows equal; test_pftrace_device TP4 / TP2 bitwise; pf_trace_probe TP4 (256 / 512 / 1024
+traced 106.4 / 134.2 / 186.6 ms) and TP2 (140.4 / 173.2) PASS; test_batched traced == eager bitwise at every width.
+test_rowload_device: slots 0 and 3 bitwise, then AssertionError (0, 208) at slot 5 (the test's prompt is 208 tokens
+from a 192-token id list): the same failure in the 2026-11-27 baseline log, a test bug, not this round.
+
+Traced decode step (tests/test_batched_device.py D=4, ms; baseline bc333e26951):
+
+| mesh | B=1 | B=4 / 8 | B=16 | B=32 |
+|---|---:|---:|---:|---:|
+| TP4 | 8.1 -> 7.905 | (8) 16.7 -> 16.449 | 25.6 -> 24.340 | 53.5 -> 37.614 |
+| TP2 | 10.4 -> 10.131 | (8) 25.0 -> 24.959 | 46.7 -> 34.995 | |
+| TP1 | 14.7 -> 14.610 | (4) 28.4 -> 28.445, (8) 42.5 -> 42.510 | | |
+
+Quality (teacher forced, EXPERT_DT=bfp8 KV_DT=bf16; top-1 / top-1 confident / KL32; baseline bc333e26951):
+
+| path | before | after |
+|---|---|---|
+| prefill TP4 (2048 chunks) | .971 / .9964 / .0127 | .9692 / .9956 / .0124 |
+| prefill TP2 (1024) | .969 / .9961 / .0156 | .9707 / .9963 / .0135 |
+| prefill TP1 (512) | .9696 / .997 / .0123 | .9692 / .9956 / .0135 |
+| decode TP4 B=8 x 736 | .9694 / .9949 / .0193 | .9669 / .9944 / .0172 |
+| decode TP2 B=8 x 736 | .9693 / .9958 / .0165 | .9689 / .996 / .0138 |
+| decode TP1 B=8 x 736 | .9684 / .9942 / .0168 | .9664 / .9958 / .0143 |
+| decode TP4 B=1 x 736 | .9699 / .9954 / .0166 | .9693 / .9957 / .0152 |
+| decode TP4 B=32 x 736 (before = 5b98fd30cef) | .9708 / .9958 / .0196 | .9701 / .9952 / .0167 |
+
+Bisect of the decode top-1 drop (flogs/bis_summary.txt): the merge changes nothing (prefill eval == 590fbc01004 tip,
+decode eval with I2M_PF_PROJ_CFG=0 == 6172ebf2657 tip, .9713 / .995 / .0184). The shift comes from I2M_PF_PROJ_CFG
+(110cd904a7e, prefill projection program configs, TP4 2048-row chunk 291.6 -> 284.5 ms): the 256-token prompts'
+prefill rounds differently and the decode trajectory moves; KL improves on every decode row. Kept; listed for the
+numerics review with ca997ccbe78, fbab479cf2e, 9d7822f609f, 2ecc5630070, 42dbdce0d71, ae769cfaa93.
+
+Served, before (journal i2m-opt:0003 = bc333e26951 served on this box; card = the published 2026-11-24 package) ->
+after (image 7acb7d9ebd21), median of 5 runs [range]:
+
+| profile | realtext T=1 math / code / chat (tok/s) | TTFT 128 / 1K / 4K (ms) | 8 users x 128 total | 16 users x 128 | 32 users x 128 | 1K x 8 | 1K x 32 (x16 on p300) |
+|---|---|---|---|---|---|---|---|
+| p300x2 | card 160 / 124 / 91 -> 206.5 [193-221] / 186.6 [178-194] / 122.5 [122-123] | card 487 / 555 / 2009 -> 142 / 244 / 644 | card 250.8 -> 406.1 | card 304.2 -> 525.0 | 366.1 -> 649.1 [640-655] | card 228.0 -> 391.6 | 376.8 -> 539.8 [537-543] |
+| p300 | 134.2 / 130.0 / 97.8 -> 158.5 [153-169] / 137.5 [128-147] / 95.9 [93-108] | 247 / 370 / 1228 -> 179 / 291 / 1081 | 240.5 -> 285.2 | 265.7 -> 374.0 | | 238.9 -> 268.9 | card 207.1 -> 330.6 |
+| p150 | 99.2 / 78.1 / 64.3 -> 100.9 [83-112] / 82.7 [80-85] / 65.9 [65-66] | 324 / 657 / 2279 -> 220 / 525 / 2035 | 143.5 -> 171.8 | | | 142.0 -> 159.0 | |
+
+Without speculative decoding (I2M_SPEC=0, same image): p300x2 122.4, p300 96.6, p150 67.0 tok/s on every text (card
+92.3 / 74.8 / 53.2); p150-long 67.2 (card 53.2). Chat at T=1 drafts little and runs at the plain rate; the spec pass
+also adds ~25 ms to TTFT (realtext 300-token TTFT p300x2 196 vs 170 ms). Prefix cache (4,438-token document): cold /
+resent / next turn / 4 users p300x2 2.26 / 0.65 / 0.63 / 1.14 -> 0.84 / 0.17 / 0.19 / 0.34 s, p300 1.98 / 0.51 / 0.48 /
+1.07 -> 1.37 / 0.22 / 0.24 / 0.39, p150 3.31 / 0.51 / 0.53 / 1.04 -> 2.57 / 0.28 / 0.30 / 0.47, answers identical.
+Greedy texts (sequential + 8 concurrent) coherent on every profile; the two greedy loops (64-token math prefix, the
+classical Chinese prefix) are the same as in every earlier run. Card (tt-model.yaml performance / limitations)
+rewritten from these runs.
+
+Dropped this round, with numbers: I2M_SDPA_VPAIR (verify SDPA -28.7 us/pass but the o_proj prefetch +1.73 ms: TP4
+traced verify 12.09 -> 13.82 ms); spec depth 2 (R = 3; ~-0.6 ms TP4 pass, d = 3 greedy 2.045 / T=1 1.02-1.17 kept per
+pass: break-even, and BatchedDecoder needs B % verify == 0); mesh gmm row gather v2 (write-bound: embedding 387 us =
+243 GB/s written; only ~1.8 ms per TP4 chunk reachable by skipping all-padding groups); TP1 q projection split (the
+served 512-row chunk's q proj is 191 us, not L1-capped); decode all-reduce merged into pre / post (TP2 12.75 -> 12.98
+ms, earlier round).
+
+Publish (not done; leave for the user): see the i2m-final handoff for the exact commands (card-only repackage on the
+tested commit with the edited yaml out of tree, push, serve --refresh, branch push).
+
 ## Next
 
 0. Verify pass at 4 rows (TP4 12.07 ms vs 8.65 at B=1): the MoE (+2.4 ms incl. the down) is at its DRAM floor per
@@ -853,3 +925,6 @@ B=1 (the single-row ExpertGateUp has no REM layout for TP4's 288 = 256 + 32 colu
 4. Land the dl_reader one-packet guard and the mesh LM-head top-k width (W=1).
 5. Prefill: the gmm row gather v2 (tilize in the compute; est. -0.3 ms per call, ~/inkling2-work/pr/NOTES_C.txt),
    long-context SDPA past 4 items per stream, 2048-token chunks in the served config (pool cap), MixPlan for prefill.
+6. tests/test_rowload_device.py: slot 5's 208-token prompt is cut from a 192-id list (AssertionError (0, 208));
+   lengthen the id list. Spec costs ~25 ms TTFT and nothing on chat at T=1: a per-request spec gate (acceptance
+   history) would keep the plain rate's TTFT there.

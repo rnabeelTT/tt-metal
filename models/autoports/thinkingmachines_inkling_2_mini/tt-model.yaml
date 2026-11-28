@@ -192,100 +192,82 @@ card:
     | path | top-1 | top-1 (confident) | KL |
     | --- | ---: | ---: | ---: |
     | reference noise floor: fp32 vs bf16 CPU model | 0.975 | 0.998 | 0.010 |
-    | prefill (1 die, 8 x 1000 tokens) | 0.970 | 0.997 | 0.014 |
-    | decode (1 die, 8 x 736 steps) | 0.971 | 0.996 | 0.014 |
-    | prefill (4 dies, 2048-token chunks) | 0.972 | 0.997 | 0.015 |
-    | prefill (2 dies, 1024-token chunks) | 0.969 | 0.996 | 0.016 |
-    | decode (4 dies, 8 x 736 steps) | 0.970 | 0.996 | 0.014 |
-    | decode (2 dies, 8 x 736 steps) | 0.968 | 0.995 | 0.017 |
-    | decode, 32-wide batch (4 dies, 8 x 256 steps) | 0.969 | 0.995 | 0.025 |
+    | prefill (1 die, 512-token chunks) | 0.969 | 0.996 | 0.014 |
+    | prefill (2 dies, 1024-token chunks) | 0.971 | 0.996 | 0.014 |
+    | prefill (4 dies, 2048-token chunks) | 0.969 | 0.996 | 0.012 |
+    | decode (1 die, 8 x 736 steps) | 0.966 | 0.996 | 0.014 |
+    | decode (2 dies, 8 x 736 steps) | 0.969 | 0.996 | 0.014 |
+    | decode (4 dies, 8 x 736 steps) | 0.967 | 0.994 | 0.017 |
+    | decode, 32-wide batch (4 dies, 8 x 736 steps) | 0.970 | 0.995 | 0.017 |
 
-    Per text, the decode KL is 0.002 - 0.012 on seven texts and 0.03 - 0.16 on code_mbpp. Long context: a passphrase
+    Per text, the decode KL is 0.003 - 0.015 on six texts and 0.03 - 0.07 on code_mbpp. Long context: a passphrase
     planted at 10 / 50 / 90 % depth of 135K, 539K and 1,031K-token prompts is retrieved on 4 dies.
 
     Speed at the checkpoint's default sampling (temperature 1), one user: three held-out texts (math, code, chat) as
-    300-token prompts, 256 output tokens, streamed, decode tok/s = 1000 / TPOT; TTFT on 1,024 / 4,096-token text
-    prompts; 8 users each generating 128 tokens at temperature 1 at once (total output tok/s):
+    300-token prompts, 256 output tokens, streamed, decode tok/s = 1000 / TPOT, the mean of the three texts (median of 5
+    runs each); TTFT on 1,024 / 4,096-token prompts; 8 users x 128 / 128 tokens at once (total output tok/s; the load
+    benchmark below):
 
     | Profile | Decode, temperature 1 (tok/s) | Without speculative decoding, temperature 1 (tok/s) | Decode, greedy (tok/s) | TTFT 1K / 4K (s) | 8 users x 128 tokens (total tok/s) |
     | --- | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | 119.4 | 92.3 | 117.9 | 0.560 / 1.860 | 192.8 |
-    | p300 | 100.7 | 74.8 | 107.8 | 0.526 / 1.727 | 171.4 |
-    | p150 | 65.8 | 53.2 | 68.5 | 0.882 / 3.095 | 109.6 |
-    | p150-long (text only, no speculative decoding) | 53.2 | 53.2 | 53.1 | 0.780 / 2.968 | 109.8 |
+    | p300x2 | 171.9 | 122.4 | 172.5 | 0.244 / 0.644 | 406.1 |
+    | p300 | 130.6 | 96.6 | 127.9 | 0.291 / 1.081 | 285.2 |
+    | p150 | 83.2 | 67.0 | 89.3 | 0.525 / 2.035 | 171.8 |
+    | p150-long (text only, no speculative decoding) | 67.2 | 67.2 | 67.2 | 0.486 / 1.983 | 169.7 |
 
-    The speculative gain depends on the text (at temperature 1: p300x2 math 160, code 124, chat 91 tok/s; p300 math 112,
-    code 110, chat 85; p150 math 75, code 74, chat 53).
+    The speculative gain depends on the text (at temperature 1: p300x2 math 207, code 187, chat 123 tok/s; p300 math 159,
+    code 138, chat 96; p150 math 101, code 83, chat 66). On chat, where few drafts are accepted, it decodes at about
+    the plain rate.
 
     Load benchmark (`tools/bench_card.py`): random-token prompts of exactly the input length (ISL), output pinned with
     ignore_eos (OSL), greedy, streamed; every request a distinct prompt (no prefix-cache hits); `concurrency` users in
-    a closed loop, N requests in all; TTFT = time to first streamed token; prefill = ISL / TTFT; decode = 1 / TPOT per
-    user, TPOT = (E2EL - TTFT) / (OSL - 1); total = output tokens / wall time. On random-token prompts the greedy
-    continuation is repetitive and drafts unusually well, so the one-user rows overstate what real text decodes at
-    (table above).
+    a closed loop, 2 requests each, run 5 times (N = all requests); TTFT = time to first streamed token (median of the 5
+    runs' means, with their range); prefill = ISL / TTFT; decode = 1 / TPOT per user, TPOT = (E2EL - TTFT) / (OSL - 1);
+    total = output tokens / wall time (median, range). On random-token prompts the greedy continuation is repetitive and
+    drafts unusually well, so the one-user rows overstate what real text decodes at (table above).
 
     | Profile | ISL | OSL | Concurrency | N | TTFT (ms) | Prefill (tok/s) | Decode (tok/s/u) | Total (tok/s) | E2EL (s) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-    | p300x2 | 128 | 128 | 1 | 2 | 487 | 263 | 123.0 | 84.2 | 1.52 |
-    | p300x2 | 1,024 | 256 | 1 | 2 | 555 | 1,845 | 120.8 | 96.0 | 2.67 |
-    | p300x2 | 4,096 | 256 | 1 | 2 | 2,009 | 2,039 | 204.2 | 78.5 | 3.26 |
-    | p300x2 | 16,384 | 256 | 1 | 2 | 7,848 | 2,088 | 177.2 | 27.6 | 9.29 |
-    | p300x2 | 128 | 128 | 2 | 4 | 923 | 139 | 80.9 | 102.7 | 2.49 |
-    | p300x2 | 128 | 128 | 4 | 8 | 1,048 | 122 | 63.1 | 167.3 | 3.06 |
-    | p300x2 | 128 | 128 | 8 | 16 | 1,439 | 89 | 48.1 | 250.8 | 4.08 |
-    | p300x2 | 128 | 128 | 16 | 32 | 2,821 | 45 | 32.5 | 304.2 | 6.73 |
-    | p300x2 | 1,024 | 256 | 2 | 4 | 1,013 | 1,011 | 79.6 | 121.4 | 4.22 |
-    | p300x2 | 1,024 | 256 | 4 | 8 | 2,145 | 477 | 67.4 | 172.7 | 5.93 |
-    | p300x2 | 1,024 | 256 | 8 | 16 | 4,204 | 244 | 53.4 | 228.0 | 8.98 |
-    | p300x2 | 1,024 | 256 | 16 | 32 | 8,574 | 119 | 35.9 | 261.2 | 15.68 |
-    | p300x2 | 128 | 128 | 32 | 64 | 5,202 | 25 | 16.5 | 317.2 | 12.91 |
-    | p300x2 | 1,024 | 256 | 32 | 64 | 17,019 | 60 | 17.8 | 261.5 | 31.33 |
-    | p300 | 128 | 128 | 1 | 2 | 421 | 304 | 170.7 | 109.8 | 1.17 |
-    | p300 | 1,024 | 256 | 1 | 2 | 511 | 2,004 | 167.5 | 125.9 | 2.03 |
-    | p300 | 4,096 | 256 | 1 | 2 | 1,749 | 2,342 | 159.2 | 76.4 | 3.35 |
-    | p300 | 16,384 | 256 | 1 | 2 | 6,800 | 2,409 | 145.6 | 29.9 | 8.55 |
-    | p300 | 128 | 128 | 2 | 4 | 734 | 174 | 62.8 | 92.8 | 2.76 |
-    | p300 | 128 | 128 | 4 | 8 | 918 | 139 | 51.0 | 150.2 | 3.41 |
-    | p300 | 128 | 128 | 8 | 16 | 1,240 | 103 | 34.7 | 209.1 | 4.90 |
-    | p300 | 128 | 128 | 16 | 32 | 2,214 | 58 | 19.4 | 233.4 | 8.78 |
-    | p300 | 1,024 | 256 | 2 | 4 | 939 | 1,091 | 61.5 | 100.6 | 5.09 |
-    | p300 | 1,024 | 256 | 4 | 8 | 1,871 | 547 | 52.5 | 152.3 | 6.72 |
-    | p300 | 1,024 | 256 | 8 | 16 | 3,745 | 273 | 39.4 | 200.4 | 10.22 |
-    | p300 | 1,024 | 256 | 16 | 32 | 7,434 | 138 | 20.7 | 207.1 | 19.78 |
-    | p150 | 128 | 128 | 1 | 2 | 361 | 355 | 55.6 | 48.4 | 2.64 |
-    | p150 | 1,024 | 256 | 1 | 2 | 856 | 1,196 | 113.6 | 82.5 | 3.10 |
-    | p150 | 4,096 | 256 | 1 | 2 | 2,824 | 1,450 | 104.6 | 48.6 | 5.26 |
-    | p150 | 128 | 128 | 2 | 4 | 679 | 189 | 43.7 | 71.5 | 3.58 |
-    | p150 | 128 | 128 | 4 | 8 | 938 | 136 | 32.4 | 105.3 | 4.86 |
-    | p150 | 128 | 128 | 8 | 16 | 1,568 | 82 | 22.5 | 142.1 | 7.20 |
-    | p150 | 1,024 | 256 | 2 | 4 | 1,443 | 710 | 40.1 | 65.7 | 7.80 |
-    | p150 | 1,024 | 256 | 4 | 8 | 2,907 | 352 | 32.9 | 96.1 | 10.66 |
-    | p150 | 1,024 | 256 | 8 | 16 | 5,795 | 177 | 26.0 | 131.2 | 15.60 |
-    | p150-long | 128 | 128 | 1 | 2 | 323 | 396 | 53.5 | 47.5 | 2.70 |
-    | p150-long | 1,024 | 256 | 1 | 2 | 709 | 1,444 | 51.8 | 45.4 | 5.64 |
-    | p150-long | 4,096 | 256 | 1 | 2 | 2,668 | 1,535 | 50.9 | 33.3 | 7.68 |
-    | p150-long | 128 | 128 | 2 | 4 | 549 | 233 | 40.5 | 69.5 | 3.68 |
-    | p150-long | 128 | 128 | 4 | 8 | 948 | 135 | 30.7 | 100.7 | 5.08 |
-    | p150-long | 128 | 128 | 8 | 16 | 1,653 | 77 | 21.5 | 135.3 | 7.57 |
-    | p150-long | 1,024 | 256 | 2 | 4 | 1,440 | 711 | 43.5 | 70.2 | 7.30 |
-    | p150-long | 1,024 | 256 | 4 | 8 | 2,912 | 352 | 35.0 | 100.3 | 10.21 |
-    | p150-long | 1,024 | 256 | 8 | 16 | 5,808 | 176 | 26.6 | 133.1 | 15.39 |
+    | p300x2 | 128 | 128 | 1 | 10 | 142 (141-143) | 901 | 122.8 | 108.7 (104.2-143.5) | 1.18 |
+    | p300x2 | 1,024 | 256 | 1 | 10 | 244 (239-244) | 4,197 | 159.9 | 139.2 (104.1-215.2) | 1.84 |
+    | p300x2 | 4,096 | 256 | 1 | 10 | 644 (643-654) | 6,360 | 259.3 | 157.3 (113.1-162.7) | 1.63 |
+    | p300x2 | 128 | 128 | 8 | 80 | 386 (362-401) | 332 | 59.3 | 406.1 (395.6-408.8) | 2.52 |
+    | p300x2 | 1,024 | 256 | 8 | 80 | 1,331 (1,321-1,334) | 769 | 65.3 | 391.6 (389.3-395.6) | 5.23 |
+    | p300x2 | 128 | 128 | 16 | 160 | 603 (590-616) | 212 | 38.6 | 525.0 (520.3-537.7) | 3.90 |
+    | p300x2 | 128 | 128 | 32 | 320 | 1,081 (1,077-1,103) | 118 | 24.4 | 649.1 (640.5-655.1) | 6.31 |
+    | p300x2 | 1,024 | 256 | 32 | 320 | 4,924 (4,920-4,943) | 208 | 24.9 | 539.8 (537.1-542.8) | 15.17 |
+    | p300 | 128 | 128 | 1 | 10 | 179 (178-188) | 715 | 97.1 | 86.0 (82.7-127.3) | 1.49 |
+    | p300 | 1,024 | 256 | 1 | 10 | 291 (290-293) | 3,519 | 175.9 | 147.0 (83.6-159.4) | 1.74 |
+    | p300 | 4,096 | 256 | 1 | 10 | 1,081 (1,074-1,082) | 3,789 | 183.8 | 103.7 (78.3-105.3) | 2.47 |
+    | p300 | 128 | 128 | 8 | 80 | 431 (391-432) | 297 | 40.2 | 285.2 (278.4-286.3) | 3.59 |
+    | p300 | 1,024 | 256 | 8 | 80 | 2,046 (2,043-2,048) | 500 | 45.8 | 268.9 (263.6-275.8) | 7.61 |
+    | p300 | 128 | 128 | 16 | 160 | 705 (687-713) | 182 | 26.6 | 374.0 (368.4-383.9) | 5.47 |
+    | p300 | 1,024 | 256 | 16 | 160 | 4,082 (4,081-4,085) | 251 | 30.7 | 330.6 (320.5-337.9) | 12.39 |
+    | p150 | 128 | 128 | 1 | 10 | 220 (217-221) | 582 | 64.1 | 58.1 (57.0-72.6) | 2.20 |
+    | p150 | 1,024 | 256 | 1 | 10 | 525 (524-529) | 1,950 | 115.4 | 93.7 (70.9-104.9) | 2.73 |
+    | p150 | 4,096 | 256 | 1 | 10 | 2,035 (2,033-2,037) | 2,013 | 111.6 | 59.3 (49.2-63.5) | 4.32 |
+    | p150 | 128 | 128 | 8 | 80 | 668 (667-697) | 192 | 24.0 | 171.8 (158.2-178.2) | 5.96 |
+    | p150 | 1,024 | 256 | 8 | 80 | 3,840 (3,839-3,852) | 267 | 28.2 | 159.0 (156.5-167.1) | 12.88 |
+    | p150-long | 128 | 128 | 1 | 10 | 189 (186-191) | 677 | 68.4 | 62.6 (62.5-62.6) | 2.05 |
+    | p150-long | 1,024 | 256 | 1 | 10 | 486 (482-489) | 2,107 | 64.2 | 57.4 (57.3-57.4) | 4.46 |
+    | p150-long | 4,096 | 256 | 1 | 10 | 1,983 (1,978-1,985) | 2,066 | 62.8 | 42.4 (42.3-42.4) | 6.04 |
+    | p150-long | 128 | 128 | 8 | 80 | 696 (667-699) | 184 | 23.7 | 169.7 (163.8-187.0) | 6.03 |
+    | p150-long | 1,024 | 256 | 8 | 80 | 3,846 (3,840-3,852) | 266 | 27.8 | 157.4 (150.5-162.6) | 13.01 |
 
     Prefix cache (`tools/prefix_serve.py`, greedy): a 4,438-token prompt (a document plus a question)
     cold, then resent, then the next chat turn on it, then 4 users asking about the same document at once (TTFT, s):
 
     | Profile | Cold | Resent | Next turn | 4 users, shared document (mean) |
     | --- | ---: | ---: | ---: | ---: |
-    | p300x2 | 2.26 | 0.65 | 0.63 | 1.14 |
-    | p300 | 1.98 | 0.51 | 0.48 | 1.07 |
-    | p150 | 3.31 | 0.51 | 0.53 | 1.04 |
-    | p150-long | 3.27 | 0.39 | 0.41 | 0.95 |
+    | p300x2 | 0.84 | 0.17 | 0.19 | 0.34 |
+    | p300 | 1.37 | 0.22 | 0.24 | 0.39 |
+    | p150 | 2.57 | 0.28 | 0.30 | 0.47 |
+    | p150-long | 2.53 | 0.25 | 0.27 | 0.47 |
 
-    Measured 2026-11-24 on one QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die profiles on a subset of it) through
-    vLLM 0.26 with this package's code and each profile's own settings.
+    Measured 2026-11-28 on one QuietBox 2 (4 Blackhole p300c dies; the 2- and 1-die profiles on a subset of it) through
+    vLLM 0.26 with this package's image and each profile's own settings.
   limitations: |
-    - Prefill runs about 2,000-2,100 prompt tokens/s on 4 dies, 2,300-2,400 on 2 and 1,450 on 1 (4K and 16K-token
-      prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
+    - Prefill runs about 6,400 prompt tokens/s on 4 dies, 3,800 on 2 and 2,000 on 1 (4K-token prompts). Up to 8 requests share each prefill chunk; long prompts (1K tokens and up) queue behind each other.
     - Speculative decoding applies only while one request is decoding and its sequence is under 65,536 tokens (32,768 on
       `p150`; not on `p150-long`); with several users, or past that length, every request decodes one token per step.
     - A profile's sequences share its KV cache (1.7M tokens on 4 dies; the context on 2 and 1 die): one request may use
