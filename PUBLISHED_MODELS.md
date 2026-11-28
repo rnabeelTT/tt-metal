@@ -26,7 +26,7 @@ resolve with `git show archive/<branch>`.
 | Package (Hub) | Published | Tag (exact code) | Package yaml | Source branch |
 |---|---|---|---|---|
 | [hy4-flash](https://huggingface.co/raahemnabeel/hy4-flash) | 2026-11-24 | `published/hy4-flash` | `models/autoports/tencent_hy4_flash/tt-model.yaml` | `raahem/hy4-flash-hybrid` |
-| [inkling-2-mini](https://huggingface.co/raahemnabeel/inkling-2-mini) | 2026-11-24 | `published/inkling-2-mini` | `models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml` | `raahem/inkling-2-mini` |
+| [inkling-2-mini](https://huggingface.co/raahemnabeel/inkling-2-mini) | 2026-11-28 | `published/inkling-2-mini` | `models/autoports/thinkingmachines_inkling_2_mini/tt-model.yaml` | `raahem/inkling-2-mini` |
 | [inkling-small-hybrid-qb2](https://huggingface.co/raahemnabeel/inkling-small-hybrid-qb2) | 2026-11-21 | `published/inkling-small-hybrid-qb2` | `models/autoports/thinkingmachines_inkling_small/tt-model-hybrid.yaml` | `raahem/inkling-small-hybrid` |
 | [minimax-m2.7-hybrid-qb2](https://huggingface.co/raahemnabeel/minimax-m2.7-hybrid-qb2) | 2026-11-18 | `published/minimax-m2.7-hybrid-qb2` | `models/autoports/minimaxai_minimax_m2_7/tt-model-hybrid.yaml` | `raahem/qwen35-397b-hybrid-moe` |
 | [ornith-1.5-397b-hybrid-qb2](https://huggingface.co/raahemnabeel/ornith-1.5-397b-hybrid-qb2) | 2026-11-16 | `published/ornith-1.5-397b-hybrid-qb2` | `models/autoports/qwen_qwen3_5_122b_a10b/tt-model-o397-hybrid.yaml` | `ornith397-hybrid` |
