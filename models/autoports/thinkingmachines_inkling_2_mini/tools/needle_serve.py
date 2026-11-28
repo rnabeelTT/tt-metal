@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+MODEL = json.load(urllib.request.urlopen(f"http://localhost:{PORT}/v1/models"))["data"][0]["id"]  # the served name
 LENS = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else "16000,32000,60000").split(",")]
 WORDS = ("river mountain lantern harbor meadow quiet morning archive copper violet garden station window paper "
          "orchard signal winter coastal market thread canvas ember silver forest bridge timber").split()
@@ -29,7 +30,7 @@ def filler(n_tokens, seed):
 
 
 def ask(prompt):
-    body = {"model": "inkling-2-mini", "messages": [{"role": "user", "content": prompt}], "max_tokens": 400,
+    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "max_tokens": 400,
             "temperature": 0, "chat_template_kwargs": {"reasoning_effort": "none"}}
     req = urllib.request.Request(f"http://localhost:{PORT}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
