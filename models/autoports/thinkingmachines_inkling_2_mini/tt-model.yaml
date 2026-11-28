@@ -201,7 +201,17 @@ card:
     | decode, 32-wide batch (4 dies, 8 x 736 steps) | 0.970 | 0.995 | 0.017 |
 
     Per text, the decode KL is 0.003 - 0.015 on six texts and 0.03 - 0.07 on code_mbpp. Long context: a passphrase
-    planted at 10 / 50 / 90 % depth of 135K, 539K and 1,031K-token prompts is retrieved on 4 dies.
+    planted at 10 / 50 / 90 % depth of 135K, 539K and 1,031K-token prompts is retrieved on 4 dies. Teacher forcing on
+    32K and 64K-token documents (two novels, one code repository; positions through the whole document) stays at the
+    noise floor: top-1 0.965 - 0.985, KL 0.002 - 0.004, no drift with depth.
+
+    Served evals (p300x2, vLLM, temperature 1, default reasoning effort 0.9, up to 65,536 output tokens; Thinking
+    Machines' reported setup is not published, so the scores are not exactly comparable):
+
+    | eval | this server | Thinking Machines' card |
+    | --- | ---: | ---: |
+    | MMMU-Pro, standard 10 options (600-item random sample) | 72.0% +/- 1.8 | 74.9% |
+    | LongBench v2 (200-item random sample, contexts up to 980K tokens, middle-truncated beyond) | 61.0% +/- 3.4 | 66.9% |
 
     Speed at the checkpoint's default sampling (temperature 1), one user: three held-out texts (math, code, chat) as
     300-token prompts, 256 output tokens, streamed, decode tok/s = 1000 / TPOT, the mean of the three texts (median of 5
