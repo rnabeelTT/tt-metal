@@ -168,12 +168,15 @@ card:
     Chat, coding, reasoning and agent use (tool calls) over text and images (text only on `p150-long`), for up to 32
     (4 dies), 16 (2 dies) or 8 (1 die) concurrent users.
   quickstart: |
-    Inkling-2-Mini reasons before it answers by default: give requests a large `max_tokens`, or turn reasoning down per
-    request with `"chat_template_kwargs": {"reasoning_effort": "none"}`. The checkpoint's default sampling is
-    temperature 1.
+    Inkling-2-Mini reasons before it answers by default (effort 0.9), often for 10,000 - 50,000 tokens on hard
+    questions: give requests a large `max_tokens` (the evals below use 65,536; at 16,384 about 1 in 6 long-document
+    answers is cut off before it answers), or turn reasoning down per request with
+    `"chat_template_kwargs": {"reasoning_effort": "none"}` (or a number from 0.0 to 0.99). The checkpoint's default
+    sampling is temperature 1.
   usage: |
-    Images go in chat messages as `image_url` content parts (up to 4,095 image tokens per image, one token per 40 x 40
-    pixel patch); a larger image is rejected with HTTP 400. `p150-long` is text only.
+    Images go in chat messages as `image_url` content parts, several per message and interleaved with text (up to
+    4,095 image tokens per image, one token per 40 x 40 pixel patch); a larger image is rejected with HTTP 400.
+    `p150-long` is text only.
 
     Speculative decoding serves a request while it is the only one decoding; with more requests the server decodes
     one token per step for all of them. Drafts are accepted with the standard min(1, p / q) rule, so sampled outputs
@@ -286,8 +289,9 @@ card:
       penalties or top_p < 1, and logprobs, are sampled on the host (slower).
     - No video or audio input; no image input on `p150-long`. One image may take up to 4,095 image tokens.
     - The p150x4 and p150x2 profiles run the same meshes as p300x2 / p300 but were not run on p150 boards.
-    - Outputs are close to but not identical to the bf16 reference (bfp8 experts; see the accuracy table). Benchmark
-      evals (GPQA, LiveCodeBench, IFEval) were not run.
+    - Outputs are close to but not identical to the bf16 reference (bfp8 experts; see the accuracy table). MMMU-Pro and
+      LongBench v2 were run on samples (see above), 1.6 - 1.7 standard errors under Thinking Machines' reported
+      scores, whose setup is not published; other benchmark evals (GPQA, LiveCodeBench, IFEval) were not run.
     - Not for decisions where an unreviewed wrong answer causes harm (medical, legal, financial or safety-critical
       use); like the original model, it can state wrong facts with confidence.
   license: {id: apache-2.0}
