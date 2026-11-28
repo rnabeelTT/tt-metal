@@ -53,7 +53,9 @@ class Inkling2ProcessingInfo(BaseProcessingInfo):
 
 class Inkling2DummyInputsBuilder(BaseDummyInputsBuilder[Inkling2ProcessingInfo]):
     def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
-        return "<|content_image|>" + IMAGE_TOKEN if mm_counts.get("image", 0) else ""
+        # one placeholder per image: vLLM's processor cache runs uncached items through this text
+        # (_apply_hf_processor_mm_only) and _call_hf_processor checks one placeholder per image
+        return ("<|content_image|>" + IMAGE_TOKEN) * mm_counts.get("image", 0)
 
     def get_dummy_mm_data(self, seq_len: int, mm_counts: Mapping[str, int], mm_options=None):
         n = mm_counts.get("image", 0)
